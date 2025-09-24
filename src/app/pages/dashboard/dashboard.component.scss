@@ -1,0 +1,30 @@
+.lanes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(260px, 1fr));
+  gap: 16px;
+  }
+  .lane {
+  padding: 12px;
+  border-radius: 18px;
+  min-height: 300px;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  }
+  .lane-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+  opacity: .9;
+  }
+  .card {
+  padding: 10px 12px;
+  border-radius: 14px;
+  margin: 8px 0;
+  background: var(--glass-card);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  cursor: grab;
+  user-select: none;
+  }

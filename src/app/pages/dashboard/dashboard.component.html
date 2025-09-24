@@ -1,0 +1,29 @@
+<ion-header class="glass-header">
+  <ion-toolbar>
+    <ion-title>Customer Flow</ion-title>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content class="ion-padding glass-bg">
+  <div style="margin-bottom:12px; display:flex; gap:8px; align-items:center;">
+    <ion-button size="small" (click)="testPing()">Test API</ion-button>
+    <span>{{ pingResult() }}</span>
+  </div>
+
+  <div class="lanes">
+    <div class="lane glass-surface" cdkDropList [cdkDropListData]="lead()" (cdkDropListDropped)="dropped($event)">
+      <div class="lane-title">Lead</div>
+      <div class="card" *ngFor="let c of lead()" cdkDrag>{{ c.name }}</div>
+    </div>
+
+    <div class="lane glass-surface" cdkDropList [cdkDropListData]="quote()" (cdkDropListDropped)="dropped($event)">
+      <div class="lane-title">Quote</div>
+      <div class="card" *ngFor="let c of quote()" cdkDrag>{{ c.name }}</div>
+    </div>
+
+    <div class="lane glass-surface" cdkDropList [cdkDropListData]="invoiced()" (cdkDropListDropped)="dropped($event)">
+      <div class="lane-title">Invoiced</div>
+      <div class="card" *ngFor="let c of invoiced()" cdkDrag>{{ c.name }}</div>
+    </div>
+  </div>
+</ion-content>

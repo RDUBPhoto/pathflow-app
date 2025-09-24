@@ -1,1 +1,54 @@
-/* You can add global styles to this file, and also import other style files */
+@import "@ionic/angular/css/core.css";
+@import "@ionic/angular/css/normalize.css";
+@import "@ionic/angular/css/structure.css";
+@import "@ionic/angular/css/typography.css";
+@import "@ionic/angular/css/display.css";
+@import "@ionic/angular/css/padding.css";
+@import "@ionic/angular/css/float-elements.css";
+@import "@ionic/angular/css/text-alignment.css";
+@import "@ionic/angular/css/text-transformation.css";
+@import "@ionic/angular/css/flex-utils.css";
+
+:root {
+  --glass-blur: blur(18px);
+  --glass-border: rgba(255, 255, 255, 0.22);
+  --glass-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  --glass-sheen: rgba(255, 255, 255, 0.35);
+  --glass-tint: rgba(255, 255, 255, 0.06);
+  --glass-card: linear-gradient(180deg, rgba(255,255,255,0.35), rgba(255,255,255,0.18));
+  --brand-primary: #0a84ff;
+  }
+
+  .glass-bg {
+  background:
+  radial-gradient(1200px 200px at 50% 20%, rgba(255,255,255,0.25), transparent 60%),
+  linear-gradient(180deg, rgba(255,255,255,0.35), rgba(255,255,255,0.08)),
+  #0b0f14;
+  background-attachment: fixed;
+  }
+
+  .glass-header {
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  background: linear-gradient(180deg, rgba(255,255,255,0.45), rgba(255,255,255,0.18));
+  border-bottom: 1px solid var(--glass-border);
+  }
+
+  .glass-surface {
+  background:
+  linear-gradient(180deg, rgba(255,255,255,0.38), rgba(255,255,255,0.16)),
+  var(--glass-tint);
+  position: relative;
+  overflow: hidden;
+  }
+  .glass-surface::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(600px 80px at 20% -10%, var(--glass-sheen), transparent 60%);
+  pointer-events: none;
+  }
+
+  ion-toolbar ion-title {
+  color: #0b0f14;
+  }

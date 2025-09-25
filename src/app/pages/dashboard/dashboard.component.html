@@ -5,9 +5,14 @@
 </ion-header>
 
 <ion-content class="ion-padding glass-bg">
-  <div style="margin-bottom:12px; display:flex; gap:8px; align-items:center;">
+  <div style="margin-bottom:12px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
     <ion-button size="small" (click)="testPing()">Test API</ion-button>
     <span>{{ pingResult() }}</span>
+
+    <input type="file" accept="image/*" (change)="onFileSelected($event)" />
+    <ion-spinner *ngIf="uploading()"></ion-spinner>
+    <span>{{ uploadMsg() }}</span>
+    <img *ngIf="logoUrl()" [src]="logoUrl()" alt="Logo" style="height:40px; margin-left:8px; border-radius:6px;" />
   </div>
 
   <div class="lanes">

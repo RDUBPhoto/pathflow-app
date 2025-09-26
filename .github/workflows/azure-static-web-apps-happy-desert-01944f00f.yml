@@ -34,11 +34,9 @@ jobs:
           output_location: "dist/www/browser"
 
           api_location: "api"
-          api_build_command: |
-            npm ci
-            npm run build
 
           production_branch: "main"
+
 
   close_pull_request_job:
     if: github.event_name == 'pull_request' && github.event.action == 'closed'

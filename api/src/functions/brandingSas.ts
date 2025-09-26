@@ -79,6 +79,5 @@ export async function brandingSas(req: HttpRequest, ctx: InvocationContext): Pro
 app.http("brandingSas", {
   methods: ["POST"],
   authLevel: "anonymous",
-  route: "branding/sas",
   handler: brandingSas
 });

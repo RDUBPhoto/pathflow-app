@@ -12,6 +12,6 @@ export class BrandingApi {
   constructor(private http: HttpClient) {}
 
   getUploadSas(fileName: string, contentType: string) {
-    return this.http.post<SasResponse>('/api/branding/sas', { fileName, contentType });
+    return this.http.post<SasResponse>('/api/brandingSas', { fileName, contentType });
   }
 }

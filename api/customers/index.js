@@ -1,4 +1,3 @@
-const { TableClient } = require("@azure/data-tables");
 const { randomUUID } = require("crypto");
 
 const TABLE = "customers";
@@ -9,7 +8,9 @@ function pick(v, d = "") { return typeof v === "string" ? v : (v == null ? d : S
 module.exports = async function (context, req) {
   try {
     const conn = process.env.STORAGE_CONNECTION_STRING;
-    if (!conn) { context.res = { status: 500, body: { error: "Missing STORAGE_CONNECTION_STRING" } }; return; }
+    if (!conn) { context.res = { status: 500, headers: { "content-type": "application/json" }, body: { error: "Missing STORAGE_CONNECTION_STRING" } }; return; }
+
+    const { TableClient } = await import("@azure/data-tables");
 
     const client = TableClient.fromConnectionString(conn, TABLE);
     try { await client.createTable(); } catch (_) {}
@@ -49,9 +50,9 @@ module.exports = async function (context, req) {
       return;
     }
 
-    context.res = { status: 405, body: { error: "Method not allowed" } };
+    context.res = { status: 405, headers: { "content-type": "application/json" }, body: { error: "Method not allowed" } };
   } catch (err) {
     context.log.error(err);
-    context.res = { status: 500, body: { error: "Server error", detail: String(err && err.message || err) } };
+    context.res = { status: 500, headers: { "content-type": "application/json" }, body: { error: "Server error", detail: String(err && err.message || err) } };
   }
 };

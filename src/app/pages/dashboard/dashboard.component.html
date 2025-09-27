@@ -1,34 +1,48 @@
 <ion-header class="glass-header">
   <ion-toolbar>
-    <ion-title>Customer Flow</ion-title>
+    <ion-title>Dashboard</ion-title>
   </ion-toolbar>
 </ion-header>
 
 <ion-content class="ion-padding glass-bg">
-  <div style="margin-bottom:12px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-    <ion-button size="small" (click)="testPing()">Test API</ion-button>
-    <span>{{ pingResult() }}</span>
-
-    <input type="file" accept="image/*" (change)="onFileSelected($event)" />
-    <ion-spinner *ngIf="uploading()"></ion-spinner>
-    <span>{{ uploadMsg() }}</span>
-    <img *ngIf="logoUrl()" [src]="logoUrl()" alt="Logo" style="height:40px; margin-left:8px; border-radius:6px;" />
+  <ion-item>
+    <ion-label position="stacked">Add lane</ion-label>
+    <ion-input
+      [ngModel]="newLane()"
+      (ngModelChange)="newLane.set($event)"></ion-input>
+  </ion-item>
+  <div style="margin-top:8px;">
+    <ion-button (click)="addLane()">Add</ion-button>
+    <span style="margin-left:10px">{{ status() }}</span>
   </div>
 
-  <div class="lanes">
-    <div class="lane glass-surface" cdkDropList [cdkDropListData]="lead()" (cdkDropListDropped)="dropped($event)">
-      <div class="lane-title">Lead</div>
-      <div class="card" *ngFor="let c of lead()" cdkDrag>{{ c.name }}</div>
-    </div>
+  <div style="margin-top:16px" *ngIf="loading()"><ion-spinner></ion-spinner></div>
 
-    <div class="lane glass-surface" cdkDropList [cdkDropListData]="quote()" (cdkDropListDropped)="dropped($event)">
-      <div class="lane-title">Quote</div>
-      <div class="card" *ngFor="let c of quote()" cdkDrag>{{ c.name }}</div>
-    </div>
+  <div cdkDropListGroup class="board">
+    <div
+      class="lane"
+      cdkDropList
+      [id]="lane.id"
+      [cdkDropListData]="items()[lane.id]"
+      [cdkDropListConnectedTo]="laneIds()"
+      (cdkDropListDropped)="onCardsDrop($event, lane.id)"
+      *ngFor="let lane of lanes(); trackBy: trackLane">
 
-    <div class="lane glass-surface" cdkDropList [cdkDropListData]="invoiced()" (cdkDropListDropped)="dropped($event)">
-      <div class="lane-title">Invoiced</div>
-      <div class="card" *ngFor="let c of invoiced()" cdkDrag>{{ c.name }}</div>
+      <div class="lane-header">{{ lane.name }}</div>
+
+      <div class="add-card">
+        <ion-input
+          placeholder="New card title"
+          [ngModel]="(newCardTitle()[lane.id] || '')"
+          (ngModelChange)="setNewCardTitle(lane.id, $event)"></ion-input>
+        <ion-button size="small" (click)="addCard(lane.id)">Add</ion-button>
+      </div>
+
+      <div class="cards">
+        <div class="card" *ngFor="let it of items()[lane.id]; trackBy: trackItem" cdkDrag>
+          <div class="card-title">{{ it.title }}</div>
+        </div>
+      </div>
     </div>
   </div>
 </ion-content>

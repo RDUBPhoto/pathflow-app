@@ -1,88 +1,130 @@
-import { Component, signal } from '@angular/core';
+import { Component, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { IonHeader, IonToolbar, IonTitle, IonContent, IonButton, IonSpinner } from '@ionic/angular/standalone';
-import { CdkDropList, CdkDrag, CdkDragDrop, moveItemInArray, transferArrayItem } from '@angular/cdk/drag-drop';
-import { HttpClient } from '@angular/common/http';
-import { BrandingApi } from '../../services/branding-api.service';
-
-type Card = { id: string; name: string };
+import {
+  IonHeader, IonToolbar, IonTitle, IonContent,
+  IonItem, IonLabel, IonInput, IonButton, IonSpinner
+} from '@ionic/angular/standalone';
+import { FormsModule } from '@angular/forms';
+import {
+  CdkDropList, CdkDropListGroup, CdkDrag, CdkDragDrop,
+  moveItemInArray, transferArrayItem
+} from '@angular/cdk/drag-drop';
+import { LanesApi, Lane } from '../../services/lanes-api.service';
+import { WorkItemsApi, WorkItem } from '../../services/workitems-api.service';
 
 @Component({
   selector: 'app-dashboard',
   standalone: true,
   imports: [
-    CommonModule,
-    IonHeader, IonToolbar, IonTitle, IonContent, IonButton, IonSpinner,
-    CdkDropList, CdkDrag
+    CommonModule, FormsModule,
+    IonHeader, IonToolbar, IonTitle, IonContent,
+    IonItem, IonLabel, IonInput, IonButton, IonSpinner,
+    CdkDropList, CdkDropListGroup, CdkDrag
   ],
   templateUrl: './dashboard.component.html',
   styleUrls: ['./dashboard.component.scss']
 })
 export default class DashboardComponent {
-  constructor(private http: HttpClient, private branding: BrandingApi) {}
+  lanes = signal<Lane[]>([]);
+  laneIds = computed(() => this.lanes().map(l => l.id));
+  items = signal<Record<string, WorkItem[]>>({});
+  loading = signal(false);
+  status = signal('');
+  newLane = signal('');
+  newCardTitle = signal<Record<string, string>>({});
 
-  lead = signal<Card[]>([{ id: '1', name: 'John – Raptor shocks' }, { id: '2', name: 'Emily – Jeep lift' }]);
-  quote = signal<Card[]>([{ id: '3', name: 'Carlos – Wheel/Tire' }]);
-  invoiced = signal<Card[]>([]);
+  constructor(private lanesApi: LanesApi, private itemsApi: WorkItemsApi) {
+    this.loadAll();
+  }
 
-  pingResult = signal<string>('');
-  logoUrl = signal<string>('');
-  uploading = signal<boolean>(false);
-  uploadMsg = signal<string>('');
-
-  testPing() {
-    this.pingResult.set('Testing…');
-    this.http.get<{ ok: boolean; message: string }>('/api/ping').subscribe({
-      next: res => this.pingResult.set(`ok=${res.ok}, message=${res.message}`),
-      error: err => this.pingResult.set(`Error: ${err?.status || ''} ${err?.statusText || ''}`.trim())
+  loadAll() {
+    this.loading.set(true);
+    this.lanesApi.list().subscribe({
+      next: lanes => {
+        this.lanes.set(lanes);
+        this.itemsApi.list().subscribe({
+          next: rows => {
+            const map: Record<string, WorkItem[]> = {};
+            for (const l of lanes) map[l.id] = [];
+            for (const r of rows) {
+              if (!map[r.laneId]) map[r.laneId] = [];
+              map[r.laneId].push(r);
+            }
+            for (const id of Object.keys(map)) map[id].sort((a,b) => (a.sort ?? 0) - (b.sort ?? 0));
+            this.items.set(map);
+            this.loading.set(false);
+          },
+          error: _ => { this.status.set('Load items error'); this.loading.set(false); }
+        });
+      },
+      error: _ => { this.status.set('Load lanes error'); this.loading.set(false); }
     });
   }
 
-  async uploadLogo(file: File | null) {
-    if (!file) return;
-    this.uploading.set(true);
-    this.uploadMsg.set('Requesting upload URL…');
-
-    try {
-      const sas = await this.branding.getUploadSas(file.name, file.type || 'application/octet-stream').toPromise();
-      if (!sas?.uploadUrl) throw new Error('No SAS upload URL returned');
-
-      this.uploadMsg.set('Uploading…');
-
-      const putRes = await fetch(sas.uploadUrl, {
-        method: 'PUT',
-        headers: {
-          'x-ms-blob-type': 'BlockBlob',
-          'Content-Type': file.type || 'application/octet-stream'
-        },
-        body: file
-      });
-
-      if (!putRes.ok) {
-        const text = await putRes.text();
-        throw new Error(`Blob upload failed: ${putRes.status} ${putRes.statusText} ${text}`);
-      }
-
-      this.logoUrl.set(sas.url);
-      this.uploadMsg.set('Uploaded ✔');
-    } catch (e: any) {
-      this.uploadMsg.set(`Upload error: ${e?.message || e}`);
-    } finally {
-      this.uploading.set(false);
-    }
+  addLane() {
+    const name = this.newLane().trim();
+    if (!name) return;
+    this.status.set('Saving lane');
+    this.lanesApi.create(name).subscribe({
+      next: _ => { this.newLane.set(''); this.loadAll(); },
+      error: _ => this.status.set('Save lane error')
+    });
   }
 
-  onFileSelected(event: Event) {
-    const input = event.target as HTMLInputElement | null;
-    const file = input?.files?.item(0) ?? null;
-    this.uploadLogo(file);
+  setNewCardTitle(laneId: string, val: string) {
+    const m = { ...this.newCardTitle() };
+    m[laneId] = val;
+    this.newCardTitle.set(m);
   }
 
-  dropped(event: CdkDragDrop<Card[]>) {
-    if (event.previousContainer === event.container) {
-      moveItemInArray(event.container.data, event.previousIndex, event.currentIndex);
+  addCard(laneId: string) {
+    const t = (this.newCardTitle()[laneId] || '').trim();
+    if (!t) return;
+    this.status.set('Saving card');
+    this.itemsApi.create(t, laneId).subscribe({
+      next: _ => {
+        const m = { ...this.newCardTitle() };
+        m[laneId] = '';
+        this.newCardTitle.set(m);
+        this.loadAll();
+      },
+      error: _ => this.status.set('Save card error')
+    });
+  }
+
+  onLanesDrop(e: CdkDragDrop<Lane[]>) {
+    const arr = [...this.lanes()];
+    moveItemInArray(arr, e.previousIndex, e.currentIndex);
+    this.lanes.set(arr);
+    const ids = arr.map(x => x.id);
+    this.lanesApi.reorder(ids).subscribe();
+  }
+
+  onCardsDrop(event: CdkDragDrop<WorkItem[]>, targetLaneId: string) {
+    const map = { ...this.items() };
+    const sourceId = event.previousContainer.id;
+    const targetId = event.container.id;
+
+    if (sourceId === targetId) {
+      moveItemInArray(map[targetId], event.previousIndex, event.currentIndex);
+      this.items.set(map);
+      const ids = map[targetId].map(x => x.id);
+      this.itemsApi.reorder(targetLaneId, ids).subscribe();
     } else {
-      transferArrayItem(event.previousContainer.data, event.container.data, event.previousIndex, event.currentIndex);
+      transferArrayItem(map[sourceId], map[targetId], event.previousIndex, event.currentIndex);
+      this.items.set(map);
+      const moved = map[targetId][event.currentIndex];
+      this.itemsApi.update({ id: moved.id, laneId: targetLaneId }).subscribe({
+        next: _ => {
+          const idsT = map[targetId].map(x => x.id);
+          const idsS = map[sourceId].map(x => x.id);
+          this.itemsApi.reorder(targetLaneId, idsT).subscribe();
+          this.itemsApi.reorder(sourceId, idsS).subscribe();
+        }
+      });
     }
   }
+
+  trackLane(_i: number, l: Lane) { return l.id; }
+  trackItem(_i: number, it: WorkItem) { return it.id; }
 }

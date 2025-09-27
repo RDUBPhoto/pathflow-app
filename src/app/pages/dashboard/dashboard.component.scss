@@ -1,30 +1,38 @@
-.lanes {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(260px, 1fr));
-  gap: 16px;
-  }
-  .lane {
+.board {
+  display: flex;
+  gap: 12px;
+  overflow: auto;
+  padding: 8px;
+  margin-top: 12px;
+}
+.lane {
+  min-width: 280px;
+  background: var(--ion-color-step-50, #f4f5f8);
+  border-radius: 12px;
   padding: 12px;
-  border-radius: 18px;
-  min-height: 300px;
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  border: 1px solid var(--glass-border);
-  box-shadow: var(--glass-shadow);
-  }
-  .lane-title {
+}
+.lane-header {
   font-weight: 600;
   margin-bottom: 8px;
-  opacity: .9;
-  }
-  .card {
-  padding: 10px 12px;
-  border-radius: 14px;
-  margin: 8px 0;
-  background: var(--glass-card);
-  border: 1px solid var(--glass-border);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  cursor: grab;
-  user-select: none;
-  }
+}
+.add-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.card {
+  background: white;
+  border-radius: 10px;
+  padding: 10px;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 12%);
+}
+.card-title {
+  font-weight: 600;
+}

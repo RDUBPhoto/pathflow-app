@@ -37,10 +37,21 @@
   <ion-list>
     <ion-item *ngIf="loading()">Loading…</ion-item>
     <ion-item *ngFor="let c of customers()">
-      <ion-label>
-        <div style="font-weight:600">{{ c.name }}</div>
-        <div>{{ c.phone }}</div>
-        <div>{{ c.email }}</div>
+      <ion-label class="ion-text-wrap">
+        <div class="c-name">{{ c.name }}</div>
+        <div class="c-meta">{{ c.phone || '—' }} • {{ c.email || '—' }}</div>
+        <div class="veh-title">Vehicles</div>
+        <ng-container *ngIf="vehiclesByCustomer()[c.id]?.length; else noVehicles">
+          <div class="veh-row">
+            <div class="veh-chip" *ngFor="let v of vehiclesByCustomer()[c.id]">
+              <span class="veh-swatch" [style.background]="v.color || '#e0e0e0'"></span>
+              <span class="veh-name">{{ v.name }}</span>
+            </div>
+          </div>
+        </ng-container>
+        <ng-template #noVehicles>
+          <div class="veh-none">—</div>
+        </ng-template>
       </ion-label>
     </ion-item>
   </ion-list>

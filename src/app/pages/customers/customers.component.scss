@@ -1,0 +1,22 @@
+.c-name { font-weight: 700; }
+.c-meta { font-size: 12px; color: var(--ion-color-medium); margin-bottom: 6px; }
+.veh-title { margin-top: 6px; font-size: 12px; color: var(--ion-color-medium); font-weight: 600; }
+.veh-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.veh-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: #fff;
+  border: 1px solid rgba(0,0,0,.08);
+  border-radius: 999px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04);
+  font-size: 12px;
+}
+.veh-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(0,0,0,.15);
+}
+.veh-none { color: var(--ion-color-medium); }

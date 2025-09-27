@@ -3,11 +3,11 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 
 export type WorkItem = {
   id: string;
-  title: string;
   laneId: string;
+  title: string;
   customerId?: string;
   sort?: number;
-  updatedAt?: string;
+  createdAt?: string;
 };
 
 @Injectable({ providedIn: 'root' })

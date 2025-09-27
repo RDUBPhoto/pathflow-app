@@ -23,7 +23,12 @@ export class LanesApi {
     return this.http.post<{ ok: boolean }>('/api/lanes/reorder', { ids });
   }
 
-  remove(id: string) {
-    return this.http.delete<{ ok: boolean }>(`/api/lanes/delete/${id}`);
+  delete(id: string) {
+    return this.http.delete<{ ok: boolean }>(`/api/lanes/${id}`);
   }
+
+  update(id: string, name: string) {
+    return this.http.post<{ ok: boolean; id: string }>('/api/lanes', { id, name });
+  }
+
 }

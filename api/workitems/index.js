@@ -114,9 +114,14 @@ module.exports = async function (context, req) {
       const filter = laneId ? `PartitionKey eq '${PARTITION}' and laneId eq '${laneId.replace(/'/g,"''")}'` : `PartitionKey eq '${PARTITION}'`;
       const iter = items.listEntities({ queryOptions: { filter } });
       for await (const e of iter) {
-        out.push({ id: e.rowKey, title: pick(e.title), laneId: pick(e.laneId), customerId: pick(e.customerId), sort: num(e.sort), updatedAt: pick(e.updatedAt) });
+        const createdAt = pick(e.createdAt) || (e.timestamp ? new Date(e.timestamp).toISOString() : "");
+        out.push({ id: e.rowKey, title: pick(e.title), laneId: pick(e.laneId), customerId: pick(e.customerId), sort: num(e.sort), createdAt, updatedAt: pick(e.updatedAt) });
       }
-      out.sort((a,b) => (a.sort ?? 0) - (b.sort ?? 0) || String(a.updatedAt).localeCompare(String(b.updatedAt)));
+      out.sort((a,b) =>
+        String(b.createdAt).localeCompare(String(a.createdAt)) ||
+        String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")) ||
+        ((b.sort ?? 0) - (a.sort ?? 0))
+      );
       context.res = { status: 200, headers: { "content-type": "application/json" }, body: out };
       return;
     }
@@ -144,8 +149,9 @@ module.exports = async function (context, req) {
         const iter = items.listEntities({ queryOptions: { filter: `PartitionKey eq '${PARTITION}' and laneId eq '${laneId.replace(/'/g,"''")}'` } });
         for await (const e of iter) max = Math.max(max, num(e.sort));
         const rowKey = randomUUID();
-        await items.upsertEntity({ partitionKey: PARTITION, rowKey, title, laneId, customerId, sort: max + 10, updatedAt: new Date().toISOString() }, "Merge");
-        await events.upsertEntity({ partitionKey: PARTITION, rowKey: randomUUID(), type: "created", workItemId: rowKey, laneId, at: new Date().toISOString() }, "Merge");
+        const now = new Date().toISOString();
+        await items.upsertEntity({ partitionKey: PARTITION, rowKey, title, laneId, customerId, sort: max + 10, createdAt: now, updatedAt: now }, "Merge");
+        await events.upsertEntity({ partitionKey: PARTITION, rowKey: randomUUID(), type: "created", workItemId: rowKey, laneId, at: now }, "Merge");
         context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true, id: rowKey } };
         return;
       } else {

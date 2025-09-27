@@ -3,10 +3,94 @@ const { randomUUID } = require("crypto");
 
 const T_ITEMS = "workitems";
 const T_EVENTS = "events";
+const T_CUSTOMERS = "customers";
 const PARTITION = "main";
 
 function pick(v, d = "") { return typeof v === "string" ? v : (v == null ? d : String(v)); }
 function num(v, d = 0) { const n = Number(v); return Number.isFinite(n) ? n : d; }
+function kindOf(name) {
+  const s = String(name || "").toLowerCase();
+  if (/quote/.test(s)) return "quote";
+  if (/sched/.test(s)) return "scheduled";
+  if (/progress|in[- ]?progress/.test(s)) return "inprogress";
+  if (/ready|pickup|complete|completed|done/.test(s)) return "completed";
+  if (/lead/.test(s)) return "lead";
+  if (/invoice|invoiced|paid/.test(s)) return "invoiced";
+  return "other";
+}
+
+async function notify(context, laneName, workItem, customer) {
+  const k = kindOf(laneName);
+  const email = pick(customer && customer.email);
+  const phone = pick(customer && customer.phone);
+  const name = pick(customer && customer.name);
+  const title = pick(workItem && workItem.title);
+
+  let subj = "";
+  let body = "";
+  let sms = "";
+
+  if (k === "quote") {
+    subj = "Your quote is ready";
+    body = `Hi ${name || "there"}, your quote for "${title}" is ready. Reply to confirm or ask questions.`;
+    sms = `Your quote for "${title}" is ready. Check your email for details.`;
+  } else if (k === "scheduled") {
+    subj = "You're scheduled";
+    body = `Hi ${name || "there"}, your vehicle is scheduled for "${title}". We'll send drop-off instructions soon.`;
+    sms = `You're scheduled for "${title}". Watch for drop-off instructions.`;
+  } else if (k === "inprogress") {
+    subj = "Work in progress";
+    body = `Update: "${title}" is now in progress. We'll keep you posted.`;
+    sms = `Update: "${title}" is now in progress.`;
+  } else if (k === "completed") {
+    subj = "Ready for pickup";
+    body = `Great news: "${title}" is complete and ready for pickup. Reply to confirm a time.`;
+    sms = `"${title}" is complete and ready for pickup.`;
+  } else if (k === "invoiced") {
+    subj = "Invoice available";
+    body = `Your invoice for "${title}" is ready. You can pay online via the link provided.`;
+    sms = `Invoice for "${title}" is ready. Check your email for the link.`;
+  } else {
+    return;
+  }
+
+  if (email) await sendEmail(context, email, subj, body);
+  if (phone) await sendSms(context, phone, sms);
+}
+
+async function sendEmail(context, to, subject, text) {
+  const key = process.env.SENDGRID_API_KEY;
+  const from = process.env.FROM_EMAIL;
+  if (!key || !from) return;
+  try {
+    const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ personalizations: [{ to: [{ email: to }] }], from: { email: from }, subject, content: [{ type: "text/plain", value: text }] })
+    });
+    context.log(`sendgrid ${res.status}`);
+  } catch (e) {
+    context.log(`sendgrid error ${String(e)}`);
+  }
+}
+
+async function sendSms(context, to, text) {
+  const sid = process.env.TWILIO_SID;
+  const token = process.env.TWILIO_TOKEN;
+  const from = process.env.FROM_PHONE;
+  if (!sid || !token || !from) return;
+  const body = new URLSearchParams({ From: from, To: to, Body: text });
+  try {
+    const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(sid)}/Messages.json`, {
+      method: "POST",
+      headers: { "Authorization": "Basic " + Buffer.from(`${sid}:${token}`).toString("base64"), "Content-Type": "application/x-www-form-urlencoded" },
+      body
+    });
+    context.log(`twilio ${res.status}`);
+  } catch (e) {
+    context.log(`twilio error ${String(e)}`);
+  }
+}
 
 module.exports = async function (context, req) {
   const method = (req.method || "GET").toUpperCase();
@@ -20,6 +104,7 @@ module.exports = async function (context, req) {
 
     const items = TableClient.fromConnectionString(conn, T_ITEMS);
     const events = TableClient.fromConnectionString(conn, T_EVENTS);
+    const customers = TableClient.fromConnectionString(conn, T_CUSTOMERS);
     try { await items.createTable(); } catch (_) {}
     try { await events.createTable(); } catch (_) {}
 
@@ -31,7 +116,7 @@ module.exports = async function (context, req) {
       for await (const e of iter) {
         out.push({ id: e.rowKey, title: pick(e.title), laneId: pick(e.laneId), customerId: pick(e.customerId), sort: num(e.sort), updatedAt: pick(e.updatedAt) });
       }
-      out.sort((a,b) => a.sort - b.sort || String(a.updatedAt).localeCompare(String(b.updatedAt)));
+      out.sort((a,b) => (a.sort ?? 0) - (b.sort ?? 0) || String(a.updatedAt).localeCompare(String(b.updatedAt)));
       context.res = { status: 200, headers: { "content-type": "application/json" }, body: out };
       return;
     }
@@ -40,9 +125,7 @@ module.exports = async function (context, req) {
       const b = req.body || {};
       const laneId = pick(b.laneId);
       const ids = Array.isArray(b.ids) ? b.ids.map(String) : [];
-      for (let i = 0; i < ids.length; i++) {
-        await items.upsertEntity({ partitionKey: PARTITION, rowKey: ids[i], sort: i * 10, laneId }, "Merge");
-      }
+      for (let i = 0; i < ids.length; i++) await items.upsertEntity({ partitionKey: PARTITION, rowKey: ids[i], sort: i * 10, laneId }, "Merge");
       context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true } };
       return;
     }
@@ -80,6 +163,13 @@ module.exports = async function (context, req) {
           for await (const e of iter) max = Math.max(max, num(e.sort));
           await items.upsertEntity({ partitionKey: PARTITION, rowKey: rid, sort: max + 10 }, "Merge");
           await events.upsertEntity({ partitionKey: PARTITION, rowKey: randomUUID(), type: "moved", workItemId: rid, fromLaneId: prevLane, toLaneId: laneId, at: new Date().toISOString() }, "Merge");
+          try {
+            const cust = customerId ? await customers.getEntity(PARTITION, customerId) : null;
+            const customer = cust ? { name: pick(cust.name), email: pick(cust.email), phone: pick(cust.phone) } : null;
+            await notify(context, laneId, { id: rid, title }, customer);
+          } catch (e) {
+            context.log(`notify error ${String(e)}`);
+          }
         }
         context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true, id: rid, moved } };
         return;

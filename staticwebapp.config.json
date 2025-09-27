@@ -2,7 +2,8 @@
   "routes": [
     {
       "route": "/api/*",
-      "allowedRoles": ["anonymous"],
+      "methods": ["OPTIONS"],
+      "statusCode": 204,
       "headers": {
         "Access-Control-Allow-Origin": "http://localhost:4200",
         "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
@@ -11,4 +12,3 @@
     }
   ]
 }
-

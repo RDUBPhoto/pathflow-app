@@ -1,7 +1,8 @@
 {
   "bindings": [
-    { "authLevel": "anonymous", "type": "httpTrigger", "direction": "in", "name": "req", "methods": ["post"], "route": "brandingSas" },
+    { "authLevel": "anonymous", "type": "httpTrigger", "direction": "in", "name": "req", "methods": ["post", "options"], "route": "brandingSas" },
     { "type": "http", "direction": "out", "name": "res" }
   ],
   "scriptFile": "index.js"
 }
+

@@ -5,5 +5,43 @@
 </ion-header>
 
 <ion-content class="ion-padding glass-bg">
-  Customers list coming soon…
+  <div style="display:grid; gap:10px; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); margin-bottom:14px;">
+    <ion-item>
+      <ion-label position="stacked">Name</ion-label>
+      <ion-input
+        [ngModel]="name()"
+        (ngModelChange)="name.set($event)"></ion-input>
+    </ion-item>
+
+    <ion-item>
+      <ion-label position="stacked">Phone</ion-label>
+      <ion-input
+        [ngModel]="phone()"
+        (ngModelChange)="phone.set($event)"></ion-input>
+    </ion-item>
+
+    <ion-item>
+      <ion-label position="stacked">Email</ion-label>
+      <ion-input
+        [ngModel]="email()"
+        (ngModelChange)="email.set($event)"></ion-input>
+    </ion-item>
+
+    <div style="display:flex; align-items:end;">
+      <ion-button (click)="add()">Add</ion-button>
+    </div>
+  </div>
+
+  <div style="margin-bottom:8px;">{{ status() }}</div>
+
+  <ion-list>
+    <ion-item *ngIf="loading()">Loading…</ion-item>
+    <ion-item *ngFor="let c of customers()">
+      <ion-label>
+        <div style="font-weight:600">{{ c.name }}</div>
+        <div>{{ c.phone }}</div>
+        <div>{{ c.email }}</div>
+      </ion-label>
+    </ion-item>
+  </ion-list>
 </ion-content>

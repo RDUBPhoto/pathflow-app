@@ -3,13 +3,25 @@ const { randomUUID } = require("crypto");
 
 const TABLE = "customers";
 const PARTITION = "main";
+const ORIGIN = process.env.CORS_ORIGIN || "http://localhost:4200";
+
+const cors = {
+  "Access-Control-Allow-Origin": ORIGIN,
+  "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type"
+};
 
 function pick(v, d = "") { return typeof v === "string" ? v : (v == null ? d : String(v)); }
 
 module.exports = async function (context, req) {
   try {
+    if ((req.method || "").toUpperCase() === "OPTIONS") {
+      context.res = { status: 204, headers: cors };
+      return;
+    }
+
     const conn = process.env.STORAGE_CONNECTION_STRING;
-    if (!conn) { context.res = { status: 500, headers: { "content-type": "application/json" }, body: { error: "Missing STORAGE_CONNECTION_STRING" } }; return; }
+    if (!conn) { context.res = { status: 500, headers: cors, body: { error: "Missing STORAGE_CONNECTION_STRING" } }; return; }
 
     const client = TableClient.fromConnectionString(conn, TABLE);
     try { await client.createTable(); } catch (_) {}
@@ -20,7 +32,7 @@ module.exports = async function (context, req) {
     if (method === "GET") {
       if (id) {
         const e = await client.getEntity(PARTITION, id);
-        context.res = { status: 200, headers: { "content-type": "application/json" }, body: { id: e.rowKey, name: pick(e.name), phone: pick(e.phone), email: pick(e.email) } };
+        context.res = { status: 200, headers: { "content-type": "application/json", ...cors }, body: { id: e.rowKey, name: pick(e.name), phone: pick(e.phone), email: pick(e.email) } };
         return;
       }
       const out = [];
@@ -29,7 +41,7 @@ module.exports = async function (context, req) {
         out.push({ id: e.rowKey, name: pick(e.name), phone: pick(e.phone), email: pick(e.email) });
         if (out.length >= 50) break;
       }
-      context.res = { status: 200, headers: { "content-type": "application/json" }, body: out };
+      context.res = { status: 200, headers: { "content-type": "application/json", ...cors }, body: out };
       return;
     }
 
@@ -45,13 +57,13 @@ module.exports = async function (context, req) {
         updatedAt: new Date().toISOString()
       };
       await client.upsertEntity(entity, "Merge");
-      context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true, id: rid } };
+      context.res = { status: 200, headers: { "content-type": "application/json", ...cors }, body: { ok: true, id: rid } };
       return;
     }
 
-    context.res = { status: 405, headers: { "content-type": "application/json" }, body: { error: "Method not allowed" } };
+    context.res = { status: 405, headers: { "content-type": "application/json", ...cors }, body: { error: "Method not allowed" } };
   } catch (err) {
     context.log.error(err);
-    context.res = { status: 500, headers: { "content-type": "application/json" }, body: { error: "Server error", detail: String(err && err.message || err) } };
+    context.res = { status: 500, headers: { "content-type": "application/json", ...cors }, body: { error: "Server error", detail: String(err && err.message || err) } };
   }
 };

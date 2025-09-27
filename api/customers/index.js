@@ -1,3 +1,4 @@
+const { TableClient } = require("@azure/data-tables");
 const { randomUUID } = require("crypto");
 
 const TABLE = "customers";
@@ -9,8 +10,6 @@ module.exports = async function (context, req) {
   try {
     const conn = process.env.STORAGE_CONNECTION_STRING;
     if (!conn) { context.res = { status: 500, headers: { "content-type": "application/json" }, body: { error: "Missing STORAGE_CONNECTION_STRING" } }; return; }
-
-    const { TableClient } = await import("@azure/data-tables");
 
     const client = TableClient.fromConnectionString(conn, TABLE);
     try { await client.createTable(); } catch (_) {}

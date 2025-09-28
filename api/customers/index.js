@@ -3,67 +3,63 @@ const { randomUUID } = require("crypto");
 
 const TABLE = "customers";
 const PARTITION = "main";
-const ORIGIN = process.env.CORS_ORIGIN || "http://localhost:4200";
-
-const cors = {
-  "Access-Control-Allow-Origin": ORIGIN,
-  "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type"
-};
 
 function pick(v, d = "") { return typeof v === "string" ? v : (v == null ? d : String(v)); }
 
 module.exports = async function (context, req) {
-  try {
-    if ((req.method || "").toUpperCase() === "OPTIONS") {
-      context.res = { status: 204, headers: cors };
-      return;
-    }
+  const method = (req.method || "GET").toUpperCase();
+  if (method === "OPTIONS") { context.res = { status: 204 }; return; }
 
+  try {
     const conn = process.env.STORAGE_CONNECTION_STRING;
-    if (!conn) { context.res = { status: 500, headers: cors, body: { error: "Missing STORAGE_CONNECTION_STRING" } }; return; }
+    if (!conn) { context.res = { status: 500, body: { error: "Missing STORAGE_CONNECTION_STRING" } }; return; }
 
     const client = TableClient.fromConnectionString(conn, TABLE);
     try { await client.createTable(); } catch (_) {}
 
-    const method = (req.method || "GET").toUpperCase();
-    const id = context.bindingData && context.bindingData.id ? String(context.bindingData.id) : "";
-
     if (method === "GET") {
-      if (id) {
-        const e = await client.getEntity(PARTITION, id);
-        context.res = { status: 200, headers: { "content-type": "application/json", ...cors }, body: { id: e.rowKey, name: pick(e.name), phone: pick(e.phone), email: pick(e.email) } };
-        return;
-      }
       const out = [];
       const iter = client.listEntities({ queryOptions: { filter: `PartitionKey eq '${PARTITION}'` } });
-      for await (const e of iter) {
-        out.push({ id: e.rowKey, name: pick(e.name), phone: pick(e.phone), email: pick(e.email) });
-        if (out.length >= 50) break;
-      }
-      context.res = { status: 200, headers: { "content-type": "application/json", ...cors }, body: out };
+      for await (const e of iter) out.push({ id: e.rowKey, name: pick(e.name), phone: pick(e.phone), email: pick(e.email) });
+      context.res = { status: 200, headers: { "content-type": "application/json" }, body: out };
       return;
     }
 
     if (method === "POST") {
       const b = req.body || {};
-      const rid = pick(b.id) || randomUUID();
-      const entity = {
-        partitionKey: PARTITION,
-        rowKey: rid,
-        name: pick(b.name),
-        phone: pick(b.phone),
-        email: pick(b.email),
-        updatedAt: new Date().toISOString()
-      };
-      await client.upsertEntity(entity, "Merge");
-      context.res = { status: 200, headers: { "content-type": "application/json", ...cors }, body: { ok: true, id: rid } };
-      return;
+      const op = String(b.op || "").toLowerCase();
+      const id = pick(b.id);
+      if (op === "delete" && id) {
+        await client.deleteEntity(PARTITION, id);
+        context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true } };
+        return;
+      }
+
+      const name = pick(b.name).trim();
+      const phone = pick(b.phone).trim();
+      const email = pick(b.email).trim();
+
+      if (!id && !name) { context.res = { status: 400, headers: { "content-type": "application/json" }, body: { error: "name required" } }; return; }
+
+      if (!id) {
+        const rowKey = randomUUID();
+        await client.upsertEntity({ partitionKey: PARTITION, rowKey, name, phone, email }, "Merge");
+        context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true, id: rowKey } };
+        return;
+      } else {
+        const patch = { partitionKey: PARTITION, rowKey: id };
+        if (name) patch.name = name;
+        if (phone || b.hasOwnProperty("phone")) patch.phone = phone;
+        if (email || b.hasOwnProperty("email")) patch.email = email;
+        await client.upsertEntity(patch, "Merge");
+        context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true, id } };
+        return;
+      }
     }
 
-    context.res = { status: 405, headers: { "content-type": "application/json", ...cors }, body: { error: "Method not allowed" } };
+    context.res = { status: 405, headers: { "content-type": "application/json" }, body: { error: "Method not allowed" } };
   } catch (err) {
     context.log.error(err);
-    context.res = { status: 500, headers: { "content-type": "application/json", ...cors }, body: { error: "Server error", detail: String(err && err.message || err) } };
+    context.res = { status: 500, headers: { "content-type": "application/json" }, body: { error: "Server error", detail: String(err && err.message || err) } };
   }
 };

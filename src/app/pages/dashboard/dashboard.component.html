@@ -12,7 +12,6 @@
       </ion-item>
       <div style="margin-top:8px;">
         <ion-button (click)="addLane()">Add</ion-button>
-        <span style="margin-left:10px">{{ status() }}</span>
       </div>
     </ion-list>
 
@@ -89,7 +88,12 @@
           (cdkDropListDropped)="onCardsDrop($event, lane.id)">
           <div class="card" *ngFor="let it of getLaneCards(lane.id); trackBy: trackItem" cdkDrag>
             <div class="card-body">
-              <div class="card-name-lg">{{ customerName(it) }}</div>
+              <div>
+                <div class="card-name-lg">{{ customerName(it) }}</div>
+                <ion-button fill="clear" size="small" (click)="openCardMenu($event, it)">
+                  <ion-icon name="ellipsis-vertical"></ion-icon>
+                </ion-button>
+              </div>
               <div class="card-line"><span>Vehicle: {{ vehicleOf(it) || '—' }}</span></div>
               <div class="card-line">
                 <span>Vehicle color:</span>
@@ -108,9 +112,26 @@
           </div>
         </div>
       </div>
-
     </div>
   </div>
+
+  <ion-popover
+    [isOpen]="cardMenuOpen()"
+    [event]="cardMenuEvent()"
+    (didDismiss)="closeCardMenu()">
+    <ng-template>
+      <ion-content class="ion-padding">
+        <ion-list lines="full">
+          <ion-item button (click)="startEditFromCard()">
+            <ion-label>Edit customer</ion-label>
+          </ion-item>
+          <ion-item button (click)="startDeleteFromCard()">
+            <ion-label color="danger">Delete customer</ion-label>
+          </ion-item>
+        </ion-list>
+      </ion-content>
+    </ng-template>
+  </ion-popover>
 
   <ion-popover
     [isOpen]="laneMenuOpen()"
@@ -121,9 +142,6 @@
         <ion-list lines="full">
           <ion-item button (click)="startRename()">
             <ion-label>Rename</ion-label>
-          </ion-item>
-          <ion-item button (click)="startColor()">
-            <ion-label>Color</ion-label>
           </ion-item>
           <ion-item button (click)="handleDeleteFromMenu()">
             <ion-label color="danger">Delete</ion-label>
@@ -284,4 +302,26 @@
       </ion-content>
     </ng-template>
   </ion-modal>
+
+  <ion-modal [isOpen]="customerDeleteOpen()" (didDismiss)="cancelDeleteCustomer()">
+    <ng-template>
+      <ion-header>
+        <ion-toolbar>
+          <ion-title>Delete customer</ion-title>
+          <ion-buttons slot="end">
+            <ion-button (click)="cancelDeleteCustomer()">Close</ion-button>
+          </ion-buttons>
+        </ion-toolbar>
+      </ion-header>
+      <ion-content class="ion-padding">
+        <div style="margin-bottom:12px;">Delete “{{ customerDeleteName() }}”?</div>
+        <div class="ion-text-medium" style="font-size:12px; opacity:.7">This removes the customer from all cards.</div>
+        <div style="margin-top:16px; display:flex; gap:8px; justify-content:flex-end;">
+          <ion-button fill="outline" (click)="cancelDeleteCustomer()">Cancel</ion-button>
+          <ion-button color="danger" (click)="confirmDeleteCustomer()">Delete</ion-button>
+        </div>
+      </ion-content>
+    </ng-template>
+  </ion-modal>
+
 </ion-content>

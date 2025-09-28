@@ -64,6 +64,15 @@ export default class DashboardComponent {
   deleteTargetId = signal<string | null>(null);
   deleteTargetName = signal<string>('');
   deleteTargetCount = signal(0);
+  cardMenuOpen = signal(false);
+  cardMenuEvent = signal<any>(null);
+  cardMenuItemId = signal<string | null>(null);
+  editMode = signal(false);
+  editCustomerId = signal<string | null>(null);
+  customerDeleteOpen = signal(false);
+  customerDeleteId = signal<string | null>(null);
+  customerDeleteName = signal<string>('');
+
 
   palette: ColorOpt[] = [
     { label: 'White',  hex: '#ffffff' },
@@ -134,6 +143,76 @@ export default class DashboardComponent {
     setTimeout(() => this.openDelete(lane), 0);
   }
 
+  openCardMenu(ev: Event, it: WorkItem) {
+    this.cardMenuEvent.set(ev);
+    this.cardMenuItemId.set(it.id);
+    this.cardMenuOpen.set(true);
+  }
+  closeCardMenu() { this.cardMenuOpen.set(false); }
+
+  startEditFromCard() {
+    const itId = this.cardMenuItemId();
+    this.cardMenuOpen.set(false);
+    if (!itId) return;
+    let it: WorkItem | undefined;
+    for (const arr of Object.values(this.items())) {
+      it = (arr as WorkItem[]).find(x => x.id === itId);
+      if (it) break;
+    }
+    if (!it) return;
+    const cust = this.customersMap()[it.customerId || ''];
+    if (!cust) return;
+    this.editMode.set(true);
+    this.editCustomerId.set(cust.id);
+    this.ncName.set(cust.name || '');
+    this.ncPhone.set(cust.phone || '');
+    this.ncEmail.set(cust.email || '');
+    this.ncVehicle.set(this.vehicleOf(it) || '');
+    this.ncNotes.set(this.notesOf(it) || '');
+    this.ncColor.set(this.colorOf(it) || '');
+    this.ncAlsoAdd.set(false);
+    this.openNew.set(true);
+  }
+
+  startDeleteFromCard() {
+    const itId = this.cardMenuItemId();
+    this.cardMenuOpen.set(false);
+    if (!itId) return;
+    let it: WorkItem | undefined;
+    for (const arr of Object.values(this.items())) {
+      it = (arr as WorkItem[]).find(x => x.id === itId);
+      if (it) break;
+    }
+    if (!it) return;
+    const cust = this.customersMap()[it.customerId || ''];
+    if (!cust) return;
+    this.customerDeleteId.set(cust.id);
+    this.customerDeleteName.set(cust.name || '');
+    this.customerDeleteOpen.set(true);
+  }
+  cancelDeleteCustomer() { this.customerDeleteOpen.set(false); }
+
+  confirmDeleteCustomer() {
+    const id = this.customerDeleteId();
+    if (!id) { this.customerDeleteOpen.set(false); return; }
+    this.status.set('Deleting customer');
+    this.customersApi.delete(id).subscribe({
+      next: () => {
+        const cm = { ...this.customersMap() };
+        delete cm[id];
+        this.customersMap.set(cm);
+        this.allCustomers.set(this.allCustomers().filter(c => c.id !== id));
+        const map = { ...this.items() };
+        for (const k of Object.keys(map)) {
+          map[k] = map[k].map(w => w.customerId === id ? { ...w, customerId: '' } as WorkItem : w);
+        }
+        this.items.set(map);
+        this.customerDeleteOpen.set(false);
+        this.status.set('Deleted');
+      },
+      error: () => { this.customerDeleteOpen.set(false); this.status.set('Delete customer error'); }
+    });
+  }
 
   confirmDelete() {
     const id = this.deleteTargetId();
@@ -411,6 +490,8 @@ export default class DashboardComponent {
   }
 
   openNewModal() {
+    this.editMode.set(false);
+    this.editCustomerId.set(null);
     this.ncName.set('');
     this.ncPhone.set('');
     this.ncEmail.set('');
@@ -428,6 +509,29 @@ export default class DashboardComponent {
   saveNewCustomer() {
     const name = this.ncName().trim();
     if (!name) { this.status.set('Name required'); return; }
+
+    if (this.editMode()) {
+      const id = this.editCustomerId();
+      if (!id) { this.openNew.set(false); return; }
+      const body = { id, name, phone: this.ncPhone().trim(), email: this.ncEmail().trim() };
+      this.status.set('Saving customer');
+      this.customersApi.upsert(body).subscribe({
+        next: res => {
+          const cm = { ...this.customersMap() };
+          cm[id] = { id, name: body.name, phone: body.phone, email: body.email };
+          this.customersMap.set(cm);
+          const list = this.allCustomers().slice();
+          const idx = list.findIndex(c => c.id === id);
+          if (idx >= 0) list[idx] = cm[id]; else list.push(cm[id]);
+          this.allCustomers.set(list);
+          this.openNew.set(false);
+          this.status.set('Saved');
+        },
+        error: () => this.status.set('Save customer error')
+      });
+      return;
+    }
+
     const selected = this.selectedExistingId();
     if (selected) {
       const custId = selected;
@@ -452,6 +556,7 @@ export default class DashboardComponent {
       }
       return;
     }
+
     const body = { name, phone: this.ncPhone().trim(), email: this.ncEmail().trim() };
     this.status.set('Saving customer');
     this.customersApi.upsert(body).subscribe({

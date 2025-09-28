@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import {
   IonHeader, IonToolbar, IonTitle, IonContent, IonButtons, IonButton,
   IonItem, IonLabel, IonInput, IonSpinner, IonIcon, IonModal,
-  IonSelect, IonSelectOption, IonTextarea, IonToggle, IonMenu, IonList, IonPopover, IonMenuToggle
+  IonSelect, IonSelectOption, IonTextarea, IonToggle, IonMenu, IonList, IonPopover, IonMenuToggle, IonLoading
 } from '@ionic/angular/standalone';
 import { FormsModule } from '@angular/forms';
 import {
@@ -25,7 +25,7 @@ type ColorOpt = { label: string; hex: string };
     IonHeader, IonToolbar, IonTitle, IonContent, IonButtons, IonButton,
     IonItem, IonLabel, IonInput, IonSpinner, IonIcon, IonModal,
     IonSelect, IonSelectOption, IonTextarea, IonToggle,
-    CdkDropList, CdkDropListGroup, CdkDrag, IonList, IonMenu, IonPopover, IonMenuToggle
+    CdkDropList, CdkDropListGroup, CdkDrag, IonList, IonMenu, IonPopover, IonMenuToggle, IonLoading
   ],
   templateUrl: './dashboard.component.html',
   styleUrls: ['./dashboard.component.scss']

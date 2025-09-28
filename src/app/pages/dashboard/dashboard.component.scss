@@ -1,7 +1,6 @@
 .board {
   overflow: auto;
   padding: 8px;
-  margin-top: 12px;
 }
 .lanes {
   display: flex;
@@ -61,7 +60,6 @@
 }
 .card-title { font-weight: 600; }
 
-/* Lane drag visuals */
 .lane-preview {
   min-width: 280px;
   height: 160px;
@@ -107,10 +105,8 @@
 }
 
 .card-body { display: grid; gap: 2px; }
-.card-line { font-size: 12px; }
 .card-name { font-weight: 600; }
 .muted { color: var(--ion-color-medium); }
-.card-body { display: grid; gap: 6px; }
 .card-name-lg { font-size: 1rem; font-weight: 700; }
 .card-line { font-size: 12px; display: flex; align-items: center; gap: 8px; }
 .muted { color: var(--ion-color-medium); }
@@ -223,3 +219,92 @@
   vertical-align: middle;
 }
 .lane-header ion-button { margin-left: 4px; }
+.no-vscroll {
+  --padding-start: 12px;
+  --padding-end: 12px;
+  --padding-top: 12px;
+  --padding-bottom: 12px;
+}
+
+.board {
+  height: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0 4px;
+}
+
+.lanes {
+  height: 100%;
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+  padding-bottom: 4px;
+}
+
+.lane {
+  height: 100%;
+  min-width: 280px;
+  display: flex;
+  flex-direction: column;
+}
+
+.lane-header {
+  flex: 0 0 auto;
+  padding-bottom: 6px;
+}
+
+.cards {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 6px;
+  border-radius: 12px;
+}
+
+.cards.cdk-drop-list-dragging {
+  background: rgba(var(--ion-color-primary-rgb,56,128,255), .06);
+  outline: 2px dashed var(--ion-color-primary);
+  outline-offset: 4px;
+}
+
+.cdk-drag-placeholder {
+  opacity: .35;
+  border: 2px dashed var(--ion-color-medium);
+  border-radius: 12px;
+  min-height: 48px;
+}
+
+.board::-webkit-scrollbar,
+.cards::-webkit-scrollbar { height: 8px; width: 8px; }
+.board::-webkit-scrollbar-thumb,
+.cards::-webkit-scrollbar-thumb { border-radius: 8px; background: rgba(0,0,0,.2); }
+
+ion-content.no-vscroll { --overflow: hidden; }
+
+ion-content.no-vscroll::part(scroll) { overflow-y: hidden !important; }
+
+ion-content.no-vscroll .inner-scroll { overflow-y: hidden !important; }
+
+.board { height: 100%; overflow-x: auto; overflow-y: hidden; }
+.lanes { height: 100%; display: flex; gap: 12px; align-items: stretch; }
+.lane { height: 100%; min-width: 280px; display: flex; flex-direction: column; }
+.cards { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.card-menu-btn {
+  margin-left: auto;
+  --padding-start: 4px;
+  --padding-end: 4px;
+  height: 28px;
+  min-width: 28px;
+}
+
+.card-menu-btn ion-icon {
+  font-size: 18px;
+}
+

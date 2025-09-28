@@ -4,7 +4,7 @@
       <ion-title>Board Settings</ion-title>
     </ion-toolbar>
   </ion-header>
-  <ion-content class="ion-padding">
+  <ion-content id="board-content" class="glass-bg no-vscroll" [scrollY]="false">
     <ion-list>
       <ion-item>
         <ion-label position="stacked">Add New lane</ion-label>
@@ -44,17 +44,15 @@
       <ion-menu-toggle menu="board-settings" autoHide="false">
         <ion-button>
           <ion-icon slot="start" name="settings-outline"></ion-icon>
-          Settings
         </ion-button>
       </ion-menu-toggle>
       <ion-button (click)="openNewModal()">New Customer</ion-button>
+      <ion-loading *ngIf="loading()" style="margin-left:8px; width:16px; height:16px;"></ion-loading>
     </ion-buttons>
   </ion-toolbar>
 </ion-header>
 
 <ion-content id="board-content" class="ion-padding glass-bg">
-  <div style="margin-top:16px" *ngIf="loading()"><ion-spinner></ion-spinner></div>
-
   <div class="board" cdkDropListGroup>
     <div
       class="lanes"
@@ -88,9 +86,9 @@
           (cdkDropListDropped)="onCardsDrop($event, lane.id)">
           <div class="card" *ngFor="let it of getLaneCards(lane.id); trackBy: trackItem" cdkDrag>
             <div class="card-body">
-              <div>
+              <div class="card-head">
                 <div class="card-name-lg">{{ customerName(it) }}</div>
-                <ion-button fill="clear" size="small" (click)="openCardMenu($event, it)">
+                <ion-button class="card-menu-btn" fill="clear" size="small" (click)="openCardMenu($event, it)">
                   <ion-icon name="ellipsis-vertical"></ion-icon>
                 </ion-button>
               </div>

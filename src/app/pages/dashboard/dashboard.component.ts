@@ -72,6 +72,7 @@ export default class DashboardComponent {
   customerDeleteOpen = signal(false);
   customerDeleteId = signal<string | null>(null);
   customerDeleteName = signal<string>('');
+  cardDeleteItemId = signal<string | null>(null);
 
 
   palette: ColorOpt[] = [
@@ -188,29 +189,56 @@ export default class DashboardComponent {
     if (!cust) return;
     this.customerDeleteId.set(cust.id);
     this.customerDeleteName.set(cust.name || '');
+    this.cardDeleteItemId.set(it.id);
     this.customerDeleteOpen.set(true);
   }
-  cancelDeleteCustomer() { this.customerDeleteOpen.set(false); }
+
+  cancelDeleteCustomer() {
+    this.customerDeleteOpen.set(false);
+    this.cardDeleteItemId.set(null);
+  }
 
   confirmDeleteCustomer() {
-    const id = this.customerDeleteId();
-    if (!id) { this.customerDeleteOpen.set(false); return; }
+    const custId = this.customerDeleteId();
+    const itemId = this.cardDeleteItemId();
+    if (!custId) { this.customerDeleteOpen.set(false); this.cardDeleteItemId.set(null); return; }
     this.status.set('Deleting customer');
-    this.customersApi.delete(id).subscribe({
+    this.customersApi.delete(custId).subscribe({
       next: () => {
         const cm = { ...this.customersMap() };
-        delete cm[id];
+        delete cm[custId];
         this.customersMap.set(cm);
-        this.allCustomers.set(this.allCustomers().filter(c => c.id !== id));
-        const map = { ...this.items() };
-        for (const k of Object.keys(map)) {
-          map[k] = map[k].map(w => w.customerId === id ? { ...w, customerId: '' } as WorkItem : w);
+        this.allCustomers.set(this.allCustomers().filter(c => c.id !== custId));
+        if (itemId) {
+          this.itemsApi.delete(itemId).subscribe({
+            next: () => {
+              const map = { ...this.items() };
+              for (const k of Object.keys(map)) map[k] = map[k].filter(w => w.id !== itemId);
+              this.items.set(map);
+              this.customerDeleteOpen.set(false);
+              this.cardDeleteItemId.set(null);
+              this.status.set('Deleted');
+            },
+            error: () => {
+              this.customerDeleteOpen.set(false);
+              this.cardDeleteItemId.set(null);
+              this.status.set('Delete card error');
+            }
+          });
+        } else {
+          const map = { ...this.items() };
+          for (const k of Object.keys(map)) map[k] = map[k].map(w => w.customerId === custId ? { ...w, customerId: '' } as WorkItem : w);
+          this.items.set(map);
+          this.customerDeleteOpen.set(false);
+          this.cardDeleteItemId.set(null);
+          this.status.set('Deleted');
         }
-        this.items.set(map);
-        this.customerDeleteOpen.set(false);
-        this.status.set('Deleted');
       },
-      error: () => { this.customerDeleteOpen.set(false); this.status.set('Delete customer error'); }
+      error: () => {
+        this.customerDeleteOpen.set(false);
+        this.cardDeleteItemId.set(null);
+        this.status.set('Delete customer error');
+      }
     });
   }
 
@@ -452,7 +480,14 @@ export default class DashboardComponent {
 
   customerName(it: WorkItem): string {
     const c = this.customersMap()[it.customerId ?? ''];
-    return c?.name ?? 'No customer';
+    const n = (c?.name || '').trim();
+    if (n) return n;
+    const t = (it.title || '').replace(/\[c=[^\]]+\]/gi, '').trim();
+    const dashIdx = t.indexOf('—');
+    const head = dashIdx >= 0 ? t.slice(0, dashIdx).trim() : t;
+    const parenIdx = head.indexOf('(');
+    const name = (parenIdx >= 0 ? head.slice(0, parenIdx) : head).trim();
+    return name || 'No customer';
   }
 
   customerContact(it: WorkItem): string {

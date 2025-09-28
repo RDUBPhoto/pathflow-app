@@ -4,7 +4,7 @@
       <ion-title>Board Settings</ion-title>
     </ion-toolbar>
   </ion-header>
-  <ion-content id="board-content" class="glass-bg no-vscroll" [scrollY]="false">
+  <ion-content class="glass-bg no-vscroll" [scrollY]="false">
     <ion-list>
       <ion-item>
         <ion-label position="stacked">Add New lane</ion-label>
@@ -72,7 +72,7 @@
         <div class="lane-header">
           <ion-icon name="reorder-two-outline" cdkDragHandle class="drag-handle"></ion-icon>
           <div class="lane-title">{{ lane.name }}</div>
-          <ion-button fill="clear" size="small" (click)="openLaneMenu($event, lane)">
+          <ion-button class="lane-menu-btn" fill="clear" size="small" (click)="openLaneMenu($event, lane)">
             <ion-icon name="ellipsis-vertical"></ion-icon>
           </ion-button>
         </div>

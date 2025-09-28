@@ -9,7 +9,6 @@ function num(v, d = 0) { const n = Number(v); return Number.isFinite(n) ? n : d;
 
 module.exports = async function (context, req) {
   const method = (req.method || "GET").toUpperCase();
-  const action = context.bindingData && context.bindingData.action ? String(context.bindingData.action) : "";
   const id = context.bindingData && context.bindingData.id ? String(context.bindingData.id) : "";
 
   if (method === "OPTIONS") { context.res = { status: 204 }; return; }
@@ -24,28 +23,29 @@ module.exports = async function (context, req) {
     if (method === "GET") {
       const out = [];
       const iter = client.listEntities({ queryOptions: { filter: `PartitionKey eq '${PARTITION}'` } });
-      for await (const e of iter) out.push({ id: e.rowKey, name: pick(e.name), sort: num(e.sort) });
+      for await (const e of iter) {
+        const name = pick(e.name).trim();
+        if (!name) continue;
+        out.push({ id: e.rowKey, name, sort: num(e.sort) });
+      }
       out.sort((a,b) => a.sort - b.sort || a.name.localeCompare(b.name));
       context.res = { status: 200, headers: { "content-type": "application/json" }, body: out };
-      return;
-    }
-
-    if (method === "POST" && action === "reorder") {
-      const body = req.body || {};
-      const ids = Array.isArray(body.ids) ? body.ids.map(String) : [];
-      for (let i = 0; i < ids.length; i++) {
-        const rowKey = ids[i];
-        await client.upsertEntity({ partitionKey: PARTITION, rowKey, sort: i * 10 }, "Merge");
-      }
-      context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true } };
       return;
     }
 
     if (method === "POST") {
       const b = req.body || {};
       const rid = pick(b.id);
-      const name = pick(b.name).trim();
-      if (!rid && !name) { context.res = { status: 400, headers: { "content-type": "application/json" }, body: { error: "name required" } }; return; }
+      const hasName = Object.prototype.hasOwnProperty.call(b, "name");
+      const name = hasName ? pick(b.name).trim() : "";
+
+      if (rid && hasName && name === "") {
+        await client.deleteEntity(PARTITION, rid);
+        context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true } };
+        return;
+      }
+
+      if (!rid && !hasName) { context.res = { status: 400, headers: { "content-type": "application/json" }, body: { error: "name required" } }; return; }
 
       if (!rid) {
         let max = 0;
@@ -56,7 +56,9 @@ module.exports = async function (context, req) {
         context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true, id: rowKey } };
         return;
       } else {
-        await client.upsertEntity({ partitionKey: PARTITION, rowKey: rid, name }, "Merge");
+        const patch = { partitionKey: PARTITION, rowKey: rid };
+        if (hasName && name) patch.name = name;
+        await client.upsertEntity(patch, "Merge");
         context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true, id: rid } };
         return;
       }

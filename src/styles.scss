@@ -52,3 +52,8 @@
   ion-toolbar ion-title {
   color: #0b0f14;
   }
+
+  .scroll-y {
+    overflow-y: inherit !important;
+    overscroll-behavior-y: contain;
+  }

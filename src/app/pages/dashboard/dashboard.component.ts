@@ -82,7 +82,7 @@ export default class DashboardComponent {
     private lanesApi: LanesApi,
     private itemsApi: WorkItemsApi,
     private customersApi: CustomersApi,
-    private menu: MenuController
+    private menu: MenuController,
   ) {
     this.loadLaneColors();
     this.loadAll();
@@ -119,12 +119,21 @@ export default class DashboardComponent {
     this.deleteTargetName.set(lane.name || '');
     this.deleteTargetCount.set(this.itemsCount(lane.id));
     this.deleteOpen.set(true);
-    this.laneMenuOpen.set(false);
   }
 
   cancelDelete() {
     this.deleteOpen.set(false);
   }
+
+  handleDeleteFromMenu() {
+    const id = this.laneMenuLaneId();
+    if (!id) return;
+    const lane = this.lanes().find(l => l.id === id);
+    if (!lane) return;
+    this.laneMenuOpen.set(false);
+    setTimeout(() => this.openDelete(lane), 0);
+  }
+
 
   confirmDelete() {
     const id = this.deleteTargetId();

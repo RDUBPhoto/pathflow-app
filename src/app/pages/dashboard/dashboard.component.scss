@@ -6,7 +6,7 @@
 .lanes {
   display: flex;
   gap: 12px;
-  /* while dragging lanes, make shifting smoother */
+  height: 100%;
   &.cdk-drop-list-dragging .lane {
     transition: transform .12s ease, opacity .12s ease;
   }

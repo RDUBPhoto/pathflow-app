@@ -6,11 +6,8 @@
   </ion-header>
   <ion-content class="ion-padding">
     <ion-list>
-      <ion-item lines="full">
-        <ion-label>Board</ion-label>
-      </ion-item>
       <ion-item>
-        <ion-label position="stacked">Add lane</ion-label>
+        <ion-label position="stacked">Add New lane</ion-label>
         <ion-input [ngModel]="newLane()" (ngModelChange)="newLane.set($event)"></ion-input>
       </ion-item>
       <div style="margin-top:8px;">
@@ -21,34 +18,11 @@
 
     <ion-list>
       <ion-item lines="full">
-        <ion-label>Lane sorting</ion-label>
-      </ion-item>
-      <ion-item *ngFor="let l of lanes()">
-        <ion-label class="ion-text-wrap">
-          <div style="font-weight:600">{{ l.name }}</div>
-          <div class="ion-text-muted" style="font-size:12px">{{ laneSorts()[l.id] || 'manual' }}</div>
-        </ion-label>
-        <ion-select
-          interface="popover"
-          [value]="laneSorts()[l.id] || 'manual'"
-          (ionChange)="setLaneSort(l.id, $event.detail.value)">
-          <ion-select-option value="manual">Manual (drag)</ion-select-option>
-          <ion-select-option value="nameAsc">Name A→Z</ion-select-option>
-          <ion-select-option value="nameDesc">Name Z→A</ion-select-option>
-          <ion-select-option value="vehicleAsc">Vehicle A→Z</ion-select-option>
-          <ion-select-option value="vehicleDesc">Vehicle Z→A</ion-select-option>
-        </ion-select>
-      </ion-item>
-    </ion-list>
-
-    <ion-list>
-      <ion-item lines="full">
         <ion-label>Lane colors</ion-label>
       </ion-item>
       <ion-item *ngFor="let l of lanes()">
         <ion-label class="ion-text-wrap">
           <div style="font-weight:600">{{ l.name }}</div>
-          <div class="ion-text-muted" style="font-size:12px">{{ laneColor(l.id) || 'None' }}</div>
         </ion-label>
         <ion-select
           interface="popover"
@@ -101,7 +75,6 @@
         <div class="lane-header">
           <ion-icon name="reorder-two-outline" cdkDragHandle class="drag-handle"></ion-icon>
           <div class="lane-title">{{ lane.name }}</div>
-          <span class="lane-dot" *ngIf="laneColor(lane.id)"></span>
           <ion-button fill="clear" size="small" (click)="openLaneMenu($event, lane)">
             <ion-icon name="ellipsis-vertical"></ion-icon>
           </ion-button>
@@ -115,7 +88,6 @@
           [cdkDropListConnectedTo]="laneIds()"
           (cdkDropListDropped)="onCardsDrop($event, lane.id)">
           <div class="card" *ngFor="let it of getLaneCards(lane.id); trackBy: trackItem" cdkDrag>
-            <ion-icon name="reorder-three-outline" cdkDragHandle class="drag-handle"></ion-icon>
             <div class="card-body">
               <div class="card-name-lg">{{ customerName(it) }}</div>
               <div class="card-line"><span>Vehicle: {{ vehicleOf(it) || '—' }}</span></div>
@@ -153,10 +125,7 @@
           <ion-item button (click)="startColor()">
             <ion-label>Color</ion-label>
           </ion-item>
-          <ion-item button (click)="startSort()">
-            <ion-label>Sort</ion-label>
-          </ion-item>
-          <ion-item button (click)="deleteMenuLane()">
+          <ion-item button (click)="handleDeleteFromMenu()">
             <ion-label color="danger">Delete</ion-label>
           </ion-item>
         </ion-list>
@@ -285,6 +254,32 @@
         <div style="margin-top:16px; display:flex; gap:8px; justify-content:flex-end;">
           <ion-button fill="outline" (click)="renameOpen.set(false)">Cancel</ion-button>
           <ion-button (click)="saveRename()">Save</ion-button>
+        </div>
+      </ion-content>
+    </ng-template>
+  </ion-modal>
+
+  <ion-modal [isOpen]="deleteOpen()" (didDismiss)="cancelDelete()">
+    <ng-template>
+      <ion-header>
+        <ion-toolbar>
+          <ion-title>Delete lane</ion-title>
+          <ion-buttons slot="end">
+            <ion-button (click)="cancelDelete()">Close</ion-button>
+          </ion-buttons>
+        </ion-toolbar>
+      </ion-header>
+      <ion-content class="ion-padding">
+        <div style="margin-bottom:12px;">
+          Delete “{{ deleteTargetName() }}”?
+        </div>
+        <ion-item lines="none">
+          <ion-label color="medium">Cards in lane</ion-label>
+          <ion-label slot="end">{{ deleteTargetCount() }}</ion-label>
+        </ion-item>
+        <div style="margin-top:16px; display:flex; gap:8px; justify-content:flex-end;">
+          <ion-button fill="outline" (click)="cancelDelete()">Cancel</ion-button>
+          <ion-button color="danger" [disabled]="deleteTargetCount() > 0" (click)="confirmDelete()">Delete</ion-button>
         </div>
       </ion-content>
     </ng-template>

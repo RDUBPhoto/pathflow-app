@@ -5,54 +5,219 @@
 </ion-header>
 
 <ion-content class="ion-padding glass-bg">
-  <div style="display:grid; gap:10px; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); margin-bottom:14px;">
-    <ion-item>
-      <ion-label position="stacked">Name</ion-label>
-      <ion-input
-        [ngModel]="name()"
-        (ngModelChange)="name.set($event)"></ion-input>
-    </ion-item>
+  <style>
+    .click-table tr.data-row{cursor:pointer;transition:background .15s ease}
+    .click-table tr.data-row:hover{background:rgba(0,0,0,0.04)}
+  </style>
 
-    <ion-item>
-      <ion-label position="stacked">Phone</ion-label>
-      <ion-input
-        [ngModel]="phone()"
-        (ngModelChange)="phone.set($event)"></ion-input>
-    </ion-item>
-
-    <ion-item>
-      <ion-label position="stacked">Email</ion-label>
-      <ion-input
-        [ngModel]="email()"
-        (ngModelChange)="email.set($event)"></ion-input>
-    </ion-item>
-
-    <div style="display:flex; align-items:end;">
-      <ion-button (click)="add()">Add</ion-button>
-    </div>
+  <div style="display:flex; justify-content:flex-end; align-items:center; gap:8px; margin-bottom:8px;">
+    <ion-button size="small" (click)="openAdd()">Add Customer</ion-button>
+    <ion-spinner name="crescent" *ngIf="loading()"></ion-spinner>
+    <span *ngIf="!loading() && status()">{{ status() }}</span>
   </div>
 
-  <div style="margin-bottom:8px;">{{ status() }}</div>
+  <div style="overflow:auto; border-radius:12px; border:1px solid rgba(0,0,0,0.08); background: var(--ion-item-background, #fff);">
+    <table class="click-table" style="width:100%; border-collapse:collapse; min-width:900px;">
+      <thead>
+        <tr style="background:rgba(0,0,0,0.03);">
+          <th (click)="setSort('name')" style="text-align:left; padding:12px 14px; font-weight:600; width:30%; cursor:pointer; user-select:none;">
+            Name
+            <span *ngIf="sortKey()==='name'">{{ sortDir()==='asc' ? '▲' : '▼' }}</span>
+          </th>
+          <th (click)="setSort('phone')" style="text-align:left; padding:12px 14px; font-weight:600; width:20%; cursor:pointer; user-select:none;">
+            Phone
+            <span *ngIf="sortKey()==='phone'">{{ sortDir()==='asc' ? '▲' : '▼' }}</span>
+          </th>
+          <th (click)="setSort('email')" style="text-align:left; padding:12px 14px; font-weight:600; width:30%; cursor:pointer; user-select:none;">
+            Email
+            <span *ngIf="sortKey()==='email'">{{ sortDir()==='asc' ? '▲' : '▼' }}</span>
+          </th>
+          <th style="text-align:left; padding:12px 14px; font-weight:600; width:20%;">Vehicle</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="data-row" *ngFor="let c of filtered() | slice:0:25; trackBy: trackCustomer; let i = index" (click)="openEdit(c)">
+          <td style="padding:12px 14px;">{{ c.name || 'Unnamed' }}</td>
+          <td style="padding:12px 14px;">{{ c.phone || '—' }}</td>
+          <td style="padding:12px 14px;">{{ c.email || '—' }}</td>
+          <td style="padding:12px 14px;">{{ vehicleSummaryFor(c) || '—' }}</td>
+        </tr>
+        <tr *ngIf="!loading() && (filtered() | slice:0:25).length === 0">
+          <td colspan="4" style="padding:14px; text-align:center; opacity:0.7;">No customers found</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
 
-  <ion-list>
-    <ion-item *ngIf="loading()">Loading…</ion-item>
-    <ion-item *ngFor="let c of customers()">
-      <ion-label class="ion-text-wrap">
-        <div class="c-name">{{ c.name }}</div>
-        <div class="c-meta">{{ c.phone || '—' }} • {{ c.email || '—' }}</div>
-        <div class="veh-title">Vehicles</div>
-        <ng-container *ngIf="vehiclesByCustomer()[c.id]?.length; else noVehicles">
-          <div class="veh-row">
-            <div class="veh-chip" *ngFor="let v of vehiclesByCustomer()[c.id]">
-              <span class="veh-swatch" [style.background]="v.color || '#e0e0e0'"></span>
-              <span class="veh-name">{{ v.name }}</span>
+  <div style="margin-top:10px; font-size:12px; opacity:0.8;">
+    Showing {{ (filtered() | slice:0:25).length }} of {{ filtered().length }}
+  </div>
+
+  <ion-modal [isOpen]="addOpen()" (didDismiss)="cancelAdd()">
+    <ng-template>
+      <ion-header>
+        <ion-toolbar>
+          <ion-title>{{ editMode() ? 'Edit Customer' : 'Add Customer' }}</ion-title>
+          <ion-buttons slot="end">
+            <ion-button fill="clear" (click)="cancelAdd()">Close</ion-button>
+          </ion-buttons>
+        </ion-toolbar>
+      </ion-header>
+
+      <ion-content class="ion-padding">
+        <div style="font-weight:700; margin-top:4px;">Customer Details</div>
+        <div style="height:1px; background:rgba(0,0,0,0.08); margin:6px 0 12px;"></div>
+
+        <div style="display:grid; gap:12px; grid-template-columns: repeat(auto-fit,minmax(240px,1fr));">
+          <ion-item>
+            <ion-label position="stacked">First Name *</ion-label>
+            <ion-input [ngModel]="firstName()" (ngModelChange)="onFirstChange($event)"></ion-input>
+            <ion-note slot="helper" color="danger" *ngIf="showErrors() && !firstName().trim()">Required</ion-note>
+          </ion-item>
+          <ion-item>
+            <ion-label position="stacked">Last Name *</ion-label>
+            <ion-input [ngModel]="lastName()" (ngModelChange)="onLastChange($event)"></ion-input>
+            <ion-note slot="helper" color="danger" *ngIf="showErrors() && !lastName().trim()">Required</ion-note>
+          </ion-item>
+          <ion-item>
+            <ion-label position="stacked">Phone *</ion-label>
+            <ion-input [ngModel]="phone()" (ngModelChange)="onPhoneInput($event)"></ion-input>
+            <ion-note slot="helper" color="danger" *ngIf="showErrors() && !phoneValid()">Enter a valid phone</ion-note>
+          </ion-item>
+          <ion-item>
+            <ion-label position="stacked">Email *</ion-label>
+            <ion-input [ngModel]="email()" (ngModelChange)="onEmailChange($event)"></ion-input>
+            <ion-note slot="helper" color="danger" *ngIf="showErrors() && !emailValid()">Enter a valid email</ion-note>
+          </ion-item>
+
+          <div class="full" *ngIf="dupMatches().length" style="grid-column: 1 / -1;">
+            <div style="font-weight:600; margin:6px 0 4px;">Possible duplicates</div>
+            <ion-list>
+              <ion-item button detail="false" *ngFor="let d of dupMatches()" (click)="selectDuplicate(d)">
+                <ion-label>
+                  <div style="font-weight:600;">{{ d.name }}</div>
+                  <div style="font-size:12px; opacity:0.8;">
+                    <span *ngIf="d.phone">{{ d.phone }}</span>
+                    <span *ngIf="d.phone && d.email"> • </span>
+                    <span *ngIf="d.email">{{ d.email }}</span>
+                  </div>
+                </ion-label>
+              </ion-item>
+            </ion-list>
+          </div>
+
+          <ion-item class="full" style="grid-column: 1 / -1;">
+            <ion-label position="stacked">Address *</ion-label>
+            <ion-textarea autoGrow="true" [ngModel]="address()" (ngModelChange)="address.set($event)"></ion-textarea>
+            <ion-note slot="helper" color="danger" *ngIf="showErrors() && !addressValid()">Enter an address</ion-note>
+          </ion-item>
+        </div>
+
+        <div style="font-weight:700; margin-top:18px;">Vehicle Details</div>
+        <div style="height:1px; background:rgba(0,0,0,0.08); margin:6px 0 12px;"></div>
+
+        <ion-item class="full" style="grid-column: 1 / -1;">
+          <ion-label position="stacked">VIN (optional)</ion-label>
+          <div style="display:flex; gap:8px; width:100%; align-items:center;">
+            <ion-input style="flex:1" maxlength="17" [ngModel]="vin()" (ngModelChange)="onVinChange($event)"></ion-input>
+            <ion-button size="small" (click)="lookupVIN()">Decode VIN</ion-button>
+          </div>
+          <ion-note slot="helper" color="danger" *ngIf="showErrors() && !vinValid()">VIN must be 17 characters and cannot contain I, O, or Q</ion-note>
+          <ion-note slot="helper" *ngIf="vinValid() && vinStatus()">{{ vinStatus() }}</ion-note>
+        </ion-item>
+
+        <div *ngIf="hasVinDetails()" style="margin:8px 0 12px;">
+          <div style="font-weight:600; margin-bottom:6px;">Decoded from VIN</div>
+          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:8px; border:1px solid rgba(0,0,0,0.06); border-radius:8px; padding:8px;">
+            <div *ngFor="let kv of (vinDecoded() | keyvalue)">
+              <div style="font-size:12px; opacity:0.7;">{{ kv.key }}</div>
+              <div style="font-size:14px;">{{ kv.value || '—' }}</div>
             </div>
           </div>
-        </ng-container>
-        <ng-template #noVehicles>
-          <div class="veh-none">—</div>
-        </ng-template>
-      </ion-label>
-    </ion-item>
-  </ion-list>
+        </div>
+
+        <div style="display:grid; gap:12px; grid-template-columns: repeat(auto-fit,minmax(240px,1fr));">
+          <ion-item>
+            <ion-label position="stacked">Make *</ion-label>
+            <ion-input [ngModel]="vehicleMake()" (ngModelChange)="vehicleMake.set($event)"></ion-input>
+            <ion-note slot="helper" color="danger" *ngIf="showErrors() && !vehicleMakeValid()">Required</ion-note>
+          </ion-item>
+          <ion-item>
+            <ion-label position="stacked">Model *</ion-label>
+            <ion-input [ngModel]="vehicleModel()" (ngModelChange)="vehicleModel.set($event)"></ion-input>
+            <ion-note slot="helper" color="danger" *ngIf="showErrors() && !vehicleModelValid()">Required</ion-note>
+          </ion-item>
+          <ion-item>
+            <ion-label position="stacked">Year *</ion-label>
+            <ion-input [ngModel]="vehicleYear()" (ngModelChange)="vehicleYear.set($event)"></ion-input>
+            <ion-note slot="helper" color="danger" *ngIf="showErrors() && !vehicleYearValid()">Enter a 4-digit year</ion-note>
+          </ion-item>
+          <ion-item>
+            <ion-label position="stacked">Trim</ion-label>
+            <ion-input [ngModel]="vehicleTrim()" (ngModelChange)="vehicleTrim.set($event)"></ion-input>
+          </ion-item>
+          <ion-item>
+            <ion-label position="stacked">Doors</ion-label>
+            <ion-input [ngModel]="vehicleDoors()" (ngModelChange)="vehicleDoors.set($event)"></ion-input>
+          </ion-item>
+          <ion-item>
+            <ion-label position="stacked">Bed Length</ion-label>
+            <ion-input [ngModel]="bedLength()" (ngModelChange)="bedLength.set($event)"></ion-input>
+          </ion-item>
+          <ion-item>
+            <ion-label position="stacked">Cab Type</ion-label>
+            <ion-input [ngModel]="cabType()" (ngModelChange)="cabType.set($event)"></ion-input>
+          </ion-item>
+          <ion-item>
+            <ion-label position="stacked">Engine Model</ion-label>
+            <ion-input [ngModel]="engineModel()" (ngModelChange)="engineModel.set($event)"></ion-input>
+          </ion-item>
+          <ion-item>
+            <ion-label position="stacked">Engine Cylinders</ion-label>
+            <ion-input [ngModel]="engineCylinders()" (ngModelChange)="engineCylinders.set($event)"></ion-input>
+          </ion-item>
+          <ion-item>
+            <ion-label position="stacked">Transmission Style</ion-label>
+            <ion-input [ngModel]="transmissionStyle()" (ngModelChange)="transmissionStyle.set($event)"></ion-input>
+          </ion-item>
+
+          <ion-item class="full" style="grid-column: 1 / -1;">
+            <ion-label position="stacked">Vehicle Color</ion-label>
+            <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:6px;">
+              <button type="button"
+                      *ngFor="let opt of palette"
+                      (click)="vehicleColor.set(opt.hex)"
+                      [attr.aria-pressed]="vehicleColor()===opt.hex"
+                      style="display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; border:1px solid rgba(0,0,0,0.15); background: var(--ion-item-background); cursor:pointer;">
+                <span style="display:inline-block; width:14px; height:14px; border-radius:50%; border:1px solid rgba(0,0,0,0.2);" [style.background]="opt.hex"></span>
+                <span>{{ opt.label }}</span>
+                <span *ngIf="vehicleColor()===opt.hex" style="font-size:12px; opacity:0.8;">(selected)</span>
+              </button>
+            </div>
+            <div style="margin-top:8px; font-size:13px;">
+              Selected:
+              <ng-container *ngIf="vehicleColor(); else noColor">
+                <span style="display:inline-block; width:12px; height:12px; border-radius:50%; border:1px solid rgba(0,0,0,0.2); vertical-align:middle; margin-right:6px;" [style.background]="vehicleColor()"></span>
+                {{ colorLabel(vehicleColor()) }}
+              </ng-container>
+              <ng-template #noColor>—</ng-template>
+            </div>
+          </ion-item>
+        </div>
+
+        <div style="font-weight:700; margin-top:18px;">Customer Notes</div>
+        <div style="height:1px; background:rgba(0,0,0,0.08); margin:6px 0 12px;"></div>
+
+        <ion-item class="full" style="grid-column: 1 / -1;">
+          <ion-label position="stacked">Notes</ion-label>
+          <ion-textarea autoGrow="true" [ngModel]="notes()" (ngModelChange)="notes.set($event)"></ion-textarea>
+        </ion-item>
+
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:14px;">
+          <ion-button fill="clear" (click)="cancelAdd()">Cancel</ion-button>
+          <ion-button [disabled]="!canSave()" (click)="saveAdd()">Save</ion-button>
+        </div>
+      </ion-content>
+    </ng-template>
+  </ion-modal>
 </ion-content>

@@ -369,6 +369,14 @@ export default class DashboardComponent {
     return this.selectedExistingId() === c.id;
   }
 
+  private buildCardTitle(name: string, vehicle: string, notes: string, color: string): string {
+    const parts: string[] = [name.trim()];
+    if (vehicle && vehicle.trim()) parts.push(`(${vehicle.trim()})`);
+    if (notes && notes.trim()) parts.push(`— ${notes.trim()}`);
+    if (color && color.trim()) parts.push(`[c=${color.trim()}]`);
+    return parts.join(' ');
+  }
+
   private normalizePhone(v: string): string {
     const s = (v || '').replace(/\D+/g, '');
     return s.length > 7 ? s.slice(-7) : s;

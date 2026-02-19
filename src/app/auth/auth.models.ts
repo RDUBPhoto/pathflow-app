@@ -9,6 +9,20 @@ export interface AuthUser {
   avatarUrl?: string;
 }
 
+export interface AuthLocation {
+  id: string;
+  name: string;
+}
+
+export interface AuthAccessState {
+  loaded: boolean;
+  registered: boolean;
+  canBootstrap: boolean;
+  isSuperAdmin: boolean;
+  locations: AuthLocation[];
+  defaultLocationId: string;
+}
+
 export interface AuthState {
   initialized: boolean;
   loading: boolean;
@@ -31,4 +45,15 @@ export interface ClientPrincipal {
 
 export interface AuthMeResponse {
   clientPrincipal?: ClientPrincipal | null;
+}
+
+export interface AccessProfileResponse {
+  ok: boolean;
+  canBootstrap?: boolean;
+  profile?: {
+    roles?: string[];
+    isSuperAdmin?: boolean;
+    locations?: Array<{ id?: string; name?: string }>;
+    defaultLocationId?: string;
+  } | null;
 }

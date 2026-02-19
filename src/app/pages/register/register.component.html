@@ -1,0 +1,41 @@
+<ion-content class="glass-bg register-page">
+  <div class="register-shell">
+    <ion-card class="register-card glass-surface">
+      <ion-card-header>
+        <ion-card-subtitle>Pathflow Setup</ion-card-subtitle>
+        <ion-card-title>Create your first location</ion-card-title>
+      </ion-card-header>
+
+      <ion-card-content>
+        <p class="helper">
+          Signed in as <strong>{{ auth.user()?.email }}</strong>. Create your first shop location to finish setup.
+        </p>
+
+        <ion-item>
+          <ion-label position="stacked">Location name</ion-label>
+          <ion-input
+            [disabled]="saving() || !auth.canBootstrapRegistration()"
+            [value]="locationName()"
+            (ionInput)="locationName.set($any($event.detail).value ?? '')"
+            placeholder="Exodus 4x4">
+          </ion-input>
+        </ion-item>
+
+        <p class="auth-hint warning" *ngIf="!auth.canBootstrapRegistration()">
+          This account is not allowed to bootstrap a new workspace. Ask an admin to invite or provision you.
+        </p>
+
+        <ion-button
+          expand="block"
+          size="large"
+          [disabled]="!canSubmit()"
+          (click)="registerWorkspace()">
+          <ion-spinner *ngIf="saving()" name="crescent" slot="start"></ion-spinner>
+          Create Workspace
+        </ion-button>
+
+        <p class="auth-hint error" *ngIf="error()">{{ error() }}</p>
+      </ion-card-content>
+    </ion-card>
+  </div>
+</ion-content>

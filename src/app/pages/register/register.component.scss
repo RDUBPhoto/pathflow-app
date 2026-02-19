@@ -1,0 +1,53 @@
+:host {
+  display: block;
+  min-height: 100%;
+}
+
+.register-page {
+  --padding-top: 32px;
+  --padding-bottom: 32px;
+  --padding-start: 16px;
+  --padding-end: 16px;
+}
+
+.register-shell {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+}
+
+.register-card {
+  width: min(540px, 100%);
+  border-radius: 18px;
+  border: 1px solid var(--app-border-subtle);
+  box-shadow: var(--glass-shadow);
+}
+
+.helper {
+  margin: 0 0 16px;
+  font-size: 14px;
+  opacity: 0.88;
+}
+
+ion-item {
+  margin-bottom: 10px;
+}
+
+ion-button {
+  margin-top: 12px;
+}
+
+.auth-hint {
+  margin-top: 10px;
+  margin-bottom: 0;
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+.auth-hint.error {
+  color: var(--ion-color-danger, #b31d1d);
+}
+
+.auth-hint.warning {
+  color: var(--ion-color-warning, #d97706);
+}

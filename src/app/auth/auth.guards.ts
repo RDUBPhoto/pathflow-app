@@ -35,3 +35,43 @@ export const roleGuard: CanActivateFn = async (route, state) => {
 
   return router.createUrlTree(['/forbidden']);
 };
+
+export const registeredGuard: CanActivateFn = async (_route, state) => {
+  const auth = inject(AuthService);
+  const router = inject(Router);
+
+  await auth.bootstrap();
+
+  if (!auth.isAuthenticated()) {
+    return router.createUrlTree(['/login'], {
+      queryParams: { redirect: state.url }
+    });
+  }
+
+  if (auth.needsRegistration()) {
+    return router.createUrlTree(['/register'], {
+      queryParams: { redirect: state.url }
+    });
+  }
+
+  return true;
+};
+
+export const registrationGuard: CanActivateFn = async (_route, state) => {
+  const auth = inject(AuthService);
+  const router = inject(Router);
+
+  await auth.bootstrap();
+
+  if (!auth.isAuthenticated()) {
+    return router.createUrlTree(['/login'], {
+      queryParams: { redirect: state.url }
+    });
+  }
+
+  if (!auth.needsRegistration()) {
+    return router.createUrlTree(['/dashboard']);
+  }
+
+  return true;
+};

@@ -1,6 +1,7 @@
 {
   "routes": [
     { "route": "/login", "allowedRoles": ["anonymous"] },
+    { "route": "/register", "allowedRoles": ["authenticated"] },
     { "route": "/sms-opt-in", "allowedRoles": ["anonymous"] },
     { "route": "/api/widget/lead", "allowedRoles": ["anonymous"] },
     { "route": "/dashboard", "allowedRoles": ["authenticated"] },
@@ -9,7 +10,7 @@
     { "route": "/schedule", "allowedRoles": ["authenticated"] },
     { "route": "/inventory", "allowedRoles": ["authenticated"] },
     { "route": "/user-settings", "allowedRoles": ["authenticated"] },
-    { "route": "/admin-settings", "allowedRoles": ["admin"] },
+    { "route": "/admin-settings", "allowedRoles": ["authenticated"] },
     { "route": "/forbidden", "allowedRoles": ["authenticated"] },
     { "route": "/api/*", "allowedRoles": ["authenticated"] }
   ],

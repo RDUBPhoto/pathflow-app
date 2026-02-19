@@ -1,4 +1,4 @@
-import { Injectable, computed, inject } from '@angular/core';
+import { Injectable, computed, inject, signal } from '@angular/core';
 import { AuthService } from '../auth/auth.service';
 
 const TENANT_OVERRIDE_KEY = 'pathflow.tenant.id';
@@ -6,12 +6,18 @@ const TENANT_OVERRIDE_KEY = 'pathflow.tenant.id';
 @Injectable({ providedIn: 'root' })
 export class TenantContextService {
   private readonly auth = inject(AuthService);
+  private readonly tenantOverride = signal(this.readOverride());
 
   readonly tenantId = computed(() => {
-    const override = this.readOverride();
+    const overrideRaw = this.tenantOverride();
+    const override = this.sanitizeTenantId(overrideRaw);
+    const locations = this.auth.locations();
+    const overrideAllowed = !override || !locations.length || locations.some(location => location.id === override);
+    const defaultLocation = this.auth.defaultLocationId();
     const emailTenant = this.tenantFromEmail(this.auth.user()?.email || '');
     const hostTenant = this.tenantFromHost(window.location.hostname || '');
-    return this.sanitizeTenantId(override || emailTenant || hostTenant || 'main');
+    const preferredOverride = overrideAllowed ? override : '';
+    return this.sanitizeTenantId(preferredOverride || defaultLocation || emailTenant || hostTenant || 'main');
   });
 
   setTenantOverride(value: string): void {
@@ -21,6 +27,7 @@ export class TenantContextService {
     } catch {
       // Ignore when storage is unavailable.
     }
+    this.tenantOverride.set(next);
   }
 
   clearTenantOverride(): void {
@@ -29,6 +36,7 @@ export class TenantContextService {
     } catch {
       // Ignore when storage is unavailable.
     }
+    this.tenantOverride.set('');
   }
 
   private readOverride(): string {

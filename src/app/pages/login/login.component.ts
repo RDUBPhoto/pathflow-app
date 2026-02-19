@@ -82,6 +82,13 @@ export default class LoginComponent {
     effect(() => {
       if (!this.auth.initialized()) return;
       if (!this.auth.isAuthenticated()) return;
+      if (this.auth.needsRegistration()) {
+        void this.router.navigate(['/register'], {
+          replaceUrl: true,
+          queryParams: { redirect: this.redirectTo() }
+        });
+        return;
+      }
       void this.router.navigateByUrl(this.redirectTo(), { replaceUrl: true });
     });
   }

@@ -1,15 +1,30 @@
 import { Injectable, computed, signal } from '@angular/core';
 import { environment } from '../../environments/environment';
-import { AuthMeResponse, AuthState, AuthUser, ClientPrincipal } from './auth.models';
+import {
+  AccessProfileResponse,
+  AuthAccessState,
+  AuthLocation,
+  AuthMeResponse,
+  AuthState,
+  AuthUser,
+  ClientPrincipal
+} from './auth.models';
 
 const DEV_AUTH_STORAGE_KEY = 'exodus.dev.auth.user';
 const AUTH_PROFILE_STORAGE_KEY = 'exodus.auth.profile';
+const DEFAULT_LOCATION_ID = 'exodus-4x4';
+const DEFAULT_LOCATION_NAME = 'Exodus 4x4';
 
 interface DevAuthRecord {
   role: 'admin' | 'user';
   email: string;
   displayName?: string;
   avatarUrl?: string;
+}
+
+interface AccessHydrationResult {
+  roles: string[];
+  state: AuthAccessState;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -21,6 +36,7 @@ export class AuthService {
     source: 'none',
     user: null
   });
+  private readonly accessSignal = signal<AuthAccessState>(this.emptyAccessState(false));
 
   private bootstrapping: Promise<void> | null = null;
 
@@ -30,6 +46,12 @@ export class AuthService {
   readonly user = computed(() => this.stateSignal().user);
   readonly isAuthenticated = computed(() => this.stateSignal().user !== null);
   readonly isAdmin = computed(() => this.hasRole('admin'));
+  readonly isRegistered = computed(() => this.accessSignal().registered);
+  readonly needsRegistration = computed(() => this.isAuthenticated() && this.accessSignal().loaded && !this.accessSignal().registered);
+  readonly canBootstrapRegistration = computed(() => this.accessSignal().canBootstrap);
+  readonly isSuperAdmin = computed(() => this.accessSignal().isSuperAdmin);
+  readonly locations = computed(() => this.accessSignal().locations);
+  readonly defaultLocationId = computed(() => this.accessSignal().defaultLocationId);
 
   constructor() {
     void this.bootstrap();
@@ -44,6 +66,7 @@ export class AuthService {
     }
 
     this.stateSignal.update(current => ({ ...current, loading: true }));
+    this.accessSignal.set(this.emptyAccessState(false));
 
     this.bootstrapping = this.hydrateAuthState()
       .catch(() => {
@@ -53,6 +76,7 @@ export class AuthService {
           source: 'none',
           user: null
         });
+        this.accessSignal.set(this.emptyAccessState(true));
       })
       .finally(() => {
         this.bootstrapping = null;
@@ -85,6 +109,7 @@ export class AuthService {
       source: 'none',
       user: null
     });
+    this.accessSignal.set(this.emptyAccessState(false));
 
     const target = this.normalizeRedirect(redirectTo, '/login');
     if (source === 'dev') {
@@ -129,6 +154,44 @@ export class AuthService {
     });
 
     return { ok: true };
+  }
+
+  async registerWorkspace(locationNameInput: string): Promise<{ ok: boolean; error?: string }> {
+    const user = this.user();
+    if (!user) {
+      return { ok: false, error: 'Sign in before creating your workspace.' };
+    }
+
+    const locationName = String(locationNameInput || '').trim();
+    if (!locationName) {
+      return { ok: false, error: 'Location name is required.' };
+    }
+
+    try {
+      const response = await fetch('/api/access', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          op: 'bootstrap',
+          locationName
+        })
+      });
+
+      const payload = (await response.json()) as Partial<AccessProfileResponse> & { error?: string };
+      if (!response.ok || !payload?.ok) {
+        const detail = String(payload?.error || '').trim();
+        return { ok: false, error: detail || 'Unable to complete registration right now.' };
+      }
+
+      await this.bootstrap(true);
+      return { ok: true };
+    } catch {
+      return { ok: false, error: 'Unable to complete registration right now.' };
+    }
   }
 
   updateProfile(patch: { email?: string; avatarUrl?: string; displayName?: string }): { ok: boolean; error?: string } {
@@ -188,24 +251,27 @@ export class AuthService {
     const principal = await this.fetchClientPrincipal();
 
     if (principal) {
+      const principalUser = this.principalToUser(principal);
+      const access = await this.fetchAccessState();
+      const user: AuthUser = this.applyProfileOverrides({
+        ...principalUser,
+        roles: this.mergeRoleLists(principalUser.roles, access.roles)
+      });
+
       this.stateSignal.set({
         initialized: true,
         loading: false,
         source: 'swa',
-        user: this.principalToUser(principal)
+        user
       });
+      this.accessSignal.set(access.state);
       return;
     }
 
     if (this.isLocalAuthEnabled()) {
       const devRecord = this.readDevRecord();
       if (devRecord) {
-        this.stateSignal.set({
-          initialized: true,
-          loading: false,
-          source: 'dev',
-          user: this.devRecordToUser(devRecord)
-        });
+        this.setDevUser(devRecord);
         return;
       }
     }
@@ -216,6 +282,7 @@ export class AuthService {
       source: 'none',
       user: null
     });
+    this.accessSignal.set(this.emptyAccessState(true));
   }
 
   private normalizeRedirect(path?: string, fallback = '/dashboard'): string {
@@ -252,6 +319,56 @@ export class AuthService {
       return null;
     } catch {
       return null;
+    }
+  }
+
+  private async fetchAccessState(): Promise<AccessHydrationResult> {
+    try {
+      const response = await fetch('/api/access?scope=me', {
+        method: 'GET',
+        credentials: 'include',
+        headers: {
+          Accept: 'application/json'
+        }
+      });
+
+      const payload = (await response.json()) as AccessProfileResponse;
+      if (!response.ok || !payload || !payload.ok) {
+        return {
+          roles: [],
+          state: this.emptyAccessState(true, { registered: true })
+        };
+      }
+
+      const profile = payload.profile || null;
+      if (!profile) {
+        return {
+          roles: [],
+          state: this.emptyAccessState(true, {
+            registered: false,
+            canBootstrap: !!payload.canBootstrap
+          })
+        };
+      }
+
+      const locations = this.normalizeLocations(profile.locations);
+      const defaultLocationId = this.pickDefaultLocationId(profile.defaultLocationId, locations);
+      return {
+        roles: this.normalizeRoleList(profile.roles || []),
+        state: {
+          loaded: true,
+          registered: true,
+          canBootstrap: !!payload.canBootstrap,
+          isSuperAdmin: !!profile.isSuperAdmin,
+          locations,
+          defaultLocationId
+        }
+      };
+    } catch {
+      return {
+        roles: [],
+        state: this.emptyAccessState(true, { registered: true })
+      };
     }
   }
 
@@ -299,6 +416,82 @@ export class AuthService {
     return [...out];
   }
 
+  private normalizeRoleList(input: string[]): string[] {
+    const out = new Set<string>();
+    for (const value of input) {
+      const next = String(value || '').trim().toLowerCase();
+      if (!next) continue;
+      out.add(next);
+    }
+    if (!out.has('authenticated')) out.add('authenticated');
+    return [...out];
+  }
+
+  private mergeRoleLists(...lists: string[][]): string[] {
+    const out = new Set<string>();
+    for (const list of lists) {
+      for (const role of list) {
+        const next = String(role || '').trim().toLowerCase();
+        if (!next) continue;
+        out.add(next);
+      }
+    }
+    if (!out.has('authenticated')) out.add('authenticated');
+    return [...out];
+  }
+
+  private normalizeLocations(input: Array<{ id?: string; name?: string }> | undefined): AuthLocation[] {
+    const out: AuthLocation[] = [];
+    const seen = new Set<string>();
+    const values = Array.isArray(input) ? input : [];
+    for (const item of values) {
+      const id = this.sanitizeTenantId(item?.id || '');
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      const name = String(item?.name || '').trim() || this.humanizeTenantId(id);
+      out.push({ id, name });
+    }
+    return out;
+  }
+
+  private pickDefaultLocationId(candidate: string | undefined, locations: AuthLocation[]): string {
+    const normalized = this.sanitizeTenantId(candidate || '');
+    if (normalized && locations.some(location => location.id === normalized)) {
+      return normalized;
+    }
+    return locations[0]?.id || '';
+  }
+
+  private emptyAccessState(loaded: boolean, patch?: Partial<AuthAccessState>): AuthAccessState {
+    return {
+      loaded,
+      registered: false,
+      canBootstrap: false,
+      isSuperAdmin: false,
+      locations: [],
+      defaultLocationId: '',
+      ...patch
+    };
+  }
+
+  private sanitizeTenantId(value: string): string {
+    return String(value || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9._:-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 80);
+  }
+
+  private humanizeTenantId(tenantId: string): string {
+    const value = String(tenantId || '').replace(/[-_]+/g, ' ').trim();
+    if (!value) return 'Location';
+    return value
+      .split(/\s+/)
+      .filter(Boolean)
+      .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
+  }
+
   private readDevRecord(): DevAuthRecord | null {
     const raw = localStorage.getItem(DEV_AUTH_STORAGE_KEY);
     if (!raw) return null;
@@ -342,6 +535,15 @@ export class AuthService {
       loading: false,
       source: 'dev',
       user
+    });
+    const defaultLocation: AuthLocation = { id: DEFAULT_LOCATION_ID, name: DEFAULT_LOCATION_NAME };
+    this.accessSignal.set({
+      loaded: true,
+      registered: true,
+      canBootstrap: false,
+      isSuperAdmin: user.roles.includes('admin'),
+      locations: [defaultLocation],
+      defaultLocationId: defaultLocation.id
     });
   }
 

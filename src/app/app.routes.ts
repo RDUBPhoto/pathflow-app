@@ -1,5 +1,5 @@
 import { Routes } from '@angular/router';
-import { authGuard, roleGuard } from './auth/auth.guards';
+import { registeredGuard, registrationGuard, roleGuard } from './auth/auth.guards';
 import { customerProfileUnsavedGuard } from './pages/customer-profile/customer-profile.unsaved.guard';
 
 export const routes: Routes = [
@@ -9,12 +9,18 @@ export const routes: Routes = [
       import('./pages/login/login.component').then(m => m.default)
   },
   {
+    path: 'register',
+    canActivate: [registrationGuard],
+    loadComponent: () =>
+      import('./pages/register/register.component').then(m => m.default)
+  },
+  {
     path: 'sms-opt-in',
     loadComponent: () =>
       import('./pages/sms-opt-in/sms-opt-in.component').then(m => m.default)
   },
   {
-    canActivate: [authGuard],
+    canActivate: [registeredGuard],
     path: '',
     loadComponent: () =>
       import('./layout/internal-shell/internal-shell.component').then(m => m.InternalShellComponent),

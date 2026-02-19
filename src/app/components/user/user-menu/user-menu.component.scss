@@ -69,6 +69,27 @@
   color: var(--app-text-muted, #475569);
 }
 
+.menu-location {
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--ion-color-primary, #1d4ed8);
+}
+
+.menu-subtitle {
+  --min-height: 34px;
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.82;
+  pointer-events: none;
+}
+
+.location-active {
+  --background: rgba(29, 78, 216, 0.12);
+}
+
 @media (max-width: 640px) {
   .user-name {
     display: none;

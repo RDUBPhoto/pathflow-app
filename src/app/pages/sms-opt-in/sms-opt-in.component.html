@@ -1,0 +1,109 @@
+<ion-header class="glass-header">
+  <ion-toolbar>
+    <ion-title>SMS Opt-In</ion-title>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content class="glass-bg optin-page ion-padding">
+  <div class="optin-shell">
+    <ion-card class="glass-surface intro-card">
+      <ion-card-header>
+        <ion-card-title>Pathflow Customer Updates</ion-card-title>
+      </ion-card-header>
+      <ion-card-content>
+        <p>
+          Use this page as your public SMS consent flow. It captures lead details and creates a lead card in your dashboard.
+        </p>
+        <div class="meta-row">
+          <ion-badge color="primary">Source: Website Widget</ion-badge>
+          <ion-badge color="medium">Consent version: {{ consentVersion }}</ion-badge>
+        </div>
+        <p class="small-text">
+          Public URL for verification: <code>{{ pageUrl() }}</code>
+        </p>
+      </ion-card-content>
+    </ion-card>
+
+    <ion-card class="glass-surface form-card">
+      <ion-card-header>
+        <ion-card-title>Request Service Updates</ion-card-title>
+      </ion-card-header>
+      <ion-card-content>
+        <div class="form-grid">
+          <ion-item>
+            <ion-label position="stacked">Full name</ion-label>
+            <ion-input [(ngModel)]="name" placeholder="John Smith"></ion-input>
+          </ion-item>
+
+          <ion-item>
+            <ion-label position="stacked">Email</ion-label>
+            <ion-input [(ngModel)]="email" type="email" placeholder="you@example.com"></ion-input>
+          </ion-item>
+
+          <ion-item>
+            <ion-label position="stacked">Mobile phone</ion-label>
+            <ion-input [(ngModel)]="phone" placeholder="(555) 555-1212"></ion-input>
+          </ion-item>
+
+          <ion-item>
+            <ion-label position="stacked">VIN (required)</ion-label>
+            <ion-input [(ngModel)]="vin" maxlength="17" placeholder="Enter 17-character VIN (no I, O, or Q)"></ion-input>
+          </ion-item>
+        </div>
+
+        <ion-item class="message-item">
+          <ion-label position="stacked">How can we help?</ion-label>
+          <ion-textarea
+            [(ngModel)]="message"
+            rows="4"
+            [autoGrow]="true"
+            maxlength="1200"
+            placeholder="Describe your service request...">
+          </ion-textarea>
+        </ion-item>
+
+        <label class="consent-box">
+          <ion-checkbox [(ngModel)]="smsOptIn"></ion-checkbox>
+          <span>{{ consentText }}</span>
+        </label>
+
+        <p class="small-text">
+          Privacy Policy:
+          <a [href]="privacyPolicyUrl" target="_blank" rel="noopener noreferrer">{{ privacyPolicyUrl }}</a>
+          <br />
+          SMS Terms:
+          <a [href]="smsTermsUrl" target="_blank" rel="noopener noreferrer">{{ smsTermsUrl }}</a>
+        </p>
+
+        <div class="action-row">
+          <ion-button (click)="submit()" [disabled]="!canSubmit()">
+            <ion-spinner name="crescent" *ngIf="submitting()" slot="start"></ion-spinner>
+            {{ submitting() ? 'Submitting...' : 'Submit Request' }}
+          </ion-button>
+        </div>
+
+        <ion-text color="success" *ngIf="status()">
+          <p class="feedback">{{ status() }}</p>
+        </ion-text>
+        <ion-text color="danger" *ngIf="error()">
+          <p class="feedback">{{ error() }}</p>
+        </ion-text>
+      </ion-card-content>
+    </ion-card>
+
+    <ion-card class="glass-surface result-card" *ngIf="result() as response">
+      <ion-card-header>
+        <ion-card-title>Submission Result</ion-card-title>
+      </ion-card-header>
+      <ion-card-content>
+        <p><strong>Lead:</strong> {{ response.leadId }}</p>
+        <p><strong>Customer:</strong> {{ response.customerName || response.customerId || 'n/a' }}</p>
+        <p><strong>Customer created:</strong> {{ response.customerCreated ? 'Yes' : 'No (matched existing)' }}</p>
+        <p><strong>Lead created:</strong> {{ response.leadCreated ? 'Yes' : 'No (updated existing lead)' }}</p>
+        <p><strong>SMS consent status:</strong> {{ response.sms?.consentStatus || 'n/a' }}</p>
+        <p><strong>Confirmation SMS:</strong> {{ response.sms?.confirmationSent ? 'Sent' : 'Not sent' }}</p>
+        <p *ngIf="response.sms?.confirmationError"><strong>SMS error:</strong> {{ response.sms?.confirmationError }}</p>
+      </ion-card-content>
+    </ion-card>
+  </div>
+</ion-content>

@@ -2,7 +2,13 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 
-export type Lane = { id: string; name: string; sort?: number };
+export type Lane = {
+  id: string;
+  name: string;
+  sort?: number;
+  stageKey?: string;
+  protected?: boolean;
+};
 
 @Injectable({ providedIn: 'root' })
 export class LanesApi {

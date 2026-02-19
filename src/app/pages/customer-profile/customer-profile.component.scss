@@ -1,0 +1,796 @@
+:host {
+  display: block;
+  height: 100%;
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 10px;
+}
+
+.customer-profile-content {
+  display: grid;
+  gap: 14px;
+  --padding-bottom: calc(118px + env(safe-area-inset-bottom));
+}
+
+.customer-hero,
+.section-panel,
+.right-column {
+  border-radius: 14px;
+  border: 1px solid var(--app-border-subtle);
+  background: var(--app-surface-bg);
+}
+
+.customer-hero {
+  padding: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  z-index: 24;
+  backdrop-filter: blur(8px);
+}
+
+.hero-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.hero-avatar {
+  width: 46px;
+  height: 46px;
+  border-radius: 999px;
+  background: var(--avatar-color, #1d4ed8);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+}
+
+.hero-copy {
+  min-width: 0;
+}
+
+.hero-copy h1 {
+  margin: 0 0 8px;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.hero-meta {
+  margin-top: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--app-text-muted);
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+
+.hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.hero-actions-wrap {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+}
+
+.mobile-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid var(--app-border-subtle);
+  background: color-mix(in srgb, var(--app-surface-bg) 90%, transparent);
+  overflow-x: auto;
+}
+
+.mobile-tab-btn {
+  border: 1px solid var(--app-border-subtle);
+  background: var(--app-control-bg);
+  color: var(--app-text);
+  border-radius: 10px;
+  padding: 8px 10px;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  position: relative;
+}
+
+.mobile-tab-btn ion-icon {
+  font-size: 16px;
+}
+
+.mobile-tab-btn.active {
+  background: var(--app-nav-active-bg);
+  border-color: var(--app-nav-active-border);
+  color: var(--app-nav-active-text);
+}
+
+.mobile-tab-badge {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #ff5a1f;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+.save-feedback {
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.save-feedback.success {
+  color: var(--ion-color-success, #22c55e);
+}
+
+.save-feedback.error {
+  color: var(--ion-color-danger, #ef4444);
+}
+
+.customer-layout {
+  display: grid;
+  grid-template-columns: minmax(520px, 1.35fr) 68px minmax(420px, 1fr);
+  gap: 14px;
+  align-items: start;
+  margin-top: 6px;
+}
+
+.left-column {
+  display: grid;
+  gap: 14px;
+}
+
+.mobile-profile-column {
+  display: grid;
+  gap: 14px;
+}
+
+.section-panel {
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+  position: relative;
+  z-index: 1;
+}
+
+.contact-panel {
+  overflow: visible;
+  z-index: 6;
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.form-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.contact-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.address-field {
+  grid-column: 2 / span 2;
+  position: relative;
+  min-width: 0;
+}
+
+.address-item {
+  margin: 0;
+}
+
+.address-lookup {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 16;
+  border-radius: 12px;
+  border: 1px solid var(--app-border-subtle);
+  background: var(--app-surface-bg);
+  box-shadow: 0 12px 24px rgba(5, 10, 20, 0.34);
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.address-suggestion {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--app-border-subtle);
+  background: transparent;
+  color: var(--app-text);
+  text-align: left;
+  padding: 9px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.address-suggestion:last-child {
+  border-bottom: 0;
+}
+
+.address-suggestion:hover {
+  background: var(--app-control-bg-hover);
+}
+
+.address-state {
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.address-validation-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.field-error {
+  grid-column: 1 / -1;
+  margin-top: -4px;
+  font-size: 12px;
+  color: var(--ion-color-danger, #ef4444);
+}
+
+.span-2 {
+  grid-column: 1 / -1;
+}
+
+.vin-row {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: end;
+}
+
+.vin-btn {
+  margin-bottom: 4px;
+}
+
+.remove-vehicle-btn {
+  min-width: 146px;
+}
+
+.vin-status {
+  font-size: 13px;
+  color: var(--app-text-muted);
+}
+
+.vin-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.vin-key {
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.vin-value {
+  font-size: 14px;
+}
+
+.color-wrap {
+  display: grid;
+  gap: 8px;
+}
+
+.fitment-section {
+  display: grid;
+  gap: 10px;
+}
+
+.fitment-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.color-title {
+  font-size: 13px;
+  color: var(--app-text-muted);
+}
+
+.color-palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.color-btn {
+  border: 1px solid var(--app-border-subtle);
+  background: var(--app-control-bg);
+  color: var(--app-text);
+  border-radius: 999px;
+  padding: 6px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.color-btn.active {
+  border-color: var(--app-nav-active-border);
+  background: var(--app-nav-active-bg);
+  color: var(--app-nav-active-text);
+}
+
+.swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+.right-column {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.tab-rail {
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 14px;
+  border: 1px solid var(--app-border-subtle);
+  background: color-mix(in srgb, var(--app-surface-bg) 90%, transparent);
+}
+
+.tab-rail-btn {
+  border: 1px solid var(--app-border-subtle);
+  background: var(--app-control-bg);
+  color: var(--app-text);
+  border-radius: 10px;
+  padding: 10px 0;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 42px;
+}
+
+.tab-rail-btn ion-icon {
+  font-size: 20px;
+}
+
+.tab-rail-btn:hover {
+  background: var(--app-control-bg-hover);
+}
+
+.tab-rail-btn.active {
+  background: var(--app-nav-active-bg);
+  border-color: var(--app-nav-active-border);
+  color: var(--app-nav-active-text);
+}
+
+.tab-activity-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #ff5a1f;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  box-shadow: 0 0 0 4px rgba(255, 90, 31, 0.18), 0 0 12px rgba(255, 90, 31, 0.7);
+  animation: activityPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes activityPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.2); opacity: 0.82; }
+}
+
+.right-content {
+  border-top: 1px solid var(--app-border-subtle);
+  padding: 14px;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+}
+
+.right-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 56px;
+  padding: 10px 14px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.right-panel {
+  display: grid;
+  gap: 12px;
+  min-height: 0;
+}
+
+.sms-disabled,
+.sms-loading,
+.sms-empty {
+  font-size: 13px;
+  color: var(--app-text-muted);
+}
+
+.sms-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 630px;
+  max-height: min(820px, calc(100vh - 250px));
+}
+
+.sms-chat-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.sms-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  background: color-mix(in srgb, var(--app-control-bg) 74%, transparent);
+  border-top: 1px solid var(--app-border-subtle);
+  border-bottom: 1px solid var(--app-border-subtle);
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.sms-entry {
+  display: flex;
+}
+
+.sms-entry.outbound {
+  justify-content: flex-end;
+}
+
+.sms-entry.inbound {
+  justify-content: flex-start;
+}
+
+.sms-bubble {
+  max-width: min(640px, 86%);
+  border-radius: 12px;
+  border: 1px solid var(--app-border-subtle);
+  background: var(--app-control-bg);
+  padding: 10px 12px;
+}
+
+.sms-entry.outbound .sms-bubble {
+  background: var(--app-nav-active-bg);
+  border-color: var(--app-nav-active-border);
+  color: var(--app-nav-active-text);
+}
+
+.sms-meta-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  opacity: 0.8;
+  margin-bottom: 4px;
+}
+
+.sms-delivery-badge {
+  border-radius: 999px;
+  padding: 2px 7px;
+  border: 1px solid transparent;
+  line-height: 1;
+  font-weight: 700;
+}
+
+.sms-delivery-badge.queued {
+  color: #f59e0b;
+  border-color: color-mix(in srgb, #f59e0b 55%, transparent);
+  background: color-mix(in srgb, #f59e0b 16%, transparent);
+}
+
+.sms-delivery-badge.delivered {
+  color: #22c55e;
+  border-color: color-mix(in srgb, #22c55e 55%, transparent);
+  background: color-mix(in srgb, #22c55e 16%, transparent);
+}
+
+.sms-delivery-badge.failed {
+  color: #ef4444;
+  border-color: color-mix(in srgb, #ef4444 55%, transparent);
+  background: color-mix(in srgb, #ef4444 16%, transparent);
+}
+
+.sms-message {
+  white-space: pre-wrap;
+  font-size: 14px;
+}
+
+.sms-compose-wrap {
+  display: grid;
+  gap: 10px;
+  background: color-mix(in srgb, var(--app-surface-bg) 88%, transparent);
+  padding: 10px 14px 14px;
+  border-top: 1px solid var(--app-border-subtle);
+  flex: 0 0 auto;
+}
+
+.sms-compose-item {
+  --background: color-mix(in srgb, var(--app-control-bg) 82%, transparent);
+  --inner-padding-end: 10px;
+  --inner-padding-start: 10px;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 12px;
+}
+
+.sms-compose-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sms-feedback {
+  font-size: 13px;
+}
+
+.sms-feedback.success {
+  color: var(--ion-color-success, #22c55e);
+}
+
+.sms-feedback.error {
+  color: var(--ion-color-danger, #ef4444);
+}
+
+.invoice-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.invoice-card {
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 12px;
+  background: var(--app-control-bg);
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.invoice-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.invoice-amount {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.invoice-date {
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.invoice-note {
+  font-size: 13px;
+  color: var(--app-text-muted);
+}
+
+.email-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.email-shell {
+  display: grid;
+  gap: 10px;
+}
+
+.email-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.email-list {
+  display: grid;
+  gap: 10px;
+}
+
+.email-list-item {
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 12px;
+  background: var(--app-control-bg);
+  color: var(--app-text);
+  padding: 12px;
+  display: grid;
+  gap: 6px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.email-list-item:hover {
+  background: var(--app-control-bg-hover);
+  border-color: var(--app-nav-active-border);
+}
+
+.email-detail {
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--app-control-bg) 82%, transparent);
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.email-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.email-date {
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.email-subject {
+  font-weight: 700;
+}
+
+.email-from {
+  font-size: 13px;
+  color: var(--app-text-muted);
+}
+
+.email-preview {
+  font-size: 14px;
+}
+
+.email-body {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.email-compose {
+  display: grid;
+  gap: 10px;
+}
+
+.email-compose-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 1160px) {
+  .customer-layout {
+    grid-template-columns: minmax(460px, 1.25fr) 64px minmax(340px, 1fr);
+  }
+}
+
+@media (max-width: 980px) {
+  .customer-layout {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .contact-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .address-field {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 800px) {
+  .mobile-tabs {
+    gap: 6px;
+    padding: 8px 6px;
+  }
+
+  .mobile-tab-btn {
+    padding: 7px 9px;
+    min-height: 36px;
+    font-size: 11px;
+  }
+
+  .vin-row {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-actions {
+    width: 100%;
+  }
+
+  .hero-actions-wrap {
+    width: 100%;
+    justify-items: stretch;
+  }
+
+  .hero-actions ion-button {
+    flex: 1 1 auto;
+  }
+
+  .contact-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .address-field {
+    grid-column: auto;
+  }
+
+  .sms-panel {
+    min-height: 560px;
+    max-height: min(740px, calc(100vh - 220px));
+  }
+
+  .sms-bubble {
+    max-width: 92%;
+  }
+
+  .sms-compose-actions ion-button {
+    flex: 1 1 auto;
+  }
+
+  .email-compose-actions ion-button {
+    flex: 1 1 auto;
+  }
+}

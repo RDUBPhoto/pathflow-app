@@ -1,0 +1,172 @@
+<ion-header class="glass-header">
+  <ion-toolbar>
+    <ion-buttons slot="start">
+      <app-page-back-button></app-page-back-button>
+    </ion-buttons>
+    <ion-title>Inventory</ion-title>
+    <ion-buttons slot="end" class="ion-margin-end">
+      <app-user-menu></app-user-menu>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content class="ion-padding glass-bg inventory-content">
+  <div class="inventory-stack">
+    <section class="inventory-feedback" *ngIf="status() || error() || loading()">
+      <div class="feedback-row" *ngIf="loading()">Loading inventory...</div>
+      <div class="feedback-row success" *ngIf="!loading() && status()">{{ status() }}</div>
+      <div class="feedback-row error" *ngIf="!loading() && error()">{{ error() }}</div>
+    </section>
+
+    <section class="summary-grid">
+      <article class="summary-card glass-surface">
+        <div class="summary-icon">
+          <ion-icon name="cube-outline"></ion-icon>
+        </div>
+        <div class="summary-copy">
+          <div class="summary-label">Tracked SKUs</div>
+          <div class="summary-value">{{ items().length }}</div>
+        </div>
+      </article>
+
+      <article class="summary-card glass-surface">
+        <div class="summary-icon warning">
+          <ion-icon name="alert-circle-outline"></ion-icon>
+        </div>
+        <div class="summary-copy">
+          <div class="summary-label">Low Stock</div>
+          <div class="summary-value">{{ lowStockCount() }}</div>
+        </div>
+      </article>
+
+      <article class="summary-card glass-surface">
+        <div class="summary-icon accent">
+          <ion-icon name="cart-outline"></ion-icon>
+        </div>
+        <div class="summary-copy">
+          <div class="summary-label">Units On Order</div>
+          <div class="summary-value">{{ totalOnOrder() }}</div>
+        </div>
+      </article>
+
+      <article class="summary-card glass-surface">
+        <div class="summary-icon oem">
+          <ion-icon name="business-outline"></ion-icon>
+        </div>
+        <div class="summary-copy">
+          <div class="summary-label">On-Hand Value</div>
+          <div class="summary-value">{{ formatCurrency(totalInventoryValue()) }}</div>
+        </div>
+      </article>
+    </section>
+
+    <section class="inventory-panel glass-surface">
+      <div class="panel-head">
+        <h2>Shop Inventory</h2>
+        <div class="panel-meta">{{ totalOnHand() }} units on-hand</div>
+      </div>
+
+      <div class="inventory-controls">
+        <ion-item class="search-item" lines="none">
+          <ion-label position="stacked">Search Parts</ion-label>
+          <ion-input
+            [ngModel]="search()"
+            (ngModelChange)="search.set($event || '')"
+            placeholder="Part name, SKU, category, supplier">
+          </ion-input>
+        </ion-item>
+        <ion-item class="toggle-item" lines="none">
+          <ion-label>Low stock only</ion-label>
+          <ion-toggle
+            [checked]="showLowStockOnly()"
+            (ionChange)="showLowStockOnly.set($event.detail.checked)">
+          </ion-toggle>
+        </ion-item>
+      </div>
+
+      <div class="table-wrap">
+        <table class="inventory-table">
+          <thead>
+            <tr>
+              <th>Part</th>
+              <th>Supplier</th>
+              <th>On Hand</th>
+              <th>Min</th>
+              <th>On Order</th>
+              <th>Status</th>
+              <th>Unit Cost</th>
+              <th>Last Updated</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let item of filteredItems(); trackBy: trackInventoryItem">
+              <td>
+                <div class="part-name">{{ item.name }}</div>
+                <div class="part-meta">SKU {{ item.sku }} · {{ item.category }}</div>
+              </td>
+              <td>{{ item.vendor }}</td>
+              <td>{{ item.onHand }}</td>
+              <td>{{ item.reorderAt }}</td>
+              <td>{{ item.onOrder }}</td>
+              <td>
+                <span class="stock-pill" [ngClass]="stockStateClass(item)">
+                  {{ stockStateLabel(item) }}
+                </span>
+              </td>
+              <td>{{ formatCurrency(item.unitCost) }}</td>
+              <td>{{ formatDateTime(item.lastUpdated) }}</td>
+              <td class="row-actions">
+                <ion-button
+                  size="small"
+                  fill="outline"
+                  [disabled]="saving() || stockState(item) === 'ok'"
+                  (click)="createReorderDraft(item)">
+                  Reorder
+                </ion-button>
+              </td>
+            </tr>
+            <tr *ngIf="!filteredItems().length">
+              <td colspan="9" class="empty-row">No inventory matches your search.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="inventory-lower-grid">
+      <article class="inventory-panel glass-surface">
+        <div class="panel-head">
+          <h2>Job-Linked Parts Queue</h2>
+          <ion-badge color="primary">{{ pendingJobNeeds().length }} pending</ion-badge>
+        </div>
+        <p class="panel-note">
+          This queue is where scheduled jobs can auto-create part requests and purchase orders.
+        </p>
+        <div class="job-list">
+          <div class="job-row" *ngFor="let need of jobPartNeeds(); trackBy: trackJobNeed">
+            <div class="job-main">
+              <div class="job-top">
+                <strong>{{ need.customerName }}</strong>
+                <span class="job-vehicle">{{ need.vehicle }}</span>
+              </div>
+              <div class="job-part">{{ need.partName }} · Qty {{ need.qty }}</div>
+              <div class="job-meta">
+                <span>{{ formatDateTime(need.scheduleStart) }}</span>
+                <span>Supplier: {{ need.vendorHint }}</span>
+              </div>
+            </div>
+            <span class="stock-pill" [ngClass]="needStatusClass(need)">
+              {{ needStatusLabel(need) }}
+            </span>
+          </div>
+        </div>
+        <div class="job-actions">
+          <ion-button size="small" [disabled]="saving() || !pendingJobNeeds().length" (click)="createPOBatchFromNeeds()">
+            Create PO Batch
+          </ion-button>
+        </div>
+      </article>
+    </section>
+  </div>
+</ion-content>

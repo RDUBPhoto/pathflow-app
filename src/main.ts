@@ -1,24 +1,16 @@
 import { bootstrapApplication } from '@angular/platform-browser';
+import { provideHttpClient, withInterceptors } from '@angular/common/http';
+import { provideRouter } from '@angular/router';
+import { provideIonicAngular } from '@ionic/angular/standalone';
+
 import AppComponent from './app/app.component';
-import { appConfig } from './app/app.config';
+import { routes } from './app/app.routes';
+import { tenantHeaderInterceptor } from './app/interceptors/tenant-header.interceptor';
 
-import { addIcons } from 'ionicons';
-import {
-  settingsOutline,
-  ellipsisVertical,
-  reorderTwoOutline,
-  reorderThreeOutline,
-  linkOutline,
-  alertCircleOutline
-} from 'ionicons/icons';
-
-addIcons({
-  'settings-outline': settingsOutline,
-  'ellipsis-vertical': ellipsisVertical,
-  'reorder-two-outline': reorderTwoOutline,
-  'reorder-three-outline': reorderThreeOutline,
-  'link-outline': linkOutline,
-  'alert-circle-outline': alertCircleOutline
+bootstrapApplication(AppComponent, {
+  providers: [
+    provideIonicAngular(),
+    provideRouter(routes),
+    provideHttpClient(withInterceptors([tenantHeaderInterceptor]))
+  ]
 });
-
-bootstrapApplication(AppComponent, appConfig).catch(err => console.error(err));

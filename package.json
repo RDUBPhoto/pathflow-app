@@ -3,7 +3,13 @@
   "version": "0.0.0",
   "scripts": {
     "ng": "ng",
-    "start": "ng serve --proxy-config proxy.conf.json",
+    "postinstall": "node scripts/patch-stencil-empty-glob.mjs",
+    "prebuild": "node scripts/patch-stencil-empty-glob.mjs",
+    "start": "node scripts/dev-local.mjs",
+    "start:demo": "node scripts/dev-local.mjs --seed-demo",
+    "start:cloud": "ng serve --proxy-config proxy.conf.json",
+    "start:local": "node scripts/dev-local.mjs",
+    "dev:local": "node scripts/dev-local.mjs",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test"
@@ -19,6 +25,7 @@
     "@angular/platform-browser-dynamic": "^19.2.0",
     "@angular/router": "^19.2.0",
     "@azure/storage-blob": "^12.28.0",
+    "@daypilot/daypilot-lite-angular": "^5.3.1",
     "@ionic/angular": "^8.7.4",
     "ionicons": "^8.0.13",
     "rxjs": "~7.8.0",

@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 
-type SasResponse = { uploadUrl: string; url: string; expiresOn: string };
+type SasResponse = { uploadUrl: string; url: string; expiresOn: string; tenantId: string };
 
 @Injectable({ providedIn: 'root' })
 export class BrandingApi {

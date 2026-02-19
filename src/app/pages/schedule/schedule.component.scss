@@ -1,0 +1,161 @@
+:host {
+  display: block;
+  height: 100%;
+}
+
+ion-content {
+  --padding-bottom: 16px;
+}
+
+.schedule-shell {
+  border-radius: 16px;
+  padding: 12px;
+  box-shadow: var(--glass-shadow);
+  height: calc(100vh - 120px);
+  display: flex;
+  flex-direction: column;
+}
+
+daypilot-scheduler {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.schedule-shell ::ng-deep .scheduler_default_rowheader,
+.schedule-shell ::ng-deep .scheduler_default_rowheader_inner,
+.schedule-shell ::ng-deep .scheduler_default_row,
+.schedule-shell ::ng-deep .scheduler_default_cell {
+  height: var(--row-height, 120px);
+}
+
+.schedule-shell ::ng-deep .scheduler_default_main,
+.schedule-shell ::ng-deep .scheduler_default_scroll,
+.schedule-shell ::ng-deep .scheduler_default_matrix {
+  overflow: auto !important;
+}
+
+.schedule-shell ::ng-deep .holiday-cell {
+  background: #2f343a !important;
+  color: #ffffff;
+}
+
+.editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.settings-content {
+  --padding-bottom: 28px;
+}
+
+.settings-section {
+  border-radius: 14px;
+  padding: 14px;
+  border: 1px solid var(--glass-border);
+  margin-bottom: 14px;
+}
+
+.settings-section-head {
+  margin-bottom: 10px;
+}
+
+.settings-section-head h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.settings-section-head p {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+  opacity: 0.72;
+}
+
+.hours-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.settings-section ion-item {
+  --background: rgba(255, 255, 255, 0.03);
+  --border-color: rgba(255, 255, 255, 0.1);
+  --inner-padding-end: 10px;
+  --padding-start: 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.weekend-toggle {
+  margin-top: 10px;
+}
+
+.toggle-title {
+  font-weight: 600;
+}
+
+.toggle-help {
+  font-size: 0.8rem;
+  opacity: 0.72;
+  margin-top: 2px;
+}
+
+.bay-list,
+.holiday-list,
+.federal-list {
+  margin-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.holiday-add-row,
+.federal-toolbar {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.federal-name {
+  font-weight: 600;
+}
+
+.federal-date {
+  font-size: 0.78rem;
+  opacity: 0.72;
+}
+
+.schedule-shell ::ng-deep .scheduler_default_event_inner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  line-height: 1.2;
+  overflow: hidden;
+}
+.schedule-shell ::ng-deep .evt-title {
+  font-weight: 700;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.schedule-shell ::ng-deep .evt-time {
+  font-size: 11px;
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
+@media (max-width: 700px) {
+  .hours-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .holiday-add-row,
+  .federal-toolbar {
+    grid-template-columns: 1fr;
+  }
+}

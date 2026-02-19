@@ -1,0 +1,105 @@
+<ion-header class="glass-header">
+  <ion-toolbar>
+    <ion-buttons slot="start">
+      <app-page-back-button></app-page-back-button>
+    </ion-buttons>
+    <ion-title>User Settings</ion-title>
+    <div class="toolbar-actions" slot="end">
+      <app-user-menu></app-user-menu>
+    </div>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content class="glass-bg ion-padding settings-content">
+  <ion-card class="glass-surface">
+    <ion-card-header>
+      <ion-card-title>
+        <ion-icon name="person-circle-outline"></ion-icon>
+        Profile
+      </ion-card-title>
+    </ion-card-header>
+    <ion-card-content>
+      <input #avatarFileInput type="file" accept="image/*" hidden (change)="onAvatarFileSelected($event)" />
+
+      <div class="profile-line">
+        <ion-avatar>
+          <img [src]="avatarUrl || 'https://placehold.co/80x80/png'" alt="Avatar preview" />
+        </ion-avatar>
+        <div>
+          <div class="name">{{ auth.user()?.displayName || 'User' }}</div>
+          <div class="meta">{{ auth.user()?.identityProvider }}</div>
+          <ion-badge color="success" *ngIf="auth.isAuthenticated()">authenticated</ion-badge>
+        </div>
+      </div>
+
+      <div class="avatar-actions">
+        <ion-button size="small" (click)="avatarFileInput.click()">Upload Avatar</ion-button>
+        <ion-button size="small" fill="outline" [disabled]="!avatarUrl" (click)="clearAvatar()">Remove Avatar</ion-button>
+      </div>
+      <div class="help-text">Upload JPG, PNG, or WEBP (max 5MB).</div>
+      <div class="help-text success" *ngIf="avatarUploadMessage">{{ avatarUploadMessage }}</div>
+
+      <div class="form-stack">
+        <ion-item>
+          <ion-label position="stacked">Email</ion-label>
+          <ion-input [(ngModel)]="email" placeholder="name@company.com"></ion-input>
+        </ion-item>
+        <div class="validation-error" *ngIf="hasProfileChanges() && !isEmailValid()">
+          Enter a valid email address.
+        </div>
+
+        <ion-item>
+          <ion-label position="stacked">Avatar URL (optional)</ion-label>
+          <ion-input [(ngModel)]="avatarUrl" placeholder="https://.../avatar.png"></ion-input>
+        </ion-item>
+      </div>
+
+      <div class="action-row">
+        <ion-button (click)="saveProfile()" [disabled]="!canSaveProfile()">Save Profile</ion-button>
+      </div>
+      <div class="help-text" *ngIf="!canSaveProfile()">Save is enabled after a valid change is made.</div>
+    </ion-card-content>
+  </ion-card>
+
+  <ion-card class="glass-surface">
+    <ion-card-header>
+      <ion-card-title>
+        <ion-icon name="key-outline"></ion-icon>
+        Password
+      </ion-card-title>
+    </ion-card-header>
+    <ion-card-content>
+      <div class="form-stack">
+        <ion-item>
+          <ion-label position="stacked">Current password</ion-label>
+          <ion-input type="password" [(ngModel)]="currentPassword"></ion-input>
+        </ion-item>
+
+        <ion-item>
+          <ion-label position="stacked">New password</ion-label>
+          <ion-input type="password" [(ngModel)]="newPassword"></ion-input>
+        </ion-item>
+
+        <ion-item>
+          <ion-label position="stacked">Confirm new password</ion-label>
+          <ion-input type="password" [(ngModel)]="confirmPassword"></ion-input>
+        </ion-item>
+      </div>
+
+      <div class="action-row">
+        <ion-button fill="outline" (click)="savePassword()" [disabled]="!canSavePassword()">Update Password</ion-button>
+      </div>
+      <div class="validation-error" *ngIf="hasPasswordChanges() && !passwordFieldsComplete()">
+        Complete all password fields.
+      </div>
+      <div class="validation-error" *ngIf="passwordFieldsComplete() && !newPasswordStrongEnough()">
+        New password must be at least 8 characters.
+      </div>
+      <div class="validation-error" *ngIf="passwordFieldsComplete() && newPasswordStrongEnough() && !passwordsMatch()">
+        New password and confirmation must match.
+      </div>
+    </ion-card-content>
+  </ion-card>
+
+  <div class="status" *ngIf="statusMessage">{{ statusMessage }}</div>
+</ion-content>

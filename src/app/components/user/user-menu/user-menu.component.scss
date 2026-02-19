@@ -1,0 +1,76 @@
+:host {
+  display: inline-flex;
+  align-items: center;
+}
+
+.user-trigger {
+  --padding-start: 6px;
+  --padding-end: 8px;
+  --border-radius: 999px;
+  --background: var(--app-control-bg, rgba(255, 255, 255, 0.5));
+  --background-hover: var(--app-control-bg-hover, rgba(255, 255, 255, 0.65));
+  --background-activated: var(--app-control-bg-active, rgba(255, 255, 255, 0.72));
+  --box-shadow: var(--app-control-shadow, 0 1px 6px rgba(0, 0, 0, 0.14));
+  min-height: 40px;
+}
+
+.avatar {
+  width: 30px;
+  height: 30px;
+  background: var(--avatar-bg, #334155);
+  color: #ffffff;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.user-name {
+  margin: 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--app-text, #111827);
+  max-width: 120px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.menu-profile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-bottom: 1px solid var(--app-border-subtle, rgba(15, 23, 42, 0.1));
+}
+
+.menu-avatar {
+  width: 36px;
+  height: 36px;
+  font-size: 12px;
+}
+
+.menu-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--app-text, #0f172a);
+}
+
+.menu-email {
+  font-size: 12px;
+  color: var(--app-text-muted, #475569);
+}
+
+@media (max-width: 640px) {
+  .user-name {
+    display: none;
+  }
+}

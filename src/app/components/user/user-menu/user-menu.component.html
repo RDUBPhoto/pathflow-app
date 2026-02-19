@@ -1,0 +1,43 @@
+<ion-button class="user-trigger" fill="clear" (click)="openMenu($event)">
+  <ion-avatar class="avatar" [style.--avatar-bg]="avatarColor()">
+    <img *ngIf="showAvatarImage()" [src]="avatarUrl()" alt="Profile avatar" (error)="onAvatarError()" />
+    <span *ngIf="!showAvatarImage()">{{ initials() }}</span>
+  </ion-avatar>
+
+  <span class="user-name">{{ firstName() }}</span>
+  <ion-icon name="chevron-down-outline"></ion-icon>
+</ion-button>
+
+<ion-popover [isOpen]="menuOpen()" [event]="menuEvent()" (didDismiss)="closeMenu()">
+  <ng-template>
+    <ion-content>
+      <div class="menu-profile">
+        <ion-avatar class="avatar menu-avatar" [style.--avatar-bg]="avatarColor()">
+          <img *ngIf="showAvatarImage()" [src]="avatarUrl()" alt="Profile avatar" (error)="onAvatarError()" />
+          <span *ngIf="!showAvatarImage()">{{ initials() }}</span>
+        </ion-avatar>
+        <div>
+          <div class="menu-name">{{ userDisplayName() }}</div>
+          <div class="menu-email">{{ userEmail() }}</div>
+        </div>
+      </div>
+
+      <ion-list lines="full">
+        <ion-item button detail="false" routerLink="/user-settings" (click)="closeMenu()">
+          <ion-icon slot="start" name="person-circle-outline"></ion-icon>
+          <ion-label>User Settings</ion-label>
+        </ion-item>
+
+        <ion-item button detail="false" *ngIf="auth.isAdmin()" routerLink="/admin-settings" (click)="closeMenu()">
+          <ion-icon slot="start" name="shield-checkmark-outline"></ion-icon>
+          <ion-label>Admin</ion-label>
+        </ion-item>
+
+        <ion-item button detail="false" (click)="signOut()">
+          <ion-icon slot="start" name="log-out-outline"></ion-icon>
+          <ion-label>Logout</ion-label>
+        </ion-item>
+      </ion-list>
+    </ion-content>
+  </ng-template>
+</ion-popover>

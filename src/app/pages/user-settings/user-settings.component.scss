@@ -1,0 +1,91 @@
+:host {
+  display: block;
+  height: 100%;
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 10px;
+}
+
+.settings-content {
+  display: grid;
+  gap: 14px;
+}
+
+ion-card {
+  border-radius: 14px;
+  border: 1px solid var(--app-border-subtle);
+}
+
+ion-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.profile-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.avatar-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.help-text {
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.help-text.success {
+  color: var(--ion-color-success, #22c55e);
+}
+
+.validation-error {
+  font-size: 12px;
+  color: var(--ion-color-danger, #ef4444);
+}
+
+.form-stack {
+  margin-top: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.action-row {
+  margin-top: 14px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.name {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.meta {
+  font-size: 12px;
+  opacity: 0.75;
+  margin-bottom: 6px;
+}
+
+.status {
+  font-size: 13px;
+  opacity: 0.9;
+}
+
+@media (max-width: 740px) {
+  .toolbar-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+}

@@ -1,0 +1,149 @@
+<div class="internal-shell glass-bg" [class.collapsed]="collapsed()">
+  <aside class="sidenav glass-surface">
+    <div class="sidenav-main">
+      <div class="brand-row">
+        <ion-button
+          class="collapse-btn"
+          fill="clear"
+          *ngIf="!isMobile()"
+          (click)="toggleCollapsed()"
+          aria-label="Toggle navigation">
+          <ion-icon [name]="collapsed() ? 'chevron-forward-outline' : 'chevron-back-outline'"></ion-icon>
+        </ion-button>
+        <a class="brand-home" routerLink="/dashboard" title="Go to dashboard" aria-label="Go to dashboard">
+          <div class="brand-logo-wrap">
+            <img class="brand-logo" [src]="branding.logoUrl()" alt="Business logo" />
+          </div>
+        </a>
+      </div>
+
+      <div class="section-label">Workspace</div>
+      <nav class="nav-links">
+        <a
+          class="nav-link"
+          routerLink="/dashboard"
+          routerLinkActive="active"
+          [routerLinkActiveOptions]="{ exact: true }"
+          title="Dashboard">
+          <span class="icon-wrap">
+            <ion-icon name="grid-outline"></ion-icon>
+          </span>
+          <span class="nav-label">Dashboard</span>
+        </a>
+
+        <a
+          class="nav-link"
+          routerLink="/schedule"
+          routerLinkActive="active"
+          title="Calendar">
+          <span class="icon-wrap">
+            <ion-icon name="calendar-clear-outline"></ion-icon>
+          </span>
+          <span class="nav-label">Calendar</span>
+        </a>
+
+        <a
+          class="nav-link"
+          routerLink="/customers"
+          routerLinkActive="active"
+          title="Customers">
+          <span class="icon-wrap">
+            <ion-icon name="people-outline"></ion-icon>
+          </span>
+          <span class="nav-label">Customers</span>
+        </a>
+
+        <a
+          class="nav-link"
+          routerLink="/inventory"
+          routerLinkActive="active"
+          title="Inventory">
+          <span class="icon-wrap">
+            <ion-icon name="cube-outline"></ion-icon>
+          </span>
+          <span class="nav-label">Inventory</span>
+        </a>
+      </nav>
+    </div>
+
+    <nav class="nav-links utility-nav">
+      <a
+        class="nav-link"
+        routerLink="/reports"
+        routerLinkActive="active"
+        title="Reports">
+        <span class="icon-wrap">
+          <ion-icon name="bar-chart-outline"></ion-icon>
+        </span>
+        <span class="nav-label">Reports</span>
+      </a>
+    </nav>
+
+    <section
+      class="messages-panel"
+      *ngIf="!collapsed()"
+      [class.has-unread]="unreadMessages().length > 0"
+      [class.mobile-open]="isMobile()"
+      (click)="handleMessagesPanelClick($event)">
+      <ng-container *ngIf="isMobile(); else desktopSmsHub">
+        <div class="mobile-sms-summary" aria-label="Open SMS Hub">
+          <ion-icon name="chatbubble-ellipses-outline"></ion-icon>
+          <span class="mobile-sms-label">SMS</span>
+          <span class="mobile-sms-count" [class.active]="unreadMessages().length > 0">
+            {{ unreadMessages().length > 99 ? '99+' : unreadMessages().length }}
+          </span>
+        </div>
+      </ng-container>
+
+      <ng-template #desktopSmsHub>
+        <div class="messages-head">
+          <div class="messages-title">
+            <ion-icon name="chatbubble-ellipses-outline"></ion-icon>
+            <span>SMS Hub</span>
+            <span class="messages-alert-slot" *ngIf="unreadMessages().length > 0" aria-hidden="true">
+              <span class="messages-alert-dot"></span>
+            </span>
+          </div>
+          <button
+            type="button"
+            class="messages-see-all"
+            *ngIf="!isMobile()"
+            (click)="openMessagesScreen()">
+            View All
+          </button>
+        </div>
+
+        <div class="messages-empty" *ngIf="smsLoading() && !messageThreads().length">Loading SMS...</div>
+        <div class="messages-empty" *ngIf="!smsLoading() && smsError() && !messageThreads().length">{{ smsError() }}</div>
+        <div class="messages-empty" *ngIf="!smsLoading() && !smsError() && !messageThreads().length">
+          No new SMS messages.
+        </div>
+
+        <div class="messages-list" *ngIf="messageThreads().length">
+          <button
+            type="button"
+            class="message-row message-row-btn"
+            *ngFor="let thread of visibleMessageThreads(); trackBy: trackThread"
+            (click)="openThread(thread)">
+            <div class="message-avatar" [style.--avatar-color]="thread.color">{{ thread.initials }}</div>
+            <div class="message-meta">
+              <div class="message-name" [attr.title]="thread.name">{{ thread.name }}</div>
+              <div class="message-preview" [attr.title]="thread.preview">{{ thread.preview }}</div>
+            </div>
+            <div class="message-trailing">
+              <div class="message-time">{{ relativeTimeLabel(thread.latestAt) }}</div>
+              <span class="message-count" *ngIf="thread.unread > 0">{{ thread.unread }}</span>
+            </div>
+          </button>
+        </div>
+      </ng-template>
+    </section>
+  </aside>
+
+  <main class="main-pane">
+    <section class="page-pane">
+      <router-outlet></router-outlet>
+    </section>
+    <app-shell-footer></app-shell-footer>
+  </main>
+</div>

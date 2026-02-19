@@ -1,0 +1,475 @@
+:host {
+  display: block;
+  min-height: 100vh;
+}
+
+.internal-shell {
+  --nav-width: 240px;
+  display: grid;
+  grid-template-columns: var(--nav-width) minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.internal-shell.collapsed {
+  --nav-width: 84px;
+}
+
+.sidenav {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  padding: 12px;
+  border-right: 1px solid var(--app-border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+.sidenav-main {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.brand-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.collapse-btn {
+  --padding-start: 6px;
+  --padding-end: 6px;
+  --border-radius: 8px;
+  --background: var(--app-control-bg);
+  --background-hover: var(--app-control-bg-hover);
+}
+
+.brand-logo-wrap {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+}
+
+.brand-home {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.brand-logo {
+  display: block;
+  width: auto;
+  height: 44px;
+  max-width: 170px;
+  object-fit: contain;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.18));
+}
+
+.section-label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+  padding: 0 8px;
+  margin-top: 4px;
+}
+
+.nav-links {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.utility-nav {
+  margin-top: 2px;
+}
+
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-height: 46px;
+  border-radius: 12px;
+  padding: 0 10px 0 8px;
+  text-decoration: none;
+  color: var(--app-text);
+  background: var(--app-control-bg);
+  border: 1px solid transparent;
+  transition: background-color 0.15s ease, transform 0.1s ease, border-color 0.15s ease;
+}
+
+.nav-link:hover {
+  background: var(--app-control-bg-hover);
+  border-color: var(--app-border-subtle);
+}
+
+.nav-link.active {
+  background: var(--app-nav-active-bg);
+  color: var(--app-nav-active-text);
+  border-color: var(--app-nav-active-border);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  font-weight: 700;
+}
+
+.icon-wrap {
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  background: var(--app-control-bg);
+}
+
+.icon-wrap ion-icon {
+  font-size: 17px;
+}
+
+.nav-label {
+  font-size: 14px;
+  white-space: nowrap;
+  letter-spacing: 0.01em;
+}
+
+.messages-panel {
+  margin-top: auto;
+  border-radius: 14px;
+  border: 1px solid var(--app-border-subtle);
+  background: var(--app-surface-bg);
+  padding: 10px;
+}
+
+.messages-panel.mobile-open {
+  cursor: pointer;
+}
+
+.mobile-sms-summary {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.mobile-sms-summary ion-icon {
+  font-size: 13px;
+  color: var(--app-text-muted);
+}
+
+.mobile-sms-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--app-text);
+  letter-spacing: 0.03em;
+}
+
+.mobile-sms-count {
+  min-width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--app-text-muted);
+  background: var(--app-control-bg);
+  border: 1px solid var(--app-border-subtle);
+}
+
+.mobile-sms-count.active {
+  color: #fff;
+  background: #ff5a1f;
+  border-color: rgba(255, 90, 31, 0.7);
+  box-shadow: 0 0 0 2px rgba(255, 90, 31, 0.18);
+}
+
+.messages-panel.has-unread {
+  border-color: rgba(255, 106, 47, 0.34);
+}
+
+.messages-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 30px;
+  padding: 2px 0;
+  margin-bottom: 8px;
+}
+
+.messages-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 18px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--app-text);
+}
+
+.messages-alert-slot {
+  width: 14px;
+  height: 14px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 14px;
+}
+
+.messages-alert-dot {
+  width: 8px;
+  height: 8px;
+  display: block;
+  border-radius: 999px;
+  background: #ff5a1f;
+  box-shadow: 0 0 0 2px rgba(255, 90, 31, 0.2);
+}
+
+.messages-title ion-icon {
+  font-size: 15px;
+}
+
+.messages-see-all {
+  border: 1px solid var(--app-nav-active-border);
+  background: var(--app-nav-active-bg);
+  color: var(--app-nav-active-text);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.messages-see-all:hover {
+  background: var(--app-nav-active-bg-hover);
+}
+
+.messages-list {
+  display: grid;
+  gap: 7px;
+}
+
+.message-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 4px 2px;
+}
+
+.message-row-btn {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.message-row-btn:hover {
+  background: var(--app-control-bg-hover);
+}
+
+.message-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--avatar-color, #0f766e);
+  color: #ffffff;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.message-meta {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.message-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--app-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.message-preview {
+  font-size: 11px;
+  color: var(--app-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.message-trailing {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+  min-width: 24px;
+  margin-left: 2px;
+  flex: 0 0 auto;
+}
+
+.message-time {
+  font-size: 10px;
+  color: var(--app-text-muted);
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.message-count {
+  min-width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--app-nav-active-text);
+  background: var(--app-nav-active-bg);
+  border: 1px solid var(--app-nav-active-border);
+}
+
+.messages-empty {
+  font-size: 12px;
+  color: var(--app-text-muted);
+  padding: 6px 2px 4px;
+}
+
+.main-pane {
+  min-width: 0;
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.page-pane {
+  min-width: 0;
+  min-height: 0;
+}
+
+.internal-shell.collapsed .nav-label,
+.internal-shell.collapsed .section-label,
+.internal-shell.collapsed .messages-panel {
+  display: none;
+}
+
+.internal-shell.collapsed .brand-logo {
+  height: 30px;
+  max-width: 30px;
+}
+
+.internal-shell.collapsed .nav-link {
+  justify-content: center;
+  padding: 0;
+}
+
+.internal-shell.collapsed .icon-wrap {
+  width: 30px;
+  height: 30px;
+}
+
+@media (max-width: 900px) {
+  .internal-shell {
+    --nav-width: 56px;
+  }
+
+  .sidenav {
+    padding: 6px 4px;
+    gap: 4px;
+    overflow: hidden;
+  }
+
+  .sidenav-main {
+    gap: 4px;
+  }
+
+  .brand-row {
+    display: none;
+  }
+
+  .brand-home {
+    display: none;
+  }
+
+  .collapse-btn {
+    --padding-start: 4px;
+    --padding-end: 4px;
+    min-height: 28px;
+  }
+
+  .section-label,
+  .nav-label {
+    display: none;
+  }
+
+  .brand-logo {
+    height: 30px;
+    max-width: 30px;
+  }
+
+  .nav-link {
+    min-height: 32px;
+    border-radius: 8px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .icon-wrap {
+    width: 22px;
+    height: 22px;
+  }
+
+  .icon-wrap ion-icon {
+    font-size: 14px;
+  }
+
+  .messages-panel {
+    display: block;
+    margin-top: auto;
+    padding: 4px 3px;
+    border-radius: 8px;
+    min-height: 26px;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .messages-panel.mobile-open:active {
+    background: var(--app-control-bg-hover);
+  }
+
+  .mobile-sms-summary {
+    grid-template-columns: auto;
+    gap: 0;
+    justify-content: center;
+  }
+
+  .mobile-sms-summary ion-icon {
+    display: none;
+  }
+
+  .mobile-sms-label {
+    display: none;
+  }
+
+  .mobile-sms-count {
+    min-width: 18px;
+    height: 18px;
+    font-size: 10px;
+  }
+}

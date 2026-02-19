@@ -1,0 +1,186 @@
+<ion-header class="glass-header">
+  <ion-toolbar>
+    <ion-buttons slot="start">
+      <app-page-back-button></app-page-back-button>
+    </ion-buttons>
+    <ion-title>Reports</ion-title>
+    <ion-buttons slot="end" class="ion-margin-end">
+      <app-user-menu></app-user-menu>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content class="ion-padding glass-bg reports-content">
+  <div class="reports-toolbar">
+    <div class="reports-meta" *ngIf="data() as report">
+      Updated {{ formatDateTime(report.generatedAt) }}
+    </div>
+    <ion-button size="small" fill="outline" (click)="refresh()" [disabled]="loading()">
+      <ion-icon slot="start" name="refresh-outline"></ion-icon>
+      {{ loading() ? 'Refreshing...' : 'Refresh' }}
+    </ion-button>
+  </div>
+
+  <div class="reports-feedback error" *ngIf="error()">{{ error() }}</div>
+
+  <section class="kpi-grid" *ngIf="kpi() as kpi">
+    <article class="kpi-card glass-surface">
+      <div class="kpi-head">
+        <ion-icon name="cash-outline"></ion-icon>
+        <span>Sales Past</span>
+      </div>
+      <div class="kpi-value">{{ formatCurrency(kpi.sales_past_amount) }}</div>
+    </article>
+
+    <article class="kpi-card glass-surface">
+      <div class="kpi-head">
+        <ion-icon name="trending-up-outline"></ion-icon>
+        <span>Sales Current</span>
+      </div>
+      <div class="kpi-value">{{ formatCurrency(kpi.sales_current_amount) }}</div>
+    </article>
+
+    <article class="kpi-card glass-surface">
+      <div class="kpi-head">
+        <ion-icon name="pulse-outline"></ion-icon>
+        <span>Sales Future</span>
+      </div>
+      <div class="kpi-value">{{ formatCurrency(kpi.sales_future_amount) }}</div>
+    </article>
+
+    <article class="kpi-card glass-surface">
+      <div class="kpi-head">
+        <ion-icon name="bar-chart-outline"></ion-icon>
+        <span>Lead to Quote</span>
+      </div>
+      <div class="kpi-value">{{ formatPercent(kpi.lead_to_quote_rate_pct) }}</div>
+    </article>
+  </section>
+
+  <section class="reports-grid">
+    <ion-card class="glass-surface">
+      <ion-card-header>
+        <ion-card-title>Funnel</ion-card-title>
+      </ion-card-header>
+      <ion-card-content>
+        <div class="funnel-list" *ngIf="funnel().length; else noFunnelData">
+          <div class="funnel-row" *ngFor="let row of funnel(); trackBy: trackFunnel">
+            <div>
+              <div class="row-title">{{ row.stage_label }}</div>
+              <div class="row-sub">{{ row.item_count }} items</div>
+            </div>
+            <div class="row-right">
+              <div class="row-title">{{ formatCurrency(row.amount) }}</div>
+              <div class="row-sub">{{ formatPercent(row.conversion_from_previous_pct) }}</div>
+            </div>
+          </div>
+        </div>
+        <ng-template #noFunnelData>
+          <div class="reports-empty">No funnel data yet.</div>
+        </ng-template>
+      </ion-card-content>
+    </ion-card>
+
+    <ion-card class="glass-surface">
+      <ion-card-header>
+        <ion-card-title>Invoice Aging</ion-card-title>
+      </ion-card-header>
+      <ion-card-content>
+        <div class="funnel-list" *ngIf="aging().length; else noAgingData">
+          <div class="funnel-row" *ngFor="let row of aging(); trackBy: trackAging">
+            <div>
+              <div class="row-title">{{ row.bucket_label }}</div>
+              <div class="row-sub">{{ row.invoice_count }} invoices</div>
+            </div>
+            <div class="row-right">
+              <div class="row-title">{{ formatCurrency(row.outstanding_amount) }}</div>
+            </div>
+          </div>
+        </div>
+        <ng-template #noAgingData>
+          <div class="reports-empty">No invoice aging data yet.</div>
+        </ng-template>
+      </ion-card-content>
+    </ion-card>
+  </section>
+
+  <section class="reports-grid">
+    <ion-card class="glass-surface">
+      <ion-card-header>
+        <ion-card-title>Lead Sources</ion-card-title>
+      </ion-card-header>
+      <ion-card-content>
+        <div class="funnel-list" *ngIf="leadSources().length; else noSourceData">
+          <div class="funnel-row" *ngFor="let row of leadSources(); trackBy: trackLeadSource">
+            <div>
+              <div class="row-title">{{ row.source_key | titlecase }}</div>
+              <div class="row-sub">{{ row.lead_count }} leads</div>
+            </div>
+            <div class="row-right">
+              <div class="row-title">{{ formatCurrency(row.pipeline_amount) }}</div>
+            </div>
+          </div>
+        </div>
+        <ng-template #noSourceData>
+          <div class="reports-empty">No lead source data yet.</div>
+        </ng-template>
+      </ion-card-content>
+    </ion-card>
+
+    <ion-card class="glass-surface">
+      <ion-card-header>
+        <ion-card-title>Communications</ion-card-title>
+      </ion-card-header>
+      <ion-card-content>
+        <div class="funnel-list" *ngIf="communications().length; else noCommsData">
+          <div class="funnel-row" *ngFor="let row of communications(); trackBy: trackComms">
+            <div>
+              <div class="row-title">{{ row.channel | uppercase }} {{ row.direction }}</div>
+            </div>
+            <div class="row-right">
+              <ion-badge color="primary">{{ row.message_count }}</ion-badge>
+            </div>
+          </div>
+        </div>
+        <ng-template #noCommsData>
+          <div class="reports-empty">No communication data yet.</div>
+        </ng-template>
+      </ion-card-content>
+    </ion-card>
+  </section>
+
+  <ion-card class="glass-surface">
+    <ion-card-header>
+      <ion-card-title>Sales Trend (Monthly)</ion-card-title>
+    </ion-card-header>
+    <ion-card-content>
+      <div class="trend-wrap" *ngIf="trend().length; else noTrendData">
+        <table class="trend-table">
+          <thead>
+            <tr>
+              <th>Month</th>
+              <th>Leads</th>
+              <th>Quotes</th>
+              <th>Sales</th>
+              <th>Gross Profit</th>
+              <th>Margin</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let row of trend(); trackBy: trackTrend">
+              <td>{{ formatDate(row.period_start) }}</td>
+              <td>{{ row.leads_count }}</td>
+              <td>{{ row.quote_count }}</td>
+              <td>{{ formatCurrency(row.sales_amount) }}</td>
+              <td>{{ formatCurrency(row.gross_profit) }}</td>
+              <td>{{ formatPercent(row.gross_margin_pct) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <ng-template #noTrendData>
+        <div class="reports-empty">No monthly trend data yet.</div>
+      </ng-template>
+    </ion-card-content>
+  </ion-card>
+</ion-content>

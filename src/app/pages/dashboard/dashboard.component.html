@@ -1,53 +1,79 @@
-<ion-menu menuId="board-settings" side="end" contentId="board-content">
-  <ion-header>
-    <ion-toolbar>
-      <ion-title>Board Settings</ion-title>
-    </ion-toolbar>
-  </ion-header>
-  <ion-content class="glass-bg no-vscroll" [scrollY]="false">
-    <ion-list>
-      <ion-item>
-        <ion-label position="stacked">Add New lane</ion-label>
-        <ion-input [ngModel]="newLane()" (ngModelChange)="newLane.set($event)"></ion-input>
-      </ion-item>
-      <div style="margin-top:8px;">
-        <ion-button (click)="addLane()">Add</ion-button>
-      </div>
-    </ion-list>
+<ion-modal [isOpen]="settingsOpen()" cssClass="side-panel" (didDismiss)="settingsOpen.set(false)">
+  <ng-template>
+    <ion-header>
+      <ion-toolbar>
+        <ion-title>Board Settings</ion-title>
+        <ion-buttons slot="end">
+          <ion-button (click)="settingsOpen.set(false)">Close</ion-button>
+        </ion-buttons>
+      </ion-toolbar>
+    </ion-header>
+    <ion-content class="glass-bg no-vscroll" [scrollY]="false">
+      <ion-list>
+        <ion-item lines="full" class="theme-item">
+          <ion-label>Theme</ion-label>
+          <div slot="end" class="theme-direction-toggle">
+            <span class="theme-side" [class.active]="!isDarkTheme()">Light</span>
+            <ion-toggle
+              mode="ios"
+              [checked]="isDarkTheme()"
+              aria-label="Theme toggle"
+              (ionChange)="onThemeToggle($event.detail.checked)">
+            </ion-toggle>
+            <span class="theme-side" [class.active]="isDarkTheme()">Dark</span>
+          </div>
+        </ion-item>
 
-    <ion-list>
-      <ion-item lines="full">
-        <ion-label>Lane colors</ion-label>
-      </ion-item>
-      <ion-item *ngFor="let l of lanes()">
-        <ion-label class="ion-text-wrap">
-          <div style="font-weight:600">{{ l.name }}</div>
-        </ion-label>
-        <ion-select
-          interface="popover"
-          [value]="laneColor(l.id) || ''"
-          (ionChange)="setLaneColor(l.id, $event.detail.value)">
-          <ion-select-option value="">None</ion-select-option>
-          <ion-select-option *ngFor="let c of palette" [value]="c.hex">
-            <span class="sw" [style.background]="c.hex"></span>{{ c.label }}
-          </ion-select-option>
-        </ion-select>
-      </ion-item>
-    </ion-list>
-  </ion-content>
-</ion-menu>
+        <ion-item>
+          <ion-label position="stacked">Add New lane</ion-label>
+          <ion-input [ngModel]="newLane()" (ngModelChange)="newLane.set($event)"></ion-input>
+        </ion-item>
+        <div style="margin-top:8px;">
+          <ion-button (click)="addLane()">Add</ion-button>
+        </div>
+      </ion-list>
+
+      <ion-list>
+        <ion-item lines="full">
+          <ion-label>Lane colors</ion-label>
+        </ion-item>
+        <ion-item *ngFor="let l of lanes()">
+          <ion-label class="ion-text-wrap">
+            <div style="font-weight:600">{{ l.name }}</div>
+          </ion-label>
+          <ion-select interface="popover" [value]="laneColor(l.id) || ''" (ionChange)="setLaneColor(l.id, $event.detail.value)">
+            <ion-select-option value="">None</ion-select-option>
+            <ion-select-option *ngFor="let c of palette" [value]="c.hex">
+              <span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:1px solid rgba(0,0,0,.2);margin-right:8px;vertical-align:middle;" [style.background]="c.hex"></span>{{ c.label }}
+            </ion-select-option>
+          </ion-select>
+        </ion-item>
+      </ion-list>
+    </ion-content>
+  </ng-template>
+</ion-modal>
 
 <ion-header class="glass-header">
   <ion-toolbar>
     <ion-title>Dashboard</ion-title>
-    <ion-buttons slot="end">
-      <ion-menu-toggle menu="board-settings" autoHide="false">
-        <ion-button>
-          <ion-icon slot="start" name="settings-outline"></ion-icon>
-        </ion-button>
-      </ion-menu-toggle>
-      <ion-button (click)="openNewModal()">New Customer</ion-button>
-      <ion-loading *ngIf="loading()" style="margin-left:8px; width:16px; height:16px;"></ion-loading>
+    <ion-buttons slot="end" class="ion-margin-end">
+      <span
+        class="api-status"
+        [class.up]="apiStatus() === 'up'"
+        [class.down]="apiStatus() === 'down'"
+        [attr.title]="apiStatus() === 'up' ? 'API online' : (apiStatus() === 'down' ? 'API offline' : 'API unknown')">
+      </span>
+      <ion-spinner name="crescent" *ngIf="loading()" style="margin-left:8px;"></ion-spinner>
+      <span *ngIf="!loading() && status()"
+            [style.opacity]="statusFading() ? 0 : 1"
+            style="margin-left:8px; transition: opacity .35s linear;">
+        {{ status() }}
+      </span>
+      <ion-button (click)="openSettings()">
+        <ion-icon slot="start" name="settings-outline"></ion-icon>
+        Dashboard Settings
+      </ion-button>
+      <app-user-menu></app-user-menu>
     </ion-buttons>
   </ion-toolbar>
 </ion-header>
@@ -58,10 +84,15 @@
       class="lanes"
       cdkDropList
       [cdkDropListData]="lanes()"
-      [cdkDropListOrientation]="'horizontal'"
+      [cdkDropListOrientation]="isMobileLayout() ? 'vertical' : 'horizontal'"
       (cdkDropListDropped)="onLanesDrop($event)">
 
-      <div class="lane" cdkDrag *ngFor="let lane of lanes(); trackBy: trackLane" [style.--lane-color]="laneColor(lane.id)">
+      <div
+        class="lane"
+        cdkDrag
+        [cdkDragDisabled]="isMobileLayout()"
+        *ngFor="let lane of lanes(); trackBy: trackLane"
+        [style.--lane-color]="laneColor(lane.id)">
         <ng-template cdkDragPreview>
           <div class="lane lane-preview"></div>
         </ng-template>
@@ -72,6 +103,9 @@
         <div class="lane-header">
           <ion-icon name="reorder-two-outline" cdkDragHandle class="drag-handle"></ion-icon>
           <div class="lane-title">{{ lane.name }}</div>
+          <ion-button size="small" fill="clear" (click)="openSearch(lane.id)">
+            <ion-icon name="add-outline"></ion-icon>
+          </ion-button>
           <ion-button class="lane-menu-btn" fill="clear" size="small" (click)="openLaneMenu($event, lane)">
             <ion-icon name="ellipsis-vertical"></ion-icon>
           </ion-button>
@@ -84,10 +118,48 @@
           [cdkDropListData]="getLaneCards(lane.id)"
           [cdkDropListConnectedTo]="laneIds()"
           (cdkDropListDropped)="onCardsDrop($event, lane.id)">
-          <div class="card" *ngFor="let it of getLaneCards(lane.id); trackBy: trackItem" cdkDrag>
+          <div
+            class="card"
+            *ngFor="let it of getLaneCards(lane.id); trackBy: trackItem"
+            [class.has-activity]="hasUnreadActivity(it)"
+            [cdkDragDisabled]="isMobileLayout()"
+            cdkDrag>
             <div class="card-body">
+              <div class="card-activity-reason" *ngIf="hasUnreadActivity(it)">
+                <span class="card-activity-dot activity-inline-dot" aria-hidden="true"></span>
+                <button
+                  type="button"
+                  class="activity-link"
+                  *ngIf="hasUnreadSms(it)"
+                  (click)="openCustomerActivity(it, 'sms', $event)">
+                  New SMS received
+                </button>
+                <span class="activity-separator" *ngIf="hasUnreadSms(it) && hasUnreadEmail(it)">•</span>
+                <button
+                  type="button"
+                  class="activity-link"
+                  *ngIf="hasUnreadEmail(it)"
+                  (click)="openCustomerActivity(it, 'email', $event)">
+                  New Email received
+                </button>
+              </div>
               <div class="card-head">
-                <div class="card-name-lg">{{ customerName(it) }}</div>
+                <ion-icon name="reorder-two-outline" cdkDragHandle class="card-drag-handle"></ion-icon>
+                <button
+                  type="button"
+                  class="card-name-link"
+                  [class.disabled]="!it.customerId"
+                  [disabled]="!it.customerId"
+                  [attr.title]="unreadActivityTitle(it)"
+                  (click)="openCustomerProfileFromCard(it, $event)">
+                  <span class="card-name-text">{{ customerName(it) }}</span>
+                  <ion-icon
+                    *ngIf="isCheckedIn(it)"
+                    name="checkmark-circle"
+                    class="checked-in-icon"
+                    aria-label="Checked in">
+                  </ion-icon>
+                </button>
                 <ion-button class="card-menu-btn" fill="clear" size="small" (click)="openCardMenu($event, it)">
                   <ion-icon name="ellipsis-vertical"></ion-icon>
                 </ion-button>
@@ -100,10 +172,24 @@
                 </span>
                 <span *ngIf="!colorOf(it)">—</span>
               </div>
-              <div class="card-line muted"><span>Added: {{ createdAtLabel(it) }}</span></div>
               <div class="card-line muted"><span>{{ customerContact(it) }}</span></div>
+              <div class="card-line lead-time" *ngIf="isLeadLane(lane) && leadReceivedLabel(it)">
+                <span>Lead received:</span>
+                <span>{{ leadReceivedLabel(it) }}</span>
+              </div>
+              <div class="card-line muted" *ngIf="appointmentLabel(it)">
+                <span>Scheduled:</span>
+                <span class="appt-lines" [innerHTML]="appointmentLabel(it)"></span>
+              </div>
+              <div class="card-actions" *ngIf="canCheckIn(it, lane)">
+                <ion-button size="small" fill="outline" (click)="checkInCard(it, lane, $event)">
+                  Check-in
+                </ion-button>
+              </div>
               <div class="card-notes" *ngIf="notesOf(it)">
-                <ion-button size="small" fill="clear" (click)="toggleExpanded(it.id)">{{ isExpanded(it.id) ? 'Hide notes' : 'Show notes' }}</ion-button>
+                <ion-button class="notes-toggle-btn" size="small" fill="solid" (click)="toggleExpanded(it.id)">
+                  {{ isExpanded(it.id) ? 'Hide notes' : 'Show notes' }}
+                </ion-button>
                 <div class="notes" *ngIf="isExpanded(it.id)">{{ notesOf(it) }}</div>
               </div>
             </div>
@@ -121,10 +207,10 @@
       <ion-content class="ion-padding">
         <ion-list lines="full">
           <ion-item button (click)="startEditFromCard()">
-            <ion-label>Edit customer</ion-label>
+            <ion-label>Edit Customer</ion-label>
           </ion-item>
-          <ion-item button (click)="startDeleteFromCard()">
-            <ion-label color="danger">Delete customer</ion-label>
+          <ion-item button (click)="removeCardFromLane()">
+            <ion-label color="danger">Remove from lane</ion-label>
           </ion-item>
         </ion-list>
       </ion-content>
@@ -138,119 +224,19 @@
     <ng-template>
       <ion-content class="ion-padding">
         <ion-list lines="full">
-          <ion-item button (click)="startRename()">
+          <ion-item button (click)="startRename()" [disabled]="isProtectedLaneById(laneMenuLaneId())">
             <ion-label>Rename</ion-label>
           </ion-item>
-          <ion-item button (click)="handleDeleteFromMenu()">
+          <ion-item button (click)="handleDeleteFromMenu()" [disabled]="isProtectedLaneById(laneMenuLaneId())">
             <ion-label color="danger">Delete</ion-label>
+          </ion-item>
+          <ion-item *ngIf="isProtectedLaneById(laneMenuLaneId())" lines="none">
+            <ion-label color="medium">Core lane is locked</ion-label>
           </ion-item>
         </ion-list>
       </ion-content>
     </ng-template>
   </ion-popover>
-
-  <ion-modal [isOpen]="openNew()" (didDismiss)="openNew.set(false)">
-    <ng-template>
-      <ion-header>
-        <ion-toolbar>
-          <ion-title>New Customer</ion-title>
-          <ion-buttons slot="end">
-            <ion-button (click)="openNew.set(false)">Close</ion-button>
-          </ion-buttons>
-        </ion-toolbar>
-      </ion-header>
-
-      <ion-content class="ion-padding">
-        <div class="link-banner" *ngIf="selectedExistingId()">
-          <ion-icon name="link-outline"></ion-icon>
-          <div>Linking to an existing customer</div>
-        </div>
-
-        <ion-item>
-          <ion-label position="stacked">Name</ion-label>
-          <ion-input [readonly]="!!selectedExistingId()" [ngModel]="ncName()" (ngModelChange)="ncName.set($event)"></ion-input>
-        </ion-item>
-
-        <ion-item>
-          <ion-label position="stacked">Phone</ion-label>
-          <ion-input [readonly]="!!selectedExistingId()" [ngModel]="ncPhone()" (ngModelChange)="ncPhone.set($event)"></ion-input>
-        </ion-item>
-
-        <ion-item>
-          <ion-label position="stacked">Email</ion-label>
-          <ion-input [readonly]="!!selectedExistingId()" [ngModel]="ncEmail()" (ngModelChange)="ncEmail.set($event)"></ion-input>
-        </ion-item>
-
-        <div class="dup-panel" *ngIf="dupChecking() || dupMatches().length">
-          <div class="dup-header">
-            <ion-icon name="alert-circle-outline"></ion-icon>
-            <div>Possible matches</div>
-            <div class="grow"></div>
-            <ion-button *ngIf="selectedExistingId()" class="dup-clear" size="small" fill="clear" (click)="clearExisting()">Clear</ion-button>
-            <ion-spinner *ngIf="dupChecking()" class="dup-spinner"></ion-spinner>
-          </div>
-
-          <ion-list lines="none" class="dup-list" *ngIf="!dupChecking() && dupMatches().length">
-            <ion-item
-              class="dup-item"
-              *ngFor="let c of dupMatches()"
-              [class.selected]="isSelected(c)"
-              [button]="true"
-              (click)="useExisting(c)">
-              <ion-label class="ion-text-wrap">
-                <div class="dup-name">{{ c.name }}</div>
-                <div class="dup-meta">{{ c.phone || '—' }} • {{ c.email || '—' }}</div>
-              </ion-label>
-              <ion-button
-                slot="end"
-                size="small"
-                [fill]="isSelected(c) ? 'solid' : 'outline'"
-                [color]="isSelected(c) ? 'success' : 'primary'"
-                (click)="$event.stopPropagation(); useExisting(c)">
-                {{ isSelected(c) ? 'Selected' : 'Use' }}
-              </ion-button>
-            </ion-item>
-          </ion-list>
-        </div>
-
-        <ion-item>
-          <ion-label position="stacked">Vehicle</ion-label>
-          <ion-input [ngModel]="ncVehicle()" (ngModelChange)="ncVehicle.set($event)"></ion-input>
-        </ion-item>
-
-        <ion-item>
-          <ion-label position="stacked">Vehicle color</ion-label>
-          <ion-select interface="popover" placeholder="Select color" [ngModel]="ncColor()" (ngModelChange)="ncColor.set($event)">
-            <ion-select-option *ngFor="let c of palette" [value]="c.hex">{{ c.label }}</ion-select-option>
-          </ion-select>
-        </ion-item>
-
-        <ion-item>
-          <ion-label position="stacked">Notes</ion-label>
-          <ion-textarea auto-grow="true" [ngModel]="ncNotes()" (ngModelChange)="ncNotes.set($event)"></ion-textarea>
-        </ion-item>
-
-        <ion-item lines="full">
-          <ion-label>Add to lane</ion-label>
-          <ion-toggle [checked]="ncAlsoAdd()" (ionChange)="ncAlsoAdd.set($event.detail.checked)"></ion-toggle>
-        </ion-item>
-
-        <ion-item *ngIf="ncAlsoAdd()">
-          <ion-label position="stacked">Status</ion-label>
-          <ion-select interface="popover" [ngModel]="ncLaneId()" (ngModelChange)="ncLaneId.set($event)">
-            <ion-select-option *ngFor="let l of lanes()" [value]="l.id">{{ l.name }}</ion-select-option>
-          </ion-select>
-        </ion-item>
-
-        <div style="margin-top:16px; display:flex; gap:8px; justify-content:flex-end;">
-          <ion-button (click)="openNew.set(false)" fill="outline">Cancel</ion-button>
-          <ion-button [disabled]="!ncName().trim()" [color]="selectedExistingId() ? 'success' : 'primary'" (click)="saveNewCustomer()">
-            {{ selectedExistingId() ? 'Link to customer' : 'Save' }}
-          </ion-button>
-        </div>
-      </ion-content>
-    </ng-template>
-  </ion-modal>
 
   <ion-modal [isOpen]="renameOpen()" (didDismiss)="renameOpen.set(false)">
     <ng-template>
@@ -301,25 +287,64 @@
     </ng-template>
   </ion-modal>
 
-  <ion-modal [isOpen]="customerDeleteOpen()" (didDismiss)="cancelDeleteCustomer()">
+  <ion-modal [isOpen]="searchOpen()" (didDismiss)="closeSearch()">
     <ng-template>
       <ion-header>
         <ion-toolbar>
-          <ion-title>Delete customer</ion-title>
+          <ion-title>Add to {{ laneNameById(searchLaneId()) }}</ion-title>
           <ion-buttons slot="end">
-            <ion-button (click)="cancelDeleteCustomer()">Close</ion-button>
+            <ion-button (click)="closeSearch()">Close</ion-button>
           </ion-buttons>
         </ion-toolbar>
       </ion-header>
       <ion-content class="ion-padding">
-        <div style="margin-bottom:12px;">Delete “{{ customerDeleteName() }}”?</div>
-        <div class="ion-text-medium" style="font-size:12px; opacity:.7">This removes the customer from all cards.</div>
-        <div style="margin-top:16px; display:flex; gap:8px; justify-content:flex-end;">
-          <ion-button fill="outline" (click)="cancelDeleteCustomer()">Cancel</ion-button>
-          <ion-button color="danger" (click)="confirmDeleteCustomer()">Delete</ion-button>
+        <ion-item>
+          <ion-label position="stacked">Search customers</ion-label>
+          <ion-input placeholder="Type name, phone, or email" [ngModel]="searchTerm()" (ngModelChange)="searchTerm.set($event)"></ion-input>
+        </ion-item>
+
+        <ion-list>
+          <ion-item *ngFor="let c of searchResults()" (click)="addExistingToLane(c)" button detail="false">
+            <ion-label>
+              <div style="font-weight:600;">{{ c.name || 'Unnamed' }}</div>
+              <div style="font-size:12px; opacity:.8;">
+                <span *ngIf="c.phone">{{ c.phone }}</span>
+                <span *ngIf="c.phone && c.email"> • </span>
+                <span *ngIf="c.email">{{ c.email }}</span>
+              </div>
+            </ion-label>
+            <ion-button slot="end" size="small" (click)="$event.stopPropagation(); addExistingToLane(c)">Add</ion-button>
+          </ion-item>
+          <ion-item *ngIf="!searchResults().length">
+            <ion-label>No matches</ion-label>
+          </ion-item>
+        </ion-list>
+
+        <div style="display:flex; justify-content:flex-end; margin-top:10px;">
+          <ion-button (click)="openAddCustomerForLane()">Add New Customer</ion-button>
         </div>
       </ion-content>
     </ng-template>
   </ion-modal>
 
+  <ion-modal [isOpen]="customerModalOpen()" (didDismiss)="onCustomerModalClosed()">
+    <ng-template>
+      <app-customer-modal
+        *ngIf="customerModalOpen()"
+        [isOpen]="customerModalOpen()"
+        [customerId]="customerModalId()"
+        [mode]="customerModalMode()"
+        [initialNotes]="customerModalInitialNotes()"
+        (closed)="onCustomerModalClosed()
+        " (saved)="onCustomerSaved($event)">
+      </app-customer-modal>
+    </ng-template>
+  </ion-modal>
+
+  <app-schedule-modal
+    [isOpen]="scheduleModalOpen()"
+    [customerId]="scheduleModalCustomerId()"
+    (closed)="closeScheduleModal()"
+    (saved)="onScheduleSaved()">
+  </app-schedule-modal>
 </ion-content>

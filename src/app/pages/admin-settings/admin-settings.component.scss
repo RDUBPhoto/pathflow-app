@@ -1,0 +1,415 @@
+:host {
+  display: block;
+  height: 100%;
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 10px;
+}
+
+.admin-content {
+  --padding-bottom: calc(88px + env(safe-area-inset-bottom));
+}
+
+.admin-layout {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  align-items: start;
+  gap: 14px;
+}
+
+.admin-sidebar {
+  border-radius: 14px;
+  border: 1px solid var(--app-border-subtle);
+  padding: 12px;
+  position: sticky;
+  top: 10px;
+}
+
+.admin-sidebar-title {
+  margin-bottom: 10px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+}
+
+.admin-sidebar-list {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-section-btn {
+  width: 100%;
+  border: 1px solid var(--app-border-subtle);
+  background: var(--app-control-bg);
+  color: inherit;
+  border-radius: 12px;
+  padding: 10px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  text-align: left;
+}
+
+.admin-section-btn ion-icon {
+  font-size: 18px;
+  color: var(--app-text-muted);
+  margin-top: 1px;
+}
+
+.admin-section-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.admin-section-copy .label {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.admin-section-copy .description {
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--app-text-muted);
+}
+
+.admin-section-btn.active {
+  border-color: var(--app-nav-active-border);
+  background: var(--app-nav-active-bg);
+}
+
+.admin-section-btn.active ion-icon {
+  color: var(--app-nav-active-text);
+}
+
+.admin-main {
+  min-width: 0;
+}
+
+.admin-main ion-card {
+  margin: 0;
+}
+
+ion-card {
+  border-radius: 14px;
+  border: 1px solid var(--app-border-subtle);
+}
+
+ion-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.branding-grid {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.logo-preview-wrap {
+  width: 130px;
+  height: 130px;
+  border-radius: 12px;
+  border: 1px dashed var(--app-border-subtle);
+  background: var(--app-control-bg);
+  display: grid;
+  place-items: center;
+  padding: 10px;
+}
+
+.logo-preview {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.branding-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.branding-help {
+  width: 100%;
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.branding-help.success {
+  color: var(--ion-color-success, #22c55e);
+}
+
+.sms-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sms-help {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.sms-help code {
+  font-size: 11px;
+}
+
+.sms-form {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.sms-actions {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.sms-feedback {
+  margin-top: 10px;
+  font-size: 13px;
+}
+
+.sms-feedback.success {
+  color: var(--ion-color-success, #22c55e);
+}
+
+.sms-feedback.error {
+  color: var(--ion-color-danger, #ef4444);
+}
+
+.email-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.email-column {
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 12px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--app-surface-2) 82%, transparent);
+}
+
+.widget-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.widget-column {
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 12px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--app-surface-2) 82%, transparent);
+}
+
+.widget-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.widget-code-block {
+  margin-top: 8px;
+}
+
+.widget-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.widget-checkbox-item {
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 10px;
+  padding: 10px 8px;
+  --inner-padding-end: 0;
+}
+
+.widget-checkbox-item ion-label {
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.email-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.email-section-title + .sms-form,
+.email-section-title + .email-template-list {
+  margin-top: 8px;
+}
+
+.email-template-list {
+  display: grid;
+  gap: 8px;
+}
+
+.email-template-item {
+  text-align: left;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 10px;
+  background: var(--app-control-bg);
+  color: inherit;
+  padding: 8px 10px;
+  width: 100%;
+}
+
+.email-template-item:hover {
+  border-color: color-mix(in srgb, var(--ion-color-primary, #2563eb) 46%, var(--app-border-subtle));
+}
+
+.email-template-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.email-template-meta {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.add-user-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  align-items: end;
+}
+
+.summary-row {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  opacity: 0.9;
+}
+
+.user-list,
+.integration-row {
+  margin-top: 14px;
+}
+
+.integration-section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.integration-section-header {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--app-border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.user-row,
+.integration-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--app-border-subtle);
+}
+
+.user-row:last-child,
+.integration-row:last-child {
+  border-bottom: 0;
+}
+
+.name {
+  font-weight: 600;
+}
+
+.meta {
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (max-width: 740px) {
+  .toolbar-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .branding-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .logo-preview-wrap {
+    width: 100%;
+    height: 110px;
+  }
+
+  .email-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .widget-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .user-row,
+  .integration-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 980px) {
+  .admin-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .admin-sidebar {
+    position: static;
+  }
+
+  .admin-sidebar-list {
+    display: flex;
+    gap: 8px;
+    overflow: auto;
+    padding-bottom: 2px;
+  }
+
+  .admin-section-btn {
+    flex: 0 0 220px;
+  }
+}

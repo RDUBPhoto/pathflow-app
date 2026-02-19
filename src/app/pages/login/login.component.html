@@ -1,0 +1,88 @@
+<ion-content class="glass-bg auth-page">
+  <div class="auth-shell">
+    <ion-card class="auth-card glass-surface">
+      <ion-card-header>
+        <ion-card-subtitle>Exodus 4x4</ion-card-subtitle>
+        <ion-card-title>Sign in to continue</ion-card-title>
+      </ion-card-header>
+
+      <ion-card-content>
+        <p class="helper">
+          Use your secure Azure identity flow for SSO, Google sign-in, passwordless options, and MFA.
+        </p>
+
+        <ion-button expand="block" size="large" (click)="signInPrimary()" [disabled]="auth.loading()">
+          <ion-icon slot="start" name="shield-checkmark-outline"></ion-icon>
+          Continue with Microsoft
+        </ion-button>
+
+        <ion-button
+          *ngIf="googleEnabled()"
+          expand="block"
+          size="large"
+          fill="outline"
+          (click)="signInGoogle()"
+          [disabled]="auth.loading()">
+          <ion-icon slot="start" name="logo-google"></ion-icon>
+          Continue with Google
+        </ion-button>
+
+        <div class="secure-note">
+          <ion-icon name="key-outline"></ion-icon>
+          <span>Passkeys, phone sign-in, biometrics, and PIN are managed in your Entra sign-in journey.</span>
+        </div>
+
+        <p class="auth-hint" *ngIf="localAuthHint()">{{ localAuthHint() }}</p>
+
+        <div class="loading" *ngIf="auth.loading()">
+          <ion-spinner name="crescent"></ion-spinner>
+        </div>
+
+        <div class="dev-box" *ngIf="passwordLoginEnabled()">
+          <div class="dev-title">Email / Password (Temporary)</div>
+
+          <ion-item>
+            <ion-label position="stacked">Email</ion-label>
+            <ion-input
+              type="email"
+              autocomplete="username"
+              [(ngModel)]="localLoginEmail"
+              placeholder="you@example.com">
+            </ion-input>
+          </ion-item>
+
+          <ion-item>
+            <ion-label position="stacked">Password</ion-label>
+            <ion-input
+              type="password"
+              autocomplete="current-password"
+              [(ngModel)]="localLoginPassword"
+              placeholder="Password">
+            </ion-input>
+          </ion-item>
+
+          <ion-button expand="block" (click)="signInWithEmailPassword()">
+            Sign in with Email
+          </ion-button>
+
+          <p class="auth-hint error" *ngIf="passwordLoginError()">{{ passwordLoginError() }}</p>
+
+          <p class="auth-hint" *ngIf="localCredentialHints.length">
+            Test accounts:
+            <span *ngFor="let acct of localCredentialHints; let last = last">
+              {{ acct.email }} / {{ acct.password }} ({{ acct.role }})<span *ngIf="!last">, </span>
+            </span>
+          </p>
+        </div>
+
+        <div class="dev-box" *ngIf="devBypassEnabled">
+          <div class="dev-title">Local development quick access</div>
+          <div class="dev-actions">
+            <ion-button size="small" fill="outline" (click)="signInDevAsUser()">Login as User</ion-button>
+            <ion-button size="small" (click)="signInDevAsAdmin()">Login as Admin</ion-button>
+          </div>
+        </div>
+      </ion-card-content>
+    </ion-card>
+  </div>
+</ion-content>

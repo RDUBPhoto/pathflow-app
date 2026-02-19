@@ -1,0 +1,29 @@
+<ion-header class="glass-header">
+  <ion-toolbar>
+    <ion-buttons slot="start">
+      <app-page-back-button></app-page-back-button>
+    </ion-buttons>
+    <ion-title>Access</ion-title>
+    <ion-buttons slot="end" class="ion-margin-end">
+      <app-user-menu></app-user-menu>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content class="glass-bg forbidden-page ion-padding">
+  <ion-card class="glass-surface forbidden-card">
+    <ion-card-header>
+      <ion-card-title>
+        <ion-icon name="lock-closed-outline"></ion-icon>
+        Access denied
+      </ion-card-title>
+    </ion-card-header>
+    <ion-card-content>
+      <p>Your account does not currently have permission to access this page.</p>
+      <div class="actions">
+        <ion-button fill="outline" routerLink="/dashboard">Return to Dashboard</ion-button>
+        <ion-button color="danger" (click)="signOut()">Logout</ion-button>
+      </div>
+    </ion-card-content>
+  </ion-card>
+</ion-content>

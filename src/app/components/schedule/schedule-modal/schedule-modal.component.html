@@ -1,0 +1,88 @@
+<ion-modal [isOpen]="isOpen" (didDismiss)="close()">
+  <ng-template>
+    <ion-header>
+      <ion-toolbar>
+        <ion-title>Schedule</ion-title>
+        <ion-buttons slot="end">
+          <ion-button (click)="close()">Close</ion-button>
+        </ion-buttons>
+      </ion-toolbar>
+    </ion-header>
+    <ion-content class="ion-padding glass-bg">
+      <div class="schedule-shell glass-surface">
+        <daypilot-scheduler
+          #scheduler
+          [config]="config"
+          [events]="events()">
+        </daypilot-scheduler>
+      </div>
+      <ion-spinner name="crescent" *ngIf="loading()" style="margin-top:12px;"></ion-spinner>
+    </ion-content>
+  </ng-template>
+</ion-modal>
+
+<ion-modal [isOpen]="editorOpen()" (didDismiss)="editorOpen.set(false)">
+  <ng-template>
+    <ion-header>
+      <ion-toolbar>
+        <ion-title>Appointment</ion-title>
+        <ion-buttons slot="end">
+          <ion-button (click)="editorOpen.set(false)">Close</ion-button>
+        </ion-buttons>
+      </ion-toolbar>
+    </ion-header>
+    <ion-content class="ion-padding glass-bg">
+      <ion-item lines="full">
+        <ion-label>Block bay</ion-label>
+        <ion-checkbox slot="end" [checked]="editorBlocked()" (ionChange)="editorBlocked.set($event.detail.checked)"></ion-checkbox>
+      </ion-item>
+
+      <ion-item *ngIf="!editorBlocked()">
+        <ion-label position="stacked">Customer</ion-label>
+        <ion-select interface="popover" [value]="editorCustomerId()" (ionChange)="editorCustomerId.set($event.detail.value || null)">
+          <ion-select-option [value]="null">Unassigned</ion-select-option>
+          <ion-select-option *ngFor="let c of customers()" [value]="c.id">
+            {{ c.name || 'Unnamed' }}
+          </ion-select-option>
+        </ion-select>
+      </ion-item>
+
+      <ion-item *ngIf="editorBlocked()">
+        <ion-label position="stacked">Block label</ion-label>
+        <ion-input [ngModel]="editorTitle()" (ngModelChange)="editorTitle.set($event)"></ion-input>
+      </ion-item>
+
+      <ion-item>
+        <ion-label position="stacked">Notes</ion-label>
+        <ion-textarea autoGrow [ngModel]="editorNotes()" (ngModelChange)="editorNotes.set($event)"></ion-textarea>
+      </ion-item>
+
+      <ion-item>
+        <ion-label position="stacked">Start</ion-label>
+        <ion-datetime
+          presentation="date-time"
+          hour-cycle="h12"
+          [value]="editorStart()"
+          (ionChange)="editorStart.set(coerceDatetime($event.detail.value))">
+        </ion-datetime>
+      </ion-item>
+
+      <ion-item>
+        <ion-label position="stacked">End</ion-label>
+        <ion-datetime
+          presentation="date-time"
+          hour-cycle="h12"
+          [value]="editorEnd()"
+          (ionChange)="editorEnd.set(coerceDatetime($event.detail.value))">
+        </ion-datetime>
+      </ion-item>
+
+      <div class="editor-actions">
+        <ion-button fill="outline" color="danger" *ngIf="editorId()" (click)="deleteEditor()">Delete</ion-button>
+        <span style="flex:1 1 auto;"></span>
+        <ion-button fill="outline" (click)="editorOpen.set(false)">Cancel</ion-button>
+        <ion-button (click)="saveEditor()">Save</ion-button>
+      </div>
+    </ion-content>
+  </ng-template>
+</ion-modal>

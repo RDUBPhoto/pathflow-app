@@ -5,9 +5,10 @@ const {
   SASProtocol,
   generateBlobSASQueryParameters
 } = require("@azure/storage-blob");
+const { resolveTenantId } = require("../_shared/tenant");
 
 const CONTAINER = "branding";
-const ORIGIN = process.env.CORS_ORIGIN || "http://localhost:4200";
+const ORIGIN = process.env.CORS_ORIGIN || "*";
 
 const cors = {
   "Access-Control-Allow-Origin": ORIGIN,
@@ -25,6 +26,15 @@ function parseConnString(conn) {
   return { accountName: map.AccountName, accountKey: map.AccountKey };
 }
 
+function sanitizeFileName(name) {
+  const raw = String(name || "").trim();
+  const safe = raw
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 120);
+  return safe || `logo-${Date.now()}.png`;
+}
+
 module.exports = async function (context, req) {
   try {
     if ((req.method || "").toUpperCase() === "OPTIONS") {
@@ -32,24 +42,27 @@ module.exports = async function (context, req) {
       return;
     }
 
-    const { fileName, contentType } = (req.body || {});
+    const body = req.body || {};
+    const { fileName, contentType } = body;
     if (!fileName) { context.res = { status: 400, headers: cors, body: { error: "fileName is required" } }; return; }
 
     const conn = process.env.STORAGE_CONNECTION_STRING;
     if (!conn) { context.res = { status: 500, headers: cors, body: { error: "Missing STORAGE_CONNECTION_STRING" } }; return; }
+    const tenantId = resolveTenantId(req, body);
 
     const service = BlobServiceClient.fromConnectionString(conn);
     const container = service.getContainerClient(CONTAINER);
-    try { await container.createIfNotExists(); } catch (_) {}
+    try { await container.createIfNotExists({ access: "blob" }); } catch (_) {}
 
     const { accountName, accountKey } = parseConnString(conn);
     const cred = new StorageSharedKeyCredential(accountName, accountKey);
 
     const expiresOn = new Date(Date.now() + 10 * 60 * 1000);
+    const blobName = `${tenantId}/${Date.now()}-${sanitizeFileName(fileName)}`;
     const sas = generateBlobSASQueryParameters(
       {
         containerName: CONTAINER,
-        blobName: String(fileName),
+        blobName,
         permissions: BlobSASPermissions.parse("cw"),
         protocol: SASProtocol.Https,
         startsOn: new Date(Date.now() - 60 * 1000),
@@ -59,11 +72,11 @@ module.exports = async function (context, req) {
       cred
     ).toString();
 
-    const blobClient = container.getBlockBlobClient(String(fileName));
+    const blobClient = container.getBlockBlobClient(blobName);
     const uploadUrl = `${blobClient.url}?${sas}`;
     const publicUrl = blobClient.url;
 
-    context.res = { status: 200, headers: { "content-type": "application/json", ...cors }, body: { uploadUrl, url: publicUrl, expiresOn: expiresOn.toISOString() } };
+    context.res = { status: 200, headers: { "content-type": "application/json", ...cors }, body: { uploadUrl, url: publicUrl, expiresOn: expiresOn.toISOString(), tenantId } };
   } catch (err) {
     context.log.error(err);
     context.res = { status: 500, headers: { "content-type": "application/json", ...cors }, body: { error: "Failed to create SAS", detail: String(err && err.message || err) } };

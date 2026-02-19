@@ -8,6 +8,7 @@
 
 # Node
 /node_modules
+/api/node_modules
 npm-debug.log
 yarn-error.log
 
@@ -36,6 +37,9 @@ yarn-error.log
 /libpeerconnection.log
 testem.log
 /typings
+/api/local.settings.json
+/.azurite
+/.azurite/*
 
 # System files
 .DS_Store

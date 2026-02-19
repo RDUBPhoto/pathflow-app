@@ -2,7 +2,17 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 
-export type WorkItem = { id: string; title: string; laneId: string; customerId?: string; sort?: number; createdAt?: string };
+export type WorkItem = {
+  id: string;
+  title: string;
+  laneId: string;
+  customerId?: string;
+  sort?: number;
+  createdAt?: string;
+  updatedAt?: string;
+  checkedInAt?: string;
+  completedAt?: string;
+};
 
 @Injectable({ providedIn: 'root' })
 export class WorkItemsApi {

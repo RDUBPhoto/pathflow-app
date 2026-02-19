@@ -1,0 +1,621 @@
+<ion-header class="glass-header">
+  <ion-toolbar>
+    <ion-buttons slot="start">
+      <app-page-back-button></app-page-back-button>
+    </ion-buttons>
+    <ion-title>Admin Settings</ion-title>
+    <div class="toolbar-actions" slot="end">
+      <app-user-menu></app-user-menu>
+    </div>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content class="glass-bg admin-content ion-padding">
+  <div class="admin-layout">
+    <aside class="admin-sidebar glass-surface">
+      <div class="admin-sidebar-title">Settings Categories</div>
+      <div class="admin-sidebar-list">
+        <button
+          type="button"
+          class="admin-section-btn"
+          *ngFor="let section of sections"
+          [class.active]="activeSection() === section.key"
+          (click)="setActiveSection(section.key)">
+          <ion-icon [name]="section.icon"></ion-icon>
+          <span class="admin-section-copy">
+            <span class="label">{{ section.label }}</span>
+            <span class="description">{{ section.description }}</span>
+          </span>
+        </button>
+      </div>
+    </aside>
+
+    <section class="admin-main">
+      <ion-card class="glass-surface" *ngIf="activeSection() === 'branding'">
+        <ion-card-header>
+          <ion-card-title>
+            <ion-icon name="image-outline"></ion-icon>
+            Business Branding
+          </ion-card-title>
+        </ion-card-header>
+        <ion-card-content>
+          <div class="branding-grid">
+            <div class="logo-preview-wrap">
+              <img class="logo-preview" [src]="logoUrl()" alt="Business logo preview" />
+            </div>
+
+            <div class="branding-actions">
+              <input #logoFileInput type="file" accept="image/*" hidden (change)="onLogoFileSelected($event)" />
+
+              <ion-button size="small" (click)="logoFileInput.click()">
+                <ion-icon slot="start" name="cloud-upload-outline"></ion-icon>
+                Upload Logo
+              </ion-button>
+
+              <ion-button size="small" fill="outline" [disabled]="!hasCustomLogo()" (click)="resetBusinessLogo()">
+                <ion-icon slot="start" name="refresh-outline"></ion-icon>
+                Reset
+              </ion-button>
+
+              <div class="branding-help">
+                Recommended: PNG/SVG, transparent background, max 5MB.
+              </div>
+              <div class="branding-help success" *ngIf="brandingStatus">{{ brandingStatus }}</div>
+            </div>
+          </div>
+        </ion-card-content>
+      </ion-card>
+
+      <ion-card class="glass-surface" *ngIf="activeSection() === 'users'">
+        <ion-card-header>
+          <ion-card-title>
+            <ion-icon name="shield-checkmark-outline"></ion-icon>
+            User Access
+          </ion-card-title>
+        </ion-card-header>
+        <ion-card-content>
+          <div class="add-user-grid">
+            <ion-item>
+              <ion-label position="stacked">Name</ion-label>
+              <ion-input [(ngModel)]="newUserName" placeholder="New team member"></ion-input>
+            </ion-item>
+
+            <ion-item>
+              <ion-label position="stacked">Email</ion-label>
+              <ion-input [(ngModel)]="newUserEmail" placeholder="name@company.com"></ion-input>
+            </ion-item>
+
+            <ion-item>
+              <ion-label position="stacked">Role</ion-label>
+              <ion-select interface="popover" [(ngModel)]="newUserRole">
+                <ion-select-option value="user">User</ion-select-option>
+                <ion-select-option value="admin">Admin</ion-select-option>
+              </ion-select>
+            </ion-item>
+
+            <ion-button (click)="addUser()">
+              <ion-icon slot="start" name="add-outline"></ion-icon>
+              Add User
+            </ion-button>
+          </div>
+
+          <div class="summary-row">
+            <ion-badge color="primary">{{ userCount() }} users</ion-badge>
+            <span *ngIf="statusMessage">{{ statusMessage }}</span>
+          </div>
+
+          <div class="user-list">
+            <div class="user-row" *ngFor="let user of users()">
+              <div>
+                <div class="name">{{ user.name }}</div>
+                <div class="meta">{{ user.email }}</div>
+              </div>
+              <div class="badges">
+                <ion-badge [color]="user.role === 'admin' ? 'warning' : 'medium'">{{ user.role }}</ion-badge>
+                <ion-badge [color]="user.status === 'active' ? 'success' : 'tertiary'">{{ user.status }}</ion-badge>
+                <ion-button size="small" fill="clear" color="danger" (click)="removeUser(user.id)">
+                  <ion-icon name="remove-circle-outline"></ion-icon>
+                </ion-button>
+              </div>
+            </div>
+          </div>
+        </ion-card-content>
+      </ion-card>
+
+      <ion-card class="glass-surface" *ngIf="activeSection() === 'sms'">
+        <ion-card-header>
+          <ion-card-title>
+            <ion-icon name="chatbubble-ellipses-outline"></ion-icon>
+            SMS Messaging (Azure ACS)
+          </ion-card-title>
+        </ion-card-header>
+        <ion-card-content>
+          <div class="sms-form">
+            <ion-item>
+              <ion-label position="stacked">Tenant sender number (E.164)</ion-label>
+              <ion-input [(ngModel)]="smsSenderFrom" placeholder="+18338978049"></ion-input>
+            </ion-item>
+
+            <ion-item>
+              <ion-label position="stacked">Sender label (optional)</ion-label>
+              <ion-input [(ngModel)]="smsSenderLabel" placeholder="Pathflow Shop SMS"></ion-input>
+            </ion-item>
+
+            <ion-item>
+              <ion-label position="stacked">Verification status (optional)</ion-label>
+              <ion-input [(ngModel)]="smsSenderVerification" placeholder="pending / approved"></ion-input>
+            </ion-item>
+          </div>
+
+          <div class="sms-actions">
+            <ion-button
+              (click)="saveSmsSenderConfig()"
+              [disabled]="smsSenderSaving() || !canSaveSmsSender()">
+              {{ smsSenderSaving() ? 'Saving sender...' : 'Save tenant sender' }}
+            </ion-button>
+            <ion-button
+              fill="outline"
+              (click)="resetSmsSenderConfig()"
+              [disabled]="smsSenderSaving()">
+              Reset tenant sender
+            </ion-button>
+          </div>
+
+          <div class="sms-badges">
+            <ion-badge [color]="smsConfig()?.mode === 'azure' ? 'primary' : 'warning'">
+              {{ smsConfig()?.mode === 'azure' ? 'azure mode' : 'mock mode' }}
+            </ion-badge>
+            <ion-badge [color]="smsConfig()?.readyForLive ? 'success' : 'medium'">
+              {{ smsConfig()?.readyForLive ? 'live ready' : 'not live ready' }}
+            </ion-badge>
+            <ion-badge color="medium">
+              sender source: {{ smsConfig()?.sender?.source || 'none' }}
+            </ion-badge>
+          </div>
+
+          <div class="sms-help">
+            Mock mode is free and does not send carrier texts. Switch to Azure mode by setting
+            <code>SMS_MODE=azure</code> and <code>ACS_CONNECTION_STRING</code>. Sender routing uses tenant sender number when configured, otherwise <code>ACS_SMS_FROM</code>.
+          </div>
+          <div class="sms-help">
+            Public consent page preview:
+            <a href="/sms-opt-in" target="_blank" rel="noopener noreferrer">/sms-opt-in</a>
+          </div>
+
+          <div class="sms-form">
+            <ion-item>
+              <ion-label position="stacked">Test recipient (E.164)</ion-label>
+              <ion-input [(ngModel)]="smsTo" placeholder="+15551234567"></ion-input>
+            </ion-item>
+
+            <ion-item>
+              <ion-label position="stacked">Message</ion-label>
+              <ion-textarea
+                [(ngModel)]="smsMessage"
+                [autoGrow]="true"
+                [maxlength]="1000"
+                rows="4"
+                placeholder="Type a test update for your customer">
+              </ion-textarea>
+            </ion-item>
+          </div>
+
+          <div class="sms-actions">
+            <ion-button (click)="sendTestSms()" [disabled]="smsSending()">
+              <ion-icon slot="start" name="send-outline"></ion-icon>
+              {{ smsSending() ? 'Sending...' : 'Send test SMS' }}
+            </ion-button>
+
+            <ion-button fill="outline" (click)="loadSmsConfig()" [disabled]="smsLoading()">
+              <ion-icon slot="start" name="refresh-outline"></ion-icon>
+              {{ smsLoading() ? 'Refreshing...' : 'Refresh status' }}
+            </ion-button>
+          </div>
+
+          <div class="sms-feedback success" *ngIf="smsStatus">{{ smsStatus }}</div>
+          <div class="sms-feedback error" *ngIf="smsError">{{ smsError }}</div>
+        </ion-card-content>
+      </ion-card>
+
+      <ion-card class="glass-surface" *ngIf="activeSection() === 'widget'">
+        <ion-card-header>
+          <ion-card-title>
+            <ion-icon name="code-slash-outline"></ion-icon>
+            Website Widget Embed + Testing
+          </ion-card-title>
+        </ion-card-header>
+        <ion-card-content>
+          <div class="widget-grid">
+            <div class="widget-column">
+              <div class="widget-section-title">Embed Builder</div>
+              <div class="sms-help">
+                Generate a copy/paste snippet for your website contact widget. Use your deployed app API URL
+                (not localhost) so external sites can submit leads correctly.
+              </div>
+
+              <div class="sms-form">
+                <ion-item>
+                  <ion-label position="stacked">Widget API URL</ion-label>
+                  <ion-input [(ngModel)]="widgetApiUrl" placeholder="https://app.pathflow.com/api/widget/lead"></ion-input>
+                </ion-item>
+
+                <ion-item>
+                  <ion-label position="stacked">Tenant ID (auto-included)</ion-label>
+                  <ion-input [value]="widgetTenantId()" readonly></ion-input>
+                </ion-item>
+
+                <ion-item>
+                  <ion-label position="stacked">Widget API key (optional)</ion-label>
+                  <ion-input [(ngModel)]="widgetApiKey" placeholder="Only if WIDGET_API_KEY is required"></ion-input>
+                </ion-item>
+
+                <ion-item>
+                  <ion-label position="stacked">Lead source label</ion-label>
+                  <ion-input [(ngModel)]="widgetSource" placeholder="website-widget"></ion-input>
+                </ion-item>
+
+                <ion-item>
+                  <ion-label position="stacked">Consent version</ion-label>
+                  <ion-input [(ngModel)]="widgetConsentVersion" placeholder="v1"></ion-input>
+                </ion-item>
+
+                <ion-item>
+                  <ion-label position="stacked">Privacy policy URL</ion-label>
+                  <ion-input [(ngModel)]="widgetPrivacyPolicyUrl" placeholder="https://yourdomain.com/privacy"></ion-input>
+                </ion-item>
+
+                <ion-item>
+                  <ion-label position="stacked">Terms URL</ion-label>
+                  <ion-input [(ngModel)]="widgetTermsUrl" placeholder="https://yourdomain.com/terms"></ion-input>
+                </ion-item>
+
+                <ion-item>
+                  <ion-label position="stacked">Submit button label</ion-label>
+                  <ion-input [(ngModel)]="widgetSubmitButtonLabel" placeholder="Send Request"></ion-input>
+                </ion-item>
+
+                <ion-item>
+                  <ion-label position="stacked">Success message</ion-label>
+                  <ion-input [(ngModel)]="widgetSuccessMessage" placeholder="Thanks! Your request was sent."></ion-input>
+                </ion-item>
+
+                <ion-item>
+                  <ion-label position="stacked">SMS consent text</ion-label>
+                  <ion-textarea
+                    [(ngModel)]="widgetConsentText"
+                    [autoGrow]="true"
+                    rows="5"
+                    maxlength="1200"
+                    placeholder="By checking this box, you agree to receive recurring SMS updates...">
+                  </ion-textarea>
+                </ion-item>
+              </div>
+
+              <div class="sms-actions">
+                <ion-button fill="outline" (click)="copyWidgetApiUrl()">
+                  <ion-icon slot="start" name="copy-outline"></ion-icon>
+                  Copy API URL
+                </ion-button>
+                <ion-button (click)="copyWidgetEmbedCode()">
+                  <ion-icon slot="start" name="copy-outline"></ion-icon>
+                  Copy Embed Code
+                </ion-button>
+              </div>
+            </div>
+
+            <div class="widget-column">
+              <div class="widget-section-title">Embed Code</div>
+              <div class="sms-form widget-code-block">
+                <ion-item>
+                  <ion-label position="stacked">Website embed snippet</ion-label>
+                  <ion-textarea
+                    class="widget-code"
+                    [value]="widgetEmbedCode()"
+                    [readonly]="true"
+                    [autoGrow]="false"
+                    rows="20">
+                  </ion-textarea>
+                </ion-item>
+              </div>
+
+              <div class="widget-section-title">Test Submit (from Admin)</div>
+              <div class="sms-help">
+                Use this to verify lead intake, customer matching, and lead card creation without leaving the app.
+              </div>
+              <div class="sms-form">
+                <ion-item>
+                  <ion-label position="stacked">Name</ion-label>
+                  <ion-input [(ngModel)]="widgetTestName" placeholder="Jane Customer"></ion-input>
+                </ion-item>
+
+                <ion-item>
+                  <ion-label position="stacked">Email</ion-label>
+                  <ion-input [(ngModel)]="widgetTestEmail" placeholder="jane@example.com"></ion-input>
+                </ion-item>
+
+                <ion-item>
+                  <ion-label position="stacked">Phone</ion-label>
+                  <ion-input [(ngModel)]="widgetTestPhone" placeholder="+15551234567"></ion-input>
+                </ion-item>
+
+                <ion-item>
+                  <ion-label position="stacked">VIN (required)</ion-label>
+                  <ion-input
+                    [(ngModel)]="widgetTestVin"
+                    maxlength="17"
+                    placeholder="Enter 17-character VIN (no I, O, or Q)">
+                  </ion-input>
+                </ion-item>
+
+                <ion-item>
+                  <ion-label position="stacked">Message (optional)</ion-label>
+                  <ion-textarea
+                    [(ngModel)]="widgetTestMessage"
+                    [autoGrow]="true"
+                    rows="3"
+                    maxlength="1200"
+                    placeholder="Need service quote and appointment availability.">
+                  </ion-textarea>
+                </ion-item>
+
+                <ion-item lines="none" class="widget-checkbox-item">
+                  <ion-checkbox slot="start" [(ngModel)]="widgetTestSmsOptIn"></ion-checkbox>
+                  <ion-label>
+                    SMS opt-in provided for this lead (required when phone is submitted in this test flow)
+                  </ion-label>
+                </ion-item>
+              </div>
+
+              <div class="sms-actions">
+                <ion-button (click)="submitWidgetTest()" [disabled]="!canSubmitWidgetTest()">
+                  <ion-icon slot="start" name="send-outline"></ion-icon>
+                  {{ widgetSubmitting() ? 'Submitting...' : 'Submit Test Lead' }}
+                </ion-button>
+              </div>
+
+              <div class="sms-badges" *ngIf="widgetTestResult() as result">
+                <ion-badge [color]="result.customerCreated ? 'success' : 'medium'">
+                  {{ result.customerCreated ? 'customer created' : 'customer matched' }}
+                </ion-badge>
+                <ion-badge [color]="result.leadCreated ? 'success' : 'warning'">
+                  {{ result.leadCreated ? 'lead created' : 'lead updated' }}
+                </ion-badge>
+                <ion-badge color="primary" *ngIf="result.sms?.confirmationSent">opt-in SMS sent</ion-badge>
+              </div>
+            </div>
+          </div>
+
+          <div class="sms-feedback success" *ngIf="widgetStatus">{{ widgetStatus }}</div>
+          <div class="sms-feedback error" *ngIf="widgetError">{{ widgetError }}</div>
+        </ion-card-content>
+      </ion-card>
+
+      <ion-card class="glass-surface" *ngIf="activeSection() === 'email'">
+        <ion-card-header>
+          <ion-card-title>
+            <ion-icon name="mail-outline"></ion-icon>
+            Email Messaging + Templates
+          </ion-card-title>
+        </ion-card-header>
+        <ion-card-content>
+          <div class="sms-badges">
+            <ion-badge [color]="emailConfig()?.mode === 'sendgrid' ? 'primary' : 'warning'">
+              {{ emailConfig()?.mode === 'sendgrid' ? 'sendgrid mode' : 'mock mode' }}
+            </ion-badge>
+            <ion-badge [color]="emailConfig()?.readyForLive ? 'success' : 'medium'">
+              {{ emailConfig()?.readyForLive ? 'live ready' : 'not live ready' }}
+            </ion-badge>
+          </div>
+
+          <div class="sms-help">
+            Mock mode is free and does not send provider email. Switch to SendGrid by setting
+            <code>EMAIL_MODE=sendgrid</code>, <code>SENDGRID_API_KEY</code>, and <code>EMAIL_FROM</code>.
+          </div>
+
+          <div class="email-grid">
+            <div class="email-column">
+              <div class="email-section-title">Template Editor</div>
+              <div class="sms-form">
+                <ion-item>
+                  <ion-label position="stacked">Template name</ion-label>
+                  <ion-input [(ngModel)]="emailTemplateName" placeholder="Appointment follow-up"></ion-input>
+                </ion-item>
+
+                <ion-item>
+                  <ion-label position="stacked">Subject</ion-label>
+                  <ion-input [(ngModel)]="emailTemplateSubject" placeholder="Your service update"></ion-input>
+                </ion-item>
+
+                <ion-item>
+                  <ion-label position="stacked">Body</ion-label>
+                  <ion-textarea
+                    [(ngModel)]="emailTemplateBody"
+                    [autoGrow]="true"
+                    rows="6"
+                    maxlength="12000"
+                    placeholder="Write template content">
+                  </ion-textarea>
+                </ion-item>
+              </div>
+
+              <div class="sms-actions">
+                <ion-button (click)="saveEmailTemplate()" [disabled]="emailSaving() || !canSaveEmailTemplate()">
+                  <ion-icon slot="start" name="save-outline"></ion-icon>
+                  {{ emailSaving() ? 'Saving...' : (emailTemplateId ? 'Update template' : 'Create template') }}
+                </ion-button>
+                <ion-button fill="outline" (click)="clearEmailTemplateForm()" [disabled]="emailSaving()">
+                  New template
+                </ion-button>
+              </div>
+
+              <div class="email-section-title">Default Signature</div>
+              <div class="sms-form">
+                <ion-item>
+                  <ion-label position="stacked">Signature</ion-label>
+                  <ion-textarea
+                    [(ngModel)]="emailSignatureDraft"
+                    [autoGrow]="true"
+                    rows="4"
+                    maxlength="3000"
+                    placeholder="Pathflow Team">
+                  </ion-textarea>
+                </ion-item>
+              </div>
+              <div class="sms-actions">
+                <ion-button fill="outline" (click)="saveEmailSignature()" [disabled]="emailSaving()">
+                  Save signature
+                </ion-button>
+              </div>
+            </div>
+
+            <div class="email-column">
+              <div class="email-section-title">Saved Templates</div>
+              <div class="email-template-list">
+                <button
+                  type="button"
+                  class="email-template-item"
+                  *ngFor="let template of emailTemplates()"
+                  (click)="editEmailTemplate(template)">
+                  <div class="email-template-head">
+                    <span>{{ template.name }}</span>
+                    <ion-button
+                      size="small"
+                      fill="clear"
+                      color="danger"
+                      (click)="$event.stopPropagation(); deleteEmailTemplate(template)"
+                      [disabled]="emailSaving()">
+                      <ion-icon name="trash-outline"></ion-icon>
+                    </ion-button>
+                  </div>
+                  <div class="email-template-meta">{{ template.subject }}</div>
+                </button>
+                <div class="sms-help" *ngIf="!emailTemplates().length">No templates yet.</div>
+              </div>
+
+              <div class="email-section-title">Inbound Email Simulation</div>
+              <div class="sms-form">
+                <ion-item>
+                  <ion-label position="stacked">From email</ion-label>
+                  <ion-input [(ngModel)]="inboundFrom" placeholder="customer@example.com"></ion-input>
+                </ion-item>
+
+                <ion-item>
+                  <ion-label position="stacked">From name (optional)</ion-label>
+                  <ion-input [(ngModel)]="inboundFromName" placeholder="Jane Customer"></ion-input>
+                </ion-item>
+
+                <ion-item>
+                  <ion-label position="stacked">Subject</ion-label>
+                  <ion-input [(ngModel)]="inboundSubject" placeholder="Need help with my vehicle"></ion-input>
+                </ion-item>
+
+                <ion-item>
+                  <ion-label position="stacked">Message</ion-label>
+                  <ion-textarea
+                    [(ngModel)]="inboundMessage"
+                    [autoGrow]="true"
+                    rows="5"
+                    maxlength="12000"
+                    placeholder="Inbound email content">
+                  </ion-textarea>
+                </ion-item>
+              </div>
+
+              <div class="sms-actions">
+                <ion-button fill="outline" (click)="logInboundEmail()" [disabled]="emailSaving() || !canLogInboundEmail()">
+                  <ion-icon slot="start" name="mail-outline"></ion-icon>
+                  Log inbound email
+                </ion-button>
+                <ion-button fill="outline" (click)="loadEmailAdminData()" [disabled]="emailLoading()">
+                  <ion-icon slot="start" name="refresh-outline"></ion-icon>
+                  {{ emailLoading() ? 'Refreshing...' : 'Refresh status' }}
+                </ion-button>
+              </div>
+              <div class="sms-help">
+                Inbound email from a new sender creates a customer and a lead card automatically.
+              </div>
+            </div>
+          </div>
+
+          <div class="sms-feedback success" *ngIf="emailStatus">{{ emailStatus }}</div>
+          <div class="sms-feedback error" *ngIf="emailError">{{ emailError }}</div>
+        </ion-card-content>
+      </ion-card>
+
+      <ion-card class="glass-surface" *ngIf="activeSection() === 'integrations'">
+        <ion-card-header>
+          <ion-card-title>
+            <ion-icon name="settings-outline"></ion-icon>
+            Connected Apps
+          </ion-card-title>
+        </ion-card-header>
+        <ion-card-content>
+          <div class="integration-section-title">Core Integrations</div>
+          <div class="integration-row" *ngFor="let integration of integrations()">
+            <div>
+              <div class="name">{{ integration.name }}</div>
+              <div class="meta">{{ integration.summary }}</div>
+            </div>
+            <div class="badges">
+              <ion-badge [color]="integration.connected ? 'success' : 'medium'">
+                {{ integration.connected ? 'connected' : 'disconnected' }}
+              </ion-badge>
+              <ion-button size="small" fill="outline" (click)="toggleIntegration(integration.key)">
+                {{
+                  integration.key === 'acs-sms' || integration.key === 'sendgrid-email'
+                    ? 'Refresh'
+                    : (integration.connected ? 'Disconnect' : 'Connect')
+                }}
+              </ion-button>
+            </div>
+          </div>
+
+          <div class="integration-section-header">
+            <div class="integration-section-title">
+              <ion-icon name="link-outline"></ion-icon>
+              Supplier Connections
+            </div>
+            <ion-button
+              size="small"
+              fill="outline"
+              (click)="loadSupplierConnections()"
+              [disabled]="supplierLoading() || supplierSaving()">
+              <ion-icon slot="start" name="refresh-outline"></ion-icon>
+              {{ supplierLoading() ? 'Refreshing...' : 'Refresh' }}
+            </ion-button>
+          </div>
+
+          <div class="sms-help">
+            Parts suppliers and OEM connectors are managed here with your other 3rd-party integrations.
+          </div>
+
+          <div class="sms-feedback success" *ngIf="supplierStatus">{{ supplierStatus }}</div>
+          <div class="sms-feedback error" *ngIf="supplierError">{{ supplierError }}</div>
+          <div class="sms-help" *ngIf="supplierLoading() && !supplierConnectors().length">Loading supplier connections...</div>
+
+          <div class="integration-row" *ngFor="let connector of supplierConnectors(); trackBy: trackSupplierConnector">
+            <div>
+              <div class="name">{{ connector.provider }}</div>
+              <div class="meta">{{ connector.segment }} · {{ connector.note }}</div>
+            </div>
+            <div class="badges">
+              <ion-badge [color]="connectorBadgeColor(connector)">
+                {{ connectorBadgeLabel(connector) }}
+              </ion-badge>
+              <ion-button
+                size="small"
+                fill="outline"
+                [disabled]="supplierSaving() || connectorActionDisabled(connector)"
+                (click)="connectSupplierConnector(connector)">
+                {{ connectorActionLabel(connector) }}
+              </ion-button>
+            </div>
+          </div>
+          <div class="sms-help" *ngIf="!supplierLoading() && !supplierConnectors().length">
+            No supplier connections configured.
+          </div>
+        </ion-card-content>
+      </ion-card>
+    </section>
+  </div>
+</ion-content>

@@ -1,0 +1,52 @@
+.schedule-shell {
+  border-radius: 16px;
+  padding: 12px;
+  box-shadow: var(--glass-shadow);
+  height: 520px;
+  display: flex;
+  flex-direction: column;
+}
+
+daypilot-scheduler {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.schedule-shell ::ng-deep .scheduler_default_main,
+.schedule-shell ::ng-deep .scheduler_default_scroll,
+.schedule-shell ::ng-deep .scheduler_default_matrix {
+  overflow: auto !important;
+}
+
+.editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.schedule-shell ::ng-deep .holiday-cell {
+  background: #2f343a !important;
+  color: #ffffff;
+}
+
+.schedule-shell ::ng-deep .scheduler_default_event_inner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  line-height: 1.2;
+  overflow: hidden;
+}
+.schedule-shell ::ng-deep .evt-title {
+  font-weight: 700;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.schedule-shell ::ng-deep .evt-time {
+  font-size: 11px;
+  opacity: 0.85;
+  white-space: nowrap;
+}

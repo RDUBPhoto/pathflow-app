@@ -1,0 +1,335 @@
+:host {
+  display: block;
+  height: 100%;
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 10px;
+}
+
+.messages-page {
+  --padding-bottom: calc(104px + env(safe-area-inset-bottom));
+}
+
+.messages-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 330px) minmax(0, 1fr);
+  gap: 12px;
+  min-height: calc(100vh - 190px);
+}
+
+.threads-pane,
+.chat-pane {
+  border-radius: 14px;
+  border: 1px solid var(--app-border-subtle);
+  background: var(--app-surface-bg);
+}
+
+.threads-pane {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 8px;
+  padding: 10px;
+}
+
+.threads-title {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.search-item {
+  --background: var(--app-control-bg);
+  --inner-padding-start: 8px;
+  --inner-padding-end: 8px;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 10px;
+}
+
+.threads-loading,
+.threads-empty,
+.messages-loading,
+.messages-empty {
+  font-size: 13px;
+  color: var(--app-text-muted);
+  padding: 8px 4px;
+}
+
+.threads-list {
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  gap: 6px;
+}
+
+.thread-row {
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 10px;
+  padding: 8px 6px;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  color: var(--app-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.thread-row:hover {
+  background: var(--app-control-bg-hover);
+  border-color: var(--app-border-subtle);
+}
+
+.thread-row.active {
+  background: var(--app-nav-active-bg);
+  border-color: var(--app-nav-active-border);
+  color: var(--app-nav-active-text);
+}
+
+.thread-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: var(--avatar-color, #0f766e);
+  color: #ffffff;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.thread-meta {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.thread-name {
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.thread-preview {
+  font-size: 12px;
+  color: var(--app-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.thread-row.active .thread-preview {
+  color: color-mix(in srgb, var(--app-nav-active-text) 82%, #9ca3af 18%);
+}
+
+.thread-trailing {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+  min-width: 30px;
+}
+
+.thread-time {
+  font-size: 10px;
+  color: var(--app-text-muted);
+}
+
+.thread-status {
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  line-height: 1;
+}
+
+.thread-status.queued {
+  color: #f59e0b;
+  border-color: color-mix(in srgb, #f59e0b 55%, transparent);
+  background: color-mix(in srgb, #f59e0b 16%, transparent);
+}
+
+.thread-status.delivered {
+  color: #22c55e;
+  border-color: color-mix(in srgb, #22c55e 55%, transparent);
+  background: color-mix(in srgb, #22c55e 16%, transparent);
+}
+
+.thread-status.failed {
+  color: #ef4444;
+  border-color: color-mix(in srgb, #ef4444 55%, transparent);
+  background: color-mix(in srgb, #ef4444 16%, transparent);
+}
+
+.chat-pane {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-height: 0;
+}
+
+.chat-head {
+  border-bottom: 1px solid var(--app-border-subtle);
+  padding: 10px 12px;
+}
+
+.chat-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.chat-user-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.chat-name {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.chat-phone {
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.chat-thread {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: color-mix(in srgb, var(--app-control-bg) 74%, transparent);
+}
+
+.chat-row {
+  display: flex;
+}
+
+.chat-row.outbound {
+  justify-content: flex-end;
+}
+
+.chat-row.inbound {
+  justify-content: flex-start;
+}
+
+.chat-bubble {
+  max-width: min(640px, 88%);
+  border-radius: 12px;
+  border: 1px solid var(--app-border-subtle);
+  background: var(--app-control-bg);
+  padding: 10px 12px;
+}
+
+.chat-row.outbound .chat-bubble {
+  background: var(--app-nav-active-bg);
+  border-color: var(--app-nav-active-border);
+  color: var(--app-nav-active-text);
+}
+
+.chat-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  opacity: 0.78;
+  margin-bottom: 4px;
+}
+
+.chat-delivery {
+  border-radius: 999px;
+  padding: 2px 7px;
+  border: 1px solid transparent;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.chat-delivery.queued {
+  color: #f59e0b;
+  border-color: color-mix(in srgb, #f59e0b 55%, transparent);
+  background: color-mix(in srgb, #f59e0b 16%, transparent);
+}
+
+.chat-delivery.delivered {
+  color: #22c55e;
+  border-color: color-mix(in srgb, #22c55e 55%, transparent);
+  background: color-mix(in srgb, #22c55e 16%, transparent);
+}
+
+.chat-delivery.failed {
+  color: #ef4444;
+  border-color: color-mix(in srgb, #ef4444 55%, transparent);
+  background: color-mix(in srgb, #ef4444 16%, transparent);
+}
+
+.chat-message {
+  white-space: pre-wrap;
+  font-size: 14px;
+}
+
+.chat-compose {
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--app-border-subtle);
+  background: color-mix(in srgb, var(--app-surface-bg) 88%, transparent);
+  display: grid;
+  gap: 8px;
+}
+
+.compose-item {
+  --background: color-mix(in srgb, var(--app-control-bg) 82%, transparent);
+  --inner-padding-start: 10px;
+  --inner-padding-end: 10px;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 10px;
+}
+
+.compose-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.empty-state {
+  min-height: calc(100vh - 190px);
+  display: grid;
+  place-items: center;
+  color: var(--app-text-muted);
+}
+
+.page-feedback {
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+.page-feedback.success {
+  color: var(--ion-color-success, #22c55e);
+}
+
+.page-feedback.error {
+  color: var(--ion-color-danger, #ef4444);
+}
+
+@media (max-width: 980px) {
+  .messages-layout {
+    grid-template-columns: 1fr;
+    min-height: auto;
+  }
+
+  .threads-pane {
+    max-height: 38vh;
+  }
+
+  .chat-pane,
+  .empty-state {
+    min-height: 62vh;
+  }
+}

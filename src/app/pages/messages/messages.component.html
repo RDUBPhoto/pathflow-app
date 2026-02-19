@@ -1,0 +1,129 @@
+<ion-header class="glass-header">
+  <ion-toolbar>
+    <ion-buttons slot="start">
+      <app-page-back-button></app-page-back-button>
+    </ion-buttons>
+    <ion-title>Messages</ion-title>
+    <div class="toolbar-actions" slot="end">
+      <app-user-menu></app-user-menu>
+    </div>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content class="glass-bg messages-page ion-padding">
+  <section class="messages-layout">
+    <aside class="threads-pane glass-surface">
+      <div class="threads-title">SMS Conversations</div>
+      <ion-item class="search-item">
+        <ion-icon name="search-outline" slot="start"></ion-icon>
+        <ion-input
+          [ngModel]="searchTerm()"
+          (ngModelChange)="searchTerm.set($event)"
+          placeholder="Search customer or message">
+        </ion-input>
+      </ion-item>
+
+      <div class="threads-loading" *ngIf="loadingThreads()">
+        <ion-spinner name="crescent"></ion-spinner>
+      </div>
+
+      <div class="threads-empty" *ngIf="!loadingThreads() && !filteredThreadViews().length">
+        No conversations yet.
+      </div>
+
+      <div class="threads-list" *ngIf="filteredThreadViews().length">
+        <button
+          type="button"
+          class="thread-row"
+          *ngFor="let thread of filteredThreadViews(); trackBy: trackThread"
+          [class.active]="selectedThreadKey() === thread.key"
+          (click)="selectThread(thread)">
+          <div class="thread-avatar" [style.--avatar-color]="thread.color">{{ thread.initials }}</div>
+          <div class="thread-meta">
+            <div class="thread-name">{{ thread.displayName }}</div>
+            <div class="thread-preview">{{ thread.latestMessage }}</div>
+          </div>
+          <div class="thread-trailing">
+            <div class="thread-time">{{ relativeTimeLabel(thread.latestAt) }}</div>
+            <div
+              class="thread-status"
+              *ngIf="thread.latestDirection === 'outbound'"
+              [ngClass]="threadDeliveryClass(thread)">
+              {{ threadDeliveryLabel(thread) }}
+            </div>
+            <ion-badge *ngIf="thread.unread > 0" color="primary">{{ thread.unread }}</ion-badge>
+          </div>
+        </button>
+      </div>
+    </aside>
+
+    <section class="chat-pane glass-surface" *ngIf="selectedThread() as thread; else noThreadSelected">
+      <div class="chat-head">
+        <div class="chat-user">
+          <div class="thread-avatar" [style.--avatar-color]="thread.color">{{ thread.initials }}</div>
+          <div class="chat-user-copy">
+            <div class="chat-name">{{ thread.displayName }}</div>
+            <div class="chat-phone">{{ thread.displayPhone || thread.customerPhone || 'No phone on file' }}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="chat-thread" #messageScroll>
+        <div class="messages-loading" *ngIf="loadingMessages()">Loading conversation...</div>
+        <div class="messages-empty" *ngIf="!loadingMessages() && !messages().length">No messages yet.</div>
+
+        <div
+          class="chat-row"
+          *ngFor="let message of messages(); trackBy: trackMessage"
+          [class.outbound]="message.direction === 'outbound'"
+          [class.inbound]="message.direction === 'inbound'">
+          <div class="chat-bubble">
+            <div class="chat-meta">
+              <span>{{ message.direction === 'inbound' ? thread.displayName : 'You' }}</span>
+              <span
+                class="chat-delivery"
+                *ngIf="message.direction === 'outbound'"
+                [ngClass]="messageDeliveryClass(message)"
+                [attr.title]="messageDeliveryTitle(message)">
+                {{ messageDeliveryLabel(message) }}
+              </span>
+              <span>{{ smsDateLabel(message.createdAt) }}</span>
+            </div>
+            <div class="chat-message">{{ message.message }}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="chat-compose">
+        <ion-item class="compose-item">
+          <ion-label position="stacked">Message</ion-label>
+          <ion-textarea
+            [(ngModel)]="outgoingMessage"
+            [autoGrow]="true"
+            rows="2"
+            maxlength="1000"
+            placeholder="Type a message..."
+            (keydown)="onComposerKeydown($event)">
+          </ion-textarea>
+        </ion-item>
+        <div class="compose-actions">
+          <ion-button
+            (click)="sendMessage()"
+            [disabled]="sending() || !outgoingMessage.trim()">
+            <ion-icon name="paper-plane-outline" slot="start"></ion-icon>
+            {{ sending() ? 'Sending...' : 'Send SMS' }}
+          </ion-button>
+        </div>
+      </div>
+    </section>
+  </section>
+
+  <ng-template #noThreadSelected>
+    <section class="chat-pane glass-surface empty-state">
+      <div>Select a conversation from the left.</div>
+    </section>
+  </ng-template>
+
+  <div class="page-feedback success" *ngIf="status()">{{ status() }}</div>
+  <div class="page-feedback error" *ngIf="error()">{{ error() }}</div>
+</ion-content>

@@ -1,0 +1,48 @@
+<ion-menu [menuId]="menuId" side="end" [contentId]="contentId">
+  <ion-header>
+    <ion-toolbar>
+      <ion-title>Board Settings</ion-title>
+    </ion-toolbar>
+  </ion-header>
+
+  <ion-content class="glass-bg no-vscroll" [scrollY]="false">
+    <ion-list>
+      <ion-item>
+        <ion-label position="stacked">Add New lane</ion-label>
+        <ion-input
+          [ngModel]="newLane"
+          (ngModelChange)="newLaneChange.emit($event)">
+        </ion-input>
+      </ion-item>
+      <div style="margin-top:8px;">
+        <ion-button (click)="addLane.emit()">Add</ion-button>
+      </div>
+    </ion-list>
+
+    <ion-list>
+      <ion-item lines="full">
+        <ion-label>Lane colors</ion-label>
+      </ion-item>
+
+      <ion-item *ngFor="let l of lanes">
+        <ion-label class="ion-text-wrap">
+          <div style="font-weight:600">{{ l.name }}</div>
+        </ion-label>
+
+        <ion-select
+          interface="popover"
+          [value]="getLaneColor(l.id)"
+          (ionChange)="onPickColor(l.id, $event.detail.value)">
+          <ion-select-option value="">None</ion-select-option>
+          <ion-select-option *ngFor="let c of palette" [value]="c.hex">
+            <span
+              style="display:inline-block;width:12px;height:12px;border-radius:50%;border:1px solid rgba(0,0,0,.2);margin-right:8px;vertical-align:middle;"
+              [style.background]="c.hex">
+            </span>
+            {{ c.label }}
+          </ion-select-option>
+        </ion-select>
+      </ion-item>
+    </ion-list>
+  </ion-content>
+</ion-menu>

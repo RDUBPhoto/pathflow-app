@@ -9,51 +9,174 @@
 @import "@ionic/angular/css/text-transformation.css";
 @import "@ionic/angular/css/flex-utils.css";
 
-:root {
-  --glass-blur: blur(18px);
-  --glass-border: rgba(255, 255, 255, 0.22);
-  --glass-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
-  --glass-sheen: rgba(255, 255, 255, 0.35);
-  --glass-tint: rgba(255, 255, 255, 0.06);
-  --glass-card: linear-gradient(180deg, rgba(255,255,255,0.35), rgba(255,255,255,0.18));
+:root,
+html[data-theme='dark'] {
+  color-scheme: dark;
   --brand-primary: #0a84ff;
-  }
+  --glass-blur: blur(18px);
+  --glass-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  --glass-border: rgba(255, 255, 255, 0.22);
+  --glass-sheen: rgba(255, 255, 255, 0.1);
+  --glass-tint: rgba(255, 255, 255, 0.04);
+  --app-bg-layer-1: radial-gradient(1200px 240px at 50% 18%, rgba(255, 255, 255, 0.05), transparent 60%);
+  --app-bg-layer-2: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.006));
+  --app-bg-solid: #111923;
+  --app-header-bg: linear-gradient(180deg, rgba(27, 35, 47, 0.97), rgba(21, 28, 39, 0.94));
+  --app-surface-bg: linear-gradient(180deg, rgba(31, 40, 53, 0.88), rgba(22, 30, 42, 0.8));
+  --app-text: #eef4fd;
+  --app-text-muted: #bcc8dc;
+  --app-title: #f3f8ff;
+  --app-border-subtle: rgba(255, 255, 255, 0.22);
+  --app-control-bg: rgba(255, 255, 255, 0.075);
+  --app-control-bg-hover: rgba(255, 255, 255, 0.135);
+  --app-control-bg-active: rgba(255, 255, 255, 0.2);
+  --app-control-shadow: 0 1px 8px rgba(0, 0, 0, 0.42);
+  --app-lane-bg: #1e2836;
+  --app-card-bg: #243041;
+  --app-surface-muted: #233040;
+  --app-scrollbar: rgba(255, 255, 255, 0.28);
+  --app-link: #8fd3ff;
+  --app-link-hover: #b5e3ff;
+  --app-nav-active-bg: rgba(10, 132, 255, 0.32);
+  --app-nav-active-bg-hover: rgba(10, 132, 255, 0.44);
+  --app-nav-active-border: rgba(130, 205, 255, 0.62);
+  --app-nav-active-text: #ecf6ff;
 
-  .glass-bg {
-  background:
-  radial-gradient(1200px 200px at 50% 20%, rgba(255,255,255,0.25), transparent 60%),
-  linear-gradient(180deg, rgba(255,255,255,0.35), rgba(255,255,255,0.08)),
-  #0b0f14;
+  --ion-background-color: var(--app-bg-solid);
+  --ion-text-color: var(--app-text);
+  --ion-card-background: rgba(32, 41, 55, 0.92);
+  --ion-item-background: rgba(255, 255, 255, 0.07);
+  --ion-toolbar-background: transparent;
+  --ion-toolbar-color: var(--app-title);
+  --ion-border-color: var(--app-border-subtle);
+  --ion-color-step-50: #1e2836;
+  --ion-color-step-100: #212c3b;
+  --ion-color-medium: #b2bfd3;
+  --ion-color-medium-rgb: 178, 191, 211;
+  --ion-color-dark: #f1f5fb;
+  --ion-color-dark-rgb: 241, 245, 251;
+}
+
+html[data-theme='light'] {
+  color-scheme: light;
+  --brand-primary: #0a84ff;
+  --glass-blur: blur(18px);
+  --glass-shadow: 0 10px 28px rgba(15, 23, 42, 0.16);
+  --glass-border: rgba(15, 23, 42, 0.14);
+  --glass-sheen: rgba(255, 255, 255, 0.75);
+  --glass-tint: rgba(255, 255, 255, 0.52);
+  --app-bg-layer-1: radial-gradient(1200px 240px at 50% 18%, rgba(255, 255, 255, 0.82), transparent 60%);
+  --app-bg-layer-2: linear-gradient(180deg, rgba(255, 255, 255, 0.66), rgba(255, 255, 255, 0.24));
+  --app-bg-solid: #e8eef6;
+  --app-header-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.58));
+  --app-surface-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.62));
+  --app-text: #0f172a;
+  --app-text-muted: #475569;
+  --app-title: #0f172a;
+  --app-border-subtle: rgba(15, 23, 42, 0.16);
+  --app-control-bg: rgba(255, 255, 255, 0.66);
+  --app-control-bg-hover: rgba(255, 255, 255, 0.85);
+  --app-control-bg-active: rgba(255, 255, 255, 0.98);
+  --app-control-shadow: 0 1px 6px rgba(15, 23, 42, 0.14);
+  --app-lane-bg: #f2f5f9;
+  --app-card-bg: #ffffff;
+  --app-surface-muted: #ebf0f6;
+  --app-scrollbar: rgba(15, 23, 42, 0.22);
+  --app-link: #0a5ec7;
+  --app-link-hover: #0b4a9f;
+  --app-nav-active-bg: rgba(10, 132, 255, 0.14);
+  --app-nav-active-bg-hover: rgba(10, 132, 255, 0.22);
+  --app-nav-active-border: rgba(10, 132, 255, 0.32);
+  --app-nav-active-text: #0f172a;
+
+  --ion-background-color: var(--app-bg-solid);
+  --ion-text-color: var(--app-text);
+  --ion-card-background: rgba(255, 255, 255, 0.92);
+  --ion-item-background: rgba(255, 255, 255, 0.84);
+  --ion-toolbar-background: transparent;
+  --ion-toolbar-color: var(--app-title);
+  --ion-border-color: var(--app-border-subtle);
+  --ion-color-step-50: #f3f6fa;
+  --ion-color-step-100: #ebf0f6;
+  --ion-color-medium: #64748b;
+  --ion-color-medium-rgb: 100, 116, 139;
+  --ion-color-dark: #111827;
+  --ion-color-dark-rgb: 17, 24, 39;
+}
+
+html,
+body {
+  background: var(--app-bg-solid);
+  color: var(--app-text);
+}
+
+.glass-bg {
+  background: var(--app-bg-layer-1), var(--app-bg-layer-2), var(--app-bg-solid);
   background-attachment: fixed;
-  }
+  color: var(--app-text);
+}
 
-  .glass-header {
+.glass-header {
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
-  background: linear-gradient(180deg, rgba(255,255,255,0.45), rgba(255,255,255,0.18));
+  background: var(--app-header-bg);
   border-bottom: 1px solid var(--glass-border);
-  }
+}
 
-  .glass-surface {
-  background:
-  linear-gradient(180deg, rgba(255,255,255,0.38), rgba(255,255,255,0.16)),
-  var(--glass-tint);
+.glass-surface {
+  background: var(--app-surface-bg), var(--glass-tint);
   position: relative;
   overflow: hidden;
-  }
-  .glass-surface::after {
+}
+
+.glass-surface::after {
   content: "";
   position: absolute;
   inset: 0;
   background: radial-gradient(600px 80px at 20% -10%, var(--glass-sheen), transparent 60%);
   pointer-events: none;
-  }
+}
 
-  ion-toolbar ion-title {
-  color: #0b0f14;
-  }
+ion-toolbar {
+  --background: var(--ion-toolbar-background);
+  --color: var(--ion-toolbar-color);
+}
 
-  .scroll-y {
-    overflow-y: inherit !important;
-    overscroll-behavior-y: contain;
-  }
+ion-toolbar ion-title {
+  color: var(--app-title);
+}
+
+a {
+  color: var(--app-link);
+}
+
+a:hover {
+  color: var(--app-link-hover);
+}
+
+ion-card {
+  color: var(--app-text);
+}
+
+ion-item {
+  --background: var(--ion-item-background);
+  --color: var(--app-text);
+  --border-color: var(--app-border-subtle);
+}
+
+ion-input,
+ion-select,
+ion-textarea,
+ion-datetime {
+  --color: var(--app-text);
+  --placeholder-color: var(--app-text-muted);
+}
+
+ion-content.glass-bg.ion-padding {
+  --padding-bottom: calc(72px + env(safe-area-inset-bottom));
+}
+
+.scroll-y {
+  overflow-y: inherit !important;
+  overscroll-behavior-y: contain;
+}

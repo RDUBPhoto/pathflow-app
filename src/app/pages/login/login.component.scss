@@ -1,0 +1,80 @@
+:host {
+  display: block;
+  min-height: 100%;
+}
+
+.auth-page {
+  --padding-top: 32px;
+  --padding-bottom: 32px;
+  --padding-start: 16px;
+  --padding-end: 16px;
+}
+
+.auth-shell {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+}
+
+.auth-card {
+  width: min(520px, 100%);
+  border-radius: 18px;
+  border: 1px solid var(--app-border-subtle);
+  box-shadow: var(--glass-shadow);
+}
+
+.helper {
+  margin: 0 0 16px;
+  font-size: 14px;
+  opacity: 0.85;
+}
+
+ion-button {
+  margin-top: 12px;
+}
+
+.secure-note {
+  margin-top: 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  opacity: 0.85;
+}
+
+.loading {
+  margin-top: 12px;
+  display: flex;
+  justify-content: center;
+}
+
+.dev-box {
+  margin-top: 18px;
+  border-top: 1px solid var(--app-border-subtle);
+  padding-top: 14px;
+}
+
+.dev-title {
+  font-size: 12px;
+  opacity: 0.82;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.dev-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.auth-hint {
+  margin-top: 10px;
+  margin-bottom: 0;
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+.auth-hint.error {
+  color: var(--ion-color-danger, #b31d1d);
+}

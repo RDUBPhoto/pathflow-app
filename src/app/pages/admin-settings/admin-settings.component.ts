@@ -1086,7 +1086,7 @@ export default class AdminSettingsComponent implements OnInit {
     const configured = this.normalizePublicOrigin(environment.publicAppUrl || environment.apiBase || '');
     if (configured) return configured;
 
-    return 'https://app.pathflow.com';
+    return 'https://wonderful-glacier-0f45f5110.6.azurestaticapps.net';
   }
 
   private normalizePublicOrigin(value: string): string {

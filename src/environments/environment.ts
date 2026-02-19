@@ -1,6 +1,6 @@
 export const environment = {
   apiBase: '',
-  publicAppUrl: 'https://happy-desert-01944f00f.1.azurestaticapps.net',
+  publicAppUrl: 'https://wonderful-glacier-0f45f5110.6.azurestaticapps.net',
   auth: {
     primaryProvider: 'aad',
     providers: ['aad', 'google'],

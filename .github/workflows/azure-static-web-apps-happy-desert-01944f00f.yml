@@ -27,11 +27,11 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: "upload"
 
-          app_location: ""
+          app_location: "/"
           app_build_command: |
             npm ci
-            npm run build -- --output-path=dist/www
-          output_location: "dist/www/browser"
+            npm run build
+          output_location: "dist/web/browser"
 
           api_location: "api"
 

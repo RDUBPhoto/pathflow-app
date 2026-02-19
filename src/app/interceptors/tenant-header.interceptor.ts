@@ -17,7 +17,7 @@ export const tenantHeaderInterceptor: HttpInterceptorFn = (req, next) => {
 
 function isApiRequest(url: string): boolean {
   try {
-    const parsed = new URL(url, typeof window !== 'undefined' ? window.location.origin : 'https://app.pathflow.com');
+    const parsed = new URL(url, typeof window !== 'undefined' ? window.location.origin : 'https://wonderful-glacier-0f45f5110.6.azurestaticapps.net');
     return parsed.pathname.startsWith('/api/');
   } catch {
     return String(url || '').startsWith('/api/');

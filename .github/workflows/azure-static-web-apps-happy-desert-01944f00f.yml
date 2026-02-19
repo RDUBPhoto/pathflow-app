@@ -31,7 +31,7 @@ jobs:
           app_build_command: |
             npm ci
             npm run build
-          output_location: "dist/web/browser"
+          output_location: "dist/web"
 
           api_location: "api"
 

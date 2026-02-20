@@ -16,26 +16,19 @@ concurrency:
 
 jobs:
   build_and_deploy_job:
-    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository)
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     name: Build and Deploy Job
     env:
-      SWA_DEPLOY_TOKEN_PRIMARY: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_WONDERFUL_GLACIER_0F45F5110 }}
-      SWA_DEPLOY_TOKEN_FALLBACK: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+      SWA_DEPLOY_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_WONDERFUL_GLACIER_0F45F5110 }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Resolve SWA Deploy Token
+      - name: Validate SWA Deploy Token
         run: |
-          if [ -n "${SWA_DEPLOY_TOKEN_PRIMARY}" ]; then
-            echo "SWA_DEPLOY_TOKEN=${SWA_DEPLOY_TOKEN_PRIMARY}" >> "${GITHUB_ENV}"
-            echo "Using resource-scoped SWA deploy token."
-          elif [ -n "${SWA_DEPLOY_TOKEN_FALLBACK}" ]; then
-            echo "SWA_DEPLOY_TOKEN=${SWA_DEPLOY_TOKEN_FALLBACK}" >> "${GITHUB_ENV}"
-            echo "Using fallback SWA deploy token."
-          else
+          if [ -z "${SWA_DEPLOY_TOKEN}" ]; then
             echo "Missing SWA deploy token."
-            echo "Set either AZURE_STATIC_WEB_APPS_API_TOKEN or AZURE_STATIC_WEB_APPS_API_TOKEN_WONDERFUL_GLACIER_0F45F5110 in GitHub repo secrets."
+            echo "Set AZURE_STATIC_WEB_APPS_API_TOKEN_WONDERFUL_GLACIER_0F45F5110 in GitHub repo secrets."
             exit 1
           fi
 
@@ -59,7 +52,7 @@ jobs:
     runs-on: ubuntu-latest
     name: Close Pull Request Job
     env:
-      SWA_DEPLOY_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_WONDERFUL_GLACIER_0F45F5110 || secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+      SWA_DEPLOY_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_WONDERFUL_GLACIER_0F45F5110 }}
     steps:
       - name: Close Pull Request
         id: closepullrequest

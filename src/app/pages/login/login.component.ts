@@ -3,11 +3,6 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
   IonButton,
-  IonCard,
-  IonCardContent,
-  IonCardHeader,
-  IonCardSubtitle,
-  IonCardTitle,
   IonContent,
   IonIcon,
   IonInput,
@@ -17,7 +12,7 @@ import {
 } from '@ionic/angular/standalone';
 import { ActivatedRoute, Router } from '@angular/router';
 import { addIcons } from 'ionicons';
-import { keyOutline, lockClosedOutline, logoGoogle, shieldCheckmarkOutline } from 'ionicons/icons';
+import { keyOutline, logoGoogle, shieldCheckmarkOutline } from 'ionicons/icons';
 import { environment } from '../../../environments/environment';
 import { AuthService } from '../../auth/auth.service';
 
@@ -28,11 +23,6 @@ import { AuthService } from '../../auth/auth.service';
     CommonModule,
     FormsModule,
     IonContent,
-    IonCard,
-    IonCardHeader,
-    IonCardTitle,
-    IonCardSubtitle,
-    IonCardContent,
     IonButton,
     IonIcon,
     IonItem,
@@ -69,7 +59,6 @@ export default class LoginComponent {
 
   constructor() {
     addIcons({
-      'lock-closed-outline': lockClosedOutline,
       'shield-checkmark-outline': shieldCheckmarkOutline,
       'key-outline': keyOutline,
       'logo-google': logoGoogle

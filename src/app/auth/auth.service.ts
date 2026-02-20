@@ -22,6 +22,16 @@ interface DevAuthRecord {
   avatarUrl?: string;
 }
 
+interface RegistrationBillingPayload {
+  cardholderName: string;
+  cardNumber: string;
+  expiryMonth: string;
+  expiryYear: string;
+  cvc: string;
+  postalCode: string;
+  sandboxBypass?: boolean;
+}
+
 interface AccessHydrationResult {
   roles: string[];
   state: AuthAccessState;
@@ -156,7 +166,10 @@ export class AuthService {
     return { ok: true };
   }
 
-  async registerWorkspace(locationNameInput: string): Promise<{ ok: boolean; error?: string }> {
+  async registerWorkspace(
+    locationNameInput: string,
+    billing?: RegistrationBillingPayload
+  ): Promise<{ ok: boolean; error?: string }> {
     const user = this.user();
     if (!user) {
       return { ok: false, error: 'Sign in before creating your workspace.' };
@@ -177,7 +190,8 @@ export class AuthService {
         },
         body: JSON.stringify({
           op: 'bootstrap',
-          locationName
+          locationName,
+          billing: billing || null
         })
       });
 

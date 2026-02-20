@@ -20,6 +20,7 @@ import { EmailApiService } from '../../services/email-api.service';
 import CustomerModalComponent from '../../components/customer/customer-modal/customer-modal.component';
 import ScheduleModalComponent from '../../components/schedule/schedule-modal/schedule-modal.component';
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
+import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
 import { addIcons } from 'ionicons';
 import {
   settingsOutline,
@@ -46,7 +47,8 @@ const LANE_COLORS_SETTING_KEY = 'dashboard.laneColors';
     CdkDropList, CdkDropListGroup, CdkDrag,
     CustomerModalComponent,
     ScheduleModalComponent,
-    UserMenuComponent
+    UserMenuComponent,
+    CompanySwitcherComponent
   ],
   templateUrl: './dashboard.component.html',
   styleUrls: ['./dashboard.component.scss']

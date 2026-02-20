@@ -624,6 +624,45 @@
   color: var(--app-text-muted);
 }
 
+.schedule-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.schedule-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.schedule-list {
+  display: grid;
+  gap: 10px;
+}
+
+.schedule-card {
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--app-control-bg) 82%, transparent);
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.schedule-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.schedule-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .email-panel {
   display: grid;
   gap: 10px;
@@ -791,6 +830,10 @@
   }
 
   .email-compose-actions ion-button {
+    flex: 1 1 auto;
+  }
+
+  .schedule-actions ion-button {
     flex: 1 1 auto;
   }
 }

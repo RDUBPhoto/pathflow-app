@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 180" role="img" aria-label="Business logo placeholder">
+  <defs>
+    <linearGradient id="tlp-accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#8aa3c8"/>
+      <stop offset="100%" stop-color="#5c7397"/>
+    </linearGradient>
+  </defs>
+
+  <g transform="translate(14 18)">
+    <rect x="0" y="0" width="144" height="144" rx="28" fill="#13233d"/>
+    <rect x="34" y="34" width="76" height="76" rx="14" fill="url(#tlp-accent)" opacity="0.85"/>
+    <rect x="52" y="52" width="40" height="40" rx="8" fill="#13233d"/>
+  </g>
+
+  <g transform="translate(186 54)">
+    <text x="0" y="42" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="42" font-weight="800" fill="#d9e5fb">
+      YOUR BUSINESS LOGO
+    </text>
+    <text x="2" y="72" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="19" font-weight="500" fill="#9cb0cf">
+      Upload in Admin Settings
+    </text>
+  </g>
+</svg>

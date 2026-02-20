@@ -23,6 +23,7 @@ import {
 import { addIcons } from 'ionicons';
 import {
   carOutline,
+  calendarOutline,
   chatbubbleEllipsesOutline,
   addOutline,
   documentTextOutline,
@@ -31,16 +32,21 @@ import {
   personOutline,
   arrowBackOutline,
   saveOutline,
-  cashOutline
+  cashOutline,
+  trashOutline
 } from 'ionicons/icons';
 import { Subscription, finalize, firstValueFrom } from 'rxjs';
 import { CustomersApi, Customer, DuplicateCandidate, DuplicateReason } from '../../services/customers-api.service';
 import { SmsApiService, SmsDeliveryStatus, SmsMessage } from '../../services/sms-api.service';
 import { EmailApiService, EmailMessage, EmailTemplate } from '../../services/email-api.service';
+import { AppSettingsApiService } from '../../services/app-settings-api.service';
+import { ScheduleApi, ScheduleItem } from '../../services/schedule-api.service';
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
 import { PageBackButtonComponent } from '../../components/navigation/page-back-button/page-back-button.component';
+import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
+import { formatLocalDateTime, toLocalDateTimeInput, toLocalDateTimeStorage } from '../../utils/datetime-local';
 
-type CustomerTab = 'notes' | 'invoices' | 'sms' | 'email';
+type CustomerTab = 'notes' | 'schedule' | 'invoices' | 'sms' | 'email';
 type CustomerMobileTab = 'profile' | CustomerTab;
 type EmailView = 'list' | 'detail' | 'compose';
 type TabActivityDismissState = Record<CustomerTab, boolean>;
@@ -69,6 +75,23 @@ type FitmentLookupResponse = {
     trim?: string | null;
   } | null;
 };
+type ScheduleSettings = {
+  bays?: Array<{ id: string; name: string }>;
+  openHour?: number;
+  closeHour?: number;
+  showWeekends?: boolean;
+  holidays?: string[];
+  federalYear?: number;
+  federalInitialized?: boolean;
+};
+type ScheduleDraft = {
+  localId: string;
+  id: string | null;
+  startInput: string;
+  endInput: string;
+  resource: string;
+  notes: string;
+};
 
 @Component({
   selector: 'app-customer-profile',
@@ -92,7 +115,8 @@ type FitmentLookupResponse = {
     IonSpinner,
     IonBadge,
     UserMenuComponent,
-    PageBackButtonComponent
+    PageBackButtonComponent,
+    CompanySwitcherComponent
   ],
   templateUrl: './customer-profile.component.html',
   styleUrls: ['./customer-profile.component.scss']
@@ -106,6 +130,8 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   private readonly customersApi = inject(CustomersApi);
   private readonly smsApi = inject(SmsApiService);
   private readonly emailApi = inject(EmailApiService);
+  private readonly scheduleApi = inject(ScheduleApi);
+  private readonly appSettingsApi = inject(AppSettingsApiService);
 
   private routeSub: Subscription | null = null;
   private querySub: Subscription | null = null;
@@ -162,6 +188,13 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   readonly smsSending = signal(false);
   readonly smsStatus = signal('');
   readonly smsError = signal('');
+  readonly scheduleEntries = signal<ScheduleDraft[]>([]);
+  readonly scheduleLoading = signal(false);
+  readonly scheduleSavingId = signal<string | null>(null);
+  readonly scheduleDeletingId = signal<string | null>(null);
+  readonly scheduleStatus = signal('');
+  readonly scheduleError = signal('');
+  readonly scheduleBays = signal<Array<{ id: string; name: string }>>([]);
   readonly unreadActivityCount = signal(0);
   readonly emailThread = signal<EmailMessage[]>([]);
   readonly emailLoading = signal(false);
@@ -175,6 +208,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   readonly selectedEmailId = signal<string | null>(null);
   readonly dismissedTabActivity = signal<TabActivityDismissState>({
     notes: false,
+    schedule: false,
     invoices: false,
     sms: false,
     email: false
@@ -218,6 +252,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
 
   readonly tabs: Array<{ key: CustomerTab; label: string; icon: string }> = [
     { key: 'notes', label: 'Notes', icon: 'document-text-outline' },
+    { key: 'schedule', label: 'Scheduled', icon: 'calendar-outline' },
     { key: 'invoices', label: 'Invoices', icon: 'cash-outline' },
     { key: 'sms', label: 'SMS History', icon: 'chatbubble-ellipses-outline' },
     { key: 'email', label: 'Email History', icon: 'mail-outline' }
@@ -225,6 +260,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   readonly mobileTabs: Array<{ key: CustomerMobileTab; label: string; icon: string }> = [
     { key: 'profile', label: 'Profile', icon: 'person-outline' },
     { key: 'notes', label: 'Notes', icon: 'document-text-outline' },
+    { key: 'schedule', label: 'Scheduled', icon: 'calendar-outline' },
     { key: 'invoices', label: 'Invoices', icon: 'cash-outline' },
     { key: 'sms', label: 'SMS', icon: 'chatbubble-ellipses-outline' },
     { key: 'email', label: 'Email', icon: 'mail-outline' }
@@ -255,6 +291,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     addIcons({
       'person-outline': personOutline,
       'car-outline': carOutline,
+      'calendar-outline': calendarOutline,
       'document-text-outline': documentTextOutline,
       'chatbubble-ellipses-outline': chatbubbleEllipsesOutline,
       'mail-outline': mailOutline,
@@ -262,12 +299,14 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
       'paper-plane-outline': paperPlaneOutline,
       'arrow-back-outline': arrowBackOutline,
       'save-outline': saveOutline,
-      'cash-outline': cashOutline
+      'cash-outline': cashOutline,
+      'trash-outline': trashOutline
     });
   }
 
   ngOnInit(): void {
     this.updateMobileLayoutState();
+    this.loadScheduleSettings();
 
     this.routeSub = this.route.paramMap.subscribe(params => {
       const id = params.get('id');
@@ -281,6 +320,9 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
       } else {
         this.customerId.set(null);
         this.resetForm();
+        this.scheduleEntries.set([]);
+        this.scheduleStatus.set('');
+        this.scheduleError.set('');
         this.smsThread.set([]);
         this.unreadActivityCount.set(0);
         this.emailThread.set([]);
@@ -332,6 +374,10 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
       this.mobileTab.set(tab);
     }
     this.setTabActivityDismissed(tab, true);
+    if (tab === 'schedule' && this.customerId()) {
+      this.loadCustomerSchedule();
+      return;
+    }
     if (tab === 'sms' && this.customerId()) {
       this.loadSmsThread();
       return;
@@ -858,6 +904,163 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
       });
   }
 
+  loadCustomerSchedule(): void {
+    const customerId = (this.customerId() || '').trim();
+    if (!customerId) {
+      this.scheduleEntries.set([]);
+      return;
+    }
+
+    this.scheduleLoading.set(true);
+    this.scheduleStatus.set('');
+    this.scheduleError.set('');
+    this.scheduleApi
+      .list()
+      .pipe(finalize(() => this.scheduleLoading.set(false)))
+      .subscribe({
+        next: items => {
+          const rows = (Array.isArray(items) ? items : [])
+            .filter(item => !item.isBlocked && String(item.customerId || '').trim() === customerId)
+            .sort((a, b) => Date.parse(a.start || '') - Date.parse(b.start || ''))
+            .map(item => this.mapScheduleItemToDraft(item));
+          this.scheduleEntries.set(rows);
+        },
+        error: err => {
+          this.scheduleError.set(this.extractError(err, 'Could not load schedule.'));
+        }
+      });
+  }
+
+  addScheduleDraft(): void {
+    const customerId = (this.customerId() || '').trim();
+    if (!customerId) {
+      this.scheduleError.set('Save the customer first, then add schedule dates.');
+      return;
+    }
+
+    const window = this.defaultScheduleWindow();
+    const draft: ScheduleDraft = {
+      localId: this.localScheduleId(),
+      id: null,
+      startInput: window.start,
+      endInput: window.end,
+      resource: this.defaultScheduleResource(),
+      notes: ''
+    };
+    this.scheduleEntries.update(list => [draft, ...list]);
+    this.scheduleStatus.set('New schedule row added.');
+    this.scheduleError.set('');
+  }
+
+  saveScheduleDraft(draft: ScheduleDraft): void {
+    const customerId = (this.customerId() || '').trim();
+    if (!customerId) {
+      this.scheduleError.set('Save the customer first, then update schedule.');
+      return;
+    }
+
+    const start = toLocalDateTimeStorage(draft.startInput);
+    const end = toLocalDateTimeStorage(draft.endInput);
+    const resource = String(draft.resource || '').trim() || this.defaultScheduleResource();
+    const notes = String(draft.notes || '').trim();
+
+    if (!start || !end || !resource) {
+      this.scheduleError.set('Start, end, and bay are required.');
+      return;
+    }
+    if (Date.parse(start) >= Date.parse(end)) {
+      this.scheduleError.set('End must be after start.');
+      return;
+    }
+
+    this.scheduleSavingId.set(draft.localId);
+    this.scheduleStatus.set('');
+    this.scheduleError.set('');
+
+    const complete = () => this.scheduleSavingId.set(null);
+    if (draft.id) {
+      this.scheduleApi
+        .update({
+          id: draft.id,
+          customerId,
+          start,
+          end,
+          resource,
+          notes,
+          isBlocked: false
+        })
+        .pipe(finalize(complete))
+        .subscribe({
+          next: () => {
+            this.scheduleStatus.set('Schedule updated.');
+            this.loadCustomerSchedule();
+          },
+          error: err => this.scheduleError.set(this.extractError(err, 'Could not update schedule.'))
+        });
+      return;
+    }
+
+    this.scheduleApi
+      .create({
+        customerId,
+        start,
+        end,
+        resource,
+        notes,
+        isBlocked: false
+      })
+      .pipe(finalize(complete))
+      .subscribe({
+        next: () => {
+          this.scheduleStatus.set('Schedule saved.');
+          this.loadCustomerSchedule();
+        },
+        error: err => this.scheduleError.set(this.extractError(err, 'Could not save schedule.'))
+      });
+  }
+
+  removeScheduleDraft(draft: ScheduleDraft): void {
+    if (!draft.id) {
+      this.scheduleEntries.update(list => list.filter(item => item.localId !== draft.localId));
+      this.scheduleStatus.set('Draft removed.');
+      this.scheduleError.set('');
+      return;
+    }
+
+    if (!window.confirm('Remove this scheduled appointment?')) return;
+    this.scheduleDeletingId.set(draft.localId);
+    this.scheduleStatus.set('');
+    this.scheduleError.set('');
+    this.scheduleApi
+      .delete(draft.id)
+      .pipe(finalize(() => this.scheduleDeletingId.set(null)))
+      .subscribe({
+        next: () => {
+          this.scheduleStatus.set('Schedule removed.');
+          this.loadCustomerSchedule();
+        },
+        error: err => this.scheduleError.set(this.extractError(err, 'Could not remove schedule.'))
+      });
+  }
+
+  isScheduleDraftValid(draft: ScheduleDraft): boolean {
+    const start = toLocalDateTimeStorage(draft.startInput);
+    const end = toLocalDateTimeStorage(draft.endInput);
+    const resource = String(draft.resource || '').trim();
+    if (!start || !end || !resource) return false;
+    return Date.parse(start) < Date.parse(end);
+  }
+
+  isKnownScheduleBay(resource: string): boolean {
+    const value = String(resource || '').trim();
+    if (!value) return false;
+    return this.scheduleBays().some(bay => bay.id === value);
+  }
+
+  trackScheduleDraft(_index: number, draft: ScheduleDraft): string {
+    return draft.localId;
+  }
+
   loadEmailThread(): void {
     const customerId = this.customerId();
     if (!customerId) return;
@@ -1243,6 +1446,10 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
             return;
           }
           this.fillForm(customer);
+          if (this.activeTab() === 'schedule') {
+            this.loadCustomerSchedule();
+            return;
+          }
           if (this.activeTab() === 'sms') {
             this.loadSmsThread();
             return;
@@ -1361,6 +1568,11 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     this.outgoingMessage = '';
     this.smsStatus.set('');
     this.smsError.set('');
+    this.scheduleEntries.set([]);
+    this.scheduleStatus.set('');
+    this.scheduleError.set('');
+    this.scheduleSavingId.set(null);
+    this.scheduleDeletingId.set(null);
     this.emailThread.set([]);
     this.emailTemplates.set([]);
     this.emailSignature.set('');
@@ -1494,6 +1706,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   private resetTabActivityDismissals(activeTab?: CustomerTab): void {
     const next: TabActivityDismissState = {
       notes: false,
+      schedule: false,
       invoices: false,
       sms: false,
       email: false
@@ -1515,6 +1728,10 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     return `local-${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }
 
+  private localScheduleId(): string {
+    return `local-schedule-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+
   private scrollSmsToBottom(): void {
     if (typeof window === 'undefined') return;
     const jump = () => {
@@ -1525,6 +1742,64 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     jump();
     requestAnimationFrame(jump);
     setTimeout(jump, 80);
+  }
+
+  private loadScheduleSettings(): void {
+    this.appSettingsApi.getValue<ScheduleSettings>('schedule.settings').subscribe(value => {
+      const bays = value && Array.isArray(value.bays)
+        ? value.bays
+        : [];
+      if (!bays.length) {
+        this.scheduleBays.set([{ id: 'bay-1', name: 'Two-Post Lift 1' }]);
+        return;
+      }
+      this.scheduleBays.set(
+        bays
+          .map(item => ({
+            id: String(item?.id || '').trim(),
+            name: String(item?.name || item?.id || '').trim()
+          }))
+          .filter(item => !!item.id)
+      );
+      if (!this.scheduleBays().length) {
+        this.scheduleBays.set([{ id: 'bay-1', name: 'Two-Post Lift 1' }]);
+      }
+    });
+  }
+
+  private defaultScheduleResource(): string {
+    const first = this.scheduleBays()[0];
+    return first?.id || 'bay-1';
+  }
+
+  private defaultScheduleWindow(): { start: string; end: string } {
+    const base = new Date();
+    base.setMinutes(0, 0, 0);
+    if (base.getHours() < 7) {
+      base.setHours(7, 0, 0, 0);
+    } else if (base.getHours() >= 16) {
+      base.setDate(base.getDate() + 1);
+      base.setHours(7, 0, 0, 0);
+    } else {
+      base.setHours(base.getHours() + 1, 0, 0, 0);
+    }
+    const end = new Date(base.getTime() + 2 * 60 * 60 * 1000);
+    return {
+      start: toLocalDateTimeInput(formatLocalDateTime(base)),
+      end: toLocalDateTimeInput(formatLocalDateTime(end))
+    };
+  }
+
+  private mapScheduleItemToDraft(item: ScheduleItem): ScheduleDraft {
+    const resource = String(item.resource || '').trim() || this.defaultScheduleResource();
+    return {
+      localId: item.id,
+      id: item.id,
+      startInput: toLocalDateTimeInput(item.start),
+      endInput: toLocalDateTimeInput(item.end),
+      resource,
+      notes: String(item.notes || '')
+    };
   }
 
   private clearFitmentFields(): void {
@@ -1713,12 +1988,13 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   }
 
   private isTab(value: string): value is CustomerTab {
-    return value === 'notes' || value === 'sms' || value === 'invoices' || value === 'email';
+    return value === 'notes' || value === 'schedule' || value === 'sms' || value === 'invoices' || value === 'email';
   }
 
   private normalizeTab(value: string): CustomerTab | null {
     if (this.isTab(value)) return value;
     if (value === 'email-history') return 'email';
+    if (value === 'scheduled') return 'schedule';
     if (value === 'profile' || value === 'vehicle') return 'notes';
     return null;
   }

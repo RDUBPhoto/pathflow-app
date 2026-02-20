@@ -1,15 +1,51 @@
 <ion-content class="glass-bg register-page">
   <div class="register-shell">
-    <ion-card class="register-card glass-surface">
-      <ion-card-header>
-        <ion-card-subtitle>Pathflow Setup</ion-card-subtitle>
-        <ion-card-title>Create your first location</ion-card-title>
-      </ion-card-header>
+    <aside class="marketing-panel">
+      <div class="marketing-image"></div>
+      <div class="marketing-overlay">
+        <img src="/pathflow-logo.svg" alt="Pathflow" class="marketing-logo" />
+        <p class="marketing-kicker">Pathflow Setup</p>
+        <h2>Launch your workspace and start scheduling jobs today.</h2>
+        <p>Configure your shop location, billing profile, and account defaults in one flow.</p>
+      </div>
+    </aside>
 
-      <ion-card-content>
-        <p class="helper">
-          Signed in as <strong>{{ auth.user()?.email }}</strong>. Create your first shop location to finish setup.
+    <section class="register-panel glass-surface">
+      <header class="register-header">
+        <p class="register-kicker">Create Account</p>
+        <h1>Finish your workspace setup</h1>
+      </header>
+
+      <section class="form-card">
+        <div class="form-card-head">
+          <h2>Email &amp; Password</h2>
+          <button type="button" class="link-btn" (click)="useDifferentAccount()">Use Different Account</button>
+        </div>
+
+        <ion-item>
+          <ion-label position="stacked">Email</ion-label>
+          <ion-input [readonly]="true" [value]="auth.user()?.email ?? ''" placeholder="you@company.com"></ion-input>
+        </ion-item>
+
+        <ion-item>
+          <ion-label position="stacked">Password</ion-label>
+          <ion-input
+            [readonly]="true"
+            type="password"
+            value="************"
+            placeholder="Managed by your sign-in provider">
+          </ion-input>
+        </ion-item>
+
+        <p class="account-note">
+          Use the same credentials from login. Password updates are handled by your sign-in provider.
         </p>
+      </section>
+
+      <section class="form-card">
+        <div class="form-card-head">
+          <h2>Workspace Details</h2>
+        </div>
 
         <ion-item>
           <ion-label position="stacked">Location name</ion-label>
@@ -17,25 +53,107 @@
             [disabled]="saving() || !auth.canBootstrapRegistration()"
             [value]="locationName()"
             (ionInput)="locationName.set($any($event.detail).value ?? '')"
-            placeholder="Exodus 4x4">
+            placeholder="Pathflow HQ">
+          </ion-input>
+        </ion-item>
+      </section>
+
+      <section class="form-card billing-card">
+        <div class="form-card-head">
+          <h2>Billing</h2>
+          <span class="muted-tag">Required</span>
+        </div>
+
+        <p class="billing-hint">
+          Use your real card details, or enter all <strong>9s</strong> for card number to run sandbox setup.
+        </p>
+
+        <ion-item>
+          <ion-label position="stacked">Cardholder name</ion-label>
+          <ion-input
+            [disabled]="saving() || !auth.canBootstrapRegistration()"
+            [value]="cardholderName()"
+            (ionInput)="cardholderName.set($any($event.detail).value ?? '')"
+            placeholder="Robert Warren">
           </ion-input>
         </ion-item>
 
-        <p class="auth-hint warning" *ngIf="!auth.canBootstrapRegistration()">
-          This account is not allowed to bootstrap a new workspace. Ask an admin to invite or provision you.
-        </p>
+        <ion-item>
+          <ion-label position="stacked">Card number</ion-label>
+          <ion-input
+            [disabled]="saving() || !auth.canBootstrapRegistration()"
+            [value]="cardNumber()"
+            (ionInput)="cardNumber.set($any($event.detail).value ?? '')"
+            inputmode="numeric"
+            placeholder="4111111111111111 or 9999999999999999">
+          </ion-input>
+        </ion-item>
 
-        <ion-button
-          expand="block"
-          size="large"
-          [disabled]="!canSubmit()"
-          (click)="registerWorkspace()">
-          <ion-spinner *ngIf="saving()" name="crescent" slot="start"></ion-spinner>
-          Create Workspace
-        </ion-button>
+        <div class="billing-row">
+          <ion-item>
+            <ion-label position="stacked">Exp month</ion-label>
+            <ion-input
+              [disabled]="saving() || !auth.canBootstrapRegistration()"
+              [value]="expiryMonth()"
+              (ionInput)="expiryMonth.set($any($event.detail).value ?? '')"
+              inputmode="numeric"
+              placeholder="MM">
+            </ion-input>
+          </ion-item>
+          <ion-item>
+            <ion-label position="stacked">Exp year</ion-label>
+            <ion-input
+              [disabled]="saving() || !auth.canBootstrapRegistration()"
+              [value]="expiryYear()"
+              (ionInput)="expiryYear.set($any($event.detail).value ?? '')"
+              inputmode="numeric"
+              placeholder="YYYY">
+            </ion-input>
+          </ion-item>
+        </div>
 
-        <p class="auth-hint error" *ngIf="error()">{{ error() }}</p>
-      </ion-card-content>
-    </ion-card>
+        <div class="billing-row">
+          <ion-item>
+            <ion-label position="stacked">CVC</ion-label>
+            <ion-input
+              [disabled]="saving() || !auth.canBootstrapRegistration()"
+              [value]="cvc()"
+              (ionInput)="cvc.set($any($event.detail).value ?? '')"
+              inputmode="numeric"
+              placeholder="123">
+            </ion-input>
+          </ion-item>
+          <ion-item>
+            <ion-label position="stacked">Postal code</ion-label>
+            <ion-input
+              [disabled]="saving() || !auth.canBootstrapRegistration()"
+              [value]="postalCode()"
+              (ionInput)="postalCode.set($any($event.detail).value ?? '')"
+              inputmode="numeric"
+              placeholder="78154">
+            </ion-input>
+          </ion-item>
+        </div>
+      </section>
+
+      <p class="auth-hint warning" *ngIf="!auth.canBootstrapRegistration()">
+        This account is not allowed to bootstrap a new workspace. Ask an admin to invite or provision you.
+      </p>
+
+      <p class="auth-hint warning" *ngIf="auth.canBootstrapRegistration() && !billingValid()">
+        Enter valid billing details to continue, or use all 9s for sandbox setup.
+      </p>
+
+      <ion-button
+        expand="block"
+        size="large"
+        [disabled]="!canSubmit()"
+        (click)="registerWorkspace()">
+        <ion-spinner *ngIf="saving()" name="crescent" slot="start"></ion-spinner>
+        Create Workspace
+      </ion-button>
+
+      <p class="auth-hint error" *ngIf="error()">{{ error() }}</p>
+    </section>
   </div>
 </ion-content>

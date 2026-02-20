@@ -24,6 +24,7 @@ import { keyOutline, personCircleOutline } from 'ionicons/icons';
 import { AuthService } from '../../auth/auth.service';
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
 import { PageBackButtonComponent } from '../../components/navigation/page-back-button/page-back-button.component';
+import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
 
 @Component({
   selector: 'app-user-settings',
@@ -48,7 +49,8 @@ import { PageBackButtonComponent } from '../../components/navigation/page-back-b
     IonBadge,
     IonAvatar,
     UserMenuComponent,
-    PageBackButtonComponent
+    PageBackButtonComponent,
+    CompanySwitcherComponent
   ],
   templateUrl: './user-settings.component.html',
   styleUrls: ['./user-settings.component.scss']

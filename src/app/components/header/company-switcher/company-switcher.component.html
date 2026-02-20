@@ -1,0 +1,26 @@
+<ng-container *ngIf="show()">
+  <ion-button class="company-trigger" fill="clear" (click)="openMenu($event)">
+    <ion-icon name="business-outline" slot="start"></ion-icon>
+    <span class="company-name">{{ activeLocationName() }}</span>
+    <ion-icon name="chevron-down-outline"></ion-icon>
+  </ion-button>
+
+  <ion-popover [isOpen]="open()" [event]="menuEvent()" (didDismiss)="closeMenu()">
+    <ng-template>
+      <ion-content>
+        <ion-list lines="full">
+          <ion-item
+            button
+            detail="false"
+            *ngFor="let location of locations(); trackBy: trackLocation"
+            [class.location-active]="isActiveLocation(location.id)"
+            (click)="switchLocation(location.id)">
+            <ion-icon slot="start" name="checkmark-circle-outline" *ngIf="isActiveLocation(location.id)"></ion-icon>
+            <ion-icon slot="start" name="business-outline" *ngIf="!isActiveLocation(location.id)"></ion-icon>
+            <ion-label>{{ location.name }}</ion-label>
+          </ion-item>
+        </ion-list>
+      </ion-content>
+    </ng-template>
+  </ion-popover>
+</ng-container>

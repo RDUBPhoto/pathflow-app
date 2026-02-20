@@ -25,6 +25,7 @@ import {
 } from 'ionicons/icons';
 import { PageBackButtonComponent } from '../../components/navigation/page-back-button/page-back-button.component';
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
+import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
 import {
   ReportsApiService,
   ReportsCommunicationRow,
@@ -54,7 +55,8 @@ import {
     IonButton,
     IonBadge,
     UserMenuComponent,
-    PageBackButtonComponent
+    PageBackButtonComponent,
+    CompanySwitcherComponent
   ],
   templateUrl: './reports.component.html',
   styleUrls: ['./reports.component.scss']

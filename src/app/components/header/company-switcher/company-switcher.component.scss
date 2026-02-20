@@ -1,0 +1,45 @@
+:host {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 3;
+  pointer-events: none;
+}
+
+.company-trigger {
+  pointer-events: auto;
+  --padding-start: 10px;
+  --padding-end: 8px;
+  --border-radius: 999px;
+  --background: var(--app-control-bg, rgba(255, 255, 255, 0.5));
+  --background-hover: var(--app-control-bg-hover, rgba(255, 255, 255, 0.65));
+  --background-activated: var(--app-control-bg-active, rgba(255, 255, 255, 0.72));
+  --box-shadow: var(--app-control-shadow, 0 1px 6px rgba(0, 0, 0, 0.14));
+  min-height: 34px;
+  margin: 0;
+}
+
+.company-trigger ion-icon[name="business-outline"] {
+  font-size: 16px;
+}
+
+.company-name {
+  max-width: 220px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+.location-active {
+  --background: rgba(29, 78, 216, 0.12);
+}
+
+@media (max-width: 960px) {
+  :host {
+    display: none;
+  }
+}

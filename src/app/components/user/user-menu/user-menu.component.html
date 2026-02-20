@@ -19,27 +19,10 @@
         <div>
           <div class="menu-name">{{ userDisplayName() }}</div>
           <div class="menu-email">{{ userEmail() }}</div>
-          <div class="menu-location" *ngIf="showLocationSwitcher()">{{ activeLocationName() }}</div>
         </div>
       </div>
 
       <ion-list lines="full">
-        <ion-item class="menu-subtitle" *ngIf="showLocationSwitcher()">
-          <ion-icon slot="start" name="business-outline"></ion-icon>
-          <ion-label>Locations</ion-label>
-        </ion-item>
-
-        <ion-item
-          button
-          detail="false"
-          *ngFor="let location of locations(); trackBy: trackLocation"
-          [class.location-active]="isActiveLocation(location.id)"
-          (click)="switchLocation(location.id)">
-          <ion-icon slot="start" name="checkmark-circle-outline" *ngIf="isActiveLocation(location.id)"></ion-icon>
-          <ion-icon slot="start" name="business-outline" *ngIf="!isActiveLocation(location.id)"></ion-icon>
-          <ion-label>{{ location.name }}</ion-label>
-        </ion-item>
-
         <ion-item button detail="false" routerLink="/user-settings" (click)="closeMenu()">
           <ion-icon slot="start" name="person-circle-outline"></ion-icon>
           <ion-label>User Settings</ion-label>

@@ -4,6 +4,7 @@
       <app-page-back-button></app-page-back-button>
     </ion-buttons>
     <ion-title>Schedule</ion-title>
+    <app-company-switcher></app-company-switcher>
     <ion-buttons slot="end" class="ion-margin-end">
       <ion-button (click)="openSettings()">
         <ion-icon slot="start" name="settings-outline"></ion-icon>
@@ -77,22 +78,20 @@
 
       <ion-item>
         <ion-label position="stacked">Start</ion-label>
-          <ion-datetime
-            presentation="date-time"
-            hour-cycle="h12"
-            [value]="editorStart()"
-            (ionChange)="editorStart.set(coerceDatetime($event.detail.value))">
-          </ion-datetime>
+        <ion-input
+          type="datetime-local"
+          [ngModel]="editorStart()"
+          (ngModelChange)="editorStart.set($event || '')">
+        </ion-input>
       </ion-item>
 
       <ion-item>
         <ion-label position="stacked">End</ion-label>
-          <ion-datetime
-            presentation="date-time"
-            hour-cycle="h12"
-            [value]="editorEnd()"
-            (ionChange)="editorEnd.set(coerceDatetime($event.detail.value))">
-          </ion-datetime>
+        <ion-input
+          type="datetime-local"
+          [ngModel]="editorEnd()"
+          (ngModelChange)="editorEnd.set($event || '')">
+        </ion-input>
       </ion-item>
 
       <ion-item lines="full">

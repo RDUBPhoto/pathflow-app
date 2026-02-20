@@ -4,8 +4,7 @@ import { FormsModule } from '@angular/forms';
 import {
   IonHeader, IonToolbar, IonTitle, IonContent, IonButtons, IonButton,
   IonIcon, IonModal, IonItem, IonLabel, IonSelect, IonSelectOption,
-  IonInput, IonTextarea, IonCheckbox, IonSpinner, IonToggle,
-  IonDatetime
+  IonInput, IonTextarea, IonCheckbox, IonSpinner, IonToggle
 } from '@ionic/angular/standalone';
 import { ActivatedRoute } from '@angular/router';
 import { DayPilot, DayPilotModule, DayPilotSchedulerComponent } from '@daypilot/daypilot-lite-angular';
@@ -20,6 +19,8 @@ import { ScheduleApi, ScheduleItem } from '../../services/schedule-api.service';
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
 import { PageBackButtonComponent } from '../../components/navigation/page-back-button/page-back-button.component';
 import { AppSettingsApiService } from '../../services/app-settings-api.service';
+import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
+import { formatLocalDateTime, toLocalDateTimeInput, toLocalDateTimeStorage } from '../../utils/datetime-local';
 
 type UICustomer = Customer & {
   vehicleYear?: string;
@@ -48,9 +49,9 @@ const SCHEDULE_SETTINGS_KEY = 'schedule.settings';
     IonHeader, IonToolbar, IonTitle, IonContent, IonButtons, IonButton,
     IonIcon, IonModal, IonItem, IonLabel, IonSelect, IonSelectOption,
     IonInput, IonTextarea, IonCheckbox, IonSpinner, IonToggle,
-    IonDatetime,
     UserMenuComponent,
-    PageBackButtonComponent
+    PageBackButtonComponent,
+    CompanySwitcherComponent
   ],
   templateUrl: './schedule.component.html',
   styleUrls: ['./schedule.component.scss']
@@ -356,6 +357,7 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
   }
 
   private refreshEvents() {
+    this.reconcileResourcesWithItems();
     const map = this.customersById();
     const list: DayPilot.EventData[] = [];
     for (const it of this.items()) {
@@ -404,7 +406,6 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
   private defaultSlot(): { start: string; end: string; resource: string } {
     const openHour = this.settingsOpenHour();
     const closeHour = this.settingsCloseHour();
-    const now = new Date();
     const start = new Date();
     start.setMinutes(0, 0, 0);
     if (start.getHours() < openHour) {
@@ -416,7 +417,11 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     const end = new Date(start.getTime() + 4 * 60 * 60 * 1000);
     if (end.getHours() > closeHour) end.setHours(closeHour, 0, 0, 0);
     const resource = (this.resources()[0]?.id || 'bay-1').toString();
-    return { start: start.toISOString(), end: end.toISOString(), resource };
+    return {
+      start: formatLocalDateTime(start),
+      end: formatLocalDateTime(end),
+      resource
+    };
   }
 
   private vehicleLabel(c: UICustomer): string {
@@ -436,8 +441,8 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     partRequests?: Array<{ partName: string; qty: number; vendorHint?: string; sku?: string; note?: string }>;
   }) {
     this.editorId.set(data.id);
-    this.editorStart.set(data.start);
-    this.editorEnd.set(data.end);
+    this.editorStart.set(toLocalDateTimeInput(data.start));
+    this.editorEnd.set(toLocalDateTimeInput(data.end));
     this.editorResource.set(data.resource);
     this.editorCustomerId.set(data.customerId || null);
     this.editorBlocked.set(!!data.isBlocked);
@@ -454,8 +459,8 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
   }
 
   saveEditor() {
-    const start = this.editorStart();
-    const end = this.editorEnd();
+    const start = toLocalDateTimeStorage(this.editorStart());
+    const end = toLocalDateTimeStorage(this.editorEnd());
     const resource = this.editorResource();
     const isBlocked = this.editorBlocked();
     const customerId = isBlocked ? '' : (this.editorCustomerId() || '');
@@ -465,7 +470,15 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     const repeatEvery = Math.max(0, Number(this.editorRepeatEvery()) || 0);
     const repeatCount = Math.max(1, Number(this.editorRepeatCount()) || 1);
 
-    if (!start || !end || !resource) return;
+    if (!start || !end || !resource) {
+      this.status.set('Start, end, and bay are required.');
+      return;
+    }
+
+    if (Date.parse(start) >= Date.parse(end)) {
+      this.status.set('End must be after start.');
+      return;
+    }
 
     const base = { start, end, resource, customerId, isBlocked, title, notes, partRequests };
     const id = this.editorId();
@@ -679,9 +692,29 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     return `${hour12}:00 ${ampm}`;
   }
 
-  coerceDatetime(value: string | string[] | null | undefined): string {
-    if (Array.isArray(value)) return value[0] || '';
-    return value || '';
+  private reconcileResourcesWithItems(): void {
+    const baseResources = [...this.resources()];
+    const seen = new Set(baseResources.map(resource => String(resource.id)));
+    let changed = false;
+
+    for (const item of this.items()) {
+      const resourceId = String(item.resource || '').trim();
+      if (!resourceId || seen.has(resourceId)) continue;
+      seen.add(resourceId);
+      baseResources.push({
+        id: resourceId,
+        name: `Unmapped (${resourceId})`
+      });
+      changed = true;
+    }
+
+    if (!changed) return;
+    this.resources.set(baseResources);
+    this.config.resources = baseResources;
+    if (this.scheduler?.control) {
+      this.scheduler.control.update({ resources: baseResources });
+    }
+    this.updateSchedulerHeight();
   }
 
   private formatPartRequestsForEditor(parts: Array<{ partName: string; qty: number; vendorHint?: string; sku?: string; note?: string }>): string {

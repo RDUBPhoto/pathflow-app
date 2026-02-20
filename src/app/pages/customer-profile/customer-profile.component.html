@@ -4,6 +4,7 @@
       <app-page-back-button></app-page-back-button>
     </ion-buttons>
     <ion-title>{{ customerId() ? 'Customer Profile' : 'New Customer' }}</ion-title>
+    <app-company-switcher></app-company-switcher>
     <div class="toolbar-actions" slot="end">
       <app-user-menu></app-user-menu>
     </div>
@@ -314,6 +315,95 @@
             <ion-label position="stacked">Service Notes</ion-label>
             <ion-textarea [(ngModel)]="notes" [autoGrow]="true" rows="16"></ion-textarea>
           </ion-item>
+        </section>
+
+        <section class="right-panel schedule-panel" *ngIf="activeTab() === 'schedule'">
+          <div class="schedule-toolbar">
+            <ion-button fill="outline" size="small" (click)="loadCustomerSchedule()" [disabled]="scheduleLoading()">
+              Refresh
+            </ion-button>
+            <ion-button size="small" (click)="addScheduleDraft()" [disabled]="!customerId() || scheduleLoading()">
+              <ion-icon slot="start" name="add-outline"></ion-icon>
+              Add Date
+            </ion-button>
+          </div>
+
+          <div class="sms-disabled" *ngIf="!customerId()">
+            Save this customer first to manage scheduled dates.
+          </div>
+          <div class="sms-loading" *ngIf="customerId() && scheduleLoading()">Loading schedule...</div>
+          <div class="sms-empty" *ngIf="customerId() && !scheduleLoading() && !scheduleEntries().length">
+            No scheduled appointments yet.
+          </div>
+
+          <div class="schedule-list" *ngIf="customerId() && !scheduleLoading() && scheduleEntries().length">
+            <article class="schedule-card" *ngFor="let entry of scheduleEntries(); trackBy: trackScheduleDraft">
+              <div class="schedule-grid">
+                <ion-item>
+                  <ion-label position="stacked">Start</ion-label>
+                  <ion-input
+                    type="datetime-local"
+                    [ngModel]="entry.startInput"
+                    (ngModelChange)="entry.startInput = ($event || '')">
+                  </ion-input>
+                </ion-item>
+
+                <ion-item>
+                  <ion-label position="stacked">End</ion-label>
+                  <ion-input
+                    type="datetime-local"
+                    [ngModel]="entry.endInput"
+                    (ngModelChange)="entry.endInput = ($event || '')">
+                  </ion-input>
+                </ion-item>
+
+                <ion-item>
+                  <ion-label position="stacked">Bay</ion-label>
+                  <ion-select
+                    interface="popover"
+                    [value]="entry.resource"
+                    (ionChange)="entry.resource = ($event.detail.value || '').toString()">
+                    <ion-select-option *ngFor="let bay of scheduleBays()" [value]="bay.id">
+                      {{ bay.name }}
+                    </ion-select-option>
+                    <ion-select-option [value]="entry.resource" *ngIf="entry.resource && !isKnownScheduleBay(entry.resource)">
+                      Unmapped ({{ entry.resource }})
+                    </ion-select-option>
+                  </ion-select>
+                </ion-item>
+              </div>
+
+              <ion-item>
+                <ion-label position="stacked">Notes</ion-label>
+                <ion-textarea
+                  [autoGrow]="true"
+                  rows="3"
+                  [ngModel]="entry.notes"
+                  (ngModelChange)="entry.notes = ($event || '')">
+                </ion-textarea>
+              </ion-item>
+
+              <div class="schedule-actions">
+                <ion-button
+                  fill="outline"
+                  color="danger"
+                  (click)="removeScheduleDraft(entry)"
+                  [disabled]="scheduleSavingId() === entry.localId || scheduleDeletingId() === entry.localId">
+                  <ion-icon slot="start" name="trash-outline"></ion-icon>
+                  Remove
+                </ion-button>
+                <ion-button
+                  (click)="saveScheduleDraft(entry)"
+                  [disabled]="!isScheduleDraftValid(entry) || scheduleSavingId() === entry.localId || scheduleDeletingId() === entry.localId">
+                  <ion-spinner slot="start" *ngIf="scheduleSavingId() === entry.localId" name="crescent"></ion-spinner>
+                  {{ scheduleSavingId() === entry.localId ? 'Saving...' : 'Save Date' }}
+                </ion-button>
+              </div>
+            </article>
+          </div>
+
+          <div class="sms-feedback success" *ngIf="scheduleStatus()">{{ scheduleStatus() }}</div>
+          <div class="sms-feedback error" *ngIf="scheduleError()">{{ scheduleError() }}</div>
         </section>
 
         <section class="right-panel" *ngIf="activeTab() === 'invoices'">

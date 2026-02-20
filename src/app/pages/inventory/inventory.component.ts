@@ -24,6 +24,7 @@ import {
 } from 'ionicons/icons';
 import { PageBackButtonComponent } from '../../components/navigation/page-back-button/page-back-button.component';
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
+import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
 import {
   InventoryApiService,
   InventoryItem,
@@ -50,7 +51,8 @@ import { PurchaseOrdersApiService } from '../../services/purchase-orders-api.ser
     IonToggle,
     IonBadge,
     PageBackButtonComponent,
-    UserMenuComponent
+    UserMenuComponent,
+    CompanySwitcherComponent
   ],
   templateUrl: './inventory.component.html',
   styleUrls: ['./inventory.component.scss']

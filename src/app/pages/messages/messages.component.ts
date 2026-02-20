@@ -27,6 +27,7 @@ import { CustomersApi, Customer } from '../../services/customers-api.service';
 import { SmsApiService, SmsDeliveryStatus, SmsMessage, SmsThreadSummary } from '../../services/sms-api.service';
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
 import { PageBackButtonComponent } from '../../components/navigation/page-back-button/page-back-button.component';
+import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
 
 type ThreadView = SmsThreadSummary & {
   displayName: string;
@@ -55,7 +56,8 @@ type ThreadView = SmsThreadSummary & {
     IonBadge,
     IonSpinner,
     UserMenuComponent,
-    PageBackButtonComponent
+    PageBackButtonComponent,
+    CompanySwitcherComponent
   ],
   templateUrl: './messages.component.html',
   styleUrls: ['./messages.component.scss']

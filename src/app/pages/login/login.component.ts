@@ -111,6 +111,25 @@ export default class LoginComponent {
     this.auth.signIn('google', this.redirectTo());
   }
 
+  startRegistration(): void {
+    this.passwordLoginError.set('');
+
+    if (this.auth.isAuthenticated() && this.auth.needsRegistration()) {
+      void this.router.navigate(['/register'], {
+        replaceUrl: true,
+        queryParams: { redirect: '/dashboard' }
+      });
+      return;
+    }
+
+    if (this.localServerMode) {
+      this.localAuthHint.set('For local mode, sign in with Email/Password or quick access below. If this is a new workspace, registration will open automatically.');
+      return;
+    }
+
+    this.auth.signIn(environment.auth.primaryProvider, '/register?redirect=/dashboard');
+  }
+
   signInDevAsUser(): void {
     this.auth.signInDev('user');
   }

@@ -41,9 +41,10 @@ import {
   codeSlashOutline,
   copyOutline
 } from 'ionicons/icons';
-import { finalize, forkJoin } from 'rxjs';
+import { finalize, firstValueFrom, forkJoin } from 'rxjs';
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
 import { PageBackButtonComponent } from '../../components/navigation/page-back-button/page-back-button.component';
+import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
 import { BrandSettingsService } from '../../services/brand-settings.service';
 import { BrandingApi } from '../../services/branding-api.service';
 import { SmsApiService, SmsConfigResponse } from '../../services/sms-api.service';
@@ -181,7 +182,8 @@ type WidgetLeadResponse = {
     IonTextarea,
     IonBadge,
     UserMenuComponent,
-    PageBackButtonComponent
+    PageBackButtonComponent,
+    CompanySwitcherComponent
   ],
   templateUrl: './admin-settings.component.html',
   styleUrls: ['./admin-settings.component.scss']
@@ -505,32 +507,30 @@ export default class AdminSettingsComponent implements OnInit {
     }
 
     this.brandingStatus = 'Uploading logo...';
-    this.brandingApi.getUploadSas(file.name, file.type || 'application/octet-stream').subscribe({
-      next: async sas => {
-        try {
-          const response = await fetch(sas.uploadUrl, {
-            method: 'PUT',
-            headers: {
-              'x-ms-blob-type': 'BlockBlob',
-              'Content-Type': file.type || 'application/octet-stream'
-            },
-            body: file
-          });
-          if (!response.ok) {
-            throw new Error(`Upload failed (${response.status})`);
-          }
-          this.branding.setLogoUrl(sas.url);
-          this.brandingStatus = 'Business logo updated.';
-        } catch {
-          this.brandingStatus = 'Logo upload failed. Try again.';
-        } finally {
-          input.value = '';
-        }
-      },
-      error: () => {
-        this.brandingStatus = 'Could not get upload URL.';
-        input.value = '';
-      }
+    void this.uploadLogoViaApi(file, input);
+  }
+
+  private async uploadLogoViaApi(file: File, input: HTMLInputElement): Promise<void> {
+    try {
+      const fileDataUrl = await this.readFileAsDataUrl(file);
+      const result = await firstValueFrom(
+        this.brandingApi.uploadLogo(file.name, file.type || 'application/octet-stream', fileDataUrl)
+      );
+      this.branding.setLogoUrl(result.url);
+      this.brandingStatus = 'Business logo updated.';
+    } catch {
+      this.brandingStatus = 'Logo upload failed. Try again.';
+    } finally {
+      input.value = '';
+    }
+  }
+
+  private readFileAsDataUrl(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error('Unable to read file.'));
+      reader.readAsDataURL(file);
     });
   }
 

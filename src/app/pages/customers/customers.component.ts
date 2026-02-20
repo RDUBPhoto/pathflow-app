@@ -10,6 +10,7 @@ import { Router } from '@angular/router';
 import { CustomersApi, Customer } from '../../services/customers-api.service';
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
 import { PageBackButtonComponent } from '../../components/navigation/page-back-button/page-back-button.component';
+import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
 
 type SortKey = 'name' | 'phone' | 'email';
 type SortDir = 'asc' | 'desc';
@@ -31,7 +32,8 @@ type UICustomer = Customer & {
     IonButtons,
     IonItem, IonLabel, IonInput, IonSpinner,
     UserMenuComponent,
-    PageBackButtonComponent
+    PageBackButtonComponent,
+    CompanySwitcherComponent
   ],
   templateUrl: './customers.component.html',
   styleUrls: ['./customers.component.scss']

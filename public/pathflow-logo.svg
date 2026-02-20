@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 180" role="img" aria-label="Pathflow logo">
+  <defs>
+    <linearGradient id="pf-accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#30d5ff"/>
+      <stop offset="48%" stop-color="#0a84ff"/>
+      <stop offset="100%" stop-color="#4f8cff"/>
+    </linearGradient>
+    <linearGradient id="pf-track" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#e3edff"/>
+      <stop offset="100%" stop-color="#9fb7e7"/>
+    </linearGradient>
+  </defs>
+
+  <g transform="translate(14 16)">
+    <rect x="0" y="0" width="140" height="140" rx="34" fill="#0f1f39"/>
+    <path d="M26 106 C44 60, 60 48, 88 48 C108 48, 124 58, 124 76 C124 95, 107 108, 85 108 L64 108" fill="none" stroke="url(#pf-track)" stroke-width="12" stroke-linecap="round"/>
+    <path d="M27 110 C44 65, 60 53, 88 53 C104 53, 114 60, 114 72 C114 84, 103 92, 86 92 L68 92" fill="none" stroke="url(#pf-accent)" stroke-width="12" stroke-linecap="round"/>
+    <circle cx="59" cy="92" r="8" fill="#30d5ff"/>
+    <circle cx="86" cy="53" r="7" fill="#72b8ff"/>
+  </g>
+
+  <g transform="translate(176 55)">
+    <text x="0" y="52" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="74" font-weight="800" letter-spacing="1.1" fill="#edf4ff" stroke="#0f1f39" stroke-width="4" paint-order="stroke">
+      PATHFLOW
+    </text>
+  </g>
+</svg>

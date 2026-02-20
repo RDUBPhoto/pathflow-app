@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 
 type SasResponse = { uploadUrl: string; url: string; expiresOn: string; tenantId: string };
+type UploadResponse = { ok: boolean; url: string; tenantId: string; contentType: string; size: number };
 
 @Injectable({ providedIn: 'root' })
 export class BrandingApi {
@@ -9,5 +10,9 @@ export class BrandingApi {
 
   getUploadSas(fileName: string, contentType: string) {
     return this.http.post<SasResponse>('/api/brandingSas', { fileName, contentType });
+  }
+
+  uploadLogo(fileName: string, contentType: string, fileDataUrl: string) {
+    return this.http.post<UploadResponse>('/api/brandingUpload', { fileName, contentType, fileDataUrl });
   }
 }

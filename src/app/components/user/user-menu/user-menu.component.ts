@@ -13,15 +13,12 @@ import {
 import { RouterLink } from '@angular/router';
 import { addIcons } from 'ionicons';
 import {
-  businessOutline,
-  checkmarkCircleOutline,
   chevronDownOutline,
   logOutOutline,
   personCircleOutline,
   shieldCheckmarkOutline
 } from 'ionicons/icons';
 import { AuthService } from '../../../auth/auth.service';
-import { TenantContextService } from '../../../services/tenant-context.service';
 
 @Component({
   selector: 'app-user-menu',
@@ -43,7 +40,6 @@ import { TenantContextService } from '../../../services/tenant-context.service';
 })
 export class UserMenuComponent {
   readonly auth = inject(AuthService);
-  private readonly tenantContext = inject(TenantContextService);
 
   readonly menuOpen = signal(false);
   readonly menuEvent = signal<Event | null>(null);
@@ -66,14 +62,6 @@ export class UserMenuComponent {
     const user = this.user();
     return (user?.displayName || user?.email || 'User').trim();
   });
-  readonly locations = computed(() => this.auth.locations());
-  readonly activeLocationId = computed(() => this.tenantContext.tenantId());
-  readonly showLocationSwitcher = computed(() => this.auth.isSuperAdmin() && this.locations().length > 0);
-  readonly activeLocationName = computed(() => {
-    const activeId = this.activeLocationId();
-    const locations = this.locations();
-    return locations.find(location => location.id === activeId)?.name || locations[0]?.name || '';
-  });
   readonly userEmail = computed(() => (this.user()?.email || '').trim());
   readonly firstName = computed(() => this.extractFirstName(this.userDisplayName(), this.userEmail()));
   readonly initials = computed(() => this.extractInitials(this.userDisplayName(), this.userEmail()));
@@ -91,9 +79,7 @@ export class UserMenuComponent {
       'chevron-down-outline': chevronDownOutline,
       'person-circle-outline': personCircleOutline,
       'shield-checkmark-outline': shieldCheckmarkOutline,
-      'log-out-outline': logOutOutline,
-      'business-outline': businessOutline,
-      'checkmark-circle-outline': checkmarkCircleOutline
+      'log-out-outline': logOutOutline
     });
 
     effect(() => {
@@ -116,24 +102,6 @@ export class UserMenuComponent {
 
   onAvatarError(): void {
     this.avatarLoadError.set(true);
-  }
-
-  switchLocation(locationId: string): void {
-    const next = String(locationId || '').trim().toLowerCase();
-    if (!next) return;
-
-    this.tenantContext.setTenantOverride(next);
-    this.closeMenu();
-    window.location.assign('/dashboard');
-  }
-
-  isActiveLocation(locationId: string): boolean {
-    const value = String(locationId || '').trim().toLowerCase();
-    return value !== '' && value === this.activeLocationId();
-  }
-
-  trackLocation(_index: number, location: { id: string }): string {
-    return location.id;
   }
 
   signOut(): void {

@@ -4,12 +4,13 @@ import { FormsModule } from '@angular/forms';
 import {
   IonModal, IonHeader, IonToolbar, IonTitle, IonButtons, IonButton,
   IonContent, IonItem, IonLabel, IonSelect, IonSelectOption, IonInput,
-  IonTextarea, IonCheckbox, IonSpinner, IonDatetime
+  IonTextarea, IonCheckbox, IonSpinner
 } from '@ionic/angular/standalone';
 import { DayPilot, DayPilotModule, DayPilotSchedulerComponent } from '@daypilot/daypilot-lite-angular';
 import { CustomersApi, Customer } from '../../../services/customers-api.service';
 import { ScheduleApi, ScheduleItem } from '../../../services/schedule-api.service';
 import { AppSettingsApiService } from '../../../services/app-settings-api.service';
+import { formatLocalDateTime, toLocalDateTimeInput, toLocalDateTimeStorage } from '../../../utils/datetime-local';
 
 type UICustomer = Customer & {
   vehicleYear?: string;
@@ -36,7 +37,7 @@ const SCHEDULE_SETTINGS_KEY = 'schedule.settings';
     CommonModule, FormsModule, DayPilotModule,
     IonModal, IonHeader, IonToolbar, IonTitle, IonButtons, IonButton,
     IonContent, IonItem, IonLabel, IonSelect, IonSelectOption, IonInput,
-    IonTextarea, IonCheckbox, IonSpinner, IonDatetime
+    IonTextarea, IonCheckbox, IonSpinner
   ],
   templateUrl: './schedule-modal.component.html',
   styleUrls: ['./schedule-modal.component.scss']
@@ -191,6 +192,7 @@ export default class ScheduleModalComponent {
   }
 
   private refreshEvents() {
+    this.reconcileResourcesWithItems();
     const list: DayPilot.EventData[] = [];
     const map: Record<string, UICustomer> = {};
     for (const c of this.customers()) map[c.id] = c;
@@ -246,8 +248,8 @@ export default class ScheduleModalComponent {
     notes?: string;
   }) {
     this.editorId.set(data.id);
-    this.editorStart.set(data.start);
-    this.editorEnd.set(data.end);
+    this.editorStart.set(toLocalDateTimeInput(data.start));
+    this.editorEnd.set(toLocalDateTimeInput(data.end));
     this.editorResource.set(data.resource);
     this.editorCustomerId.set(data.customerId || null);
     this.editorBlocked.set(!!data.isBlocked);
@@ -257,14 +259,15 @@ export default class ScheduleModalComponent {
   }
 
   saveEditor() {
-    const start = this.editorStart();
-    const end = this.editorEnd();
+    const start = toLocalDateTimeStorage(this.editorStart());
+    const end = toLocalDateTimeStorage(this.editorEnd());
     const resource = this.editorResource();
     const isBlocked = this.editorBlocked();
     const customerId = isBlocked ? '' : (this.editorCustomerId() || '');
     const title = isBlocked ? this.editorTitle().trim() : '';
     const notes = this.editorNotes().trim();
     if (!start || !end || !resource) return;
+    if (Date.parse(start) >= Date.parse(end)) return;
 
     const base = { start, end, resource, customerId, isBlocked, title, notes };
     const id = this.editorId();
@@ -279,11 +282,6 @@ export default class ScheduleModalComponent {
       next: () => { this.editorOpen.set(false); this.loadAll(); this.saved.emit(); },
       error: () => {}
     });
-  }
-
-  coerceDatetime(value: string | string[] | null | undefined): string {
-    if (Array.isArray(value)) return value[0] || '';
-    return value || '';
   }
 
   deleteEditor() {
@@ -317,7 +315,11 @@ export default class ScheduleModalComponent {
     const end = new Date(start.getTime() + 4 * 60 * 60 * 1000);
     if (end.getHours() > closeHour) end.setHours(closeHour, 0, 0, 0);
     const resource = (this.resources()[0]?.id || 'bay-1').toString();
-    return { start: start.toISOString(), end: end.toISOString(), resource };
+    return {
+      start: formatLocalDateTime(start),
+      end: formatLocalDateTime(end),
+      resource
+    };
   }
 
   private isHoliday(date: DayPilot.Date): boolean {
@@ -373,6 +375,30 @@ export default class ScheduleModalComponent {
     this.config.businessEndsHour = settings.closeHour;
     this.config.businessWeekends = settings.showWeekends;
     this.config.days = settings.showWeekends ? 7 : 5;
+  }
+
+  private reconcileResourcesWithItems(): void {
+    const baseResources = [...this.resources()];
+    const seen = new Set(baseResources.map(resource => String(resource.id)));
+    let changed = false;
+
+    for (const item of this.items()) {
+      const resourceId = String(item.resource || '').trim();
+      if (!resourceId || seen.has(resourceId)) continue;
+      seen.add(resourceId);
+      baseResources.push({
+        id: resourceId,
+        name: `Unmapped (${resourceId})`
+      });
+      changed = true;
+    }
+
+    if (!changed) return;
+    this.resources.set(baseResources);
+    this.config.resources = baseResources;
+    if (this.scheduler?.control) {
+      this.scheduler.control.update({ resources: baseResources });
+    }
   }
 
   private escapeHtml(input: string): string {

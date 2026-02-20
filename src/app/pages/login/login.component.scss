@@ -4,42 +4,206 @@
 }
 
 .auth-page {
-  --padding-top: 32px;
-  --padding-bottom: 32px;
-  --padding-start: 16px;
-  --padding-end: 16px;
+  --padding-top: 30px;
+  --padding-bottom: 30px;
+  --padding-start: 18px;
+  --padding-end: 18px;
 }
 
 .auth-shell {
   min-height: 100%;
   display: grid;
-  place-items: center;
+  gap: 18px;
+  grid-template-columns: 1fr;
+  max-width: 1160px;
+  margin: 0 auto;
 }
 
-.auth-card {
-  width: min(520px, 100%);
+.marketing-panel {
+  min-height: 320px;
   border-radius: 18px;
+  overflow: hidden;
+  position: relative;
   border: 1px solid var(--app-border-subtle);
-  box-shadow: var(--glass-shadow);
+  background: #101a2b;
 }
 
-.helper {
-  margin: 0 0 16px;
-  font-size: 14px;
+.marketing-image {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(7, 12, 20, 0.22) 0%, rgba(7, 12, 20, 0.66) 100%),
+    url('/auth-hero.svg') center center / cover no-repeat;
+}
+
+.marketing-overlay {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 20px;
+  color: #f4f7ff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.marketing-logo {
+  width: 170px;
+  height: auto;
+  margin-bottom: auto;
+}
+
+.marketing-kicker {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
   opacity: 0.85;
 }
 
-ion-button {
+.marketing-overlay h2 {
+  margin: 0;
+  font-size: clamp(24px, 2.4vw, 34px);
+  line-height: 1.08;
+}
+
+.marketing-overlay p {
+  margin: 0;
+  font-size: 14px;
+  opacity: 0.9;
+  max-width: 520px;
+}
+
+.auth-panel {
+  border-radius: 18px;
+  border: 1px solid var(--app-border-subtle);
+  padding: 22px 20px;
+}
+
+.auth-header {
+  margin-bottom: 14px;
+}
+
+.auth-kicker {
+  margin: 0 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.74;
+}
+
+.auth-header h1 {
+  margin: 0;
+  font-size: clamp(27px, 2.1vw, 36px);
+  line-height: 1.08;
+}
+
+.form-card {
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 14px;
+  background: rgba(35, 49, 72, 0.42);
+  padding: 14px;
+}
+
+.form-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.form-card-head h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.register-cta {
+  appearance: none;
+  width: 100%;
+  border: 1px solid rgba(29, 107, 255, 0.45);
+  border-radius: 10px;
+  background: rgba(29, 107, 255, 0.12);
+  color: #86b5ff;
+  text-align: center;
+  font-weight: 700;
+  font-size: 15px;
+  line-height: 1.25;
+  letter-spacing: 0.01em;
+  padding: 10px 12px;
+  margin-top: 10px;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background-color 0.2s ease, color 0.2s ease;
+}
+
+.register-cta:hover,
+.register-cta:focus-visible {
+  border-color: rgba(79, 140, 255, 0.8);
+  background: rgba(29, 107, 255, 0.2);
+  color: #d8e8ff;
+}
+
+.auth-panel ion-item {
+  --background: rgba(55, 65, 81, 0.56);
+  --border-color: transparent;
+  --inner-border-width: 0;
+  --padding-start: 12px;
+  --inner-padding-end: 12px;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 10px;
+  margin-top: 10px;
+}
+
+.auth-panel ion-item ion-label {
+  margin-bottom: 4px;
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+.auth-panel ion-button {
   margin-top: 12px;
+  min-height: 44px;
+}
+
+.or-divider {
+  margin: 16px 0 2px;
+  position: relative;
+  text-align: center;
+}
+
+.or-divider::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  border-top: 1px solid var(--app-border-subtle);
+}
+
+.or-divider span {
+  position: relative;
+  display: inline-block;
+  padding: 0 10px;
+  background: rgba(18, 30, 48, 0.95);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.76;
 }
 
 .secure-note {
-  margin-top: 14px;
+  margin-top: 12px;
   display: flex;
   align-items: flex-start;
   gap: 8px;
   font-size: 13px;
-  opacity: 0.85;
+  opacity: 0.86;
+}
+
+.secure-note ion-icon {
+  margin-top: 1px;
 }
 
 .loading {
@@ -49,20 +213,24 @@ ion-button {
 }
 
 .dev-box {
-  margin-top: 18px;
-  border-top: 1px solid var(--app-border-subtle);
-  padding-top: 14px;
+  margin-top: 14px;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 12px;
+  background: rgba(29, 41, 62, 0.38);
+  padding: 12px;
 }
 
 .dev-title {
+  margin: 0;
   font-size: 12px;
-  opacity: 0.82;
-  margin-bottom: 8px;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
+  opacity: 0.8;
+  font-weight: 700;
 }
 
 .dev-actions {
+  margin-top: 8px;
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
@@ -76,5 +244,20 @@ ion-button {
 }
 
 .auth-hint.error {
-  color: var(--ion-color-danger, #b31d1d);
+  color: var(--ion-color-danger, #d14343);
+}
+
+@media (min-width: 980px) {
+  .auth-shell {
+    grid-template-columns: minmax(360px, 0.95fr) minmax(520px, 1fr);
+    align-items: stretch;
+  }
+
+  .marketing-panel {
+    min-height: 700px;
+  }
+
+  .auth-panel {
+    padding: 24px;
+  }
 }

@@ -1,6 +1,9 @@
 :host {
   display: block;
   min-height: 100vh;
+  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
 }
 
 .internal-shell {
@@ -8,6 +11,9 @@
   display: grid;
   grid-template-columns: var(--nav-width) minmax(0, 1fr);
   min-height: 100vh;
+  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
 }
 
 .internal-shell.collapsed {
@@ -353,14 +359,80 @@
 
 .main-pane {
   min-width: 0;
-  min-height: 100vh;
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .page-pane {
   min-width: 0;
   min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.page-pane > router-outlet {
+  display: none;
+}
+
+.page-pane > :not(router-outlet) {
+  min-height: 0;
+  flex: 1 1 auto;
+  display: block;
+}
+
+.trial-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 42px;
+  padding: 8px 14px;
+  border-bottom: 1px solid rgba(255, 92, 92, 0.35);
+  background: linear-gradient(90deg, rgba(90, 19, 19, 0.74), rgba(80, 16, 16, 0.55));
+}
+
+.trial-banner-copy {
+  min-width: 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.trial-banner-label {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #ff8a8a;
+}
+
+.trial-banner-text {
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffd0d0;
+}
+
+.trial-pay-link {
+  appearance: none;
+  border: 1px solid rgba(255, 159, 159, 0.8);
+  background: rgba(255, 82, 82, 0.2);
+  color: #fff0f0;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.trial-pay-link:hover,
+.trial-pay-link:focus-visible {
+  background: rgba(255, 82, 82, 0.3);
 }
 
 .internal-shell.collapsed .nav-label,
@@ -369,9 +441,8 @@
   display: none;
 }
 
-.internal-shell.collapsed .brand-logo {
-  height: 30px;
-  max-width: 30px;
+.internal-shell.collapsed .brand-home {
+  display: none;
 }
 
 .internal-shell.collapsed .nav-link {
@@ -471,5 +542,25 @@
     min-width: 18px;
     height: 18px;
     font-size: 10px;
+  }
+
+  .trial-banner {
+    padding: 8px 10px;
+    min-height: 40px;
+    gap: 8px;
+  }
+
+  .trial-banner-copy {
+    gap: 6px;
+  }
+
+  .trial-banner-label,
+  .trial-banner-text {
+    font-size: 12px;
+  }
+
+  .trial-pay-link {
+    padding: 3px 10px;
+    font-size: 11px;
   }
 }

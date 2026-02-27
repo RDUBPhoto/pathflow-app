@@ -17,6 +17,7 @@
       <div class="hero-avatar" [style.--avatar-color]="avatarColor()">{{ avatarInitials() }}</div>
       <div class="hero-copy">
         <h1>{{ displayName() }}</h1>
+        <div class="hero-since" *ngIf="customerCreatedAt">Customer since {{ customerSinceLabel() }}</div>
         <div class="hero-meta">
           <span>{{ email || 'No email set' }}</span>
           <span>{{ phone || 'No phone set' }}</span>
@@ -300,16 +301,39 @@
       <ng-container *ngTemplateOutlet="profilePanelsTemplate"></ng-container>
     </section>
 
-    <section class="right-column glass-surface" *ngIf="!isMobileLayout() || mobileTab() !== 'profile'">
+    <section
+      class="right-column glass-surface"
+      [class.sms-active]="activeTab() === 'sms'"
+      *ngIf="!isMobileLayout() || mobileTab() !== 'profile'">
       <div class="right-header">
-        <ion-icon [name]="tabIcon(activeTab())"></ion-icon>
-        <span>{{ activeTabLabel() }}</span>
-        <ion-badge *ngIf="tabActivityCount(activeTab()) > 0" color="primary">
-          {{ tabActivityCount(activeTab()) }}
-        </ion-badge>
+        <div class="right-header-title" style="display:flex;align-items:center;gap:8px;min-width:0;">
+          <ion-icon [name]="tabIcon(activeTab())"></ion-icon>
+          <span>{{ activeTabLabel() }}</span>
+          <ion-badge *ngIf="tabActivityCount(activeTab()) > 0" color="primary">
+            {{ tabActivityCount(activeTab()) }}
+          </ion-badge>
+        </div>
+        <div class="right-header-actions" style="display:flex;" *ngIf="activeTab() === 'schedule' || activeTab() === 'invoices'">
+          <ion-button
+            size="small"
+            *ngIf="activeTab() === 'schedule'"
+            (click)="openScheduleAppointmentModal()"
+            [disabled]="!customerId() || scheduleLoading()">
+            <ion-icon slot="start" name="add-outline"></ion-icon>
+            Add Appointment
+          </ion-button>
+          <ion-button
+            size="small"
+            fill="outline"
+            *ngIf="activeTab() === 'invoices'"
+            (click)="openCreateInvoice()"
+            [disabled]="!customerId()">
+            Create Invoice
+          </ion-button>
+        </div>
       </div>
 
-      <div class="right-content">
+      <div class="right-content" [class.sms-active]="activeTab() === 'sms'">
         <section class="right-panel" *ngIf="activeTab() === 'notes'">
           <ion-item>
             <ion-label position="stacked">Service Notes</ion-label>
@@ -319,109 +343,127 @@
 
         <section class="right-panel schedule-panel" *ngIf="activeTab() === 'schedule'">
           <div class="schedule-toolbar">
-            <ion-button fill="outline" size="small" (click)="loadCustomerSchedule()" [disabled]="scheduleLoading()">
-              Refresh
-            </ion-button>
-            <ion-button size="small" (click)="addScheduleDraft()" [disabled]="!customerId() || scheduleLoading()">
-              <ion-icon slot="start" name="add-outline"></ion-icon>
-              Add Date
-            </ion-button>
+            <div class="invoice-date">Upcoming Appointments</div>
           </div>
 
           <div class="sms-disabled" *ngIf="!customerId()">
             Save this customer first to manage scheduled dates.
           </div>
           <div class="sms-loading" *ngIf="customerId() && scheduleLoading()">Loading schedule...</div>
-          <div class="sms-empty" *ngIf="customerId() && !scheduleLoading() && !scheduleEntries().length">
-            No scheduled appointments yet.
-          </div>
 
-          <div class="schedule-list" *ngIf="customerId() && !scheduleLoading() && scheduleEntries().length">
-            <article class="schedule-card" *ngFor="let entry of scheduleEntries(); trackBy: trackScheduleDraft">
-              <div class="schedule-grid">
-                <ion-item>
-                  <ion-label position="stacked">Start</ion-label>
-                  <ion-input
-                    type="datetime-local"
-                    [ngModel]="entry.startInput"
-                    (ngModelChange)="entry.startInput = ($event || '')">
-                  </ion-input>
-                </ion-item>
+          <ng-container *ngIf="customerId() && !scheduleLoading()">
+            <div class="schedule-section">
+              <div class="sms-empty" *ngIf="!upcomingScheduleEntries().length">No upcoming appointments.</div>
+              <div class="schedule-list" *ngIf="upcomingScheduleEntries().length">
+                <article class="schedule-card" *ngFor="let entry of upcomingScheduleEntries(); trackBy: trackScheduleDraft">
+                  <div class="schedule-grid">
+                    <ion-item>
+                      <ion-label position="stacked">Start</ion-label>
+                      <ion-input
+                        type="datetime-local"
+                        [ngModel]="entry.startInput"
+                        (ngModelChange)="entry.startInput = ($event || '')">
+                      </ion-input>
+                    </ion-item>
 
-                <ion-item>
-                  <ion-label position="stacked">End</ion-label>
-                  <ion-input
-                    type="datetime-local"
-                    [ngModel]="entry.endInput"
-                    (ngModelChange)="entry.endInput = ($event || '')">
-                  </ion-input>
-                </ion-item>
+                    <ion-item>
+                      <ion-label position="stacked">End</ion-label>
+                      <ion-input
+                        type="datetime-local"
+                        [ngModel]="entry.endInput"
+                        (ngModelChange)="entry.endInput = ($event || '')">
+                      </ion-input>
+                    </ion-item>
 
-                <ion-item>
-                  <ion-label position="stacked">Bay</ion-label>
-                  <ion-select
-                    interface="popover"
-                    [value]="entry.resource"
-                    (ionChange)="entry.resource = ($event.detail.value || '').toString()">
-                    <ion-select-option *ngFor="let bay of scheduleBays()" [value]="bay.id">
-                      {{ bay.name }}
-                    </ion-select-option>
-                    <ion-select-option [value]="entry.resource" *ngIf="entry.resource && !isKnownScheduleBay(entry.resource)">
-                      Unmapped ({{ entry.resource }})
-                    </ion-select-option>
-                  </ion-select>
-                </ion-item>
+                    <ion-item>
+                      <ion-label position="stacked">Bay</ion-label>
+                      <ion-select
+                        interface="popover"
+                        [value]="entry.resource"
+                        (ionChange)="entry.resource = ($event.detail.value || '').toString()">
+                        <ion-select-option *ngFor="let bay of scheduleBays()" [value]="bay.id">
+                          {{ bay.name }}
+                        </ion-select-option>
+                        <ion-select-option [value]="entry.resource" *ngIf="entry.resource && !isKnownScheduleBay(entry.resource)">
+                          Unmapped ({{ entry.resource }})
+                        </ion-select-option>
+                      </ion-select>
+                    </ion-item>
+                  </div>
+
+                  <ion-item>
+                    <ion-label position="stacked">Notes</ion-label>
+                    <ion-textarea
+                      [autoGrow]="true"
+                      rows="3"
+                      [ngModel]="entry.notes"
+                      (ngModelChange)="entry.notes = ($event || '')">
+                    </ion-textarea>
+                  </ion-item>
+
+                  <div class="schedule-actions">
+                    <ion-button
+                      (click)="saveScheduleDraft(entry)"
+                      [disabled]="!isScheduleDraftValid(entry) || scheduleSavingId() === entry.localId || scheduleDeletingId() === entry.localId">
+                      <ion-spinner slot="start" *ngIf="scheduleSavingId() === entry.localId" name="crescent"></ion-spinner>
+                      {{ scheduleSavingId() === entry.localId ? 'Saving...' : 'Save Appointment' }}
+                    </ion-button>
+                  </div>
+                </article>
               </div>
+            </div>
 
-              <ion-item>
-                <ion-label position="stacked">Notes</ion-label>
-                <ion-textarea
-                  [autoGrow]="true"
-                  rows="3"
-                  [ngModel]="entry.notes"
-                  (ngModelChange)="entry.notes = ($event || '')">
-                </ion-textarea>
-              </ion-item>
-
-              <div class="schedule-actions">
-                <ion-button
-                  fill="outline"
-                  color="danger"
-                  (click)="removeScheduleDraft(entry)"
-                  [disabled]="scheduleSavingId() === entry.localId || scheduleDeletingId() === entry.localId">
-                  <ion-icon slot="start" name="trash-outline"></ion-icon>
-                  Remove
-                </ion-button>
-                <ion-button
-                  (click)="saveScheduleDraft(entry)"
-                  [disabled]="!isScheduleDraftValid(entry) || scheduleSavingId() === entry.localId || scheduleDeletingId() === entry.localId">
-                  <ion-spinner slot="start" *ngIf="scheduleSavingId() === entry.localId" name="crescent"></ion-spinner>
-                  {{ scheduleSavingId() === entry.localId ? 'Saving...' : 'Save Date' }}
-                </ion-button>
+            <div class="schedule-section">
+              <div class="invoice-date">Appointment History</div>
+              <div class="sms-empty" *ngIf="!historyScheduleEntries().length">No appointment history yet.</div>
+              <div class="schedule-list" *ngIf="historyScheduleEntries().length">
+                <article class="schedule-card" *ngFor="let entry of historyScheduleEntries(); trackBy: trackScheduleDraft">
+                  <div class="invoice-line" style="align-items:flex-start;">
+                    <div style="display:grid;gap:2px;min-width:0;">
+                      <span class="invoice-date">Start</span>
+                      <strong>{{ scheduleDateLabel(entry.startInput) }}</strong>
+                    </div>
+                    <div style="display:grid;gap:2px;min-width:0;text-align:right;">
+                      <span class="invoice-date">End</span>
+                      <strong>{{ scheduleDateLabel(entry.endInput) }}</strong>
+                    </div>
+                  </div>
+                  <div class="invoice-date">Bay: {{ scheduleBayLabel(entry.resource) }}</div>
+                  <div class="invoice-note">{{ entry.notes.trim() || 'No notes.' }}</div>
+                </article>
               </div>
-            </article>
-          </div>
+            </div>
+          </ng-container>
 
           <div class="sms-feedback success" *ngIf="scheduleStatus()">{{ scheduleStatus() }}</div>
           <div class="sms-feedback error" *ngIf="scheduleError()">{{ scheduleError() }}</div>
         </section>
 
         <section class="right-panel" *ngIf="activeTab() === 'invoices'">
-          <div class="invoice-grid">
-            <article class="invoice-card" *ngFor="let invoice of invoiceMocks">
+          <div class="invoice-grid" *ngIf="customerInvoices().length; else noCustomerInvoices">
+            <article
+              class="invoice-card invoice-card-link"
+              *ngFor="let invoice of customerInvoices(); trackBy: trackInvoice"
+              role="button"
+              tabindex="0"
+              (click)="openInvoice(invoice)"
+              (keydown.enter)="openInvoice(invoice)"
+              (keydown.space)="openInvoice(invoice); $event.preventDefault()">
               <div class="invoice-line">
-                <strong>{{ invoice.id }}</strong>
-                <ion-badge [color]="invoice.status === 'Paid' ? 'success' : (invoice.status === 'Open' ? 'warning' : 'medium')">
-                  {{ invoice.status }}
+                <strong>{{ invoice.invoiceNumber }}</strong>
+                <ion-badge [color]="invoiceBadgeColor(invoice)">
+                  {{ invoiceStatusLabel(invoice) }}
                 </ion-badge>
               </div>
-              <div class="invoice-amount">{{ invoice.amount }}</div>
-              <div class="invoice-date">{{ invoice.date }}</div>
+              <div class="invoice-date">Template: {{ invoice.template }}</div>
+              <div class="invoice-date">Vehicle: {{ invoice.vehicle }}</div>
+              <div class="invoice-amount">{{ invoice.total | currency:'USD':'symbol':'1.2-2' }}</div>
+              <div class="invoice-date">Invoiced: {{ invoice.invoicedAt }}</div>
             </article>
           </div>
-          <div class="invoice-note">
-            Invoice integration is currently static and will be wired to your billing provider later.
-          </div>
+          <ng-template #noCustomerInvoices>
+            <div class="invoice-note">No invoices for this customer yet.</div>
+          </ng-template>
         </section>
 
         <section class="right-panel sms-panel" *ngIf="activeTab() === 'sms'">

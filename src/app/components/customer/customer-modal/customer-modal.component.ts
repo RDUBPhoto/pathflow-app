@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
   IonModal, IonHeader, IonToolbar, IonTitle, IonButtons, IonButton,
-  IonContent, IonItem, IonLabel, IonInput, IonTextarea, IonList, IonNote, IonSpinner
+  IonContent, IonItem, IonLabel, IonInput, IonTextarea, IonList, IonNote, IonSpinner, IonFooter
 } from '@ionic/angular/standalone';
 import { HttpClient } from '@angular/common/http';
 import { CustomersApi, Customer } from '../../../services/customers-api.service';
@@ -36,7 +36,7 @@ type UICustomer = Customer & {
   imports: [
     CommonModule, FormsModule,
     IonHeader, IonToolbar, IonTitle, IonButtons, IonButton,
-    IonContent, IonItem, IonLabel, IonInput, IonTextarea, IonList, IonNote, IonSpinner
+    IonContent, IonItem, IonLabel, IonInput, IonTextarea, IonList, IonNote, IonSpinner, IonFooter
   ],
   templateUrl: './customer-modal.component.html',
   styleUrls: ['./customer-modal.component.scss']
@@ -55,6 +55,7 @@ export default class CustomerModalComponent implements OnInit, OnChanges {
   status = signal('');
   loadingForm = signal<boolean>(false);
   showErrors = signal<boolean>(false);
+  private initialFormSnapshot = signal('');
 
   allCustomers = signal<Customer[]>([]);
   dupMatches = signal<Customer[]>([]);
@@ -114,6 +115,7 @@ export default class CustomerModalComponent implements OnInit, OnChanges {
     if (!v) return true;
     return /^[A-HJ-NPR-Z0-9]{17}$/.test(v);
   });
+  formDirty = computed(() => this.formSnapshotValue() !== this.initialFormSnapshot());
   canSave = computed(() =>
     this.nameValid() &&
     this.phoneValid() &&
@@ -122,7 +124,8 @@ export default class CustomerModalComponent implements OnInit, OnChanges {
     this.vehicleMakeValid() &&
     this.vehicleModelValid() &&
     this.vehicleYearValid() &&
-    this.vinValid()
+    this.vinValid() &&
+    this.formDirty()
   );
   hasVinDetails = computed(() => Object.values(this.vinDecoded()).some(v => !!v));
 
@@ -312,6 +315,7 @@ export default class CustomerModalComponent implements OnInit, OnChanges {
   private resetStateAfterSave() {
     this.showErrors.set(false);
     this.status.set('Saved');
+    this.markFormPristine();
   }
 
   private loadAllCustomers() {
@@ -345,6 +349,7 @@ export default class CustomerModalComponent implements OnInit, OnChanges {
     this.dupMatches.set([]);
     this.selectedExistingId.set(null);
     this.showErrors.set(false);
+    this.markFormPristine();
   }
 
   private fillFormFromCustomer(c: UICustomer) {
@@ -373,6 +378,34 @@ export default class CustomerModalComponent implements OnInit, OnChanges {
     this.vinDecoded.set({});
     this.vinStatus.set('');
     this.showErrors.set(false);
+    this.markFormPristine();
+  }
+
+  private formSnapshotValue(): string {
+    return JSON.stringify({
+      firstName: this.firstName().trim(),
+      lastName: this.lastName().trim(),
+      phone: this.phone().trim(),
+      email: this.email().trim().toLowerCase(),
+      address: this.address().trim(),
+      notes: this.notes().trim(),
+      vin: this.vin().trim().toUpperCase(),
+      vehicleMake: this.vehicleMake().trim(),
+      vehicleModel: this.vehicleModel().trim(),
+      vehicleYear: this.vehicleYear().trim(),
+      vehicleTrim: this.vehicleTrim().trim(),
+      vehicleDoors: this.vehicleDoors().trim(),
+      bedLength: this.bedLength().trim(),
+      cabType: this.cabType().trim(),
+      engineModel: this.engineModel().trim(),
+      engineCylinders: this.engineCylinders().trim(),
+      transmissionStyle: this.transmissionStyle().trim(),
+      vehicleColor: this.vehicleColor().trim()
+    });
+  }
+
+  private markFormPristine(): void {
+    this.initialFormSnapshot.set(this.formSnapshotValue());
   }
 
   private normalizePhone(v: string): string {

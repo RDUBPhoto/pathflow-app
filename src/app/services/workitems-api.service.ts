@@ -12,6 +12,7 @@ export type WorkItem = {
   updatedAt?: string;
   checkedInAt?: string;
   completedAt?: string;
+  calendarOverrideAt?: string;
 };
 
 @Injectable({ providedIn: 'root' })

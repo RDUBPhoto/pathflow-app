@@ -71,7 +71,7 @@ export default class LoginComponent {
     effect(() => {
       if (!this.auth.initialized()) return;
       if (!this.auth.isAuthenticated()) return;
-      if (this.auth.needsRegistration()) {
+      if (this.auth.needsRegistration() || this.auth.isAccessLocked()) {
         void this.router.navigate(['/register'], {
           replaceUrl: true,
           queryParams: { redirect: this.redirectTo() }
@@ -103,7 +103,7 @@ export default class LoginComponent {
   startRegistration(): void {
     this.passwordLoginError.set('');
 
-    if (this.auth.isAuthenticated() && this.auth.needsRegistration()) {
+    if (this.auth.isAuthenticated() && (this.auth.needsRegistration() || this.auth.isAccessLocked())) {
       void this.router.navigate(['/register'], {
         replaceUrl: true,
         queryParams: { redirect: '/dashboard' }
@@ -111,12 +111,9 @@ export default class LoginComponent {
       return;
     }
 
-    if (this.localServerMode) {
-      this.localAuthHint.set('For local mode, sign in with Email/Password or quick access below. If this is a new workspace, registration will open automatically.');
-      return;
-    }
-
-    this.auth.signIn(environment.auth.primaryProvider, '/register?redirect=/dashboard');
+    void this.router.navigate(['/signup'], {
+      queryParams: { redirect: this.redirectTo() }
+    });
   }
 
   signInDevAsUser(): void {
@@ -133,7 +130,18 @@ export default class LoginComponent {
 
     const result = this.auth.signInWithEmailPassword(this.localLoginEmail, this.localLoginPassword);
     if (!result.ok) {
-      this.passwordLoginError.set(result.error || 'Unable to sign in.');
+      const errorText = (result.error || '').toLowerCase();
+      if (
+        errorText.includes('not enabled') ||
+        errorText.includes('invalid') ||
+        errorText.includes('incorrect') ||
+        errorText.includes('unauthorized')
+      ) {
+        this.passwordLoginError.set('Email/Password is not correct. Do you need to create an account?');
+        return;
+      }
+
+      this.passwordLoginError.set(result.error || 'Email/Password is not correct. Do you need to create an account?');
       return;
     }
   }

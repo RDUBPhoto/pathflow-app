@@ -1,40 +1,13 @@
+:host {
+  display: block;
+  height: 100%;
+}
+
 .board {
   height: 100%;
   overflow-x: auto;
   overflow-y: hidden;
   padding: 0 4px;
-}
-
-.theme-item {
-  --min-height: 58px;
-}
-
-.theme-direction-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.theme-side {
-  font-size: 12px;
-  color: var(--app-text-muted);
-  min-width: 34px;
-  text-align: center;
-}
-
-.theme-side.active {
-  color: var(--app-text);
-  font-weight: 700;
-}
-
-.theme-direction-toggle ion-toggle {
-  --track-background: rgba(100, 116, 139, 0.34);
-  --track-background-checked: rgba(10, 132, 255, 0.54);
-  --handle-background: #ffffff;
-  --handle-background-checked: #ffffff;
-  --handle-width: 16px;
-  --handle-height: 16px;
-  --border-radius: 14px;
 }
 
 .lanes {
@@ -150,6 +123,13 @@
   width: 100%;
 }
 
+.card-head-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .card-name-lg { font-size: 1rem; font-weight: 700; }
 
 .card-drag-handle {
@@ -243,6 +223,7 @@
   }
 }
 .card-line { font-size: 12px; display: flex; align-items: flex-start; gap: 8px; }
+.card-line.vehicle-color-line { align-items: center; }
 .muted { color: var(--ion-color-medium); }
 
 .lead-time {
@@ -262,13 +243,38 @@
 }
 
 .card-actions {
-  margin-top: 2px;
+  margin-top: auto;
+  padding-top: 6px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .card-actions ion-button {
   margin: 0;
   --padding-start: 10px;
   --padding-end: 10px;
+}
+
+.card-actions .check-in-btn {
+  --background: var(--ion-color-primary, #2563eb);
+  --background-hover: var(--ion-color-primary-shade, #1d4ed8);
+  --background-activated: var(--ion-color-primary-shade, #1d4ed8);
+  --color: #ffffff;
+  --border-width: 0;
+  --box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.card-actions .revert-check-in-btn {
+  font-weight: 600;
+}
+
+.card-actions .calendar-override-btn {
+  font-weight: 600;
 }
 
 .card-menu-btn {
@@ -286,23 +292,26 @@
   border: 1px solid rgba(0,0,0,.15);
 }
 
-.card-notes { margin-top: 4px; }
+.card-notes {
+  margin-top: 4px;
+}
 
-.notes-toggle-btn {
-  --background: var(--app-nav-active-bg);
-  --background-hover: var(--app-nav-active-bg-hover);
-  --background-activated: var(--app-nav-active-bg-hover);
-  --color: var(--app-nav-active-text);
-  --box-shadow: none;
-  --border-width: 0;
-  --border-radius: 9px;
-  --padding-start: 10px;
-  --padding-end: 10px;
-  min-height: 28px;
-  margin: 3px 0 2px;
-  box-shadow: none;
-  font-size: 11px;
-  letter-spacing: 0.03em;
+.notes-toggle-link {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 2px 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ion-color-primary, #2563eb);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.notes-toggle-link:hover {
+  color: var(--ion-color-primary-shade, #1d4ed8);
 }
 
 .notes {
@@ -323,6 +332,14 @@
   font-weight: 700;
   flex: 1 1 auto;
   min-width: 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.lane-count {
+  font-weight: 700;
+  color: var(--app-text-muted);
 }
 
 .lane-menu-btn {

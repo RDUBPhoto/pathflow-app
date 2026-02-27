@@ -92,6 +92,21 @@ function humanizeTenantId(tenantId) {
     .join(" ");
 }
 
+function ensureUniqueTenantId(baseId, existingIds) {
+  const taken = existingIds instanceof Set ? existingIds : new Set();
+  const base = sanitizeTenantId(asString(baseId)) || "location";
+  if (!taken.has(base)) return base;
+
+  let suffix = 2;
+  while (suffix < 5000) {
+    const candidate = sanitizeTenantId(`${base}-${suffix}`);
+    if (candidate && !taken.has(candidate)) return candidate;
+    suffix += 1;
+  }
+
+  return sanitizeTenantId(`${base}-${randomUUID().slice(0, 8)}`) || `${base}-${Date.now()}`;
+}
+
 function digitsOnly(value) {
   return asString(value).replace(/\D+/g, "");
 }
@@ -162,6 +177,22 @@ function normalizeBillingPayload(rawBilling) {
     mode: "pending",
     last4: cardNumber.slice(-4)
   };
+}
+
+function normalizePlanCycle(value) {
+  return asString(value).toLowerCase() === "annual" ? "annual" : "monthly";
+}
+
+function normalizeBillingStatus(value) {
+  const normalized = asString(value).toLowerCase();
+  if (!normalized) return "trial";
+  if (normalized === "pending") return "active";
+  return normalized;
+}
+
+function billingStatusAllowsAccess(status) {
+  const normalized = normalizeBillingStatus(status);
+  return normalized === "active" || normalized === "sandbox";
 }
 
 function getEmailMode() {
@@ -318,7 +349,17 @@ async function listTenants(tenantClient) {
     const id = sanitizeTenantId(asString(entity.rowKey));
     if (!id) continue;
     const name = asString(entity.name) || humanizeTenantId(id);
-    out.push({ id, name });
+    out.push({
+      id,
+      name,
+      status: asString(entity.status || "active") || "active",
+      billingStatus: normalizeBillingStatus(entity.billingStatus),
+      billingLast4: asString(entity.billingLast4),
+      billingUpdatedAt: asString(entity.billingUpdatedAt),
+      trialStartsAt: asString(entity.trialStartsAt),
+      trialEndsAt: asString(entity.trialEndsAt),
+      planCycle: normalizePlanCycle(entity.planCycle)
+    });
   }
   out.sort((a, b) => String(a.name).localeCompare(String(b.name)) || String(a.id).localeCompare(String(b.id)));
   return out;
@@ -332,15 +373,6 @@ async function getUserEntity(userClient, email) {
   } catch {
     return null;
   }
-}
-
-async function anyUsersExist(userClient) {
-  const filter = `PartitionKey eq '${escapedFilterValue(USERS_PARTITION)}'`;
-  const iter = userClient.listEntities({ queryOptions: { filter } });
-  for await (const _entity of iter) {
-    return true;
-  }
-  return false;
 }
 
 function parseUserLocationIds(userEntity) {
@@ -365,19 +397,67 @@ function buildUserLocations(userEntity, tenants) {
   const tenantList = Array.isArray(tenants) ? tenants : [];
   const allLocations = asBool(userEntity && userEntity.allLocations);
   const allowedIds = parseUserLocationIds(userEntity);
+  const toLocation = item => ({ id: item.id, name: item.name });
 
   if (allLocations || !allowedIds.length) {
-    return [...tenantList];
+    return tenantList.map(toLocation);
   }
 
   const byId = new Map(tenantList.map(item => [item.id, item]));
-  return allowedIds.map(id => byId.get(id) || { id, name: humanizeTenantId(id) });
+  return allowedIds.map(id => {
+    const item = byId.get(id);
+    if (item) return toLocation(item);
+    return { id, name: humanizeTenantId(id) };
+  });
 }
 
 function pickDefaultLocation(userEntity, locations) {
   const normalized = sanitizeTenantId(asString(userEntity && userEntity.defaultLocationId));
   if (normalized && locations.some(item => item.id === normalized)) return normalized;
   return locations[0]?.id || "";
+}
+
+function pickBillingTenant(userEntity, allTenants, defaultLocationId, locations) {
+  const tenantList = Array.isArray(allTenants) ? allTenants : [];
+  if (!tenantList.length) return null;
+
+  const byId = new Map(tenantList.map(item => [item.id, item]));
+  if (defaultLocationId && byId.has(defaultLocationId)) return byId.get(defaultLocationId);
+
+  const allLocations = asBool(userEntity && userEntity.allLocations);
+  if (!allLocations) {
+    const allowed = parseUserLocationIds(userEntity);
+    for (const id of allowed) {
+      if (byId.has(id)) return byId.get(id);
+    }
+  }
+
+  const firstLocationId = Array.isArray(locations) ? asString(locations[0] && locations[0].id) : "";
+  if (firstLocationId && byId.has(firstLocationId)) return byId.get(firstLocationId);
+  return tenantList[0] || null;
+}
+
+function buildBillingProfileFromTenant(tenant) {
+  const billingStatus = normalizeBillingStatus(tenant && tenant.billingStatus);
+  const trialStartsAt = asString(tenant && tenant.trialStartsAt);
+  const trialEndsAt = asString(tenant && tenant.trialEndsAt);
+  const planCycle = normalizePlanCycle(tenant && tenant.planCycle);
+
+  const trialEndsMs = Date.parse(trialEndsAt);
+  const trialExpired = Number.isFinite(trialEndsMs) ? Date.now() > trialEndsMs : false;
+  const accessLocked = !billingStatusAllowsAccess(billingStatus) && trialExpired;
+  const accessLockReason = accessLocked
+    ? `Trial expired on ${new Date(trialEndsMs).toISOString().slice(0, 10)}. Add billing to continue.`
+    : "";
+
+  return {
+    billingStatus,
+    trialStartsAt,
+    trialEndsAt,
+    accessLocked,
+    accessLockReason,
+    planCycle
+  };
 }
 
 function buildMeResponse(principal, userEntity, allTenants, canBootstrap) {
@@ -399,6 +479,8 @@ function buildMeResponse(principal, userEntity, allTenants, canBootstrap) {
   const roles = parseUserRoles(userEntity);
   const locations = buildUserLocations(userEntity, allTenants);
   const defaultLocationId = pickDefaultLocation(userEntity, locations);
+  const billingTenant = pickBillingTenant(userEntity, allTenants, defaultLocationId, locations);
+  const billingProfile = buildBillingProfileFromTenant(billingTenant);
 
   return {
     ok: true,
@@ -410,7 +492,13 @@ function buildMeResponse(principal, userEntity, allTenants, canBootstrap) {
       roles,
       defaultLocationId,
       locations,
-      emailVerified: asBool(userEntity.emailVerified) || !!asString(userEntity.emailVerifiedAt)
+      emailVerified: asBool(userEntity.emailVerified) || !!asString(userEntity.emailVerifiedAt),
+      billingStatus: billingProfile.billingStatus,
+      trialStartsAt: billingProfile.trialStartsAt,
+      trialEndsAt: billingProfile.trialEndsAt,
+      accessLocked: billingProfile.accessLocked,
+      accessLockReason: billingProfile.accessLockReason,
+      planCycle: billingProfile.planCycle
     },
     locations: allTenants,
     principal: {
@@ -623,9 +711,8 @@ module.exports = async function (context, req) {
 
     if (method === "GET") {
       const userEntity = await getUserEntity(userClient, principal.email);
-      const usersExist = userEntity ? true : await anyUsersExist(userClient);
       const allTenants = await listTenants(tenantClient);
-      const canBootstrap = !userEntity && !usersExist;
+      const canBootstrap = !userEntity;
 
       context.res = json(200, buildMeResponse(principal, userEntity, allTenants, canBootstrap));
       return;
@@ -638,18 +725,17 @@ module.exports = async function (context, req) {
 
     const body = asObject(req && req.body);
     const op = asString(body.op).toLowerCase();
-    if (op !== "bootstrap") {
+    if (op !== "bootstrap" && op !== "update-billing") {
       context.res = json(400, { ok: false, error: "Unsupported operation." });
       return;
     }
 
     let userEntity = await getUserEntity(userClient, principal.email);
-    if (!userEntity) {
-      const usersExist = await anyUsersExist(userClient);
-      if (usersExist) {
+    if (op === "update-billing") {
+      if (!userEntity) {
         context.res = json(403, {
           ok: false,
-          error: "Workspace already initialized. Ask an admin to grant access."
+          error: "No workspace was found for this account. Complete registration first."
         });
         return;
       }
@@ -660,10 +746,25 @@ module.exports = async function (context, req) {
         return;
       }
 
-      const locationName = asString(body.locationName || "Exodus 4x4").slice(0, 120) || "Exodus 4x4";
-      const locationId = sanitizeTenantId(asString(body.locationId || locationName || "exodus-4x4"));
-      if (!locationId) {
-        context.res = json(400, { ok: false, error: "Invalid location id." });
+      const allTenants = await listTenants(tenantClient);
+      const userLocations = buildUserLocations(userEntity, allTenants);
+      const defaultLocationId = pickDefaultLocation(userEntity, userLocations);
+      const targetLocationId = sanitizeTenantId(asString(body.locationId || defaultLocationId || userLocations[0]?.id));
+      if (!targetLocationId) {
+        context.res = json(400, { ok: false, error: "No target location was resolved for billing update." });
+        return;
+      }
+
+      const allowedIds = parseUserLocationIds(userEntity);
+      const canManageLocation = asBool(userEntity.allLocations) || !allowedIds.length || allowedIds.includes(targetLocationId);
+      if (!canManageLocation) {
+        context.res = json(403, { ok: false, error: "You do not have access to update billing for this location." });
+        return;
+      }
+
+      const tenant = allTenants.find(item => item.id === targetLocationId);
+      if (!tenant) {
+        context.res = json(404, { ok: false, error: "Location not found for billing update." });
         return;
       }
 
@@ -671,12 +772,62 @@ module.exports = async function (context, req) {
       await tenantClient.upsertEntity(
         {
           partitionKey: TENANTS_PARTITION,
+          rowKey: targetLocationId,
+          billingStatus: normalizeBillingStatus(billing.mode),
+          billingLast4: billing.last4,
+          billingUpdatedAt: now,
+          planCycle: normalizePlanCycle(body.planCycle),
+          updatedAt: now
+        },
+        "Merge"
+      );
+
+      userEntity = await getUserEntity(userClient, principal.email);
+      const refreshedTenants = await listTenants(tenantClient);
+      context.res = json(200, buildMeResponse(principal, userEntity, refreshedTenants, false));
+      return;
+    }
+
+    if (!userEntity) {
+      let billing = null;
+      const billingInput = asObject(body.billing);
+      if (Object.keys(billingInput).length > 0) {
+        const normalized = normalizeBillingPayload(billingInput);
+        if (!normalized.ok) {
+          context.res = json(400, { ok: false, error: normalized.error || "Billing information is invalid." });
+          return;
+        }
+        billing = normalized;
+      }
+
+      const locationName = asString(body.locationName || "Exodus 4x4").slice(0, 120) || "Exodus 4x4";
+      const allTenants = await listTenants(tenantClient);
+      const existingTenantIds = new Set(allTenants.map(item => item.id));
+      const requestedLocationId = sanitizeTenantId(asString(body.locationId || locationName || "exodus-4x4"));
+      const locationId = ensureUniqueTenantId(requestedLocationId, existingTenantIds);
+      if (!locationId) {
+        context.res = json(400, { ok: false, error: "Invalid location id." });
+        return;
+      }
+
+      const trialStart = new Date();
+      const trialEnd = new Date(trialStart.getTime() + 7 * 24 * 60 * 60 * 1000);
+      const now = trialStart.toISOString();
+      const trialEndsAt = trialEnd.toISOString();
+      const billingStatus = billing ? normalizeBillingStatus(billing.mode) : "trial";
+
+      await tenantClient.upsertEntity(
+        {
+          partitionKey: TENANTS_PARTITION,
           rowKey: locationId,
           name: locationName,
           status: "active",
-          billingStatus: billing.mode,
-          billingLast4: billing.last4,
+          billingStatus,
+          billingLast4: billing ? billing.last4 : "",
           billingUpdatedAt: now,
+          trialStartsAt: now,
+          trialEndsAt,
+          planCycle: normalizePlanCycle(body.planCycle),
           updatedAt: now,
           createdAt: now
         },
@@ -693,8 +844,8 @@ module.exports = async function (context, req) {
           displayName: asString(principal.displayName || principal.email),
           identityProvider: asString(principal.identityProvider || "unknown"),
           rolesJson: JSON.stringify(roles),
-          isSuperAdmin: true,
-          allLocations: true,
+          isSuperAdmin: false,
+          allLocations: false,
           defaultLocationId: locationId,
           locationIdsJson: JSON.stringify([locationId]),
           emailVerified: false,

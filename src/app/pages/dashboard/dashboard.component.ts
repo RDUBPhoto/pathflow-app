@@ -4,7 +4,7 @@ import { Router } from '@angular/router';
 import {
   IonHeader, IonToolbar, IonTitle, IonContent, IonButtons, IonButton,
   IonItem, IonLabel, IonInput, IonSpinner, IonIcon, IonModal,
-  IonList, IonPopover, IonSelect, IonSelectOption, IonToggle
+  IonList, IonPopover, IonSelect, IonSelectOption, IonFooter
 } from '@ionic/angular/standalone';
 import { FormsModule } from '@angular/forms';
 import {
@@ -30,8 +30,8 @@ import {
   checkmarkCircle
 } from 'ionicons/icons';
 import { HttpClient } from '@angular/common/http';
-import { ThemeService } from '../../services/theme.service';
 import { UserScopedSettingsService } from '../../services/user-scoped-settings.service';
+import { catchError, forkJoin, of } from 'rxjs';
 
 type ColorOpt = { label: string; hex: string };
 const LANE_COLORS_SETTING_KEY = 'dashboard.laneColors';
@@ -43,7 +43,7 @@ const LANE_COLORS_SETTING_KEY = 'dashboard.laneColors';
     CommonModule, FormsModule,
     IonHeader, IonToolbar, IonTitle, IonContent, IonButtons, IonButton,
     IonItem, IonLabel, IonInput, IonSpinner, IonIcon, IonModal,
-    IonList, IonPopover, IonSelect, IonSelectOption, IonToggle,
+    IonList, IonPopover, IonSelect, IonSelectOption, IonFooter,
     CdkDropList, CdkDropListGroup, CdkDrag,
     CustomerModalComponent,
     ScheduleModalComponent,
@@ -77,6 +77,9 @@ export default class DashboardComponent implements OnDestroy {
   cardMenuOpen = signal(false);
   cardMenuEvent = signal<any>(null);
   cardMenuItemId = signal<string | null>(null);
+  removeCustomerOpen = signal(false);
+  removeCustomerItemId = signal<string | null>(null);
+  removeCustomerCustomerId = signal<string>('');
   customerModalInitialNotes = signal<string | null>(null);
   searchOpen = signal(false);
   searchLaneId = signal<string | null>(null);
@@ -92,8 +95,9 @@ export default class DashboardComponent implements OnDestroy {
   scheduleModalCustomerId = signal<string | null>(null);
   unreadActivityByCustomer = signal<Record<string, number>>({});
   unreadEmailByCustomer = signal<Record<string, number>>({});
+  unreadSmsIdsByCustomer = signal<Record<string, string[]>>({});
+  unreadEmailIdsByCustomer = signal<Record<string, string[]>>({});
   isMobileLayout = signal(false);
-  readonly isDarkTheme = computed(() => this.theme.mode() === 'dark');
 
   searchResults = computed(() => {
     const q = this.searchTerm().trim().toLowerCase();
@@ -128,7 +132,6 @@ export default class DashboardComponent implements OnDestroy {
     private smsApi: SmsApiService,
     private emailApi: EmailApiService,
     private http: HttpClient,
-    private theme: ThemeService,
     private userSettings: UserScopedSettingsService,
     private router: Router
   ) {
@@ -212,12 +215,18 @@ export default class DashboardComponent implements OnDestroy {
       next: res => {
         const items = Array.isArray(res.items) ? res.items : [];
         const map: Record<string, number> = {};
+        const idsByCustomer: Record<string, string[]> = {};
         for (const item of items) {
           const customerId = (item.customerId || '').trim();
           if (!customerId) continue;
           map[customerId] = (map[customerId] || 0) + 1;
+          if (item.id) {
+            if (!idsByCustomer[customerId]) idsByCustomer[customerId] = [];
+            idsByCustomer[customerId].push(item.id);
+          }
         }
         this.unreadActivityByCustomer.set(map);
+        this.unreadSmsIdsByCustomer.set(idsByCustomer);
       }
     });
 
@@ -225,12 +234,18 @@ export default class DashboardComponent implements OnDestroy {
       next: res => {
         const items = Array.isArray(res.items) ? res.items : [];
         const map: Record<string, number> = {};
+        const idsByCustomer: Record<string, string[]> = {};
         for (const item of items) {
           const customerId = (item.customerId || '').trim();
           if (!customerId) continue;
           map[customerId] = (map[customerId] || 0) + 1;
+          if (item.id) {
+            if (!idsByCustomer[customerId]) idsByCustomer[customerId] = [];
+            idsByCustomer[customerId].push(item.id);
+          }
         }
         this.unreadEmailByCustomer.set(map);
+        this.unreadEmailIdsByCustomer.set(idsByCustomer);
       }
     });
   }
@@ -239,16 +254,13 @@ export default class DashboardComponent implements OnDestroy {
     this.settingsOpen.set(true);
   }
 
-  onThemeToggle(checked: boolean): void {
-    this.theme.setMode(checked ? 'dark' : 'light');
-  }
-
   laneStageKey(lane: Lane | null | undefined): string {
     const explicit = (lane?.stageKey || '').trim().toLowerCase();
+    if (explicit === 'quote') return 'lead';
     if (explicit) return explicit;
     const name = (lane?.name || '').trim().toLowerCase();
     if (!name) return 'custom';
-    if (/lead/.test(name)) return 'lead';
+    if (/lead|quote|estimate/.test(name)) return 'lead';
     if (/sched|appointment|calendar/.test(name)) return 'scheduled';
     if (/in[- ]?progress|work in progress|progress/.test(name)) return 'inprogress';
     if (/complete|completed|done|pickup|ready/.test(name)) return 'completed';
@@ -286,17 +298,96 @@ export default class DashboardComponent implements OnDestroy {
     return this.isCompletedLane(lane);
   }
 
+  private isScheduleRequiredLaneById(laneId: string): boolean {
+    const lane = this.lanes().find(item => item.id === laneId) || null;
+    const stage = this.laneStageKey(lane);
+    return stage === 'scheduled' || stage === 'inprogress' || stage === 'completed';
+  }
+
   private inProgressLaneId(): string | null {
     const lane = this.lanes().find(item => this.isInProgressLane(item));
     return lane?.id || null;
   }
 
+  private workflowLaneStage(stageKey: string): boolean {
+    return stageKey === 'lead' || stageKey === 'scheduled' || stageKey === 'inprogress' || stageKey === 'completed';
+  }
+
+  private isWorkflowStatusLane(lane: Lane | null | undefined): boolean {
+    if (!lane) return false;
+    return this.workflowLaneStage(this.laneStageKey(lane));
+  }
+
+  private findItemById(itemId: string | null): WorkItem | null {
+    if (!itemId) return null;
+    for (const rows of Object.values(this.items())) {
+      const found = (rows || []).find(item => item.id === itemId);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  private laneForItem(item: WorkItem | null): Lane | null {
+    if (!item) return null;
+    return this.lanes().find(lane => lane.id === item.laneId) || null;
+  }
+
   canCheckIn(it: WorkItem, lane: Lane): boolean {
     const customerId = (it.customerId || '').trim();
     if (!customerId) return false;
-    if (this.isCompletedLane(lane) || this.isInProgressLane(lane)) return false;
+    if (this.laneStageKey(lane) !== 'scheduled') return false;
     if ((it.checkedInAt || '').trim()) return false;
     return true;
+  }
+
+  canRevertCheckIn(it: WorkItem, lane: Lane): boolean {
+    if (!(it.checkedInAt || '').trim()) return false;
+    if (!(this.isInProgressLane(lane) || this.isCompletedLane(lane))) return false;
+    return !!this.scheduledLaneId();
+  }
+
+  needsCalendarOverride(it: WorkItem, lane: Lane): boolean {
+    if (!this.isCompletedLane(lane)) return false;
+    const customerId = (it.customerId || '').trim();
+    if (!customerId) return false;
+    if (this.hasCalendarEvent(customerId)) return false;
+    return !(it.calendarOverrideAt || '').trim();
+  }
+
+  applyCalendarOverride(it: WorkItem, lane: Lane, event?: Event): void {
+    event?.stopPropagation();
+    event?.preventDefault();
+
+    if (!this.needsCalendarOverride(it, lane)) return;
+
+    const nowIso = new Date().toISOString();
+    const patch: Partial<WorkItem> & { id: string } = {
+      id: it.id,
+      calendarOverrideAt: nowIso
+    };
+    if (!(it.completedAt || '').trim()) patch.completedAt = nowIso;
+
+    this.status.set('Applying calendar override');
+    this.itemsApi.update(patch).subscribe({
+      next: () => {
+        this.items.update(current => {
+          const next: Record<string, WorkItem[]> = {};
+          for (const [laneId, rows] of Object.entries(current)) {
+            next[laneId] = (rows || []).map(row => {
+              if (row.id !== it.id) return row;
+              return {
+                ...row,
+                calendarOverrideAt: nowIso,
+                completedAt: (row.completedAt || '').trim() ? row.completedAt : nowIso
+              };
+            });
+          }
+          return next;
+        });
+        this.status.set('No appointment required set');
+      },
+      error: () => this.status.set('Calendar override failed')
+    });
   }
 
   checkInCard(it: WorkItem, lane: Lane, event?: Event): void {
@@ -308,9 +399,15 @@ export default class DashboardComponent implements OnDestroy {
       this.status.set('Missing Work In-Progress lane.');
       return;
     }
-    if (this.isCompletedLane(lane) || this.isInProgressLane(lane)) return;
+    if (this.laneStageKey(lane) !== 'scheduled') return;
     if ((it.checkedInAt || '').trim()) {
       this.status.set('Already checked in.');
+      return;
+    }
+    const customerId = (it.customerId || '').trim();
+    if (customerId && !this.hasCalendarEvent(customerId)) {
+      this.status.set('Calendar event required before check-in.');
+      this.openScheduleModal(customerId);
       return;
     }
 
@@ -341,6 +438,41 @@ export default class DashboardComponent implements OnDestroy {
         this.status.set('Checked in');
       },
       error: () => this.status.set('Check-in failed')
+    });
+  }
+
+  revertCheckInCard(it: WorkItem, lane: Lane, event?: Event): void {
+    event?.stopPropagation();
+    event?.preventDefault();
+
+    const scheduledId = this.scheduledLaneId();
+    if (!scheduledId) {
+      this.status.set('Missing Scheduled lane.');
+      return;
+    }
+    if (!this.canRevertCheckIn(it, lane)) return;
+
+    this.status.set('Reverting check-in');
+    this.itemsApi.update({ id: it.id, laneId: scheduledId, checkedInAt: '', completedAt: '' }).subscribe({
+      next: () => {
+        this.items.update(current => {
+          const next: Record<string, WorkItem[]> = {};
+          for (const [laneId, rows] of Object.entries(current)) {
+            next[laneId] = [...rows].filter(row => row.id !== it.id);
+          }
+          const scheduled = next[scheduledId] || [];
+          scheduled.unshift({
+            ...it,
+            laneId: scheduledId,
+            checkedInAt: '',
+            completedAt: ''
+          });
+          next[scheduledId] = scheduled;
+          return next;
+        });
+        this.status.set('Moved back to Scheduled');
+      },
+      error: () => this.status.set('Revert check-in failed')
     });
   }
 
@@ -409,9 +541,7 @@ export default class DashboardComponent implements OnDestroy {
     this.customerModalOpen.set(true);
   }
 
-  removeCardFromLane() {
-    const itId = this.cardMenuItemId();
-    this.cardMenuOpen.set(false);
+  private removeCardFromLaneById(itId: string) {
     if (!itId) return;
     this.status.set('Removing from lane');
     this.itemsApi.delete(itId).subscribe({
@@ -422,6 +552,83 @@ export default class DashboardComponent implements OnDestroy {
         this.status.set('Removed');
       },
       error: () => this.status.set('Remove error')
+    });
+  }
+
+  cardRemoveLabel(): string {
+    const item = this.findItemById(this.cardMenuItemId());
+    const lane = this.laneForItem(item);
+    if (this.isWorkflowStatusLane(lane)) return 'Remove customer';
+    return 'Remove from lane';
+  }
+
+  removeCardAction() {
+    const item = this.findItemById(this.cardMenuItemId());
+    this.cardMenuOpen.set(false);
+    if (!item) return;
+
+    const lane = this.laneForItem(item);
+    if (!this.isWorkflowStatusLane(lane)) {
+      this.removeCardFromLaneById(item.id);
+      return;
+    }
+
+    this.removeCustomerItemId.set(item.id);
+    this.removeCustomerCustomerId.set((item.customerId || '').trim());
+    this.removeCustomerOpen.set(true);
+  }
+
+  cancelRemoveCustomer() {
+    this.removeCustomerOpen.set(false);
+    this.removeCustomerItemId.set(null);
+    this.removeCustomerCustomerId.set('');
+  }
+
+  confirmRemoveCustomer() {
+    const itemId = this.removeCustomerItemId();
+    const customerId = this.removeCustomerCustomerId();
+    this.cancelRemoveCustomer();
+    if (!itemId) return;
+
+    this.status.set('Removing customer');
+
+    const deleteWorkItem = () => {
+      this.itemsApi.delete(itemId).subscribe({
+        next: () => {
+          this.status.set('Customer removed');
+          this.loadAll();
+        },
+        error: () => this.status.set('Remove error')
+      });
+    };
+
+    if (!customerId) {
+      deleteWorkItem();
+      return;
+    }
+
+    const now = Date.now();
+    const scheduleIds = this.scheduleItems()
+      .filter(entry => {
+        if ((entry.customerId || '').trim() !== customerId) return false;
+        if (!entry.start) return false;
+        const startMs = Date.parse(entry.start);
+        return Number.isFinite(startMs) && startMs >= now;
+      })
+      .map(entry => entry.id)
+      .filter(Boolean);
+
+    if (!scheduleIds.length) {
+      deleteWorkItem();
+      return;
+    }
+
+    const deletes = scheduleIds.map(id =>
+      this.scheduleApi.delete(id).pipe(catchError(() => of({ ok: false })))
+    );
+    forkJoin(deletes).subscribe({
+      next: () => deleteWorkItem(),
+      error: () => deleteWorkItem()
     });
   }
 
@@ -474,10 +681,20 @@ export default class DashboardComponent implements OnDestroy {
     this.laneMenuOpen.set(false);
   }
 
+  canSaveRename(): boolean {
+    const id = this.laneMenuLaneId();
+    if (!id) return false;
+    const nextName = this.renameValue().trim();
+    if (!nextName) return false;
+    const lane = this.lanes().find(l => l.id === id);
+    const currentName = (lane?.name || '').trim();
+    return nextName !== currentName;
+  }
+
   saveRename() {
     const id = this.laneMenuLaneId();
     const nm = this.renameValue().trim();
-    if (!id || !nm) { this.renameOpen.set(false); return; }
+    if (!this.canSaveRename() || !id || !nm) { return; }
     if (this.isProtectedLaneById(id)) {
       this.renameOpen.set(false);
       this.status.set('Core workflow lanes cannot be renamed.');
@@ -663,19 +880,43 @@ export default class DashboardComponent implements OnDestroy {
     const customerId = (it.customerId || '').trim();
     if (!customerId) return;
     if (activity === 'sms') {
+      const unreadIds = this.unreadSmsIdsByCustomer()[customerId] || [];
       this.unreadActivityByCustomer.update(current => {
         if (!current[customerId]) return current;
         const next = { ...current };
         delete next[customerId];
         return next;
       });
+      this.unreadSmsIdsByCustomer.update(current => {
+        if (!current[customerId]) return current;
+        const next = { ...current };
+        delete next[customerId];
+        return next;
+      });
+      if (unreadIds.length) {
+        this.smsApi.markReadBatch(unreadIds).subscribe({
+          error: () => this.refreshUnreadActivity()
+        });
+      }
     } else {
+      const unreadIds = this.unreadEmailIdsByCustomer()[customerId] || [];
       this.unreadEmailByCustomer.update(current => {
         if (!current[customerId]) return current;
         const next = { ...current };
         delete next[customerId];
         return next;
       });
+      this.unreadEmailIdsByCustomer.update(current => {
+        if (!current[customerId]) return current;
+        const next = { ...current };
+        delete next[customerId];
+        return next;
+      });
+      if (unreadIds.length) {
+        this.emailApi.markReadBatch(unreadIds).subscribe({
+          error: () => this.refreshUnreadActivity()
+        });
+      }
     }
     this.router.navigate(['/customers', customerId], {
       queryParams: { tab: activity === 'sms' ? 'sms' : 'email' }
@@ -761,36 +1002,154 @@ export default class DashboardComponent implements OnDestroy {
     return lane?.id || null;
   }
 
-  private hasSchedule(customerId: string): boolean {
+  private leadLaneId(): string | null {
+    const lane = this.lanes().find(l => this.laneStageKey(l) === 'lead');
+    return lane?.id || null;
+  }
+
+  private hasFutureSchedule(customerId: string, nowMs: number = Date.now()): boolean {
     if (!customerId) return false;
-    return this.scheduleItems().some(s => s.customerId === customerId && !s.isBlocked && s.start && s.end);
+    return this.scheduleItems().some(s => {
+      if ((s.customerId || '').trim() !== customerId) return false;
+      if (s.isBlocked || !s.start || !s.end) return false;
+      const startMs = Date.parse(s.start);
+      return Number.isFinite(startMs) && startMs >= nowMs;
+    });
+  }
+
+  private hasCalendarEvent(customerId: string): boolean {
+    if (!customerId) return false;
+    return this.scheduleItems().some(s => {
+      if ((s.customerId || '').trim() !== customerId) return false;
+      return !s.isBlocked && !!s.start && !!s.end;
+    });
+  }
+
+  private futureScheduleCustomerIds(nowMs: number = Date.now()): Set<string> {
+    const ids = new Set<string>();
+    for (const item of this.scheduleItems()) {
+      const customerId = (item.customerId || '').trim();
+      if (!customerId || item.isBlocked || !item.start || !item.end) continue;
+      const startMs = Date.parse(item.start);
+      if (!Number.isFinite(startMs) || startMs < nowMs) continue;
+      ids.add(customerId);
+    }
+    return ids;
+  }
+
+  private cardTitleForCustomer(customerId: string): string {
+    const customer = this.customersMap()[customerId];
+    if (!customer) return 'Scheduled customer';
+    const displayName =
+      (customer.name || '').trim() ||
+      `${customer.firstName || ''} ${customer.lastName || ''}`.trim() ||
+      'Scheduled customer';
+    const vehicle = this.customerVehicleBasic(customer);
+    return vehicle ? `${displayName} (${vehicle})` : displayName;
+  }
+
+  private ensureScheduledCardsForCustomers(customerIds: string[], scheduledLaneId: string): void {
+    const pending = [...new Set(customerIds.map(id => id.trim()).filter(Boolean))];
+    if (!pending.length) return;
+
+    let index = 0;
+    const createNext = () => {
+      if (index >= pending.length) {
+        this.loadAll();
+        return;
+      }
+      const customerId = pending[index++];
+      const title = this.cardTitleForCustomer(customerId);
+      this.itemsApi.create(title, scheduledLaneId).subscribe({
+        next: created => {
+          this.itemsApi.update({ id: created.id, customerId }).subscribe({
+            next: () => createNext(),
+            error: () => createNext()
+          });
+        },
+        error: () => createNext()
+      });
+    };
+
+    createNext();
   }
 
   private syncScheduledLane() {
     const scheduledId = this.scheduledLaneId();
     if (!scheduledId) return;
-    const map = { ...this.items() };
-    const moved: WorkItem[] = [];
+    const leadId = this.leadLaneId();
+    const inProgressId = this.inProgressLaneId();
+    const nowMs = Date.now();
+    const futureCustomerIds = this.futureScheduleCustomerIds(nowMs);
+    const map: Record<string, WorkItem[]> = {};
+    for (const [laneId, rows] of Object.entries(this.items())) {
+      map[laneId] = [...rows];
+    }
+
+    const movedToScheduled: WorkItem[] = [];
+    const movedOutOfScheduled: Array<{ item: WorkItem; targetLaneId: string }> = [];
     for (const laneId of Object.keys(map)) {
-      if (laneId === scheduledId) continue;
       if (this.isInProgressLaneById(laneId) || this.isCompletedLaneById(laneId)) continue;
       const keep: WorkItem[] = [];
       for (const it of map[laneId] || []) {
         const alreadyCheckedIn = !!(it.checkedInAt || '').trim();
-        if (it.customerId && this.hasSchedule(it.customerId) && !alreadyCheckedIn) {
-          moved.push({ ...it, laneId: scheduledId });
-        } else {
+        const customerId = (it.customerId || '').trim();
+        const hasFutureSchedule = customerId ? futureCustomerIds.has(customerId) : false;
+
+        if (laneId !== scheduledId) {
+          if (customerId && hasFutureSchedule && !alreadyCheckedIn) {
+            movedToScheduled.push({ ...it, laneId: scheduledId });
+            continue;
+          }
           keep.push(it);
+          continue;
         }
+
+        // Scheduled lane should only contain customers with future appointments.
+        if (!customerId || (hasFutureSchedule && !alreadyCheckedIn)) {
+          keep.push(it);
+          continue;
+        }
+
+        const fallbackLaneId =
+          alreadyCheckedIn && inProgressId && inProgressId !== scheduledId
+            ? inProgressId
+            : (leadId && leadId !== scheduledId ? leadId : '');
+        if (fallbackLaneId) {
+          movedOutOfScheduled.push({ item: { ...it, laneId: fallbackLaneId }, targetLaneId: fallbackLaneId });
+          continue;
+        }
+
+        keep.push(it);
       }
       map[laneId] = keep;
     }
-    if (moved.length) {
-      map[scheduledId] = [...(map[scheduledId] || []), ...moved];
+
+    if (movedToScheduled.length) {
+      map[scheduledId] = [...(map[scheduledId] || []), ...movedToScheduled];
+    }
+    for (const move of movedOutOfScheduled) {
+      map[move.targetLaneId] = [...(map[move.targetLaneId] || []), move.item];
+    }
+
+    if (movedToScheduled.length || movedOutOfScheduled.length) {
       this.items.set(map);
-      for (const it of moved) {
+      for (const it of movedToScheduled) {
         this.itemsApi.update({ id: it.id, laneId: scheduledId }).subscribe();
       }
+      for (const move of movedOutOfScheduled) {
+        this.itemsApi.update({ id: move.item.id, laneId: move.targetLaneId }).subscribe();
+      }
+    }
+
+    const scheduledCustomers = new Set(
+      (map[scheduledId] || [])
+        .map(item => (item.customerId || '').trim())
+        .filter(Boolean)
+    );
+    const missingScheduledCards = [...futureCustomerIds].filter(customerId => !scheduledCustomers.has(customerId));
+    if (missingScheduledCards.length) {
+      this.ensureScheduledCardsForCustomers(missingScheduledCards, scheduledId);
     }
   }
 
@@ -894,6 +1253,14 @@ export default class DashboardComponent implements OnDestroy {
   addExistingToLane(c: Customer) {
     const laneId = this.searchLaneId();
     if (!laneId) return;
+    const isCompletedLane = this.isCompletedLaneById(laneId);
+    const hasCalendar = this.hasCalendarEvent(c.id);
+    if (this.isScheduleRequiredLaneById(laneId) && !hasCalendar && !isCompletedLane) {
+      this.status.set('Calendar event required before moving to this lane.');
+      this.closeSearch();
+      this.openScheduleModal(c.id);
+      return;
+    }
     const scheduledId = this.scheduledLaneId();
     const isScheduledLane = !!scheduledId && laneId === scheduledId;
     const baseName = (c.name || 'Unnamed').trim();
@@ -906,7 +1273,11 @@ export default class DashboardComponent implements OnDestroy {
           next: () => {
             this.closeSearch();
             this.loadAll();
-            this.status.set('Added to lane');
+            if (isCompletedLane && !hasCalendar) {
+              this.status.set('Added to Completed. Click "No appointment required" to confirm override.');
+            } else {
+              this.status.set('Added to lane');
+            }
             if (isScheduledLane) {
               this.openScheduleModal(c.id);
             }
@@ -949,6 +1320,13 @@ export default class DashboardComponent implements OnDestroy {
         const baseName = (cust.name || 'Unnamed').trim();
         const veh = this.customerVehicleBasic(cust);
         const title = veh ? `${baseName} (${veh})` : baseName;
+        const isCompletedLane = this.isCompletedLaneById(laneId);
+        const hasCalendar = this.hasCalendarEvent(cust.id);
+        if (this.isScheduleRequiredLaneById(laneId) && !hasCalendar && !isCompletedLane) {
+          this.status.set('Calendar event required before moving to this lane.');
+          this.openScheduleModal(cust.id);
+          return;
+        }
         const scheduledId = this.scheduledLaneId();
         const isScheduledLane = !!scheduledId && laneId === scheduledId;
         this.itemsApi.create(title, laneId).subscribe({
@@ -956,7 +1334,11 @@ export default class DashboardComponent implements OnDestroy {
             this.itemsApi.update({ id: created.id, customerId: cust.id }).subscribe({
               next: () => {
                 this.laneToLinkAfterSave.set(null);
-                this.status.set('Added to lane');
+                if (isCompletedLane && !hasCalendar) {
+                  this.status.set('Added to Completed. Click "No appointment required" to confirm override.');
+                } else {
+                  this.status.set('Added to lane');
+                }
                 this.loadAll();
                 if (isScheduledLane) {
                   this.openScheduleModal(cust.id);
@@ -1007,6 +1389,10 @@ export default class DashboardComponent implements OnDestroy {
     return arr;
   }
 
+  laneItemCount(laneId: string): number {
+    return (this.items()[laneId] || []).length;
+  }
+
   onCardsDrop(event: CdkDragDrop<WorkItem[]>, targetLaneId: string) {
     const map = { ...this.items() };
     const sourceId = event.previousContainer.id;
@@ -1017,16 +1403,25 @@ export default class DashboardComponent implements OnDestroy {
       return;
     } else {
       const moved = map[sourceId][event.previousIndex];
+      const toCompleted = this.isCompletedLaneById(targetLaneId);
       if (moved && (moved.checkedInAt || '').trim()) {
         const fromInProgress = this.isInProgressLaneById(sourceId);
-        const toCompleted = this.isCompletedLaneById(targetLaneId);
         if (fromInProgress && !toCompleted) {
           this.status.set('Checked-in jobs stay in Work In-Progress until moved to Completed.');
           return;
         }
       }
+      const movedCustomerId = (moved?.customerId || '').trim();
+      if (movedCustomerId && this.isScheduleRequiredLaneById(targetLaneId) && !this.hasCalendarEvent(movedCustomerId)) {
+        if (!toCompleted) {
+          this.status.set('Calendar event required before moving to this lane.');
+          this.openScheduleModal(movedCustomerId);
+          return;
+        }
+      }
       const scheduledId = this.scheduledLaneId();
-      if (scheduledId && targetLaneId === scheduledId && moved?.customerId && !this.hasSchedule(moved.customerId)) {
+      if (scheduledId && targetLaneId === scheduledId && moved?.customerId && !this.hasFutureSchedule(moved.customerId)) {
+        this.status.set('Scheduled lane requires a future appointment.');
         this.openScheduleModal(moved.customerId);
         return;
       }
@@ -1034,16 +1429,43 @@ export default class DashboardComponent implements OnDestroy {
       transferArrayItem(map[sourceId], map[targetId], event.previousIndex, event.currentIndex);
       this.items.set(map);
       const updated = map[targetId][event.currentIndex];
-      const toCompleted = this.isCompletedLaneById(targetLaneId);
+      const toInProgress = this.isInProgressLaneById(targetLaneId);
+      const needsAutoCheckIn = toInProgress && !(updated.checkedInAt || '').trim();
+      const autoCheckInAt = needsAutoCheckIn ? new Date().toISOString() : '';
+      const nowIso = new Date().toISOString();
+      const needsCalendarOverride = !!(movedCustomerId && toCompleted && !this.hasCalendarEvent(movedCustomerId));
+      if (needsAutoCheckIn) {
+        updated.checkedInAt = autoCheckInAt;
+        updated.completedAt = '';
+        updated.calendarOverrideAt = '';
+      }
       const updateBody: Partial<WorkItem> & { id: string } = { id: updated.id, laneId: targetLaneId };
-      if ((updated.checkedInAt || '').trim() && toCompleted) {
-        updateBody.completedAt = new Date().toISOString();
+      if (needsAutoCheckIn) {
+        updateBody.checkedInAt = autoCheckInAt;
+        updateBody.completedAt = '';
+        updateBody.calendarOverrideAt = '';
+      }
+      if (toCompleted) {
+        updateBody.completedAt = nowIso;
+        updated.completedAt = nowIso;
+        if (needsCalendarOverride) {
+          updateBody.calendarOverrideAt = '';
+          updated.calendarOverrideAt = '';
+        }
+      } else {
+        updateBody.completedAt = '';
+        updateBody.calendarOverrideAt = '';
+        updated.completedAt = '';
+        updated.calendarOverrideAt = '';
       }
       this.itemsApi.update(updateBody).subscribe({
         next: () => {
           map[targetId] = [...map[targetId]].sort((a, b) => this.compareCreatedDesc(a, b));
           map[sourceId] = [...map[sourceId]].sort((a, b) => this.compareCreatedDesc(a, b));
           this.items.set(map);
+          if (needsCalendarOverride) {
+            this.status.set('Moved to Completed. Click "No appointment required" to confirm override.');
+          }
           if (scheduledId && targetLaneId === scheduledId && updated.customerId) {
             this.openScheduleModal(updated.customerId);
           }

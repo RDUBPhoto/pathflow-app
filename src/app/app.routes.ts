@@ -9,8 +9,19 @@ export const routes: Routes = [
       import('./pages/login/login.component').then(m => m.default)
   },
   {
+    path: 'signup',
+    loadComponent: () =>
+      import('./pages/signup/signup.component').then(m => m.default)
+  },
+  {
     path: 'register',
     canActivate: [registrationGuard],
+    loadComponent: () =>
+      import('./pages/register/register.component').then(m => m.default)
+  },
+  {
+    path: 'billing',
+    canActivate: [registeredGuard],
     loadComponent: () =>
       import('./pages/register/register.component').then(m => m.default)
   },
@@ -57,6 +68,21 @@ export const routes: Routes = [
         path: 'inventory',
         loadComponent: () =>
           import('./pages/inventory/inventory.component').then(m => m.default)
+      },
+      {
+        path: 'invoices/new',
+        loadComponent: () =>
+          import('./pages/invoices-new/invoices-new.component').then(m => m.default)
+      },
+      {
+        path: 'invoices/:id',
+        loadComponent: () =>
+          import('./pages/invoice-detail/invoice-detail.component').then(m => m.default)
+      },
+      {
+        path: 'invoices',
+        loadComponent: () =>
+          import('./pages/invoices/invoices.component').then(m => m.default)
       },
       {
         path: 'reports',

@@ -224,6 +224,44 @@ BEGIN
 END
 GO
 
+IF OBJECT_ID('reporting.agg_production_forecast_monthly', 'U') IS NULL
+BEGIN
+  CREATE TABLE reporting.agg_production_forecast_monthly (
+    period_start                DATE           NOT NULL PRIMARY KEY,
+    period_end                  DATE           NOT NULL,
+    scheduled_jobs              INT            NOT NULL DEFAULT(0),
+    pipeline_items              INT            NOT NULL DEFAULT(0),
+    scheduled_revenue           DECIMAL(18,2)  NOT NULL DEFAULT(0),
+    pipeline_weighted_revenue   DECIMAL(18,2)  NOT NULL DEFAULT(0),
+    projected_revenue           DECIMAL(18,2)  NOT NULL DEFAULT(0),
+    committed_po_spend          DECIMAL(18,2)  NOT NULL DEFAULT(0),
+    pending_need_spend          DECIMAL(18,2)  NOT NULL DEFAULT(0),
+    projected_parts_cogs        DECIMAL(18,2)  NOT NULL DEFAULT(0),
+    projected_labor_cost        DECIMAL(18,2)  NOT NULL DEFAULT(0),
+    projected_gross_profit      DECIMAL(18,2)  NOT NULL DEFAULT(0),
+    projected_gross_margin_pct  DECIMAL(9,2)   NOT NULL DEFAULT(0),
+    loaded_at_utc               DATETIME2(0)   NOT NULL DEFAULT SYSUTCDATETIME()
+  );
+END
+GO
+
+IF OBJECT_ID('reporting.agg_cashflow_forecast_monthly', 'U') IS NULL
+BEGIN
+  CREATE TABLE reporting.agg_cashflow_forecast_monthly (
+    period_start                DATE           NOT NULL PRIMARY KEY,
+    period_end                  DATE           NOT NULL,
+    opening_cash                DECIMAL(18,2)  NOT NULL DEFAULT(0),
+    invoice_collections_due     DECIMAL(18,2)  NOT NULL DEFAULT(0),
+    forecast_collections        DECIMAL(18,2)  NOT NULL DEFAULT(0),
+    projected_inflow            DECIMAL(18,2)  NOT NULL DEFAULT(0),
+    projected_outflow           DECIMAL(18,2)  NOT NULL DEFAULT(0),
+    net_cashflow                DECIMAL(18,2)  NOT NULL DEFAULT(0),
+    ending_cash                 DECIMAL(18,2)  NOT NULL DEFAULT(0),
+    loaded_at_utc               DATETIME2(0)   NOT NULL DEFAULT SYSUTCDATETIME()
+  );
+END
+GO
+
 /* Useful indexing for warehouse refresh and BI query speed */
 IF NOT EXISTS (
   SELECT 1 FROM sys.indexes WHERE name = 'IX_fact_workitem_snapshot_stage_created'
@@ -332,4 +370,38 @@ INNER JOIN (
   SELECT MAX(as_of_date) AS as_of_date
   FROM reporting.agg_lead_source_daily
 ) x ON x.as_of_date = s.as_of_date;
+GO
+
+CREATE OR ALTER VIEW reporting.v_powerbi_production_forecast
+AS
+SELECT
+  period_start,
+  period_end,
+  scheduled_jobs,
+  pipeline_items,
+  scheduled_revenue,
+  pipeline_weighted_revenue,
+  projected_revenue,
+  committed_po_spend,
+  pending_need_spend,
+  projected_parts_cogs,
+  projected_labor_cost,
+  projected_gross_profit,
+  projected_gross_margin_pct
+FROM reporting.agg_production_forecast_monthly;
+GO
+
+CREATE OR ALTER VIEW reporting.v_powerbi_cashflow_forecast
+AS
+SELECT
+  period_start,
+  period_end,
+  opening_cash,
+  invoice_collections_due,
+  forecast_collections,
+  projected_inflow,
+  projected_outflow,
+  net_cashflow,
+  ending_cash
+FROM reporting.agg_cashflow_forecast_monthly;
 GO

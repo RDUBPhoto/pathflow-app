@@ -21,7 +21,7 @@
           <h2>Email &amp; Password</h2>
         </div>
         <button type="button" class="register-cta" (click)="startRegistration()">
-          Dont have an account, register now?
+          Don't have an account, register now?
         </button>
 
         <ion-item>
@@ -48,10 +48,10 @@
           Sign in with Email
         </ion-button>
 
-        <p class="auth-hint" *ngIf="!passwordLoginEnabled()">
-          Email/password is not enabled for hosted auth yet. Use Microsoft or Google below.
+        <p class="auth-hint error" *ngIf="passwordLoginError()">
+          {{ passwordLoginError() }}
+          <button type="button" class="inline-register-link" (click)="startRegistration()">Create account</button>
         </p>
-        <p class="auth-hint error" *ngIf="passwordLoginError()">{{ passwordLoginError() }}</p>
       </section>
 
       <div class="or-divider"><span>or continue with</span></div>

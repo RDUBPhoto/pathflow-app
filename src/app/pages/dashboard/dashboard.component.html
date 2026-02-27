@@ -10,20 +10,6 @@
     </ion-header>
     <ion-content class="glass-bg no-vscroll" [scrollY]="false">
       <ion-list>
-        <ion-item lines="full" class="theme-item">
-          <ion-label>Theme</ion-label>
-          <div slot="end" class="theme-direction-toggle">
-            <span class="theme-side" [class.active]="!isDarkTheme()">Light</span>
-            <ion-toggle
-              mode="ios"
-              [checked]="isDarkTheme()"
-              aria-label="Theme toggle"
-              (ionChange)="onThemeToggle($event.detail.checked)">
-            </ion-toggle>
-            <span class="theme-side" [class.active]="isDarkTheme()">Dark</span>
-          </div>
-        </ion-item>
-
         <ion-item>
           <ion-label position="stacked">Add New lane</ion-label>
           <ion-input [ngModel]="newLane()" (ngModelChange)="newLane.set($event)"></ion-input>
@@ -103,7 +89,10 @@
 
         <div class="lane-header">
           <ion-icon name="reorder-two-outline" cdkDragHandle class="drag-handle"></ion-icon>
-          <div class="lane-title">{{ lane.name }}</div>
+          <div class="lane-title">
+            {{ lane.name }}
+            <span class="lane-count" *ngIf="laneItemCount(lane.id) > 0">({{ laneItemCount(lane.id) }})</span>
+          </div>
           <ion-button size="small" fill="clear" (click)="openSearch(lane.id)">
             <ion-icon name="add-outline"></ion-icon>
           </ion-button>
@@ -161,12 +150,14 @@
                     aria-label="Checked in">
                   </ion-icon>
                 </button>
-                <ion-button class="card-menu-btn" fill="clear" size="small" (click)="openCardMenu($event, it)">
-                  <ion-icon name="ellipsis-vertical"></ion-icon>
-                </ion-button>
+                <div class="card-head-actions">
+                  <ion-button class="card-menu-btn" fill="clear" size="small" (click)="openCardMenu($event, it)">
+                    <ion-icon name="ellipsis-vertical"></ion-icon>
+                  </ion-button>
+                </div>
               </div>
               <div class="card-line"><span>Vehicle: {{ vehicleOf(it) || '—' }}</span></div>
-              <div class="card-line">
+              <div class="card-line vehicle-color-line">
                 <span>Vehicle color:</span>
                 <span class="color-wrap" *ngIf="colorOf(it)" aria-label="vehicle color">
                   <span class="swatch" [style.background]="colorOf(it)"></span>
@@ -182,16 +173,40 @@
                 <span>Scheduled:</span>
                 <span class="appt-lines" [innerHTML]="appointmentLabel(it)"></span>
               </div>
-              <div class="card-actions" *ngIf="canCheckIn(it, lane)">
-                <ion-button size="small" fill="outline" (click)="checkInCard(it, lane, $event)">
+              <div class="card-notes" *ngIf="notesOf(it)">
+                <button type="button" class="notes-toggle-link" (click)="toggleExpanded(it.id)">
+                  {{ isExpanded(it.id) ? 'Hide notes' : 'Show notes' }}
+                </button>
+                <div class="notes" *ngIf="isExpanded(it.id)">{{ notesOf(it) }}</div>
+              </div>
+              <div class="card-actions" *ngIf="canCheckIn(it, lane) || canRevertCheckIn(it, lane) || needsCalendarOverride(it, lane)">
+                <ion-button
+                  class="check-in-btn"
+                  size="small"
+                  fill="solid"
+                  color="primary"
+                  *ngIf="canCheckIn(it, lane)"
+                  (click)="checkInCard(it, lane, $event)">
                   Check-in
                 </ion-button>
-              </div>
-              <div class="card-notes" *ngIf="notesOf(it)">
-                <ion-button class="notes-toggle-btn" size="small" fill="solid" (click)="toggleExpanded(it.id)">
-                  {{ isExpanded(it.id) ? 'Hide notes' : 'Show notes' }}
+                <ion-button
+                  class="revert-check-in-btn"
+                  size="small"
+                  fill="outline"
+                  color="warning"
+                  *ngIf="canRevertCheckIn(it, lane)"
+                  (click)="revertCheckInCard(it, lane, $event)">
+                  Revert check-in
                 </ion-button>
-                <div class="notes" *ngIf="isExpanded(it.id)">{{ notesOf(it) }}</div>
+                <ion-button
+                  class="calendar-override-btn"
+                  size="small"
+                  fill="outline"
+                  color="medium"
+                  *ngIf="needsCalendarOverride(it, lane)"
+                  (click)="applyCalendarOverride(it, lane, $event)">
+                  No appointment required
+                </ion-button>
               </div>
             </div>
           </div>
@@ -210,13 +225,35 @@
           <ion-item button (click)="startEditFromCard()">
             <ion-label>Edit Customer</ion-label>
           </ion-item>
-          <ion-item button (click)="removeCardFromLane()">
-            <ion-label color="danger">Remove from lane</ion-label>
+          <ion-item button (click)="removeCardAction()">
+            <ion-label color="danger">{{ cardRemoveLabel() }}</ion-label>
           </ion-item>
         </ion-list>
       </ion-content>
     </ng-template>
   </ion-popover>
+
+  <ion-modal [isOpen]="removeCustomerOpen()" (didDismiss)="cancelRemoveCustomer()">
+    <ng-template>
+      <ion-header>
+        <ion-toolbar>
+          <ion-title>Remove customer</ion-title>
+          <ion-buttons slot="end">
+            <ion-button (click)="cancelRemoveCustomer()">Close</ion-button>
+          </ion-buttons>
+        </ion-toolbar>
+      </ion-header>
+      <ion-content class="ion-padding">
+        <div style="margin-bottom:12px;">
+          Are you sure you want to take them out of their current status?
+        </div>
+        <div style="display:flex; gap:8px; justify-content:flex-end;">
+          <ion-button fill="outline" (click)="cancelRemoveCustomer()">No</ion-button>
+          <ion-button color="danger" (click)="confirmRemoveCustomer()">Yes</ion-button>
+        </div>
+      </ion-content>
+    </ng-template>
+  </ion-modal>
 
   <ion-popover
     [isOpen]="laneMenuOpen()"
@@ -249,16 +286,22 @@
           </ion-buttons>
         </ion-toolbar>
       </ion-header>
-      <ion-content class="ion-padding">
+      <ion-content class="ion-padding modal-form-content">
         <ion-item>
           <ion-label position="stacked">Name</ion-label>
           <ion-input [ngModel]="renameValue()" (ngModelChange)="renameValue.set($event)"></ion-input>
         </ion-item>
-        <div style="margin-top:16px; display:flex; gap:8px; justify-content:flex-end;">
-          <ion-button fill="outline" (click)="renameOpen.set(false)">Cancel</ion-button>
-          <ion-button (click)="saveRename()">Save</ion-button>
-        </div>
       </ion-content>
+      <ion-footer class="modal-form-footer">
+        <ion-toolbar>
+          <div class="modal-footer-row">
+            <div class="modal-footer-right">
+              <ion-button fill="outline" (click)="renameOpen.set(false)">Cancel</ion-button>
+              <ion-button (click)="saveRename()" [disabled]="!canSaveRename()">Save</ion-button>
+            </div>
+          </div>
+        </ion-toolbar>
+      </ion-footer>
     </ng-template>
   </ion-modal>
 

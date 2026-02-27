@@ -247,6 +247,24 @@
   color: var(--ion-color-danger, #d14343);
 }
 
+.inline-register-link {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin-left: 6px;
+  color: #86b5ff;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.inline-register-link:hover,
+.inline-register-link:focus-visible {
+  color: #d8e8ff;
+}
+
 @media (min-width: 980px) {
   .auth-shell {
     grid-template-columns: minmax(360px, 0.95fr) minmax(520px, 1fr);

@@ -41,6 +41,8 @@ html[data-theme='dark'] {
   --app-nav-active-bg-hover: rgba(10, 132, 255, 0.44);
   --app-nav-active-border: rgba(130, 205, 255, 0.62);
   --app-nav-active-text: #ecf6ff;
+  --app-interactive-hover-shadow: 0 4px 14px rgb(0 0 0 / 22%);
+  --app-interactive-hover-transform: translateY(-1px);
 
   --ion-background-color: var(--app-bg-solid);
   --ion-text-color: var(--app-text);
@@ -88,6 +90,8 @@ html[data-theme='light'] {
   --app-nav-active-bg-hover: rgba(10, 132, 255, 0.22);
   --app-nav-active-border: rgba(10, 132, 255, 0.32);
   --app-nav-active-text: #0f172a;
+  --app-interactive-hover-shadow: 0 4px 14px rgb(15 23 42 / 18%);
+  --app-interactive-hover-transform: translateY(-1px);
 
   --ion-background-color: var(--app-bg-solid);
   --ion-text-color: var(--app-text);
@@ -154,6 +158,152 @@ a:hover {
   color: var(--app-link-hover);
 }
 
+/* Global click affordance: pointer + consistent hover interaction */
+:where(
+  a[href],
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']),
+  input[type='button']:not(:disabled),
+  input[type='submit']:not(:disabled),
+  input[type='reset']:not(:disabled),
+  label[for],
+  summary,
+  ion-button:not([disabled]),
+  ion-fab-button:not([disabled]),
+  ion-item[button]:not([disabled]),
+  ion-segment-button:not([disabled]),
+  ion-toggle:not([disabled]),
+  th,
+  .clickable,
+  .invoice-card-button,
+  .invoice-card-link,
+  .message-row-btn,
+  .thread-row,
+  .data-row,
+  .activity-link,
+  .card-name-link,
+  .notes-toggle-link,
+  .messages-see-all,
+  .toolbar-chip,
+  .tab-rail-btn,
+  .header-link,
+  .notification-trigger,
+  .register-cta,
+  .inline-register-link,
+  .inline-link-btn,
+  .link-btn,
+  .search-clear,
+  .mobile-sms-summary
+) {
+  cursor: pointer;
+}
+
+:where(
+  button:disabled,
+  input[type='button']:disabled,
+  input[type='submit']:disabled,
+  input[type='reset']:disabled,
+  ion-button[disabled],
+  ion-fab-button[disabled],
+  ion-item[disabled],
+  ion-segment-button[disabled],
+  ion-toggle[disabled],
+  [aria-disabled='true']
+) {
+  cursor: not-allowed;
+}
+
+:where(
+  button,
+  input[type='button'],
+  input[type='submit'],
+  input[type='reset'],
+  ion-button,
+  ion-fab-button,
+  ion-item[button],
+  ion-segment-button,
+  .invoice-card-button,
+  .invoice-card-link,
+  .message-row-btn,
+  .thread-row,
+  .data-row,
+  .toolbar-chip,
+  .tab-rail-btn,
+  .messages-see-all,
+  .notification-trigger,
+  .register-cta,
+  .link-btn
+) {
+  transition: border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+
+:where(
+  button:not(:disabled),
+  input[type='button']:not(:disabled),
+  input[type='submit']:not(:disabled),
+  input[type='reset']:not(:disabled),
+  ion-button:not([disabled]),
+  ion-fab-button:not([disabled]),
+  ion-item[button]:not([disabled]),
+  ion-segment-button:not([disabled]),
+  .invoice-card-button,
+  .invoice-card-link,
+  .message-row-btn,
+  .thread-row,
+  .data-row,
+  .toolbar-chip,
+  .tab-rail-btn,
+  .messages-see-all,
+  .notification-trigger,
+  .register-cta,
+  .link-btn
+):hover {
+  border-color: var(--app-nav-active-border);
+  box-shadow: var(--app-interactive-hover-shadow);
+  transform: var(--app-interactive-hover-transform);
+}
+
+:where(
+  a[href],
+  .activity-link,
+  .card-name-link,
+  .notes-toggle-link,
+  .inline-register-link,
+  .inline-link-btn,
+  .search-clear
+):hover {
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 2px;
+}
+
+:where(
+  a[href],
+  button,
+  [role='button'],
+  input[type='button'],
+  input[type='submit'],
+  input[type='reset'],
+  ion-button,
+  ion-fab-button,
+  ion-item[button],
+  ion-segment-button,
+  .invoice-card-button,
+  .invoice-card-link,
+  .message-row-btn,
+  .thread-row,
+  .data-row,
+  .toolbar-chip,
+  .tab-rail-btn,
+  .messages-see-all,
+  .notification-trigger,
+  .register-cta,
+  .link-btn
+):focus-visible {
+  outline: 2px solid var(--app-link, #2563eb);
+  outline-offset: 1px;
+}
+
 ion-card {
   color: var(--app-text);
 }
@@ -172,11 +322,179 @@ ion-datetime {
   --placeholder-color: var(--app-text-muted);
 }
 
+ion-button[fill='outline'] {
+  --border-width: 1px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+html:not([data-theme='light']) ion-button[fill='outline']:not([color]),
+html:not([data-theme='light']) ion-button[fill='outline'][color='primary'] {
+  --color: #eaf3ff;
+  --border-color: color-mix(in srgb, var(--ion-color-primary, #0a84ff) 72%, var(--app-border-subtle));
+  --background: color-mix(in srgb, var(--ion-color-primary, #0a84ff) 18%, transparent);
+  --background-hover: color-mix(in srgb, var(--ion-color-primary, #0a84ff) 26%, transparent);
+  --background-activated: color-mix(in srgb, var(--ion-color-primary, #0a84ff) 32%, transparent);
+}
+
+html:not([data-theme='light']) ion-button[fill='outline'][color='success'] {
+  --color: #eafff3;
+  --border-color: color-mix(in srgb, var(--ion-color-success, #22c55e) 72%, var(--app-border-subtle));
+  --background: color-mix(in srgb, var(--ion-color-success, #22c55e) 17%, transparent);
+  --background-hover: color-mix(in srgb, var(--ion-color-success, #22c55e) 24%, transparent);
+  --background-activated: color-mix(in srgb, var(--ion-color-success, #22c55e) 30%, transparent);
+}
+
+html:not([data-theme='light']) ion-button[fill='outline'][color='danger'] {
+  --color: #ffeef0;
+  --border-color: color-mix(in srgb, var(--ion-color-danger, #ef4444) 72%, var(--app-border-subtle));
+  --background: color-mix(in srgb, var(--ion-color-danger, #ef4444) 17%, transparent);
+  --background-hover: color-mix(in srgb, var(--ion-color-danger, #ef4444) 24%, transparent);
+  --background-activated: color-mix(in srgb, var(--ion-color-danger, #ef4444) 30%, transparent);
+}
+
+html:not([data-theme='light']) ion-button[fill='outline'][color='warning'] {
+  --color: #fff9e8;
+  --border-color: color-mix(in srgb, var(--ion-color-warning, #f59e0b) 72%, var(--app-border-subtle));
+  --background: color-mix(in srgb, var(--ion-color-warning, #f59e0b) 17%, transparent);
+  --background-hover: color-mix(in srgb, var(--ion-color-warning, #f59e0b) 24%, transparent);
+  --background-activated: color-mix(in srgb, var(--ion-color-warning, #f59e0b) 30%, transparent);
+}
+
+html[data-theme='light'] ion-button[fill='outline']:not([color]),
+html[data-theme='light'] ion-button[fill='outline'][color='primary'] {
+  --color: #0b4da2;
+  --border-color: color-mix(in srgb, var(--ion-color-primary, #0a84ff) 55%, #8fb3db);
+  --background: color-mix(in srgb, var(--ion-color-primary, #0a84ff) 10%, #ffffff);
+  --background-hover: color-mix(in srgb, var(--ion-color-primary, #0a84ff) 15%, #ffffff);
+  --background-activated: color-mix(in srgb, var(--ion-color-primary, #0a84ff) 20%, #ffffff);
+}
+
+html[data-theme='light'] ion-button[fill='outline'][color='success'] {
+  --color: #0f5f2f;
+  --border-color: color-mix(in srgb, var(--ion-color-success, #22c55e) 55%, #92c9a8);
+  --background: color-mix(in srgb, var(--ion-color-success, #22c55e) 10%, #ffffff);
+  --background-hover: color-mix(in srgb, var(--ion-color-success, #22c55e) 15%, #ffffff);
+  --background-activated: color-mix(in srgb, var(--ion-color-success, #22c55e) 20%, #ffffff);
+}
+
+html[data-theme='light'] ion-button[fill='outline'][color='danger'] {
+  --color: #8e1f2a;
+  --border-color: color-mix(in srgb, var(--ion-color-danger, #ef4444) 55%, #d4a2ab);
+  --background: color-mix(in srgb, var(--ion-color-danger, #ef4444) 10%, #ffffff);
+  --background-hover: color-mix(in srgb, var(--ion-color-danger, #ef4444) 15%, #ffffff);
+  --background-activated: color-mix(in srgb, var(--ion-color-danger, #ef4444) 20%, #ffffff);
+}
+
+html[data-theme='light'] ion-button[fill='outline'][color='warning'] {
+  --color: #8c5a0a;
+  --border-color: color-mix(in srgb, var(--ion-color-warning, #f59e0b) 55%, #ddbf89);
+  --background: color-mix(in srgb, var(--ion-color-warning, #f59e0b) 10%, #ffffff);
+  --background-hover: color-mix(in srgb, var(--ion-color-warning, #f59e0b) 15%, #ffffff);
+  --background-activated: color-mix(in srgb, var(--ion-color-warning, #f59e0b) 20%, #ffffff);
+}
+
+ion-button[disabled] {
+  --opacity: 1;
+  opacity: 1;
+}
+
+html:not([data-theme='light']) ion-button[disabled]:not([fill]),
+html:not([data-theme='light']) ion-button[disabled][fill='solid'] {
+  --background: #3a4556;
+  --background-hover: #3a4556;
+  --background-activated: #3a4556;
+  --color: #c4cfde;
+}
+
+html:not([data-theme='light']) ion-button[disabled][fill='outline'] {
+  --background: rgba(148, 163, 184, 0.15);
+  --background-hover: rgba(148, 163, 184, 0.15);
+  --background-activated: rgba(148, 163, 184, 0.15);
+  --border-color: rgba(148, 163, 184, 0.4);
+  --color: #c4cfde;
+}
+
+html[data-theme='light'] ion-button[disabled]:not([fill]),
+html[data-theme='light'] ion-button[disabled][fill='solid'] {
+  --background: #c7ced9;
+  --background-hover: #c7ced9;
+  --background-activated: #c7ced9;
+  --color: #4b5563;
+}
+
+html[data-theme='light'] ion-button[disabled][fill='outline'] {
+  --background: rgba(148, 163, 184, 0.18);
+  --background-hover: rgba(148, 163, 184, 0.18);
+  --background-activated: rgba(148, 163, 184, 0.18);
+  --border-color: rgba(148, 163, 184, 0.5);
+  --color: #5b6472;
+}
+
 ion-content.glass-bg.ion-padding {
   --padding-bottom: calc(72px + env(safe-area-inset-bottom));
 }
 
-.scroll-y {
-  overflow-y: inherit !important;
-  overscroll-behavior-y: contain;
+ion-content.modal-form-content {
+  --padding-bottom: calc(96px + env(safe-area-inset-bottom));
+}
+
+ion-footer.modal-form-footer {
+  border-top: 1px solid var(--app-border-subtle);
+  background: var(--app-header-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+}
+
+ion-footer.modal-form-footer ion-toolbar {
+  --background: transparent;
+  --border-width: 0;
+  --min-height: 64px;
+  --padding-start: 12px;
+  --padding-end: 12px;
+}
+
+html:not([data-theme='light']) ion-footer.modal-form-footer ion-button[disabled]:not([fill]),
+html:not([data-theme='light']) ion-footer.modal-form-footer ion-button[disabled][fill='solid'] {
+  --background: #3a4556;
+  --background-hover: #3a4556;
+  --background-activated: #3a4556;
+  --border-color: rgba(148, 163, 184, 0.35);
+  --color: #c4cfde;
+  --box-shadow: none;
+  opacity: 1;
+}
+
+html[data-theme='light'] ion-footer.modal-form-footer ion-button[disabled]:not([fill]),
+html[data-theme='light'] ion-footer.modal-form-footer ion-button[disabled][fill='solid'] {
+  --background: #e6ebf2;
+  --background-hover: #e6ebf2;
+  --background-activated: #e6ebf2;
+  --border-color: #cbd4e1;
+  --color: #5a6474;
+  --box-shadow: none;
+  opacity: 1;
+}
+
+.modal-footer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.modal-footer-left,
+.modal-footer-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.modal-footer-right {
+  margin-left: auto;
+}
+
+.footer-validation {
+  margin: 0 12px 10px;
 }

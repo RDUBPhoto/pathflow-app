@@ -6,7 +6,7 @@ export const environment = {
     providers: ['aad', 'google'],
     adminEmails: [] as string[],
     devBypass: false,
-    localPasswordEnabled: false,
+    localPasswordEnabled: true,
     localUsers: [] as Array<{
       email: string;
       password: string;

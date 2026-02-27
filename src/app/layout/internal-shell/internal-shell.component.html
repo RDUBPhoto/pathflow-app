@@ -63,6 +63,17 @@
           </span>
           <span class="nav-label">Inventory</span>
         </a>
+
+        <a
+          class="nav-link"
+          routerLink="/invoices"
+          routerLinkActive="active"
+          title="Invoices">
+          <span class="icon-wrap">
+            <ion-icon name="receipt-outline"></ion-icon>
+          </span>
+          <span class="nav-label">Invoices</span>
+        </a>
       </nav>
     </div>
 
@@ -141,6 +152,16 @@
   </aside>
 
   <main class="main-pane">
+    <header class="trial-banner" *ngIf="showTrialBanner()">
+      <div class="trial-banner-copy">
+        <span class="trial-banner-label">Trial Mode</span>
+        <span class="trial-banner-text">{{ trialCountdownLabel() }}</span>
+      </div>
+      <button type="button" class="trial-pay-link" (click)="openBilling()">
+        Activate Now
+      </button>
+    </header>
+
     <section class="page-pane">
       <router-outlet></router-outlet>
     </section>

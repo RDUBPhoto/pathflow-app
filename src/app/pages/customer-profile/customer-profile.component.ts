@@ -41,6 +41,7 @@ import { SmsApiService, SmsDeliveryStatus, SmsMessage } from '../../services/sms
 import { EmailApiService, EmailMessage, EmailTemplate } from '../../services/email-api.service';
 import { AppSettingsApiService } from '../../services/app-settings-api.service';
 import { ScheduleApi, ScheduleItem } from '../../services/schedule-api.service';
+import { InvoiceCard, InvoicesDataService } from '../../services/invoices-data.service';
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
 import { PageBackButtonComponent } from '../../components/navigation/page-back-button/page-back-button.component';
 import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
@@ -132,6 +133,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   private readonly emailApi = inject(EmailApiService);
   private readonly scheduleApi = inject(ScheduleApi);
   private readonly appSettingsApi = inject(AppSettingsApiService);
+  private readonly invoicesData = inject(InvoicesDataService);
 
   private routeSub: Subscription | null = null;
   private querySub: Subscription | null = null;
@@ -156,6 +158,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   email = '';
   address = '';
   notes = '';
+  customerCreatedAt = '';
 
   vin = '';
   vinStatus = '';
@@ -242,6 +245,14 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     return this.colorForSeed(this.customerId() || this.displayName());
   }
 
+  customerSinceLabel(): string {
+    const raw = (this.customerCreatedAt || '').trim();
+    if (!raw) return '';
+    const parsed = Date.parse(raw);
+    if (!Number.isFinite(parsed)) return raw;
+    return new Date(parsed).toLocaleString();
+  }
+
   readonly canUseSms = computed(() => !!this.customerId());
   readonly canUseEmail = computed(() => !!this.customerId());
   readonly hasVinDetails = computed(() => Object.values(this.vinDecoded()).some(value => !!value));
@@ -266,13 +277,18 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     { key: 'email', label: 'Email', icon: 'mail-outline' }
   ];
 
-  readonly invoiceMocks = [
-    { id: 'INV-1045', amount: '$1,240.00', status: 'Paid', date: 'Jan 24, 2026' },
-    { id: 'INV-1102', amount: '$380.00', status: 'Open', date: 'Feb 03, 2026' },
-    { id: 'INV-1128', amount: '$95.00', status: 'Draft', date: 'Feb 15, 2026' }
-  ];
+  customerInvoices(): InvoiceCard[] {
+    const fullName = `${this.firstName} ${this.lastName}`.trim();
+    return this.invoicesData.forCustomer({
+      id: this.customerId(),
+      email: this.email,
+      name: fullName || null
+    });
+  }
 
-  readonly invoiceAttentionCount = computed(() => this.invoiceMocks.filter(invoice => invoice.status !== 'Paid').length);
+  invoiceAttentionCount(): number {
+    return this.customerInvoices().filter(invoice => invoice.stage !== 'paid').length;
+  }
 
   readonly palette: ColorOpt[] = [
     { label: 'White', hex: '#ffffff' },
@@ -557,6 +573,39 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
 
   goBack(): void {
     this.router.navigate(['/customers']);
+  }
+
+  openCreateInvoice(): void {
+    const customerId = (this.customerId() || '').trim();
+    if (!customerId) {
+      this.error.set('Save this customer first, then create an invoice.');
+      return;
+    }
+
+    const vehicle = [this.vehicleYear, this.vehicleMake, this.vehicleModel]
+      .map(value => String(value || '').trim())
+      .filter(Boolean)
+      .join(' ');
+
+    this.status.set('');
+    this.error.set('');
+    this.router.navigate(['/invoices/new'], {
+      queryParams: {
+        customerId,
+        customerName: this.displayName() || null,
+        customerEmail: this.email.trim() || null,
+        customerPhone: this.phone.trim() || null,
+        customerVehicle: vehicle || null
+      }
+    });
+  }
+
+  openInvoice(invoice: InvoiceCard): void {
+    const invoiceId = String(invoice?.id || '').trim();
+    if (!invoiceId) return;
+    this.status.set('');
+    this.error.set('');
+    void this.router.navigate(['/invoices', invoiceId]);
   }
 
   hasVehicleData(): boolean {
@@ -931,25 +980,63 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
       });
   }
 
-  addScheduleDraft(): void {
+  openScheduleAppointmentModal(): void {
     const customerId = (this.customerId() || '').trim();
     if (!customerId) {
-      this.scheduleError.set('Save the customer first, then add schedule dates.');
+      this.scheduleError.set('Save the customer first, then add an appointment.');
       return;
     }
-
-    const window = this.defaultScheduleWindow();
-    const draft: ScheduleDraft = {
-      localId: this.localScheduleId(),
-      id: null,
-      startInput: window.start,
-      endInput: window.end,
-      resource: this.defaultScheduleResource(),
-      notes: ''
-    };
-    this.scheduleEntries.update(list => [draft, ...list]);
-    this.scheduleStatus.set('New schedule row added.');
+    this.scheduleStatus.set('');
     this.scheduleError.set('');
+    this.router.navigate(['/schedule'], {
+      queryParams: { customerId }
+    });
+  }
+
+  upcomingScheduleEntries(): ScheduleDraft[] {
+    const now = Date.now();
+    return [...this.scheduleEntries()]
+      .filter(entry => {
+        const end = this.scheduleEndValue(entry);
+        return !Number.isFinite(end) || end >= now;
+      })
+      .sort((a, b) => {
+        const aStart = this.scheduleStartValue(a);
+        const bStart = this.scheduleStartValue(b);
+        const aComparable = Number.isFinite(aStart) ? aStart : Number.MAX_SAFE_INTEGER;
+        const bComparable = Number.isFinite(bStart) ? bStart : Number.MAX_SAFE_INTEGER;
+        return aComparable - bComparable;
+      });
+  }
+
+  historyScheduleEntries(): ScheduleDraft[] {
+    const now = Date.now();
+    return [...this.scheduleEntries()]
+      .filter(entry => {
+        const end = this.scheduleEndValue(entry);
+        return Number.isFinite(end) && end < now;
+      })
+      .sort((a, b) => {
+        const aEnd = this.scheduleEndValue(a);
+        const bEnd = this.scheduleEndValue(b);
+        const aComparable = Number.isFinite(aEnd) ? aEnd : 0;
+        const bComparable = Number.isFinite(bEnd) ? bEnd : 0;
+        return bComparable - aComparable;
+      });
+  }
+
+  scheduleDateLabel(value: string): string {
+    const normalized = toLocalDateTimeStorage(value);
+    const parsed = Date.parse(normalized || value || '');
+    if (!Number.isFinite(parsed)) return value;
+    return new Date(parsed).toLocaleString();
+  }
+
+  scheduleBayLabel(resource: string): string {
+    const value = String(resource || '').trim();
+    if (!value) return 'Unassigned';
+    const bay = this.scheduleBays().find(item => item.id === value);
+    return bay?.name || value;
   }
 
   saveScheduleDraft(draft: ScheduleDraft): void {
@@ -1288,6 +1375,22 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     return message.id;
   }
 
+  trackInvoice(_index: number, invoice: InvoiceCard): string {
+    return invoice.id;
+  }
+
+  invoiceStatusLabel(invoice: InvoiceCard): string {
+    return `${invoice.stage.charAt(0).toUpperCase()}${invoice.stage.slice(1)}`;
+  }
+
+  invoiceBadgeColor(invoice: InvoiceCard): string {
+    if (invoice.stage === 'paid') return 'success';
+    if (invoice.stage === 'cancelled') return 'danger';
+    if (invoice.stage === 'draft') return 'warning';
+    if (invoice.stage === 'sent') return 'primary';
+    return 'medium';
+  }
+
   smsDateLabel(value: string): string {
     const parsed = Date.parse(value);
     if (!Number.isFinite(parsed)) return value;
@@ -1483,6 +1586,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     this.emailError.set('');
     this.address = customer.address || '';
     this.notes = customer.notes || '';
+    this.customerCreatedAt = customer.createdAt || '';
     this.vin = (customer.vin || '').toUpperCase();
     this.vehicleMake = customer.vehicleMake || '';
     this.vehicleModel = customer.vehicleModel || '';
@@ -1536,6 +1640,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     this.selectedEmailId.set(null);
     this.address = '';
     this.notes = '';
+    this.customerCreatedAt = '';
     this.vin = '';
     this.vinStatus = '';
     this.vinDecoded.set({});
@@ -1800,6 +1905,20 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
       resource,
       notes: String(item.notes || '')
     };
+  }
+
+  private scheduleStartValue(entry: ScheduleDraft): number {
+    return this.scheduleTimeValue(entry.startInput);
+  }
+
+  private scheduleEndValue(entry: ScheduleDraft): number {
+    return this.scheduleTimeValue(entry.endInput);
+  }
+
+  private scheduleTimeValue(value: string): number {
+    const normalized = toLocalDateTimeStorage(value);
+    const parsed = Date.parse(normalized || value || '');
+    return Number.isFinite(parsed) ? parsed : Number.NaN;
   }
 
   private clearFitmentFields(): void {

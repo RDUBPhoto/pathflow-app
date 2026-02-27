@@ -12,6 +12,11 @@
 - `GET /api/reports/invoice-aging`
 - `GET /api/reports/lead-sources`
 - `GET /api/reports/communications`
+- `GET /api/reports/production-forecast`
+- `GET /api/reports/cashflow-forecast`
+- `GET /api/reports/powerbi-config`
+- `GET /api/reports/powerbi-embed?includeToken=true`
+- `POST /api/reports/seed-demo`
 
 ## Query params
 
@@ -19,6 +24,8 @@
 - `to=YYYY-MM-DD` period end (default: now)
 - `monthsBack=12` monthly trend history range (1-36)
 - `futureDays=90` future pipeline horizon (1-365)
+- `forecastMonths=6` forecast horizon (1-24)
+- `openingCash=0` optional opening cash input for first projected month
 
 ## Response shape
 
@@ -33,7 +40,8 @@
     "periodStart": "2026-02-01",
     "periodEnd": "2026-02-19",
     "monthsBack": 12,
-    "futureDays": 90
+    "futureDays": 90,
+    "forecastMonths": 6
   },
   "tables": {
     "kpiSummary": [],
@@ -41,12 +49,38 @@
     "salesTrend": [],
     "invoiceAging": [],
     "leadSources": [],
-    "communicationVolume": []
+    "communicationVolume": [],
+    "productionForecast": [],
+    "cashflowForecast": []
   }
 }
 ```
 
 Scoped endpoints return `rows` for one table and include shared metadata.
+
+## Power BI embed config
+
+`/api/reports/powerbi-config` returns wiring status from app settings (safe response, no secrets):
+
+- `POWERBI_TENANT_ID`
+- `POWERBI_CLIENT_ID`
+- `POWERBI_CLIENT_SECRET`
+- `POWERBI_WORKSPACE_ID`
+- `POWERBI_REPORT_ID`
+- optional `POWERBI_REPORT_WEB_URL`
+
+`/api/reports/powerbi-embed?includeToken=true` returns secure embed payload (`embedUrl`, `embedToken`, expiration) when all secure settings are configured.
+
+## Demo data seeding
+
+`POST /api/reports/seed-demo` upserts deterministic demo rows into `workitems` for report testing
+without needing live production data.
+
+Example:
+
+```bash
+curl -X POST https://<your-app>/api/reports/seed-demo
+```
 
 ## SQL rollout
 

@@ -38,6 +38,8 @@ export default class RegisterComponent {
   readonly saving = signal(false);
   readonly error = signal('');
   readonly locationName = signal('Pathflow HQ');
+  readonly selectedPlan = signal<'trial' | 'monthly' | 'annual'>('trial');
+  readonly billingMode = signal(false);
   readonly cardholderName = signal('');
   readonly cardNumber = signal('');
   readonly expiryMonth = signal('');
@@ -45,6 +47,30 @@ export default class RegisterComponent {
   readonly cvc = signal('');
   readonly postalCode = signal('');
   readonly redirectTo = signal('/dashboard');
+  readonly monthlyPrice = signal(149);
+  readonly annualPrice = signal(1490);
+
+  readonly isBillingUpdateMode = computed(() => this.auth.isAccessLocked() || this.billingMode());
+  readonly showTrialOption = computed(() => !this.isBillingUpdateMode());
+  readonly requiresBilling = computed(() => this.isBillingUpdateMode() || this.selectedPlan() !== 'trial');
+  readonly planCycleForBilling = computed<'monthly' | 'annual'>(() => this.selectedPlan() === 'annual' ? 'annual' : 'monthly');
+  readonly annualSavingsPercent = computed(() => {
+    const monthly = this.monthlyPrice();
+    const annual = this.annualPrice();
+    if (monthly <= 0 || annual <= 0) return 0;
+    const yearlyMonthly = monthly * 12;
+    const savings = Math.max(0, yearlyMonthly - annual);
+    return Math.round((savings / yearlyMonthly) * 100);
+  });
+  readonly trialEndsDisplay = computed(() => this.toDisplayDate(this.auth.trialEndsAt()));
+  readonly billingProvided = computed(() => (
+    this.cardholderName().trim().length > 0 ||
+    this.digitsOnly(this.cardNumber()).length > 0 ||
+    this.digitsOnly(this.expiryMonth()).length > 0 ||
+    this.digitsOnly(this.expiryYear()).length > 0 ||
+    this.digitsOnly(this.cvc()).length > 0 ||
+    this.digitsOnly(this.postalCode()).length > 0
+  ));
 
   readonly isSandboxCard = computed(() => {
     const cardDigits = this.digitsOnly(this.cardNumber());
@@ -95,39 +121,72 @@ export default class RegisterComponent {
 
   readonly canSubmit = computed(() =>
     !this.saving() &&
-    this.auth.canBootstrapRegistration() &&
-    this.locationName().trim().length >= 3 &&
-    this.billingValid()
+    (this.isBillingUpdateMode() || this.auth.canBootstrapRegistration()) &&
+    (this.isBillingUpdateMode() || this.locationName().trim().length >= 3) &&
+    (!this.requiresBilling() || this.billingValid())
   );
 
+  readonly submitLabel = computed(() => {
+    if (this.requiresBilling()) {
+      return this.planCycleForBilling() === 'annual' ? 'Start Annual Plan' : 'Start Monthly Plan';
+    }
+    return 'Start 7-Day Free Trial';
+  });
+
   constructor() {
+    const currentRoutePath = (this.route.snapshot.routeConfig?.path || '').toLowerCase();
+    this.billingMode.set(currentRoutePath === 'billing');
+    if (this.billingMode()) {
+      this.selectedPlan.set(this.auth.planCycle() === 'annual' ? 'annual' : 'monthly');
+    }
+
     this.route.queryParamMap.subscribe(params => {
       this.redirectTo.set(this.normalizeRedirect(params.get('redirect')));
+      const mode = (params.get('mode') || '').trim().toLowerCase();
+      if (mode === 'billing') {
+        this.billingMode.set(true);
+        this.selectedPlan.set(this.auth.planCycle() === 'annual' ? 'annual' : 'monthly');
+      }
+      const queryPlan = (params.get('plan') || '').trim().toLowerCase();
+      if (queryPlan === 'annual' || queryPlan === 'monthly' || queryPlan === 'trial') {
+        if (this.isBillingUpdateMode() && queryPlan === 'trial') return;
+        this.selectedPlan.set(queryPlan as 'trial' | 'monthly' | 'annual');
+      }
     });
 
     effect(() => {
       if (!this.auth.initialized()) return;
       if (!this.auth.isAuthenticated()) return;
-      if (this.auth.needsRegistration()) return;
+      if (this.auth.needsRegistration() || this.auth.isAccessLocked()) return;
       void this.router.navigateByUrl(this.redirectTo(), { replaceUrl: true });
+    });
+
+    effect(() => {
+      if (!this.auth.isAccessLocked()) return;
+      this.billingMode.set(true);
+      this.selectedPlan.set(this.auth.planCycle() === 'annual' ? 'annual' : 'monthly');
+      const defaultLocationId = this.auth.defaultLocationId();
+      const location = this.auth.locations().find(item => item.id === defaultLocationId) || this.auth.locations()[0];
+      if (location?.name) {
+        this.locationName.set(location.name);
+      }
     });
   }
 
-  async registerWorkspace(): Promise<void> {
+  async submitRegistration(): Promise<void> {
     if (!this.canSubmit()) return;
 
     this.saving.set(true);
     this.error.set('');
-
-    const response = await this.auth.registerWorkspace(this.locationName().trim(), {
-      cardholderName: this.cardholderName().trim(),
-      cardNumber: this.digitsOnly(this.cardNumber()),
-      expiryMonth: this.digitsOnly(this.expiryMonth()),
-      expiryYear: this.digitsOnly(this.expiryYear()),
-      cvc: this.digitsOnly(this.cvc()),
-      postalCode: this.digitsOnly(this.postalCode()),
-      sandboxBypass: this.isSandboxCard()
-    });
+    const selectedCycle = this.planCycleForBilling();
+    const billingPayload = this.requiresBilling() ? this.buildBillingPayload() : null;
+    const response = this.isBillingUpdateMode()
+      ? await this.auth.updateBilling(billingPayload as ReturnType<RegisterComponent['buildBillingPayload']>, selectedCycle)
+      : await this.auth.registerWorkspace(
+          this.locationName().trim(),
+          billingPayload || undefined,
+          selectedCycle
+        );
     if (!response.ok) {
       this.error.set(response.error || 'Unable to complete registration.');
       this.saving.set(false);
@@ -147,6 +206,11 @@ export default class RegisterComponent {
     this.auth.signOut('/login');
   }
 
+  setPlanCycle(cycle: 'trial' | 'monthly' | 'annual'): void {
+    if (this.isBillingUpdateMode() && cycle === 'trial') return;
+    this.selectedPlan.set(cycle);
+  }
+
   private normalizeRedirect(path: string | null): string {
     const value = (path || '').trim();
     if (!value.startsWith('/')) return '/dashboard';
@@ -157,5 +221,31 @@ export default class RegisterComponent {
 
   private digitsOnly(value: unknown): string {
     return String(value ?? '').replace(/\D+/g, '');
+  }
+
+  private buildBillingPayload(): {
+    cardholderName: string;
+    cardNumber: string;
+    expiryMonth: string;
+    expiryYear: string;
+    cvc: string;
+    postalCode: string;
+    sandboxBypass: boolean;
+  } {
+    return {
+      cardholderName: this.cardholderName().trim(),
+      cardNumber: this.digitsOnly(this.cardNumber()),
+      expiryMonth: this.digitsOnly(this.expiryMonth()),
+      expiryYear: this.digitsOnly(this.expiryYear()),
+      cvc: this.digitsOnly(this.cvc()),
+      postalCode: this.digitsOnly(this.postalCode()),
+      sandboxBypass: this.isSandboxCard()
+    };
+  }
+
+  private toDisplayDate(value: string): string {
+    const parsed = new Date(String(value || '').trim());
+    if (Number.isNaN(parsed.getTime())) return '';
+    return parsed.toLocaleDateString();
   }
 }

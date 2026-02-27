@@ -8,7 +8,16 @@
         </ion-buttons>
       </ion-toolbar>
     </ion-header>
-    <ion-content class="ion-padding glass-bg">
+    <ion-content class="ion-padding glass-bg schedule-modal-content">
+      <div class="feedback-overlay" *ngIf="status()">
+        <div
+          class="page-feedback"
+          [class.success]="statusTone() === 'success'"
+          [class.error]="statusTone() === 'error'">
+          {{ status() }}
+        </div>
+      </div>
+
       <div class="schedule-shell glass-surface">
         <daypilot-scheduler
           #scheduler
@@ -31,7 +40,7 @@
         </ion-buttons>
       </ion-toolbar>
     </ion-header>
-    <ion-content class="ion-padding glass-bg">
+    <ion-content class="ion-padding glass-bg modal-form-content">
       <ion-item lines="full">
         <ion-label>Block bay</ion-label>
         <ion-checkbox slot="end" [checked]="editorBlocked()" (ionChange)="editorBlocked.set($event.detail.checked)"></ion-checkbox>
@@ -51,6 +60,9 @@
         <ion-label position="stacked">Block label</ion-label>
         <ion-input [ngModel]="editorTitle()" (ngModelChange)="editorTitle.set($event)"></ion-input>
       </ion-item>
+      <div class="validation-error" *ngIf="editorBlocked() && !editorTitle().trim()">
+        Block label is required when blocking a bay.
+      </div>
 
       <ion-item>
         <ion-label position="stacked">Notes</ion-label>
@@ -75,12 +87,20 @@
         </ion-input>
       </ion-item>
 
-      <div class="editor-actions">
-        <ion-button fill="outline" color="danger" *ngIf="editorId()" (click)="deleteEditor()">Delete</ion-button>
-        <span style="flex:1 1 auto;"></span>
-        <ion-button fill="outline" (click)="editorOpen.set(false)">Cancel</ion-button>
-        <ion-button (click)="saveEditor()">Save</ion-button>
-      </div>
     </ion-content>
+    <ion-footer class="modal-form-footer">
+      <ion-toolbar>
+        <div class="modal-footer-row">
+          <div class="modal-footer-left">
+            <ion-button fill="outline" color="danger" *ngIf="editorId()" (click)="deleteEditor()">Delete</ion-button>
+          </div>
+          <div class="modal-footer-right">
+            <ion-button fill="outline" (click)="editorOpen.set(false)">Cancel</ion-button>
+            <ion-button (click)="saveEditor()" [disabled]="!canSaveEditor()">Save</ion-button>
+          </div>
+        </div>
+        <div class="validation-error footer-validation" *ngIf="editorValidationError()">{{ editorValidationError() }}</div>
+      </ion-toolbar>
+    </ion-footer>
   </ng-template>
 </ion-modal>

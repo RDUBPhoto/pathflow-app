@@ -1,10 +1,10 @@
-import { Component, Input, Output, EventEmitter, ViewChild, signal } from '@angular/core';
+import { Component, Input, Output, EventEmitter, ViewChild, signal, computed, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
   IonModal, IonHeader, IonToolbar, IonTitle, IonButtons, IonButton,
   IonContent, IonItem, IonLabel, IonSelect, IonSelectOption, IonInput,
-  IonTextarea, IonCheckbox, IonSpinner
+  IonTextarea, IonCheckbox, IonSpinner, IonFooter
 } from '@ionic/angular/standalone';
 import { DayPilot, DayPilotModule, DayPilotSchedulerComponent } from '@daypilot/daypilot-lite-angular';
 import { CustomersApi, Customer } from '../../../services/customers-api.service';
@@ -37,12 +37,12 @@ const SCHEDULE_SETTINGS_KEY = 'schedule.settings';
     CommonModule, FormsModule, DayPilotModule,
     IonModal, IonHeader, IonToolbar, IonTitle, IonButtons, IonButton,
     IonContent, IonItem, IonLabel, IonSelect, IonSelectOption, IonInput,
-    IonTextarea, IonCheckbox, IonSpinner
+    IonTextarea, IonCheckbox, IonSpinner, IonFooter
   ],
   templateUrl: './schedule-modal.component.html',
   styleUrls: ['./schedule-modal.component.scss']
 })
-export default class ScheduleModalComponent {
+export default class ScheduleModalComponent implements OnDestroy {
   @Input() isOpen: boolean = false;
   @Input() customerId: string | null = null;
 
@@ -50,8 +50,12 @@ export default class ScheduleModalComponent {
   @Output() saved = new EventEmitter<void>();
 
   @ViewChild('scheduler') scheduler?: DayPilotSchedulerComponent;
+  private readonly statusAutoDismissMs = 5000;
+  private statusDismissTimer: ReturnType<typeof setTimeout> | null = null;
 
   loading = signal(false);
+  status = signal('');
+  statusTone = signal<'success' | 'error' | ''>('');
   customers = signal<UICustomer[]>([]);
   items = signal<ScheduleItem[]>([]);
   events = signal<DayPilot.EventData[]>([]);
@@ -66,6 +70,9 @@ export default class ScheduleModalComponent {
   editorBlocked = signal(false);
   editorTitle = signal('');
   editorNotes = signal('');
+  editorError = signal('');
+  private editorInitialSnapshot = signal('');
+  readonly editorDirty = computed(() => this.editorSnapshotValue() !== this.editorInitialSnapshot());
 
   config: DayPilot.SchedulerConfig = {
     startDate: DayPilot.Date.today(),
@@ -93,7 +100,10 @@ export default class ScheduleModalComponent {
     heightSpec: 'Max',
     height: 520,
     onTimeRangeSelected: args => {
-      if (this.isHoliday(args.start)) return;
+      if (this.isHoliday(args.start)) {
+        this.setStatusError('Closed for holiday.');
+        return;
+      }
       const dp = args.control;
       dp.clearSelection();
       const start = args.start;
@@ -140,8 +150,10 @@ export default class ScheduleModalComponent {
       const end = new DayPilot.Date(args.data.end);
       const timeLabel = `${start.toString('h:mm tt')}–${end.toString('h:mm tt')}`;
       args.data.html = `
-        <div class="evt-title">${this.escapeHtml(String(args.data.text || ''))}</div>
-        <div class="evt-time">${timeLabel}</div>
+        <div class="evt-content">
+          <div class="evt-title">${this.escapeHtml(String(args.data.text || ''))}</div>
+          <div class="evt-time">${timeLabel}</div>
+        </div>
       `;
       if (tags.isBlocked) {
         args.data.backColor = '#2f343a';
@@ -151,6 +163,10 @@ export default class ScheduleModalComponent {
       }
     }
   };
+
+  ngOnDestroy(): void {
+    this.clearStatusTimer();
+  }
 
   private settings: ScheduleSettings = this.defaultSettings();
 
@@ -173,6 +189,7 @@ export default class ScheduleModalComponent {
   }
 
   private loadAll() {
+    this.clearStatus();
     this.loading.set(true);
     this.customersApi.list().subscribe({
       next: cs => {
@@ -184,10 +201,16 @@ export default class ScheduleModalComponent {
             this.loading.set(false);
             if (this.customerId) this.openEditorWithCustomer(this.customerId);
           },
-          error: () => { this.loading.set(false); }
+          error: () => {
+            this.loading.set(false);
+            this.setStatusError('Could not load schedule.');
+          }
         });
       },
-      error: () => { this.loading.set(false); }
+      error: () => {
+        this.loading.set(false);
+        this.setStatusError('Could not load customers.');
+      }
     });
   }
 
@@ -255,10 +278,20 @@ export default class ScheduleModalComponent {
     this.editorBlocked.set(!!data.isBlocked);
     this.editorTitle.set(data.title || '');
     this.editorNotes.set(data.notes || '');
+    this.editorError.set('');
+    this.markEditorPristine();
     this.editorOpen.set(true);
   }
 
   saveEditor() {
+    const validationMessage = this.editorValidationError();
+    if (validationMessage) {
+      this.editorError.set(validationMessage);
+      this.setStatusError(validationMessage);
+      return;
+    }
+
+    this.editorError.set('');
     const start = toLocalDateTimeStorage(this.editorStart());
     const end = toLocalDateTimeStorage(this.editorEnd());
     const resource = this.editorResource();
@@ -266,21 +299,35 @@ export default class ScheduleModalComponent {
     const customerId = isBlocked ? '' : (this.editorCustomerId() || '');
     const title = isBlocked ? this.editorTitle().trim() : '';
     const notes = this.editorNotes().trim();
-    if (!start || !end || !resource) return;
-    if (Date.parse(start) >= Date.parse(end)) return;
 
     const base = { start, end, resource, customerId, isBlocked, title, notes };
     const id = this.editorId();
     if (id) {
       this.scheduleApi.update({ id, ...base }).subscribe({
-        next: () => { this.editorOpen.set(false); this.loadAll(); this.saved.emit(); },
-        error: () => {}
+        next: () => {
+          this.editorOpen.set(false);
+          this.loadAll();
+          this.saved.emit();
+          this.setStatusSuccess('Appointment saved.');
+        },
+        error: () => {
+          this.editorError.set('Could not save appointment. Try again.');
+          this.setStatusError('Could not save appointment.');
+        }
       });
       return;
     }
     this.scheduleApi.create(base).subscribe({
-      next: () => { this.editorOpen.set(false); this.loadAll(); this.saved.emit(); },
-      error: () => {}
+      next: () => {
+        this.editorOpen.set(false);
+        this.loadAll();
+        this.saved.emit();
+        this.setStatusSuccess('Appointment saved.');
+      },
+      error: () => {
+        this.editorError.set('Could not save appointment. Try again.');
+        this.setStatusError('Could not save appointment.');
+      }
     });
   }
 
@@ -289,15 +336,20 @@ export default class ScheduleModalComponent {
     if (!id) { this.editorOpen.set(false); return; }
     if (!window.confirm('Delete this appointment?')) return;
     this.scheduleApi.delete(id).subscribe({
-      next: () => { this.editorOpen.set(false); this.loadAll(); this.saved.emit(); },
-      error: () => {}
+      next: () => {
+        this.editorOpen.set(false);
+        this.loadAll();
+        this.saved.emit();
+        this.setStatusSuccess('Appointment deleted.');
+      },
+      error: () => this.setStatusError('Could not delete appointment.')
     });
   }
 
   private updateEventTime(id: string, start: DayPilot.Date, end: DayPilot.Date, resource: string) {
     this.scheduleApi.update({ id, start: start.toString(), end: end.toString(), resource }).subscribe({
       next: () => { this.loadAll(); this.saved.emit(); },
-      error: () => {}
+      error: () => this.setStatusError('Could not update appointment.')
     });
   }
 
@@ -401,6 +453,43 @@ export default class ScheduleModalComponent {
     }
   }
 
+  editorValidationError(): string {
+    const start = toLocalDateTimeStorage(this.editorStart());
+    const end = toLocalDateTimeStorage(this.editorEnd());
+    const resource = this.editorResource().trim();
+    if (!start || !end || !resource) {
+      return 'Start, end, and bay are required.';
+    }
+    if (Date.parse(start) >= Date.parse(end)) {
+      return 'End must be after start.';
+    }
+    if (this.editorBlocked() && !this.editorTitle().trim()) {
+      return 'Block label is required when blocking a bay.';
+    }
+    return '';
+  }
+
+  canSaveEditor(): boolean {
+    return !this.editorValidationError() && this.editorDirty();
+  }
+
+  private editorSnapshotValue(): string {
+    return JSON.stringify({
+      id: this.editorId() || '',
+      start: toLocalDateTimeStorage(this.editorStart()),
+      end: toLocalDateTimeStorage(this.editorEnd()),
+      resource: this.editorResource().trim(),
+      customerId: this.editorBlocked() ? '' : String(this.editorCustomerId() || '').trim(),
+      isBlocked: !!this.editorBlocked(),
+      title: this.editorTitle().trim(),
+      notes: this.editorNotes().trim()
+    });
+  }
+
+  private markEditorPristine(): void {
+    this.editorInitialSnapshot.set(this.editorSnapshotValue());
+  }
+
   private escapeHtml(input: string): string {
     return input
       .replace(/&/g, '&amp;')
@@ -408,5 +497,37 @@ export default class ScheduleModalComponent {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
+  }
+
+  private clearStatus(): void {
+    this.clearStatusTimer();
+    this.status.set('');
+    this.statusTone.set('');
+  }
+
+  private setStatusSuccess(message: string): void {
+    this.status.set(message);
+    this.statusTone.set('success');
+    this.scheduleStatusDismiss();
+  }
+
+  private setStatusError(message: string): void {
+    this.status.set(message);
+    this.statusTone.set('error');
+    this.scheduleStatusDismiss();
+  }
+
+  private scheduleStatusDismiss(): void {
+    this.clearStatusTimer();
+    this.statusDismissTimer = setTimeout(() => {
+      this.statusDismissTimer = null;
+      this.clearStatus();
+    }, this.statusAutoDismissMs);
+  }
+
+  private clearStatusTimer(): void {
+    if (!this.statusDismissTimer) return;
+    clearTimeout(this.statusDismissTimer);
+    this.statusDismissTimer = null;
   }
 }

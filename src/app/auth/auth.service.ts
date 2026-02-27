@@ -12,6 +12,7 @@ import {
 
 const DEV_AUTH_STORAGE_KEY = 'exodus.dev.auth.user';
 const AUTH_PROFILE_STORAGE_KEY = 'exodus.auth.profile';
+const LOCAL_PASSWORD_ACCOUNTS_KEY = 'pathflow.local.password.accounts';
 const DEFAULT_LOCATION_ID = 'exodus-4x4';
 const DEFAULT_LOCATION_NAME = 'Exodus 4x4';
 
@@ -19,7 +20,18 @@ interface DevAuthRecord {
   role: 'admin' | 'user';
   email: string;
   displayName?: string;
+  phone?: string;
   avatarUrl?: string;
+}
+
+interface LocalPasswordAccount {
+  email: string;
+  password: string;
+  role: 'admin' | 'user';
+  displayName?: string;
+  phone?: string;
+  avatarUrl?: string;
+  registered?: boolean;
 }
 
 interface RegistrationBillingPayload {
@@ -30,6 +42,20 @@ interface RegistrationBillingPayload {
   cvc: string;
   postalCode: string;
   sandboxBypass?: boolean;
+}
+
+interface DevSessionOptions {
+  registered?: boolean;
+  canBootstrap?: boolean;
+  isSuperAdmin?: boolean;
+  locations?: AuthLocation[];
+  defaultLocationId?: string;
+  billingStatus?: string;
+  trialStartsAt?: string;
+  trialEndsAt?: string;
+  accessLocked?: boolean;
+  accessLockReason?: string;
+  planCycle?: 'monthly' | 'annual';
 }
 
 interface AccessHydrationResult {
@@ -58,6 +84,11 @@ export class AuthService {
   readonly isAdmin = computed(() => this.hasRole('admin'));
   readonly isRegistered = computed(() => this.accessSignal().registered);
   readonly needsRegistration = computed(() => this.isAuthenticated() && this.accessSignal().loaded && !this.accessSignal().registered);
+  readonly isAccessLocked = computed(() => this.accessSignal().accessLocked);
+  readonly accessLockReason = computed(() => this.accessSignal().accessLockReason);
+  readonly billingStatus = computed(() => this.accessSignal().billingStatus);
+  readonly trialEndsAt = computed(() => this.accessSignal().trialEndsAt);
+  readonly planCycle = computed(() => this.accessSignal().planCycle);
   readonly canBootstrapRegistration = computed(() => this.accessSignal().canBootstrap);
   readonly isSuperAdmin = computed(() => this.accessSignal().isSuperAdmin);
   readonly locations = computed(() => this.accessSignal().locations);
@@ -151,24 +182,94 @@ export class AuthService {
       return { ok: false, error: 'Email and password are required.' };
     }
 
-    const account = environment.auth.localUsers.find(user => user.email.trim().toLowerCase() === email);
+    const seededAccount = environment.auth.localUsers.find(user => user.email.trim().toLowerCase() === email);
+    const customAccount = this.readLocalPasswordAccounts().find(user => user.email.trim().toLowerCase() === email);
+    const account = customAccount || seededAccount;
     if (!account || account.password !== password) {
       return { ok: false, error: 'Invalid email or password.' };
     }
 
+    const accountPhone = customAccount?.phone;
     this.setDevUser({
       role: account.role,
       email,
       displayName: account.displayName || undefined,
+      phone: accountPhone || undefined,
       avatarUrl: account.avatarUrl || undefined
+    }, {
+      registered: customAccount ? !!customAccount.registered : true,
+      canBootstrap: customAccount ? !customAccount.registered : false
     });
+
+    return { ok: true };
+  }
+
+  createEmailPasswordAccount(
+    emailInput: string,
+    passwordInput: string,
+    displayNameInput = '',
+    phoneInput = ''
+  ): { ok: boolean; error?: string } {
+    if (!this.isLocalAuthEnabled()) {
+      return { ok: false, error: 'Email/password account creation is not enabled for this environment yet. Use Microsoft or Google sign-in.' };
+    }
+
+    const email = emailInput.trim().toLowerCase();
+    const password = passwordInput;
+    const displayName = displayNameInput.trim();
+    const phone = this.normalizePhone(phoneInput);
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return { ok: false, error: 'Enter a valid email address.' };
+    }
+    if (displayName.length < 2) {
+      return { ok: false, error: 'Enter your full name.' };
+    }
+    if (this.digitsOnly(phone).length < 10) {
+      return { ok: false, error: 'Enter a valid phone number.' };
+    }
+    if (password.length < 8) {
+      return { ok: false, error: 'Password must be at least 8 characters.' };
+    }
+
+    const seededExists = environment.auth.localUsers.some(user => user.email.trim().toLowerCase() === email);
+    const customAccounts = this.readLocalPasswordAccounts();
+    const customExists = customAccounts.some(user => user.email.trim().toLowerCase() === email);
+    if (seededExists || customExists) {
+      return { ok: false, error: 'An account with this email already exists. Try signing in.' };
+    }
+
+    customAccounts.push({
+      email,
+      password,
+      role: 'admin',
+      displayName: displayName || undefined,
+      phone: phone || undefined,
+      registered: false
+    });
+    this.writeLocalPasswordAccounts(customAccounts);
+
+    this.setDevUser(
+      {
+        role: 'admin',
+        email,
+        displayName: displayName || undefined,
+        phone: phone || undefined
+      },
+      {
+        registered: false,
+        canBootstrap: true
+      }
+    );
 
     return { ok: true };
   }
 
   async registerWorkspace(
     locationNameInput: string,
-    billing?: RegistrationBillingPayload
+    billing?: RegistrationBillingPayload,
+    planCycle: 'monthly' | 'annual' = 'monthly'
   ): Promise<{ ok: boolean; error?: string }> {
     const user = this.user();
     if (!user) {
@@ -181,6 +282,37 @@ export class AuthService {
     }
 
     try {
+      if (this.stateSignal().source === 'dev') {
+        const dev = this.readDevRecord();
+        if (!dev) return { ok: false, error: 'No local account is active.' };
+
+        const now = new Date();
+        const weekFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+        const locationId = this.sanitizeTenantId(locationName) || DEFAULT_LOCATION_ID;
+        const location: AuthLocation = { id: locationId, name: locationName };
+        this.setDevUser(
+          {
+            ...dev,
+            role: 'admin'
+          },
+          {
+            registered: true,
+            canBootstrap: false,
+            isSuperAdmin: true,
+            locations: [location],
+            defaultLocationId: locationId,
+            billingStatus: billing ? 'active' : 'trial',
+            trialStartsAt: now.toISOString(),
+            trialEndsAt: weekFromNow.toISOString(),
+            accessLocked: false,
+            accessLockReason: '',
+            planCycle
+          }
+        );
+        this.markLocalPasswordAccountRegistered(dev.email);
+        return { ok: true };
+      }
+
       const response = await fetch('/api/access', {
         method: 'POST',
         credentials: 'include',
@@ -191,6 +323,7 @@ export class AuthService {
         body: JSON.stringify({
           op: 'bootstrap',
           locationName,
+          planCycle,
           billing: billing || null
         })
       });
@@ -205,6 +338,53 @@ export class AuthService {
       return { ok: true };
     } catch {
       return { ok: false, error: 'Unable to complete registration right now.' };
+    }
+  }
+
+  async updateBilling(
+    billing: RegistrationBillingPayload,
+    planCycle: 'monthly' | 'annual'
+  ): Promise<{ ok: boolean; error?: string }> {
+    const user = this.user();
+    if (!user) return { ok: false, error: 'Sign in before updating billing.' };
+
+    try {
+      if (this.stateSignal().source === 'dev') {
+        const access = this.accessSignal();
+        this.accessSignal.set({
+          ...access,
+          billingStatus: this.digitsOnly(billing.cardNumber).startsWith('99999') ? 'sandbox' : 'active',
+          accessLocked: false,
+          accessLockReason: '',
+          planCycle
+        });
+        return { ok: true };
+      }
+
+      const response = await fetch('/api/access', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          op: 'update-billing',
+          planCycle,
+          billing
+        })
+      });
+
+      const payload = (await response.json()) as Partial<AccessProfileResponse> & { error?: string };
+      if (!response.ok || !payload?.ok) {
+        const detail = String(payload?.error || '').trim();
+        return { ok: false, error: detail || 'Unable to update billing right now.' };
+      }
+
+      await this.bootstrap(true);
+      return { ok: true };
+    } catch {
+      return { ok: false, error: 'Unable to update billing right now.' };
     }
   }
 
@@ -375,7 +555,13 @@ export class AuthService {
           canBootstrap: !!payload.canBootstrap,
           isSuperAdmin: !!profile.isSuperAdmin,
           locations,
-          defaultLocationId
+          defaultLocationId,
+          billingStatus: String(profile.billingStatus || '').trim().toLowerCase() || 'trial',
+          trialStartsAt: String(profile.trialStartsAt || '').trim(),
+          trialEndsAt: String(profile.trialEndsAt || '').trim(),
+          accessLocked: !!profile.accessLocked,
+          accessLockReason: String(profile.accessLockReason || '').trim(),
+          planCycle: this.normalizePlanCycle(profile.planCycle)
         }
       };
     } catch {
@@ -484,6 +670,12 @@ export class AuthService {
       isSuperAdmin: false,
       locations: [],
       defaultLocationId: '',
+      billingStatus: 'trial',
+      trialStartsAt: '',
+      trialEndsAt: '',
+      accessLocked: false,
+      accessLockReason: '',
+      planCycle: 'monthly',
       ...patch
     };
   }
@@ -517,8 +709,9 @@ export class AuthService {
       const email = String(parsed.email || '').trim().toLowerCase();
       if (!email) return null;
       const displayName = String(parsed.displayName || '').trim() || undefined;
+      const phone = this.normalizePhone(String(parsed.phone || ''));
       const avatarUrl = String(parsed.avatarUrl || '').trim() || undefined;
-      return { role, email, displayName, avatarUrl };
+      return { role, email, displayName, phone: phone || undefined, avatarUrl };
     } catch {
       return null;
     }
@@ -533,6 +726,7 @@ export class AuthService {
       id: `dev-${record.role}`,
       displayName: record.displayName || fallbackName,
       email: record.email,
+      phone: this.normalizePhone(record.phone || '') || undefined,
       identityProvider: 'dev-local',
       roles: [...roles],
       avatarUrl: record.avatarUrl
@@ -541,7 +735,7 @@ export class AuthService {
     return this.applyProfileOverrides(baseUser);
   }
 
-  private setDevUser(record: DevAuthRecord): void {
+  private setDevUser(record: DevAuthRecord, options?: DevSessionOptions): void {
     localStorage.setItem(DEV_AUTH_STORAGE_KEY, JSON.stringify(record));
     const user = this.devRecordToUser(record);
     this.stateSignal.set({
@@ -550,19 +744,52 @@ export class AuthService {
       source: 'dev',
       user
     });
-    const defaultLocation: AuthLocation = { id: DEFAULT_LOCATION_ID, name: DEFAULT_LOCATION_NAME };
+    const registered = options?.registered ?? true;
+    const locationList = Array.isArray(options?.locations)
+      ? options.locations.filter(location => !!location?.id)
+      : [{ id: DEFAULT_LOCATION_ID, name: DEFAULT_LOCATION_NAME }];
+    const defaultLocation: AuthLocation = locationList[0] || { id: DEFAULT_LOCATION_ID, name: DEFAULT_LOCATION_NAME };
     this.accessSignal.set({
       loaded: true,
-      registered: true,
-      canBootstrap: false,
-      isSuperAdmin: user.roles.includes('admin'),
-      locations: [defaultLocation],
-      defaultLocationId: defaultLocation.id
+      registered,
+      canBootstrap: options?.canBootstrap ?? !registered,
+      isSuperAdmin: options?.isSuperAdmin ?? user.roles.includes('admin'),
+      locations: registered ? locationList : [],
+      defaultLocationId: registered ? (options?.defaultLocationId || defaultLocation.id) : '',
+      billingStatus: options?.billingStatus || 'trial',
+      trialStartsAt: options?.trialStartsAt || '',
+      trialEndsAt: options?.trialEndsAt || '',
+      accessLocked: !!options?.accessLocked,
+      accessLockReason: options?.accessLockReason || '',
+      planCycle: options?.planCycle || 'monthly'
     });
   }
 
   private isLocalAuthEnabled(): boolean {
     return environment.auth.devBypass || environment.auth.localPasswordEnabled || this.isLocalHost;
+  }
+
+  private normalizePlanCycle(value: unknown): 'monthly' | 'annual' {
+    const normalized = String(value || '').trim().toLowerCase();
+    return normalized === 'annual' ? 'annual' : 'monthly';
+  }
+
+  private digitsOnly(value: unknown): string {
+    return String(value ?? '').replace(/\D+/g, '');
+  }
+
+  private normalizePhone(value: unknown): string {
+    const raw = String(value ?? '').trim();
+    if (!raw) return '';
+    const digits = this.digitsOnly(raw);
+    if (!digits) return '';
+    if (digits.length === 10) {
+      return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+    }
+    if (digits.length === 11 && digits.startsWith('1')) {
+      return `+1 (${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`;
+    }
+    return raw;
   }
 
   private applyProfileOverrides(user: AuthUser): AuthUser {
@@ -595,6 +822,56 @@ export class AuthService {
 
   private writeProfileMap(map: Record<string, { displayName?: string; avatarUrl?: string }>): void {
     localStorage.setItem(AUTH_PROFILE_STORAGE_KEY, JSON.stringify(map));
+  }
+
+  private readLocalPasswordAccounts(): LocalPasswordAccount[] {
+    const raw = localStorage.getItem(LOCAL_PASSWORD_ACCOUNTS_KEY);
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) return [];
+      const out: LocalPasswordAccount[] = [];
+      for (const item of parsed) {
+        const row = item as Partial<LocalPasswordAccount>;
+        const email = String(row.email || '').trim().toLowerCase();
+        const password = String(row.password || '');
+        const role = row.role === 'user' ? 'user' : 'admin';
+        if (!email || !password) continue;
+        out.push({
+          email,
+          password,
+          role,
+          displayName: String(row.displayName || '').trim() || undefined,
+          phone: this.normalizePhone(String(row.phone || '')) || undefined,
+          avatarUrl: String(row.avatarUrl || '').trim() || undefined,
+          registered: row.registered !== false
+        });
+      }
+      return out;
+    } catch {
+      return [];
+    }
+  }
+
+  private writeLocalPasswordAccounts(accounts: LocalPasswordAccount[]): void {
+    localStorage.setItem(LOCAL_PASSWORD_ACCOUNTS_KEY, JSON.stringify(accounts));
+  }
+
+  private markLocalPasswordAccountRegistered(emailInput: string): void {
+    const email = String(emailInput || '').trim().toLowerCase();
+    if (!email) return;
+    const accounts = this.readLocalPasswordAccounts();
+    let touched = false;
+    for (const account of accounts) {
+      if (account.email !== email) continue;
+      if (account.registered) break;
+      account.registered = true;
+      touched = true;
+      break;
+    }
+    if (touched) {
+      this.writeLocalPasswordAccounts(accounts);
+    }
   }
 
   private isAuthMeResponse(payload: unknown): payload is AuthMeResponse {

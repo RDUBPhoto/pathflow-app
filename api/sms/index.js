@@ -418,6 +418,44 @@ async function clearTenantSenderConfig(senderClient, tenantId) {
   }
 }
 
+async function ensureTenantSenderBootstrap(senderClient, tenantId, fromNumber) {
+  const normalizedFrom = pickPhone(fromNumber);
+  if (!normalizedFrom) return;
+
+  const now = new Date().toISOString();
+  const fromLookupKey = phoneLookupKey(normalizedFrom);
+
+  let existing = null;
+  try {
+    existing = await senderClient.getEntity(tenantId, SENDER_DEFAULT_ROW_KEY);
+  } catch (_) {}
+
+  await senderClient.upsertEntity(
+    {
+      partitionKey: tenantId,
+      rowKey: SENDER_DEFAULT_ROW_KEY,
+      fromNumber: normalizedFrom,
+      fromLookupKey,
+      label: asString(existing && existing.label),
+      verificationStatus: asString(existing && existing.verificationStatus) || "unknown",
+      enabled: existing == null ? true : (existing.enabled == null ? true : asBool(existing.enabled)),
+      updatedAt: now
+    },
+    "Merge"
+  );
+
+  await senderClient.upsertEntity(
+    {
+      partitionKey: LOOKUP_PARTITION,
+      rowKey: fromLookupKey,
+      tenantId,
+      fromNumber: normalizedFrom,
+      updatedAt: now
+    },
+    "Merge"
+  );
+}
+
 async function resolveTenantIdFromSenderNumber(senderClient, number) {
   const key = phoneLookupKey(number);
   if (!key) return "";
@@ -429,15 +467,46 @@ async function resolveTenantIdFromSenderNumber(senderClient, number) {
   }
 }
 
+async function resolveTenantFromSenderConfig(senderClient, number) {
+  const key = phoneLookupKey(number);
+  if (!key) return "";
+
+  const safeKey = escapedFilterValue(key);
+  const iter = senderClient.listEntities({
+    queryOptions: {
+      filter: `fromLookupKey eq '${safeKey}'`
+    }
+  });
+
+  for await (const entity of iter) {
+    const partition = sanitizeTenantId(asString(entity.partitionKey));
+    if (!partition || partition === LOOKUP_PARTITION) continue;
+
+    try {
+      await senderClient.upsertEntity(
+        {
+          partitionKey: LOOKUP_PARTITION,
+          rowKey: key,
+          tenantId: partition,
+          fromNumber: asString(entity.fromNumber),
+          updatedAt: new Date().toISOString()
+        },
+        "Merge"
+      );
+    } catch (_) {}
+
+    return partition;
+  }
+
+  return "";
+}
+
 async function resolveTenantFromIncomingNumber(senderClient, number) {
   const mappedTenantId = await resolveTenantIdFromSenderNumber(senderClient, number);
   if (mappedTenantId) return mappedTenantId;
 
-  const normalizedIncoming = pickPhone(number);
-  const normalizedEnvSender = pickPhone(process.env.ACS_SMS_FROM);
-  if (normalizedIncoming && normalizedEnvSender && normalizedIncoming === normalizedEnvSender) {
-    return sanitizeTenantId(asString(process.env.DEFAULT_TENANT_ID) || "main");
-  }
+  const senderConfigTenantId = await resolveTenantFromSenderConfig(senderClient, number);
+  if (senderConfigTenantId) return senderConfigTenantId;
   return "";
 }
 
@@ -488,6 +557,57 @@ async function saveMessage(client, tenantId, payload) {
   return { id, createdAt, deliveryStatus };
 }
 
+function customerNameFromEntity(entity) {
+  const firstName = asString(entity && entity.firstName);
+  const lastName = asString(entity && entity.lastName);
+  const explicitName = asString(entity && entity.name);
+  return explicitName || `${firstName} ${lastName}`.trim() || "Customer";
+}
+
+function customerPhoneFromEntity(entity) {
+  return pickPhone(asString(entity && entity.phone));
+}
+
+async function findCustomerById(customersClient, tenantId, customerId) {
+  const id = asString(customerId);
+  if (!id) return null;
+  try {
+    const entity = await customersClient.getEntity(tenantId, id);
+    return {
+      id,
+      name: customerNameFromEntity(entity),
+      phone: customerPhoneFromEntity(entity)
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function hydrateMessagesWithCustomerData(customersClient, tenantId, messages) {
+  if (!Array.isArray(messages) || !messages.length) return;
+  const cache = new Map();
+  for (const item of messages) {
+    const customerId = asString(item && item.customerId);
+    if (!customerId) continue;
+
+    if (!cache.has(customerId)) {
+      cache.set(customerId, await findCustomerById(customersClient, tenantId, customerId));
+    }
+    const customer = cache.get(customerId);
+    if (!customer) continue;
+
+    if (!asString(item.customerName) && customer.name) {
+      item.customerName = customer.name;
+    }
+    if (asString(item.direction).toLowerCase() === "inbound" && !asString(item.from) && customer.phone) {
+      item.from = customer.phone;
+    }
+    if (asString(item.direction).toLowerCase() === "outbound" && !asString(item.to) && customer.phone) {
+      item.to = customer.phone;
+    }
+  }
+}
+
 async function markRead(client, tenantId, id) {
   const itemId = asString(id);
   if (!itemId) return false;
@@ -517,16 +637,39 @@ async function findCustomerByPhone(customersClient, tenantId, phone) {
   for await (const entity of iter) {
     const candidatePhone = normalizeCustomerPhone(entity.phone);
     if (!candidatePhone || candidatePhone !== normalized) continue;
-    const firstName = asString(entity.firstName);
-    const lastName = asString(entity.lastName);
-    const explicitName = asString(entity.name);
-    const customerName = explicitName || `${firstName} ${lastName}`.trim() || "Customer";
     return {
       id: asString(entity.rowKey),
-      name: customerName
+      name: customerNameFromEntity(entity),
+      phone: customerPhoneFromEntity(entity)
     };
   }
   return null;
+}
+
+async function resolveTenantFromCustomerPhone(customersClient, phone) {
+  const normalized = normalizeCustomerPhone(phone);
+  if (!normalized) return "";
+
+  let match = "";
+  const iter = customersClient.listEntities();
+  for await (const entity of iter) {
+    const candidatePhone = normalizeCustomerPhone(entity.phone);
+    if (!candidatePhone || candidatePhone !== normalized) continue;
+
+    const tenant = sanitizeTenantId(asString(entity.partitionKey));
+    if (!tenant) continue;
+
+    if (!match) {
+      match = tenant;
+      continue;
+    }
+
+    if (match !== tenant) {
+      return "";
+    }
+  }
+
+  return match;
 }
 
 async function applyInboundConsentKeyword(customersClient, tenantId, customerId, message, timestamp) {
@@ -580,6 +723,60 @@ async function applyInboundConsentKeyword(customersClient, tenantId, customerId,
       "Merge"
     );
   }
+}
+
+async function resolveTenantByProviderMessageId(smsClient, providerMessageId) {
+  const safeMessageId = escapedFilterValue(providerMessageId);
+  const iter = smsClient.listEntities({
+    queryOptions: {
+      filter: `providerMessageId eq '${safeMessageId}'`
+    }
+  });
+
+  let match = "";
+  for await (const entity of iter) {
+    const tenant = sanitizeTenantId(asString(entity.partitionKey));
+    if (!tenant) continue;
+
+    if (!match) {
+      match = tenant;
+      continue;
+    }
+
+    if (match !== tenant) {
+      return "";
+    }
+  }
+
+  return match;
+}
+
+async function resolveTenantFromSmsHistoryBySenderNumber(smsClient, senderNumber) {
+  const normalizedSender = pickPhone(senderNumber);
+  if (!normalizedSender) return "";
+
+  const safeSender = escapedFilterValue(normalizedSender);
+  const iter = smsClient.listEntities({
+    queryOptions: {
+      filter: `fromNumber eq '${safeSender}' and direction eq 'outbound'`
+    }
+  });
+
+  let bestTenant = "";
+  let bestTs = Number.NEGATIVE_INFINITY;
+  for await (const entity of iter) {
+    const tenant = sanitizeTenantId(asString(entity.partitionKey));
+    if (!tenant) continue;
+
+    const ts = Date.parse(asString(entity.createdAt));
+    const score = Number.isFinite(ts) ? ts : 0;
+    if (score >= bestTs) {
+      bestTs = score;
+      bestTenant = tenant;
+    }
+  }
+
+  return bestTenant;
 }
 
 async function updateMessagesByProviderMessageId(client, tenantId, providerMessageId, patch) {
@@ -643,7 +840,20 @@ async function processInboundEvent(senderClient, smsClient, customersClient, eve
   const message = asString(firstNonEmpty([data.message, data.text, data.content]));
   if (!toNumber || !message) return false;
 
-  const tenantId = await resolveTenantFromIncomingNumber(senderClient, toNumber);
+  let tenantId = await resolveTenantFromIncomingNumber(senderClient, toNumber);
+  if (!tenantId) {
+    tenantId = await resolveTenantFromSmsHistoryBySenderNumber(smsClient, toNumber);
+  }
+  if (!tenantId && fromNumber) {
+    tenantId = await resolveTenantFromCustomerPhone(customersClient, fromNumber);
+  }
+  if (!tenantId) {
+    const normalizedIncoming = pickPhone(toNumber);
+    const normalizedEnvSender = pickPhone(process.env.ACS_SMS_FROM);
+    if (normalizedIncoming && normalizedEnvSender && normalizedIncoming === normalizedEnvSender) {
+      tenantId = sanitizeTenantId(asString(process.env.DEFAULT_TENANT_ID) || "main");
+    }
+  }
   if (!tenantId) return false;
 
   const customer = await findCustomerByPhone(customersClient, tenantId, fromNumber);
@@ -678,6 +888,7 @@ async function processInboundEvent(senderClient, smsClient, customersClient, eve
 
 async function processDeliveryEvent(senderClient, smsClient, event) {
   const data = eventDataOf(event);
+  const providerMessageId = asString(firstNonEmpty([data.messageId, data.id, data.smsMessageId]));
   const senderNumber = pickPhone(firstNonEmpty([
     data.from,
     data.fromPhoneNumber,
@@ -688,10 +899,19 @@ async function processDeliveryEvent(senderClient, smsClient, event) {
     data.toPhoneNumber,
     data.destinationPhoneNumber
   ]));
-  const tenantId = await resolveTenantFromIncomingNumber(senderClient, senderNumber || fallbackNumber);
+  let tenantId = await resolveTenantFromIncomingNumber(senderClient, senderNumber || fallbackNumber);
+  if (!tenantId && providerMessageId) {
+    tenantId = await resolveTenantByProviderMessageId(smsClient, providerMessageId);
+  }
+  if (!tenantId) {
+    const candidate = senderNumber || fallbackNumber;
+    const normalizedIncoming = pickPhone(candidate);
+    const normalizedEnvSender = pickPhone(process.env.ACS_SMS_FROM);
+    if (normalizedIncoming && normalizedEnvSender && normalizedIncoming === normalizedEnvSender) {
+      tenantId = sanitizeTenantId(asString(process.env.DEFAULT_TENANT_ID) || "main");
+    }
+  }
   if (!tenantId) return 0;
-
-  const providerMessageId = asString(firstNonEmpty([data.messageId, data.id, data.smsMessageId]));
   if (!providerMessageId) return 0;
 
   const rawStatus = asString(firstNonEmpty([
@@ -835,6 +1055,7 @@ module.exports = async function (context, req) {
       }
 
       const all = await listAllMessages(smsTable, tenantId);
+      await hydrateMessagesWithCustomerData(customersTable, tenantId, all);
 
       if (scope === "inbox") {
         const items = all
@@ -956,11 +1177,15 @@ module.exports = async function (context, req) {
         return;
       }
 
+      const customerRecord = await findCustomerById(customersTable, tenantId, customerId);
+      const customerName = requestCustomerName || asString(customerRecord && customerRecord.name);
+      const customerPhone = asString(body.from) || asString(customerRecord && customerRecord.phone);
+
       const saved = await saveMessage(smsTable, tenantId, {
         customerId,
-        customerName: requestCustomerName,
+        customerName,
         direction: "inbound",
-        from: asString(body.from),
+        from: customerPhone,
         to: status.fromNumber || "",
         message,
         read: false,
@@ -1055,6 +1280,8 @@ module.exports = async function (context, req) {
     } else {
       logInfo(context, "[sms][mock] tenant=%s to=%s message=%s", tenantId, to, message);
     }
+
+    await ensureTenantSenderBootstrap(senderTable, tenantId, status.fromNumber);
 
     const now = new Date().toISOString();
     const saved = await saveMessage(smsTable, tenantId, {

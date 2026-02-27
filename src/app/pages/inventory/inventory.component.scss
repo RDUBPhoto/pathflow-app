@@ -213,6 +213,30 @@
   color: #cbd5e1;
 }
 
+:host-context([data-theme='light']) .stock-pill.stock-ok {
+  border-color: rgba(34, 197, 94, 0.55);
+  background: rgba(187, 247, 208, 0.9);
+  color: #14532d;
+}
+
+:host-context([data-theme='light']) .stock-pill.stock-low {
+  border-color: rgba(244, 63, 94, 0.55);
+  background: rgba(255, 228, 230, 0.94);
+  color: #881337;
+}
+
+:host-context([data-theme='light']) .stock-pill.stock-on-order {
+  border-color: rgba(37, 99, 235, 0.55);
+  background: rgba(219, 234, 254, 0.95);
+  color: #1e3a8a;
+}
+
+:host-context([data-theme='light']) .stock-pill.stock-cancelled {
+  border-color: rgba(100, 116, 139, 0.55);
+  background: rgba(226, 232, 240, 0.95);
+  color: #334155;
+}
+
 .row-actions {
   white-space: nowrap;
 }

@@ -124,7 +124,8 @@ module.exports = async function (context, req) {
           createdAt,
           updatedAt: pick(e.updatedAt),
           checkedInAt: pick(e.checkedInAt),
-          completedAt: pick(e.completedAt)
+          completedAt: pick(e.completedAt),
+          calendarOverrideAt: pick(e.calendarOverrideAt)
         });
       }
       out.sort((a,b) =>
@@ -153,6 +154,7 @@ module.exports = async function (context, req) {
       const customerId = pick(b.customerId).trim();
       const checkedInAt = Object.prototype.hasOwnProperty.call(b, "checkedInAt") ? pick(b.checkedInAt).trim() : null;
       const completedAt = Object.prototype.hasOwnProperty.call(b, "completedAt") ? pick(b.completedAt).trim() : null;
+      const calendarOverrideAt = Object.prototype.hasOwnProperty.call(b, "calendarOverrideAt") ? pick(b.calendarOverrideAt).trim() : null;
 
       if (!rid && (!title || !laneId)) { context.res = { status: 400, headers: { "content-type": "application/json" }, body: { error: "title and laneId required" } }; return; }
 
@@ -162,7 +164,17 @@ module.exports = async function (context, req) {
         for await (const e of iter) max = Math.max(max, num(e.sort));
         const rowKey = randomUUID();
         const now = new Date().toISOString();
-        await items.upsertEntity({ partitionKey: PARTITION, rowKey, title, laneId, customerId, sort: max + 10, createdAt: now, updatedAt: now }, "Merge");
+        await items.upsertEntity({
+          partitionKey: PARTITION,
+          rowKey,
+          title,
+          laneId,
+          customerId,
+          sort: max + 10,
+          createdAt: now,
+          updatedAt: now,
+          calendarOverrideAt: ""
+        }, "Merge");
         await events.upsertEntity({ partitionKey: PARTITION, rowKey: randomUUID(), type: "created", workItemId: rowKey, laneId, at: now }, "Merge");
         context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true, id: rowKey } };
         return;
@@ -176,6 +188,7 @@ module.exports = async function (context, req) {
         if (customerId) patch.customerId = customerId;
         if (checkedInAt !== null) patch.checkedInAt = checkedInAt;
         if (completedAt !== null) patch.completedAt = completedAt;
+        if (calendarOverrideAt !== null) patch.calendarOverrideAt = calendarOverrideAt;
         await items.upsertEntity(patch, "Merge");
         if (moved) {
           let max = 0;

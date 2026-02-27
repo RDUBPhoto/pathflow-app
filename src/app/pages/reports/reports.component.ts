@@ -28,12 +28,16 @@ import { UserMenuComponent } from '../../components/user/user-menu/user-menu.com
 import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
 import {
   ReportsApiService,
+  ReportsCashflowForecastRow,
   ReportsCommunicationRow,
   ReportsFunnelRow,
   ReportsInvoiceAgingRow,
   ReportsKpiRow,
   ReportsLeadSourceRow,
+  PowerBiConfigResponse,
+  ReportsProductionForecastRow,
   ReportsResponse,
+  ReportsSeedDemoResponse,
   ReportsSalesTrendRow
 } from '../../services/reports-api.service';
 
@@ -64,9 +68,25 @@ import {
 export default class ReportsComponent implements OnInit {
   private readonly reportsApi = inject(ReportsApiService);
 
+  readonly reportView = signal<
+    | 'all'
+    | 'overview'
+    | 'funnel'
+    | 'invoice-aging'
+    | 'lead-sources'
+    | 'communications'
+    | 'sales-trend'
+    | 'production-forecast'
+    | 'cashflow-forecast'
+  >('all');
   readonly loading = signal(false);
   readonly error = signal('');
+  readonly info = signal('');
+  readonly forecastMonths = signal(6);
+  readonly openingCash = signal(0);
   readonly data = signal<ReportsResponse | null>(null);
+  readonly powerBi = signal<PowerBiConfigResponse['powerBi'] | null>(null);
+  readonly seeding = signal(false);
 
   readonly kpi = computed<ReportsKpiRow | null>(() => this.data()?.tables?.kpiSummary?.[0] || null);
   readonly funnel = computed<ReportsFunnelRow[]>(() => this.data()?.tables?.funnel || []);
@@ -74,6 +94,12 @@ export default class ReportsComponent implements OnInit {
   readonly aging = computed<ReportsInvoiceAgingRow[]>(() => this.data()?.tables?.invoiceAging || []);
   readonly leadSources = computed<ReportsLeadSourceRow[]>(() => this.data()?.tables?.leadSources || []);
   readonly communications = computed<ReportsCommunicationRow[]>(() => this.data()?.tables?.communicationVolume || []);
+  readonly productionForecast = computed<ReportsProductionForecastRow[]>(
+    () => this.data()?.tables?.productionForecast || []
+  );
+  readonly cashflowForecast = computed<ReportsCashflowForecastRow[]>(
+    () => this.data()?.tables?.cashflowForecast || []
+  );
 
   constructor() {
     addIcons({
@@ -87,12 +113,18 @@ export default class ReportsComponent implements OnInit {
 
   ngOnInit(): void {
     this.refresh();
+    this.loadPowerBiConfig();
   }
 
   refresh(): void {
     this.loading.set(true);
     this.error.set('');
-    this.reportsApi.getPowerBiDataset({ monthsBack: 12, futureDays: 90 }).subscribe({
+    this.reportsApi.getPowerBiDataset({
+      monthsBack: 12,
+      futureDays: 90,
+      forecastMonths: this.forecastMonths(),
+      openingCash: this.openingCash()
+    }).subscribe({
       next: res => {
         this.data.set(res);
         this.loading.set(false);
@@ -102,6 +134,82 @@ export default class ReportsComponent implements OnInit {
         this.loading.set(false);
       }
     });
+  }
+
+  seedDemoData(): void {
+    if (this.seeding()) return;
+    this.seeding.set(true);
+    this.error.set('');
+    this.info.set('');
+    this.reportsApi.seedDemoData().subscribe({
+      next: (res: ReportsSeedDemoResponse) => {
+        this.info.set(
+          `${res.message} Seeded ${res.workItemsSeeded} work items and ${res.invoicesSeeded} invoices.`
+        );
+        this.seeding.set(false);
+        this.refresh();
+      },
+      error: err => {
+        this.error.set(this.extractError(err, 'Could not seed demo reporting data.'));
+        this.seeding.set(false);
+      }
+    });
+  }
+
+  private loadPowerBiConfig(): void {
+    this.reportsApi.getPowerBiConfig(false).subscribe({
+      next: res => this.powerBi.set(res.powerBi || null),
+      error: () => this.powerBi.set(null)
+    });
+  }
+
+  downloadCurrentReport(): void {
+    const payload = this.data();
+    if (!payload) return;
+    const now = new Date();
+    const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(
+      now.getDate()
+    ).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+    const view = this.reportView();
+
+    if (view === 'all') {
+      this.downloadBlob(
+        `reports-dataset-${stamp}.json`,
+        JSON.stringify(payload, null, 2),
+        'application/json;charset=utf-8'
+      );
+      return;
+    }
+
+    const rows = this.rowsForView(view);
+    const csv = this.toCsv(rows);
+    this.downloadBlob(`reports-${view}-${stamp}.csv`, csv, 'text/csv;charset=utf-8');
+  }
+
+  updateReportView(value: string): void {
+    const normalized = (value || '').trim() as
+      | 'all'
+      | 'overview'
+      | 'funnel'
+      | 'invoice-aging'
+      | 'lead-sources'
+      | 'communications'
+      | 'sales-trend'
+      | 'production-forecast'
+      | 'cashflow-forecast';
+    const allowed = new Set([
+      'all',
+      'overview',
+      'funnel',
+      'invoice-aging',
+      'lead-sources',
+      'communications',
+      'sales-trend',
+      'production-forecast',
+      'cashflow-forecast'
+    ]);
+    if (!allowed.has(normalized)) return;
+    this.reportView.set(normalized);
   }
 
   formatCurrency(value: number): string {
@@ -147,6 +255,82 @@ export default class ReportsComponent implements OnInit {
 
   trackComms(_index: number, row: ReportsCommunicationRow): string {
     return `${row.channel}:${row.direction}`;
+  }
+
+  trackProductionForecast(_index: number, row: ReportsProductionForecastRow): string {
+    return row.period_key;
+  }
+
+  trackCashflowForecast(_index: number, row: ReportsCashflowForecastRow): string {
+    return row.period_key;
+  }
+
+  private rowsForView(
+    view:
+      | 'overview'
+      | 'funnel'
+      | 'invoice-aging'
+      | 'lead-sources'
+      | 'communications'
+      | 'sales-trend'
+      | 'production-forecast'
+      | 'cashflow-forecast'
+  ): Record<string, unknown>[] {
+    switch (view) {
+      case 'overview': {
+        const row = this.kpi();
+        return row ? [row] : [];
+      }
+      case 'funnel':
+        return this.funnel();
+      case 'invoice-aging':
+        return this.aging();
+      case 'lead-sources':
+        return this.leadSources();
+      case 'communications':
+        return this.communications();
+      case 'sales-trend':
+        return this.trend();
+      case 'production-forecast':
+        return this.productionForecast();
+      case 'cashflow-forecast':
+        return this.cashflowForecast();
+      default:
+        return [];
+    }
+  }
+
+  private toCsv(rows: Record<string, unknown>[]): string {
+    if (!rows.length) return 'No data\n';
+    const keys = Array.from(
+      rows.reduce<Set<string>>((acc, row) => {
+        Object.keys(row || {}).forEach(key => acc.add(key));
+        return acc;
+      }, new Set<string>())
+    );
+
+    const escapeCsv = (value: unknown): string => {
+      if (value == null) return '';
+      const stringValue = String(value);
+      if (/[",\r\n]/.test(stringValue)) {
+        return `"${stringValue.replace(/"/g, '""')}"`;
+      }
+      return stringValue;
+    };
+
+    const header = keys.map(escapeCsv).join(',');
+    const lines = rows.map(row => keys.map(key => escapeCsv((row as Record<string, unknown>)[key])).join(','));
+    return [header, ...lines].join('\n');
+  }
+
+  private downloadBlob(filename: string, content: string, mimeType: string): void {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
   private extractError(err: unknown, fallback: string): string {

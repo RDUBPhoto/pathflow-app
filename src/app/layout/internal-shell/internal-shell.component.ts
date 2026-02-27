@@ -11,12 +11,15 @@ import {
   chevronForwardOutline,
   cubeOutline,
   gridOutline,
-  peopleOutline
+  peopleOutline,
+  receiptOutline
 } from 'ionicons/icons';
 import { BrandSettingsService } from '../../services/brand-settings.service';
 import { ShellFooterComponent } from '../../components/layout/shell-footer/shell-footer.component';
 import { SmsApiService, SmsMessage } from '../../services/sms-api.service';
 import { UserScopedSettingsService } from '../../services/user-scoped-settings.service';
+import { AuthService } from '../../auth/auth.service';
+import { environment } from '../../../environments/environment';
 
 const NAV_COLLAPSED_SETTING_KEY = 'ui.navCollapsed';
 
@@ -48,11 +51,15 @@ type MessageThread = {
   styleUrls: ['./internal-shell.component.scss']
 })
 export class InternalShellComponent implements OnInit, OnDestroy {
+  private readonly dayMs = 24 * 60 * 60 * 1000;
   private readonly hubThreadLimit = 6;
   private readonly mobileBreakpoint = 900;
+  private readonly isLocalHost = typeof window !== 'undefined'
+    && ['localhost', '127.0.0.1'].includes(window.location.hostname);
   readonly branding = inject(BrandSettingsService);
   private readonly smsApi = inject(SmsApiService);
   private readonly userSettings = inject(UserScopedSettingsService);
+  readonly auth = inject(AuthService);
   private readonly router = inject(Router);
   readonly collapsed = signal(false);
   readonly isMobile = signal(false);
@@ -62,6 +69,32 @@ export class InternalShellComponent implements OnInit, OnDestroy {
   readonly messageThreads = computed(() => this.buildThreads(this.unreadMessages()));
   readonly visibleMessageThreads = computed(() => this.messageThreads().slice(0, this.hubThreadLimit));
   readonly hasMoreMessageThreads = computed(() => this.messageThreads().length > this.hubThreadLimit);
+  readonly nowMs = signal(Date.now());
+  readonly trialEndsAtMs = computed(() => {
+    const parsed = Date.parse(this.auth.trialEndsAt());
+    return Number.isFinite(parsed) ? parsed : null;
+  });
+  readonly showTrialBanner = computed(() => {
+    if (!this.auth.isAuthenticated()) return false;
+    if (environment.auth.devBypass) return false;
+    if (this.isLocalHost) return false;
+    return this.auth.billingStatus() === 'trial';
+  });
+  readonly trialDaysLeft = computed(() => {
+    this.nowMs();
+    const trialEndsAt = this.trialEndsAtMs();
+    if (trialEndsAt == null) return null;
+    const remaining = trialEndsAt - this.nowMs();
+    if (remaining <= 0) return 0;
+    return Math.max(1, Math.ceil(remaining / this.dayMs));
+  });
+  readonly trialCountdownLabel = computed(() => {
+    const days = this.trialDaysLeft();
+    if (days == null) return 'Trial active';
+    if (days <= 0) return 'Trial ends today';
+    if (days === 1) return '1 day left';
+    return `${days} days left`;
+  });
   private hasLoadedInbox = false;
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
   private navLoadToken = 0;
@@ -72,6 +105,7 @@ export class InternalShellComponent implements OnInit, OnDestroy {
       'calendar-clear-outline': calendarClearOutline,
       'cube-outline': cubeOutline,
       'people-outline': peopleOutline,
+      'receipt-outline': receiptOutline,
       'bar-chart-outline': barChartOutline,
       'chevron-back-outline': chevronBackOutline,
       'chevron-forward-outline': chevronForwardOutline,
@@ -115,6 +149,7 @@ export class InternalShellComponent implements OnInit, OnDestroy {
   }
 
   private refreshSmsInbox(background: boolean): void {
+    this.nowMs.set(Date.now());
     if (!background && !this.hasLoadedInbox) {
       this.smsLoading.set(true);
       this.smsError.set('');
@@ -137,11 +172,6 @@ export class InternalShellComponent implements OnInit, OnDestroy {
   }
 
   openThread(thread: MessageThread): void {
-    if (this.isMobile()) {
-      this.openMessagesScreen();
-      return;
-    }
-
     if (!thread.messageIds.length) return;
     const targetIds = new Set(thread.messageIds);
     this.unreadMessages.update(list => list.filter(item => !targetIds.has(item.id)));
@@ -149,6 +179,11 @@ export class InternalShellComponent implements OnInit, OnDestroy {
     this.smsApi.markReadBatch(thread.messageIds).subscribe({
       error: () => this.refreshSmsInbox(true)
     });
+
+    if (this.isMobile()) {
+      this.openMessagesScreen();
+      return;
+    }
 
     if (thread.customerId) {
       this.router.navigate(['/customers', thread.customerId], { queryParams: { tab: 'sms' } });
@@ -175,6 +210,12 @@ export class InternalShellComponent implements OnInit, OnDestroy {
     this.router.navigate(['/messages']);
   }
 
+  openBilling(): void {
+    this.router.navigate(['/billing'], {
+      queryParams: { redirect: this.router.url || '/dashboard' }
+    });
+  }
+
   private loadCollapsedPreference(): void {
     const token = ++this.navLoadToken;
     this.userSettings.getValue<boolean>(NAV_COLLAPSED_SETTING_KEY).subscribe(value => {
@@ -193,7 +234,8 @@ export class InternalShellComponent implements OnInit, OnDestroy {
     for (const item of messages) {
       const key = item.customerId || item.from || item.id;
       const existing = map.get(key);
-      const name = (item.customerName || item.from || 'Unknown sender').trim();
+      const fallbackName = item.customerId ? 'Unknown customer' : 'Unknown sender';
+      const name = (item.customerName || item.from || fallbackName).trim();
       if (!existing) {
         map.set(key, {
           key,

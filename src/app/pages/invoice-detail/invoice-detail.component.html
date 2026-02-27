@@ -1,0 +1,372 @@
+<ion-header class="glass-header">
+  <ion-toolbar>
+    <ion-buttons slot="start">
+      <app-page-back-button></app-page-back-button>
+    </ion-buttons>
+    <ion-title>Invoice Detail</ion-title>
+    <app-company-switcher></app-company-switcher>
+    <ion-buttons slot="end" class="ion-margin-end">
+      <app-user-menu></app-user-menu>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content class="glass-bg invoice-detail-content ion-padding">
+  <div class="invoice-detail-stack">
+    <ng-container *ngIf="!loading(); else loadingState">
+      <section class="glass-surface state-card" *ngIf="error(); else detailState">
+        <h2>Invoice Unavailable</h2>
+        <p>{{ error() }}</p>
+        <ion-button size="small" (click)="openInvoiceList()">Back To Invoices</ion-button>
+      </section>
+    </ng-container>
+  </div>
+
+  <ng-template #loadingState>
+    <section class="glass-surface state-card">
+      <h2>Loading Invoice...</h2>
+      <p>Please wait while we pull invoice details.</p>
+    </section>
+  </ng-template>
+
+  <ng-template #detailState>
+    <section class="glass-surface invoice-header-card" *ngIf="invoice() as detail">
+      <div class="invoice-head-main">
+        <div class="invoice-eyebrow">Invoice</div>
+        <h2>{{ detail.invoiceNumber }}</h2>
+        <div class="invoice-meta">
+          <span>{{ detail.customerName }}</span>
+          <span>{{ detail.template }}</span>
+        </div>
+      </div>
+
+      <div class="invoice-head-actions">
+        <label class="field stage-field">
+          <span>Stage</span>
+          <select [value]="detail.stage" (change)="setStage($any($event.target).value)">
+            <option *ngFor="let stage of stageOptions" [value]="stage">
+              {{ stage | titlecase }}
+            </option>
+          </select>
+        </label>
+        <ion-button size="small" fill="outline" (click)="openInvoiceList()">Back To Invoices</ion-button>
+        <ion-button size="small" (click)="save()" [disabled]="!canSave()">
+          {{ saving() ? 'Saving...' : 'Save Invoice' }}
+        </ion-button>
+      </div>
+    </section>
+
+    <div
+      class="status-row"
+      *ngIf="status()"
+      [class.success]="statusTone() === 'success'"
+      [class.error]="statusTone() === 'error'">
+      {{ status() }}
+    </div>
+
+    <section class="editor-grid" *ngIf="invoice() as detail">
+      <article class="glass-surface form-card">
+        <h3>Customer + Job</h3>
+        <div class="field-grid two-col">
+          <label class="field">
+            <span>Customer Name</span>
+            <input
+              type="text"
+              [value]="detail.customerName"
+              (input)="updateField('customerName', $any($event.target).value)" />
+          </label>
+          <label class="field">
+            <span>Customer Email</span>
+            <input
+              type="email"
+              [value]="detail.customerEmail"
+              (input)="updateField('customerEmail', $any($event.target).value)" />
+          </label>
+          <label class="field">
+            <span>Customer Phone</span>
+            <input
+              type="text"
+              [value]="detail.customerPhone"
+              (input)="updateField('customerPhone', $any($event.target).value)" />
+          </label>
+          <label class="field">
+            <span>Vehicle</span>
+            <input
+              type="text"
+              [value]="detail.vehicle"
+              (input)="updateField('vehicle', $any($event.target).value)" />
+          </label>
+          <label class="field full">
+            <span>Customer Address</span>
+            <input
+              type="text"
+              [value]="detail.customerAddress"
+              (input)="updateField('customerAddress', $any($event.target).value)" />
+          </label>
+          <label class="field">
+            <span>Template</span>
+            <input
+              type="text"
+              [value]="detail.template"
+              (input)="updateField('template', $any($event.target).value)" />
+          </label>
+          <label class="field">
+            <span>Job Type</span>
+            <input
+              type="text"
+              [value]="detail.jobType"
+              (input)="updateField('jobType', $any($event.target).value)" />
+          </label>
+          <label class="field">
+            <span>Referral Source</span>
+            <input
+              type="text"
+              [value]="detail.referralSource"
+              (input)="updateField('referralSource', $any($event.target).value)" />
+          </label>
+          <label class="field">
+            <span>Flags / Markers</span>
+            <input
+              type="text"
+              [value]="detail.flags"
+              (input)="updateField('flags', $any($event.target).value)" />
+          </label>
+          <label class="field full">
+            <span>Description</span>
+            <textarea
+              rows="2"
+              [value]="detail.description"
+              (input)="updateField('description', $any($event.target).value)"></textarea>
+          </label>
+          <label class="field">
+            <span>Issue Date</span>
+            <input
+              type="date"
+              [value]="detail.issueDate"
+              (input)="updateField('issueDate', $any($event.target).value)" />
+          </label>
+          <label class="field">
+            <span>Due Date</span>
+            <input
+              type="date"
+              [value]="detail.dueDate"
+              (input)="updateField('dueDate', $any($event.target).value)" />
+          </label>
+          <label class="field">
+            <span>Payment Date</span>
+            <input
+              type="date"
+              [value]="detail.paymentDate"
+              (input)="updateField('paymentDate', $any($event.target).value)" />
+          </label>
+          <label class="field">
+            <span>Exported Date</span>
+            <input
+              type="date"
+              [value]="detail.exportedDate"
+              (input)="updateField('exportedDate', $any($event.target).value)" />
+          </label>
+        </div>
+      </article>
+
+      <article class="glass-surface form-card">
+        <h3>Business + Notes</h3>
+        <div class="field-grid two-col">
+          <label class="field">
+            <span>Business Name</span>
+            <input
+              type="text"
+              [value]="detail.businessName"
+              (input)="updateField('businessName', $any($event.target).value)" />
+          </label>
+          <label class="field">
+            <span>Business Email</span>
+            <input
+              type="email"
+              [value]="detail.businessEmail"
+              (input)="updateField('businessEmail', $any($event.target).value)" />
+          </label>
+          <label class="field">
+            <span>Business Phone</span>
+            <input
+              type="text"
+              [value]="detail.businessPhone"
+              (input)="updateField('businessPhone', $any($event.target).value)" />
+          </label>
+          <label class="field">
+            <span>Business Logo URL</span>
+            <input
+              type="text"
+              [value]="detail.businessLogoUrl"
+              (input)="updateField('businessLogoUrl', $any($event.target).value)" />
+          </label>
+          <label class="field full">
+            <span>Business Address</span>
+            <input
+              type="text"
+              [value]="detail.businessAddress"
+              (input)="updateField('businessAddress', $any($event.target).value)" />
+          </label>
+          <label class="field full">
+            <span>Staff Note</span>
+            <textarea
+              rows="3"
+              [value]="detail.staffNote"
+              (input)="updateField('staffNote', $any($event.target).value)"></textarea>
+          </label>
+          <label class="field full">
+            <span>Customer Note</span>
+            <textarea
+              rows="3"
+              [value]="detail.customerNote"
+              (input)="updateField('customerNote', $any($event.target).value)"></textarea>
+          </label>
+        </div>
+
+        <div class="payment-panel">
+          <div class="payment-head">
+            <h4>Payment Link</h4>
+            <label class="check-row">
+              <input
+                type="checkbox"
+                [checked]="detail.includePaymentLink"
+                [disabled]="!paymentAvailability().enabled && !detail.includePaymentLink"
+                (change)="togglePaymentLink($any($event.target).checked)" />
+              <span>Include payment link</span>
+            </label>
+          </div>
+
+          <div class="provider-row" *ngIf="paymentAvailability().provider as provider">
+            Provider: {{ provider.label }}
+          </div>
+
+          <div class="provider-row muted" *ngIf="!paymentAvailability().enabled">
+            {{ paymentAvailability().reason || 'Need to connect your payment provider' }}
+            <button type="button" class="inline-link" (click)="openAdminSettings()">Open Admin Settings</button>
+          </div>
+
+          <label class="field" *ngIf="detail.includePaymentLink">
+            <span>Payment URL</span>
+            <input
+              type="text"
+              [readonly]="!paymentAvailability().enabled"
+              [value]="detail.paymentLinkUrl"
+              (input)="updateField('paymentLinkUrl', $any($event.target).value)" />
+          </label>
+        </div>
+      </article>
+    </section>
+
+    <section class="glass-surface line-items-card" *ngIf="invoice() as detail">
+      <header class="line-items-head">
+        <h3>Parts + Labor</h3>
+        <div class="line-item-actions">
+          <ion-button size="small" fill="outline" (click)="addLineItem('part')">+ Part</ion-button>
+          <ion-button size="small" fill="outline" (click)="addLineItem('labor')">+ Labor</ion-button>
+        </div>
+      </header>
+
+      <div class="line-table-wrap">
+        <table class="line-table">
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>Code</th>
+              <th>Description</th>
+              <th>Qty</th>
+              <th>Unit</th>
+              <th>Tax %</th>
+              <th>Line Total</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody *ngIf="detail.lineItems.length; else noLines">
+            <tr *ngFor="let line of detail.lineItems; trackBy: trackLineItem">
+              <td>
+                <select
+                  [value]="line.type"
+                  (change)="updateLineItemField(line.id, 'type', $any($event.target).value)">
+                  <option value="part">Part</option>
+                  <option value="labor">Labor</option>
+                </select>
+              </td>
+              <td>
+                <input
+                  type="text"
+                  [value]="line.code"
+                  (input)="updateLineItemField(line.id, 'code', $any($event.target).value)" />
+              </td>
+              <td>
+                <input
+                  type="text"
+                  [value]="line.description"
+                  (input)="updateLineItemField(line.id, 'description', $any($event.target).value)" />
+              </td>
+              <td>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  [value]="line.quantity"
+                  (input)="updateLineItemField(line.id, 'quantity', $any($event.target).value)" />
+              </td>
+              <td>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  [value]="line.unitPrice"
+                  (input)="updateLineItemField(line.id, 'unitPrice', $any($event.target).value)" />
+              </td>
+              <td>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  [value]="line.taxRate"
+                  (input)="updateLineItemField(line.id, 'taxRate', $any($event.target).value)" />
+              </td>
+              <td class="amount">{{ line.lineTotal | currency:'USD':'symbol':'1.2-2' }}</td>
+              <td class="remove-cell">
+                <button type="button" class="remove-line" (click)="removeLineItem(line.id)">Remove</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <ng-template #noLines>
+        <div class="line-empty">No line items yet. Add part or labor rows above.</div>
+      </ng-template>
+    </section>
+
+    <section class="summary-grid" *ngIf="invoice() as detail">
+      <article class="glass-surface timeline-card">
+        <h3>Timeline</h3>
+        <div class="timeline-empty" *ngIf="!detail.timeline.length">No timeline entries yet.</div>
+        <ul class="timeline-list" *ngIf="detail.timeline.length">
+          <li class="timeline-item" *ngFor="let entry of detail.timeline">
+            <div class="timeline-time">{{ entry.createdAt | date:'short' }}</div>
+            <div class="timeline-message">{{ entry.message }}</div>
+          </li>
+        </ul>
+      </article>
+
+      <article class="glass-surface totals-card">
+        <h3>Totals</h3>
+        <div class="total-row">
+          <span>Subtotal</span>
+          <strong>{{ totals().subtotal | currency:'USD':'symbol':'1.2-2' }}</strong>
+        </div>
+        <div class="total-row">
+          <span>Tax</span>
+          <strong>{{ totals().taxTotal | currency:'USD':'symbol':'1.2-2' }}</strong>
+        </div>
+        <div class="total-row total-grand">
+          <span>Total</span>
+          <strong>{{ totals().total | currency:'USD':'symbol':'1.2-2' }}</strong>
+        </div>
+      </article>
+    </section>
+  </ng-template>
+</ion-content>

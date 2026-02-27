@@ -1,0 +1,222 @@
+<ion-content class="glass-bg auth-page">
+  <div class="auth-shell">
+    <aside class="marketing-panel">
+      <div class="marketing-image"></div>
+      <div class="marketing-overlay">
+        <img src="/pathflow-logo.svg" alt="Pathflow" class="marketing-logo" />
+        <p class="marketing-kicker">Pathflow Platform</p>
+        <h2>Create your workspace and start your 7-day trial.</h2>
+        <p>Use Microsoft, Google, or email/password to create an account and launch your shop in minutes.</p>
+      </div>
+    </aside>
+
+    <section class="auth-panel glass-surface">
+      <header class="auth-header">
+        <p class="auth-kicker">Step {{ step() }} of 2</p>
+        <h1>Create your account</h1>
+      </header>
+
+      <div class="wizard-steps" role="tablist" aria-label="Registration steps">
+        <button type="button" class="wizard-step" [class.active]="step() === 1" (click)="backToAccount()">
+          <span class="wizard-index">1</span>
+          <span>Account</span>
+        </button>
+        <button type="button" class="wizard-step" [class.active]="step() === 2" [disabled]="!stepOneValid()" (click)="goToPlans()">
+          <span class="wizard-index">2</span>
+          <span>Plan</span>
+        </button>
+      </div>
+
+      <p class="inline-link-row">
+        Already have an account?
+        <button type="button" class="inline-link-btn" (click)="backToLogin()">Sign in</button>
+      </p>
+
+      <section class="step-body" *ngIf="step() === 1">
+        <section class="form-card">
+          <div class="form-card-head">
+            <h2>Choose sign-up method</h2>
+          </div>
+
+          <div class="method-grid">
+            <button type="button" class="method-btn" [class.active]="selectedMethod() === 'email'" (click)="setMethod('email')">
+              <ion-icon name="key-outline"></ion-icon>
+              <span>Email & Password</span>
+            </button>
+            <button type="button" class="method-btn" [class.active]="selectedMethod() === 'aad'" (click)="setMethod('aad')">
+              <ion-icon name="shield-checkmark-outline"></ion-icon>
+              <span>Microsoft</span>
+            </button>
+            <button
+              *ngIf="googleEnabled()"
+              type="button"
+              class="method-btn"
+              [class.active]="selectedMethod() === 'google'"
+              (click)="setMethod('google')">
+              <ion-icon name="logo-google"></ion-icon>
+              <span>Google</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="form-card" *ngIf="selectedMethod() === 'email'">
+          <div class="form-card-head">
+            <h2>Manual Sign-up</h2>
+          </div>
+
+          <ion-item>
+            <ion-label position="stacked">Full name</ion-label>
+            <ion-input
+              [value]="fullName()"
+              (ionInput)="fullName.set($any($event.detail).value ?? '')"
+              autocomplete="name"
+              placeholder="Robert Warren">
+            </ion-input>
+          </ion-item>
+
+          <ion-item>
+            <ion-label position="stacked">Email</ion-label>
+            <ion-input
+              [value]="email()"
+              (ionInput)="email.set($any($event.detail).value ?? '')"
+              type="email"
+              autocomplete="email"
+              placeholder="you@company.com">
+            </ion-input>
+          </ion-item>
+
+          <ion-item>
+            <ion-label position="stacked">Phone</ion-label>
+            <ion-input
+              [value]="phone()"
+              (ionInput)="phone.set($any($event.detail).value ?? '')"
+              type="tel"
+              inputmode="tel"
+              autocomplete="tel"
+              placeholder="(555) 123-4567">
+            </ion-input>
+          </ion-item>
+
+          <ion-item>
+            <ion-label position="stacked">Password</ion-label>
+            <ion-input
+              [value]="password()"
+              (ionInput)="password.set($any($event.detail).value ?? '')"
+              type="password"
+              autocomplete="new-password"
+              placeholder="Minimum 8 characters">
+            </ion-input>
+          </ion-item>
+
+          <ion-item>
+            <ion-label position="stacked">Confirm password</ion-label>
+            <ion-input
+              [value]="confirmPassword()"
+              (ionInput)="confirmPassword.set($any($event.detail).value ?? '')"
+              type="password"
+              autocomplete="new-password"
+              placeholder="Re-enter password">
+            </ion-input>
+          </ion-item>
+        </section>
+
+        <section class="form-card" *ngIf="selectedMethod() !== 'email'">
+          <div class="form-card-head">
+            <h2>Provider Sign-up</h2>
+          </div>
+          <p class="provider-note">
+            You selected <strong>{{ selectedMethod() === 'google' ? 'Google' : 'Microsoft' }}</strong>.
+            Next, choose a plan. The provider sign-in prompt opens only after you continue.
+          </p>
+        </section>
+
+        <div class="step-actions single">
+          <ion-button expand="block" size="large" (click)="goToPlans()" [disabled]="auth.loading()">
+            Continue to Plan Selection
+          </ion-button>
+        </div>
+      </section>
+
+      <section class="step-body" *ngIf="step() === 2">
+        <section class="form-card">
+          <div class="form-card-head">
+            <h2>Choose your plan</h2>
+          </div>
+
+          <div class="plan-grid">
+            <button
+              type="button"
+              class="plan-btn"
+              [class.active]="selectedPlan() === 'trial'"
+              (click)="setPlan('trial')">
+              <span class="plan-title">7-Day Trial</span>
+              <span class="plan-price">$0</span>
+              <span class="plan-subtitle">Explore everything for 7 days</span>
+            </button>
+
+            <button
+              type="button"
+              class="plan-btn"
+              [class.active]="selectedPlan() === 'monthly'"
+              (click)="setPlan('monthly')">
+              <span class="plan-title">Monthly</span>
+              <span class="plan-price">${{ monthlyPrice() }}/mo</span>
+              <span class="plan-subtitle">Flexible month-to-month billing</span>
+            </button>
+
+            <button
+              type="button"
+              class="plan-btn"
+              [class.active]="selectedPlan() === 'annual'"
+              (click)="setPlan('annual')">
+              <span class="plan-title">Annual</span>
+              <span class="plan-price">${{ annualPrice() }}/yr</span>
+              <span class="plan-subtitle">Save {{ annualSavingsPercent() }}% vs monthly</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="form-card review-card">
+          <div class="form-card-head">
+            <h2>Review</h2>
+          </div>
+
+          <div class="review-row">
+            <span>Sign-up method</span>
+            <strong>
+              {{ selectedMethod() === 'email' ? 'Email & Password' : (selectedMethod() === 'google' ? 'Google' : 'Microsoft') }}
+            </strong>
+          </div>
+          <div class="review-row">
+            <span>Plan</span>
+            <strong>{{ selectedPlan() | titlecase }}</strong>
+          </div>
+          <p class="review-note" *ngIf="selectedPlan() === 'trial'">
+            You will get full access for 7 days, then billing is required to continue.
+          </p>
+        </section>
+
+        <div class="step-actions split">
+          <ion-button fill="outline" size="large" (click)="backToAccount()" [disabled]="auth.loading()">
+            Back
+          </ion-button>
+          <ion-button size="large" (click)="submitSignup()" [disabled]="auth.loading()">
+            {{ submitCta() }}
+          </ion-button>
+        </div>
+      </section>
+
+      <div class="secure-note">
+        <ion-icon name="key-outline"></ion-icon>
+        <span>MFA, passkeys, and provider permissions are handled in your Microsoft or Google flow.</span>
+      </div>
+
+      <p class="auth-hint" *ngIf="hint()">{{ hint() }}</p>
+      <p class="auth-hint error" *ngIf="error()">{{ error() }}</p>
+
+      <div class="loading" *ngIf="auth.loading()">
+        <ion-spinner name="crescent"></ion-spinner>
+      </div>
+    </section>
+  </div>
+</ion-content>

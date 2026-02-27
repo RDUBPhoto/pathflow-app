@@ -1,0 +1,356 @@
+:host {
+  display: block;
+  height: 100%;
+}
+
+.invoices-new-content {
+  --padding-bottom: calc(96px + env(safe-area-inset-bottom));
+}
+
+.new-stack {
+  display: grid;
+  gap: 16px;
+}
+
+.template-intro,
+.template-hint,
+.mention-panel,
+.customer-panel {
+  border-radius: 14px;
+  border: 1px solid var(--app-border-subtle);
+  padding: 14px;
+}
+
+.template-intro h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.template-intro p,
+.template-hint p {
+  margin: 6px 0 0;
+  color: var(--app-text-muted);
+  font-size: 13px;
+}
+
+.template-hint h4 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.customer-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.customer-head h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.customer-head p {
+  margin: 4px 0 0;
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
+.prefill-note {
+  border: 1px solid rgba(37, 99, 235, 0.38);
+  background: rgba(37, 99, 235, 0.16);
+  color: var(--app-text);
+  border-radius: 10px;
+  padding: 7px 9px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.customer-selected {
+  border: 1px solid rgba(34, 197, 94, 0.4);
+  background: rgba(34, 197, 94, 0.12);
+  border-radius: 10px;
+  padding: 10px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.selected-main {
+  min-width: 0;
+}
+
+.selected-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--app-text);
+}
+
+.selected-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.clear-selected {
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 999px;
+  background: var(--app-surface-bg);
+  color: var(--app-text);
+  padding: 4px 11px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.customer-search-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--app-text-muted);
+}
+
+.customer-search {
+  width: 100%;
+  min-height: 38px;
+  border-radius: 10px;
+  border: 1px solid var(--app-border-subtle);
+  background: var(--app-field-bg);
+  color: var(--app-text);
+  padding: 8px 10px;
+  font-size: 13px;
+  outline: none;
+}
+
+.customer-search:focus {
+  border-color: var(--app-link, #2563eb);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+}
+
+.customer-loading,
+.customer-empty {
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.customer-error {
+  font-size: 12px;
+  color: #fda4af;
+}
+
+.customer-list {
+  display: grid;
+  gap: 7px;
+  max-height: 210px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.customer-option {
+  border: 1px solid var(--app-border-subtle);
+  background: var(--app-surface-bg);
+  border-radius: 10px;
+  padding: 8px 10px;
+  text-align: left;
+  display: grid;
+  gap: 2px;
+  cursor: pointer;
+}
+
+.customer-option.selected {
+  border-color: rgba(34, 197, 94, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.2);
+}
+
+.customer-name {
+  color: var(--app-text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.customer-detail {
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
+.mention-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.mention-head h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.mention-head p {
+  margin: 4px 0 0;
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
+.mention-search-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--app-text-muted);
+}
+
+.mention-search {
+  width: 100%;
+  min-height: 38px;
+  border-radius: 10px;
+  border: 1px solid var(--app-border-subtle);
+  background: var(--app-field-bg);
+  color: var(--app-text);
+  padding: 8px 10px;
+  font-size: 13px;
+  outline: none;
+}
+
+.mention-search:focus {
+  border-color: var(--app-link, #2563eb);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+}
+
+.mentions-loading,
+.mentions-empty {
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.mentions-error {
+  font-size: 12px;
+  color: #fda4af;
+}
+
+.mention-selected {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mention-chip {
+  border: 1px solid var(--app-nav-active-border);
+  background: var(--app-nav-active-bg);
+  color: var(--app-nav-active-text);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.chip-remove {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.mention-list {
+  display: grid;
+  gap: 7px;
+  max-height: 170px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.mention-option {
+  border: 1px solid var(--app-border-subtle);
+  background: var(--app-surface-bg);
+  border-radius: 10px;
+  padding: 8px 10px;
+  text-align: left;
+  display: grid;
+  gap: 2px;
+  cursor: pointer;
+}
+
+.mention-option.selected {
+  border-color: rgba(34, 197, 94, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.2);
+}
+
+.mention-name {
+  color: var(--app-text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.mention-email {
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
+.template-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.template-card {
+  border-radius: 14px;
+  border: 1px solid var(--app-border-subtle);
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.template-head h3 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.template-head p {
+  margin: 4px 0 0;
+  color: var(--app-text-muted);
+  font-size: 12px;
+  min-height: 34px;
+}
+
+.template-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
+.template-feedback {
+  display: grid;
+  gap: 6px;
+}
+
+.feedback-row {
+  border-radius: 10px;
+  border: 1px solid var(--app-border-subtle);
+  background: var(--app-surface-bg);
+  color: var(--app-text-muted);
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.feedback-row.success {
+  border-color: rgba(34, 197, 94, 0.45);
+  color: #86efac;
+}
+
+.feedback-row.error {
+  border-color: rgba(248, 113, 113, 0.45);
+  color: #fecaca;
+}
+
+@media (max-width: 1200px) {
+  .template-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 820px) {
+  .template-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

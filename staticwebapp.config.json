@@ -1,6 +1,7 @@
 {
   "routes": [
     { "route": "/login", "allowedRoles": ["anonymous"] },
+    { "route": "/signup", "allowedRoles": ["anonymous"] },
     { "route": "/register", "allowedRoles": ["authenticated"] },
     { "route": "/sms-opt-in", "allowedRoles": ["anonymous"] },
     { "route": "/api/widget/lead", "allowedRoles": ["anonymous"] },

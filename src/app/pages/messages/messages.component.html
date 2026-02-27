@@ -12,6 +12,11 @@
 </ion-header>
 
 <ion-content class="glass-bg messages-page ion-padding">
+  <div class="feedback-overlay" *ngIf="status() || error()">
+    <div class="page-feedback success" *ngIf="status()">{{ status() }}</div>
+    <div class="page-feedback error" *ngIf="error()">{{ error() }}</div>
+  </div>
+
   <section class="messages-layout">
     <aside class="threads-pane glass-surface">
       <div class="threads-title">SMS Conversations</div>
@@ -125,6 +130,4 @@
     </section>
   </ng-template>
 
-  <div class="page-feedback success" *ngIf="status()">{{ status() }}</div>
-  <div class="page-feedback error" *ngIf="error()">{{ error() }}</div>
 </ion-content>

@@ -1,0 +1,152 @@
+<ion-header class="glass-header">
+  <ion-toolbar>
+    <ion-buttons slot="start">
+      <app-page-back-button></app-page-back-button>
+    </ion-buttons>
+    <ion-title>New Invoice</ion-title>
+    <app-company-switcher></app-company-switcher>
+    <ion-buttons slot="end" class="ion-margin-end">
+      <app-user-menu></app-user-menu>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content class="glass-bg invoices-new-content ion-padding">
+  <div class="new-stack">
+    <section class="template-intro glass-surface">
+      <h2>Start from a template</h2>
+      <p>Select a customer, pick a template, and create a draft invoice in one step.</p>
+    </section>
+
+    <section class="customer-panel glass-surface">
+      <div class="customer-head">
+        <h3>Customer</h3>
+        <p>Search and select who this invoice belongs to.</p>
+      </div>
+
+      <div class="prefill-note" *ngIf="fromCustomerProfile()">
+        Prefilled from Customer Profile.
+      </div>
+
+      <div class="customer-selected" *ngIf="hasSelectedCustomer()">
+        <div class="selected-main">
+          <div class="selected-name">{{ selectedCustomerName() }}</div>
+          <div class="selected-meta">
+            <span>{{ selectedCustomerEmail() }}</span>
+            <span>{{ selectedCustomerPhone() }}</span>
+            <span>{{ selectedCustomerVehicle() }}</span>
+          </div>
+        </div>
+        <button type="button" class="clear-selected" (click)="clearSelectedCustomer()">Change</button>
+      </div>
+
+      <label class="customer-search-label" for="customer-search">Search customers</label>
+      <input
+        id="customer-search"
+        class="customer-search"
+        type="text"
+        placeholder="Name, email, phone, vehicle"
+        [value]="customerQuery()"
+        (input)="setCustomerQuery($any($event.target).value)" />
+
+      <div class="customer-loading" *ngIf="customersLoading()">Loading customers...</div>
+      <div class="customer-error" *ngIf="!customersLoading() && customersError()">{{ customersError() }}</div>
+
+      <div class="customer-list" *ngIf="!customersLoading() && filteredCustomers().length">
+        <button
+          type="button"
+          class="customer-option"
+          *ngFor="let customer of filteredCustomers(); trackBy: trackCustomer"
+          [class.selected]="isSelectedCustomer(customer)"
+          (click)="selectCustomer(customer)">
+          <span class="customer-name">{{ customerDisplayName(customer) }}</span>
+          <span class="customer-detail">{{ customer.email || 'No email' }}</span>
+          <span class="customer-detail">{{ customer.phone || 'No phone' }}</span>
+          <span class="customer-detail">{{ customerVehicleSummary(customer) || 'Vehicle not set' }}</span>
+        </button>
+      </div>
+
+      <div class="customer-empty" *ngIf="!customersLoading() && !filteredCustomers().length">
+        No customers match your search.
+      </div>
+    </section>
+
+    <section class="mention-panel glass-surface">
+      <div class="mention-head">
+        <h3>Mention Teammates</h3>
+        <p>Tag users who should review or approve the new invoice.</p>
+      </div>
+
+      <label class="mention-search-label" for="mention-search">Search users</label>
+      <input
+        id="mention-search"
+        class="mention-search"
+        type="text"
+        placeholder="Search by name or email"
+        [value]="mentionQuery()"
+        (input)="setMentionQuery($any($event.target).value)" />
+
+      <div class="mentions-loading" *ngIf="mentionsLoading()">Loading users...</div>
+      <div class="mentions-error" *ngIf="!mentionsLoading() && mentionsError()">{{ mentionsError() }}</div>
+
+      <div class="mention-selected" *ngIf="selectedMentions().length">
+        <button
+          type="button"
+          class="mention-chip"
+          *ngFor="let user of selectedMentions(); trackBy: trackMentionUser"
+          (click)="removeMention(user)">
+          <span>{{ user.displayName }}</span>
+          <span class="chip-remove">×</span>
+        </button>
+      </div>
+
+      <div class="mention-list" *ngIf="!mentionsLoading() && filteredMentionUsers().length">
+        <button
+          type="button"
+          class="mention-option"
+          *ngFor="let user of filteredMentionUsers(); trackBy: trackMentionUser"
+          [class.selected]="isMentioned(user)"
+          (click)="toggleMentionUser(user)">
+          <span class="mention-name">{{ user.displayName }}</span>
+          <span class="mention-email">{{ user.email }}</span>
+        </button>
+      </div>
+
+      <div class="mentions-empty" *ngIf="!mentionsLoading() && !filteredMentionUsers().length">
+        No users match your search.
+      </div>
+    </section>
+
+    <section class="template-grid">
+      <article class="template-card glass-surface" *ngFor="let template of templates; trackBy: trackTemplate">
+        <div class="template-head">
+          <h3>{{ template.name }}</h3>
+          <p>{{ template.description }}</p>
+        </div>
+        <ul class="template-list">
+          <li *ngFor="let item of template.includes">{{ item }}</li>
+        </ul>
+        <ion-button size="small" [disabled]="!hasSelectedCustomer() || creatingInvoice()" (click)="selectTemplate(template)">
+          {{ creatingInvoice() ? 'Creating...' : 'Use template' }}
+        </ion-button>
+      </article>
+    </section>
+
+    <section class="template-feedback" *ngIf="status()">
+      <div
+        class="feedback-row"
+        [class.success]="statusTone() === 'success'"
+        [class.error]="statusTone() === 'error'">
+        {{ status() }}
+      </div>
+    </section>
+
+    <section class="template-hint glass-surface">
+      <h4>Template management (next)</h4>
+      <p>
+        This screen is intentionally set up so we can add tenant-level custom templates without changing
+        the flow users already have.
+      </p>
+    </section>
+  </div>
+</ion-content>

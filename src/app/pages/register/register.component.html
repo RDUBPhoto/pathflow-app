@@ -4,16 +4,20 @@
       <div class="marketing-image"></div>
       <div class="marketing-overlay">
         <img src="/pathflow-logo.svg" alt="Pathflow" class="marketing-logo" />
-        <p class="marketing-kicker">Pathflow Setup</p>
-        <h2>Launch your workspace and start scheduling jobs today.</h2>
-        <p>Configure your shop location, billing profile, and account defaults in one flow.</p>
+        <p class="marketing-kicker">{{ requiresBilling() ? 'Billing Required' : 'Pathflow Setup' }}</p>
+        <h2>
+          {{ requiresBilling() ? 'Your trial has ended. Add billing to unlock your workspace.' : 'Launch your workspace and start scheduling jobs today.' }}
+        </h2>
+        <p>
+          {{ requiresBilling() ? 'Choose monthly or annual billing and you will regain full access immediately.' : 'Configure your shop location now and start a 7-day free trial. Billing can be added now or later.' }}
+        </p>
       </div>
     </aside>
 
     <section class="register-panel glass-surface">
       <header class="register-header">
-        <p class="register-kicker">Create Account</p>
-        <h1>Finish your workspace setup</h1>
+        <p class="register-kicker">{{ requiresBilling() ? 'Step 2 of 2 · Billing Required' : 'Step 2 of 2 · Choose Plan' }}</p>
+        <h1>{{ requiresBilling() ? 'Unlock your workspace' : 'Choose a plan and finish setup' }}</h1>
       </header>
 
       <section class="form-card">
@@ -42,7 +46,7 @@
         </p>
       </section>
 
-      <section class="form-card">
+      <section class="form-card" *ngIf="!requiresBilling()">
         <div class="form-card-head">
           <h2>Workspace Details</h2>
         </div>
@@ -61,17 +65,48 @@
       <section class="form-card billing-card">
         <div class="form-card-head">
           <h2>Billing</h2>
-          <span class="muted-tag">Required</span>
+          <span class="muted-tag">{{ requiresBilling() ? 'Required' : 'Optional' }}</span>
         </div>
 
         <p class="billing-hint">
-          Use your real card details, or enter all <strong>9s</strong> for card number to run sandbox setup.
+          {{ requiresBilling() ? 'Add billing details to continue. For sandbox testing, use all 9s for card number.' : 'You can skip billing to start your 7-day trial, or add billing now. Use all 9s for sandbox testing.' }}
         </p>
+
+        <div class="plan-toggle">
+          <button
+            *ngIf="showTrialOption()"
+            type="button"
+            class="plan-btn"
+            [class.active]="selectedPlan() === 'trial'"
+            [disabled]="saving()"
+            (click)="setPlanCycle('trial')">
+            <span class="plan-btn-title">7-Day Trial</span>
+            <span class="plan-btn-subtitle">$0 for 7 days</span>
+          </button>
+          <button
+            type="button"
+            class="plan-btn"
+            [class.active]="selectedPlan() === 'monthly'"
+            [disabled]="saving()"
+            (click)="setPlanCycle('monthly')">
+            <span class="plan-btn-title">Monthly</span>
+            <span class="plan-btn-subtitle">${{ monthlyPrice() }}/month</span>
+          </button>
+          <button
+            type="button"
+            class="plan-btn"
+            [class.active]="selectedPlan() === 'annual'"
+            [disabled]="saving()"
+            (click)="setPlanCycle('annual')">
+            <span class="plan-btn-title">Annual</span>
+            <span class="plan-btn-subtitle">${{ annualPrice() }}/year · Save {{ annualSavingsPercent() }}%</span>
+          </button>
+        </div>
 
         <ion-item>
           <ion-label position="stacked">Cardholder name</ion-label>
           <ion-input
-            [disabled]="saving() || !auth.canBootstrapRegistration()"
+            [disabled]="saving() || (!auth.canBootstrapRegistration() && !requiresBilling())"
             [value]="cardholderName()"
             (ionInput)="cardholderName.set($any($event.detail).value ?? '')"
             placeholder="Robert Warren">
@@ -81,7 +116,7 @@
         <ion-item>
           <ion-label position="stacked">Card number</ion-label>
           <ion-input
-            [disabled]="saving() || !auth.canBootstrapRegistration()"
+            [disabled]="saving() || (!auth.canBootstrapRegistration() && !requiresBilling())"
             [value]="cardNumber()"
             (ionInput)="cardNumber.set($any($event.detail).value ?? '')"
             inputmode="numeric"
@@ -93,7 +128,7 @@
           <ion-item>
             <ion-label position="stacked">Exp month</ion-label>
             <ion-input
-              [disabled]="saving() || !auth.canBootstrapRegistration()"
+              [disabled]="saving() || (!auth.canBootstrapRegistration() && !requiresBilling())"
               [value]="expiryMonth()"
               (ionInput)="expiryMonth.set($any($event.detail).value ?? '')"
               inputmode="numeric"
@@ -103,7 +138,7 @@
           <ion-item>
             <ion-label position="stacked">Exp year</ion-label>
             <ion-input
-              [disabled]="saving() || !auth.canBootstrapRegistration()"
+              [disabled]="saving() || (!auth.canBootstrapRegistration() && !requiresBilling())"
               [value]="expiryYear()"
               (ionInput)="expiryYear.set($any($event.detail).value ?? '')"
               inputmode="numeric"
@@ -116,7 +151,7 @@
           <ion-item>
             <ion-label position="stacked">CVC</ion-label>
             <ion-input
-              [disabled]="saving() || !auth.canBootstrapRegistration()"
+              [disabled]="saving() || (!auth.canBootstrapRegistration() && !requiresBilling())"
               [value]="cvc()"
               (ionInput)="cvc.set($any($event.detail).value ?? '')"
               inputmode="numeric"
@@ -126,7 +161,7 @@
           <ion-item>
             <ion-label position="stacked">Postal code</ion-label>
             <ion-input
-              [disabled]="saving() || !auth.canBootstrapRegistration()"
+              [disabled]="saving() || (!auth.canBootstrapRegistration() && !requiresBilling())"
               [value]="postalCode()"
               (ionInput)="postalCode.set($any($event.detail).value ?? '')"
               inputmode="numeric"
@@ -136,21 +171,33 @@
         </div>
       </section>
 
-      <p class="auth-hint warning" *ngIf="!auth.canBootstrapRegistration()">
+      <p class="auth-hint warning" *ngIf="requiresBilling() && trialEndsDisplay()">
+        Trial access ended on {{ trialEndsDisplay() }}.
+      </p>
+
+      <p class="auth-hint warning" *ngIf="requiresBilling() && auth.accessLockReason()">
+        {{ auth.accessLockReason() }}
+      </p>
+
+      <p class="auth-hint warning" *ngIf="!requiresBilling() && !auth.canBootstrapRegistration()">
         This account is not allowed to bootstrap a new workspace. Ask an admin to invite or provision you.
       </p>
 
-      <p class="auth-hint warning" *ngIf="auth.canBootstrapRegistration() && !billingValid()">
-        Enter valid billing details to continue, or use all 9s for sandbox setup.
+      <p class="auth-hint warning" *ngIf="requiresBilling() && !billingValid()">
+        Enter valid billing details to unlock your workspace.
+      </p>
+
+      <p class="auth-hint warning" *ngIf="!requiresBilling() && billingProvided() && !billingValid()">
+        Billing details are incomplete. Complete all required fields or clear billing to continue with the free trial.
       </p>
 
       <ion-button
         expand="block"
         size="large"
         [disabled]="!canSubmit()"
-        (click)="registerWorkspace()">
+        (click)="submitRegistration()">
         <ion-spinner *ngIf="saving()" name="crescent" slot="start"></ion-spinner>
-        Create Workspace
+        {{ submitLabel() }}
       </ion-button>
 
       <p class="auth-hint error" *ngIf="error()">{{ error() }}</p>

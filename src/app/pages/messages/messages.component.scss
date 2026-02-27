@@ -11,14 +11,34 @@
 }
 
 .messages-page {
-  --padding-bottom: calc(104px + env(safe-area-inset-bottom));
+  --padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  position: relative;
+}
+
+.messages-page::part(scroll) {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.feedback-overlay {
+  position: absolute;
+  top: 10px;
+  left: 16px;
+  right: 16px;
+  z-index: 40;
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  pointer-events: none;
 }
 
 .messages-layout {
   display: grid;
   grid-template-columns: minmax(280px, 330px) minmax(0, 1fr);
   gap: 12px;
-  min-height: calc(100vh - 190px);
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .threads-pane,
@@ -33,6 +53,8 @@
   grid-template-rows: auto auto minmax(0, 1fr);
   gap: 8px;
   padding: 10px;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .threads-title {
@@ -60,8 +82,11 @@
 .threads-list {
   min-height: 0;
   overflow-y: auto;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 6px;
+  align-items: stretch;
+  align-content: flex-start;
 }
 
 .thread-row {
@@ -307,15 +332,25 @@
 
 .page-feedback {
   font-size: 13px;
-  margin-top: 8px;
+  margin: 0;
+  width: min(760px, 100%);
+  border-radius: 12px;
+  border: 1px solid transparent;
+  padding: 10px 12px;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 10px 26px color-mix(in srgb, #020617 38%, transparent);
 }
 
 .page-feedback.success {
   color: var(--ion-color-success, #22c55e);
+  border-color: color-mix(in srgb, #22c55e 45%, transparent);
+  background: color-mix(in srgb, #22c55e 15%, transparent);
 }
 
 .page-feedback.error {
   color: var(--ion-color-danger, #ef4444);
+  border-color: color-mix(in srgb, #ef4444 45%, transparent);
+  background: color-mix(in srgb, #ef4444 15%, transparent);
 }
 
 @media (max-width: 980px) {

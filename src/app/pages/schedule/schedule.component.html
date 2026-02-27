@@ -12,20 +12,77 @@
       </ion-button>
       <app-user-menu></app-user-menu>
       <ion-spinner name="crescent" *ngIf="loading()"></ion-spinner>
-      <span *ngIf="!loading() && status()" style="margin-left:8px;">
-        {{ status() }}
-      </span>
     </ion-buttons>
   </ion-toolbar>
 </ion-header>
 
-<ion-content class="ion-padding glass-bg">
+<ion-content class="ion-padding glass-bg schedule-content">
+  <div class="feedback-overlay" *ngIf="status()">
+    <div
+      class="page-feedback"
+      [class.success]="statusTone() === 'success'"
+      [class.error]="statusTone() === 'error'">
+      {{ status() }}
+    </div>
+  </div>
+
+  <div class="calendar-toolbar glass-surface">
+    <div class="calendar-view-switch">
+      <button
+        type="button"
+        class="toolbar-chip"
+        *ngFor="let view of calendarViews"
+        [class.active]="isCalendarView(view.id)"
+        (click)="setCalendarView(view.id)">
+        {{ view.label }}
+      </button>
+    </div>
+    <div class="calendar-toolbar-center" *ngIf="isMonthView()">
+      {{ monthViewLabel() }}
+    </div>
+    <div class="calendar-nav-group">
+      <button type="button" class="toolbar-chip" (click)="previousCalendarRange()">Prev</button>
+      <button type="button" class="toolbar-chip active" (click)="jumpToToday()">Today</button>
+      <button type="button" class="toolbar-chip" (click)="nextCalendarRange()">Next</button>
+      <span class="calendar-range-label">{{ viewRangeLabel() }}</span>
+    </div>
+  </div>
+
   <div class="schedule-shell glass-surface" #scheduleShell>
-    <daypilot-scheduler
-      #scheduler
-      [config]="config"
-      [events]="events()">
-    </daypilot-scheduler>
+    <ng-container *ngIf="isMonthView(); else schedulerView">
+      <div class="month-legend" *ngIf="bayLegend().length">
+        <span class="month-legend-item" *ngFor="let bay of bayLegend()">
+          <span class="month-legend-dot" [style.background]="bay.color"></span>
+          {{ bay.name }}
+        </span>
+      </div>
+
+      <div class="month-shell">
+        <daypilot-month
+          #month
+          [config]="monthConfig"
+          [events]="monthEvents()">
+        </daypilot-month>
+      </div>
+    </ng-container>
+
+    <ng-template #schedulerView>
+      <div class="scheduler-stage">
+        <daypilot-scheduler
+          #scheduler
+          [config]="config"
+          [events]="events()">
+        </daypilot-scheduler>
+        <div
+          class="day-now-line"
+          *ngIf="showNowLine()"
+          [style.left.px]="nowLineLeft()"
+          [style.top.px]="nowLineTop()"
+          [style.height.px]="nowLineHeight()">
+          <span class="day-now-line-label">{{ nowLineLabel() }}</span>
+        </div>
+      </div>
+    </ng-template>
   </div>
 </ion-content>
 
@@ -39,7 +96,7 @@
         </ion-buttons>
       </ion-toolbar>
     </ion-header>
-    <ion-content class="ion-padding glass-bg">
+    <ion-content class="ion-padding glass-bg modal-form-content">
       <ion-item lines="full">
         <ion-label>Block bay</ion-label>
         <ion-checkbox slot="end" [checked]="editorBlocked()" (ionChange)="editorBlocked.set($event.detail.checked)"></ion-checkbox>
@@ -55,10 +112,25 @@
         </ion-select>
       </ion-item>
 
+      <ion-item>
+        <ion-label position="stacked">Lift / Bay (Category)</ion-label>
+        <ion-select
+          interface="popover"
+          [value]="editorResource()"
+          (ionChange)="editorResource.set($event.detail.value || '')">
+          <ion-select-option *ngFor="let bay of resources()" [value]="bay.id">
+            {{ bay.name || bay.id }}
+          </ion-select-option>
+        </ion-select>
+      </ion-item>
+
       <ion-item *ngIf="editorBlocked()">
         <ion-label position="stacked">Block label</ion-label>
         <ion-input [ngModel]="editorTitle()" (ngModelChange)="editorTitle.set($event)"></ion-input>
       </ion-item>
+      <div class="validation-error" *ngIf="editorBlocked() && !editorTitle().trim()">
+        Block label is required when blocking a bay.
+      </div>
 
       <ion-item>
         <ion-label position="stacked">Notes</ion-label>
@@ -104,13 +176,21 @@
         <ion-input type="number" min="1" [ngModel]="editorRepeatCount()" (ngModelChange)="editorRepeatCount.set($event)"></ion-input>
       </ion-item>
 
-      <div class="editor-actions">
-        <ion-button fill="outline" color="danger" *ngIf="editorId()" (click)="deleteEditor()">Delete</ion-button>
-        <span style="flex:1 1 auto;"></span>
-        <ion-button fill="outline" (click)="closeEditor()">Cancel</ion-button>
-        <ion-button (click)="saveEditor()">Save</ion-button>
-      </div>
     </ion-content>
+    <ion-footer class="modal-form-footer">
+      <ion-toolbar>
+        <div class="modal-footer-row">
+          <div class="modal-footer-left">
+            <ion-button fill="outline" color="danger" *ngIf="editorId()" (click)="deleteEditor()">Delete</ion-button>
+          </div>
+          <div class="modal-footer-right">
+            <ion-button fill="outline" (click)="closeEditor()">Cancel</ion-button>
+            <ion-button (click)="saveEditor()" [disabled]="!canSaveEditor()">Save</ion-button>
+          </div>
+        </div>
+        <div class="validation-error footer-validation" *ngIf="editorValidationError()">{{ editorValidationError() }}</div>
+      </ion-toolbar>
+    </ion-footer>
   </ng-template>
 </ion-modal>
 
@@ -124,7 +204,7 @@
         </ion-buttons>
       </ion-toolbar>
     </ion-header>
-    <ion-content class="ion-padding glass-bg settings-content">
+    <ion-content class="ion-padding glass-bg settings-content modal-form-content">
       <div class="settings-section glass-surface">
         <div class="settings-section-head">
           <h3>Business Hours</h3>
@@ -168,8 +248,8 @@
 
       <div class="settings-section glass-surface">
         <div class="settings-section-head">
-          <h3>Bays</h3>
-          <p>Manage service bays shown on the calendar.</p>
+          <h3>Bays (Lifts/Categories)</h3>
+          <p>Manage lift categories shown on the calendar.</p>
         </div>
         <ion-button size="small" fill="outline" (click)="addBay()">
           <ion-icon name="add-outline" slot="start"></ion-icon>
@@ -196,7 +276,7 @@
             <ion-label position="stacked">Add holiday</ion-label>
             <ion-input type="date" [ngModel]="newHolidayDate()" (ngModelChange)="newHolidayDate.set($event)"></ion-input>
           </ion-item>
-          <ion-button size="small" fill="outline" (click)="addHoliday()">Add</ion-button>
+          <ion-button size="small" fill="outline" (click)="addHoliday()" [disabled]="!newHolidayDate().trim()">Add</ion-button>
         </div>
 
         <div class="holiday-list">
@@ -243,10 +323,17 @@
         </div>
       </div>
 
-      <div class="editor-actions">
-        <ion-button fill="outline" (click)="settingsOpen.set(false)">Cancel</ion-button>
-        <ion-button (click)="saveSettings()">Save</ion-button>
-      </div>
     </ion-content>
+    <ion-footer class="modal-form-footer">
+      <ion-toolbar>
+        <div class="modal-footer-row">
+          <div class="modal-footer-right">
+            <ion-button fill="outline" (click)="settingsOpen.set(false)">Cancel</ion-button>
+            <ion-button class="settings-save-button" fill="solid" (click)="saveSettings()" [disabled]="!canSaveSettings()">Save</ion-button>
+          </div>
+        </div>
+        <div class="validation-error footer-validation" *ngIf="settingsValidationError()">{{ settingsValidationError() }}</div>
+      </ion-toolbar>
+    </ion-footer>
   </ng-template>
 </ion-modal>

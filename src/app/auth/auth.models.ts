@@ -4,6 +4,7 @@ export interface AuthUser {
   id: string;
   displayName: string;
   email: string;
+  phone?: string;
   identityProvider: string;
   roles: string[];
   avatarUrl?: string;
@@ -21,6 +22,12 @@ export interface AuthAccessState {
   isSuperAdmin: boolean;
   locations: AuthLocation[];
   defaultLocationId: string;
+  billingStatus: string;
+  trialStartsAt: string;
+  trialEndsAt: string;
+  accessLocked: boolean;
+  accessLockReason: string;
+  planCycle: 'monthly' | 'annual';
 }
 
 export interface AuthState {
@@ -55,5 +62,11 @@ export interface AccessProfileResponse {
     isSuperAdmin?: boolean;
     locations?: Array<{ id?: string; name?: string }>;
     defaultLocationId?: string;
+    billingStatus?: string;
+    trialStartsAt?: string;
+    trialEndsAt?: string;
+    accessLocked?: boolean;
+    accessLockReason?: string;
+    planCycle?: 'monthly' | 'annual' | string;
   } | null;
 }

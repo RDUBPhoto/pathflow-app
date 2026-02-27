@@ -1,4 +1,4 @@
-import { Component, computed, effect, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, computed, effect, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
   IonAvatar,
@@ -8,17 +8,25 @@ import {
   IonItem,
   IonLabel,
   IonList,
-  IonPopover
+  IonPopover,
+  IonToggle
 } from '@ionic/angular/standalone';
-import { RouterLink } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { addIcons } from 'ionicons';
 import {
   chevronDownOutline,
+  checkmarkDoneOutline,
+  closeOutline,
   logOutOutline,
+  notificationsOutline,
+  openOutline,
   personCircleOutline,
   shieldCheckmarkOutline
 } from 'ionicons/icons';
 import { AuthService } from '../../../auth/auth.service';
+import { AppNotification, NotificationsApiService } from '../../../services/notifications-api.service';
+import { ThemeService } from '../../../services/theme.service';
+import { forkJoin } from 'rxjs';
 
 @Component({
   selector: 'app-user-menu',
@@ -33,17 +41,41 @@ import { AuthService } from '../../../auth/auth.service';
     IonContent,
     IonList,
     IonItem,
-    IonLabel
+    IonLabel,
+    IonToggle
   ],
   templateUrl: './user-menu.component.html',
   styleUrls: ['./user-menu.component.scss']
 })
-export class UserMenuComponent {
+export class UserMenuComponent implements OnInit, OnDestroy {
   readonly auth = inject(AuthService);
+  private readonly theme = inject(ThemeService);
+  private readonly router = inject(Router);
+  private readonly notificationsApi = inject(NotificationsApiService);
 
   readonly menuOpen = signal(false);
   readonly menuEvent = signal<Event | null>(null);
   readonly avatarLoadError = signal(false);
+  readonly notificationsOpen = signal(false);
+  readonly notificationsEvent = signal<Event | null>(null);
+  readonly notificationsLoading = signal(false);
+  readonly notificationsError = signal('');
+  readonly notificationItems = signal<AppNotification[]>([]);
+  readonly notificationsTotal = signal(0);
+  readonly unreadNotifications = signal(0);
+  readonly showAllNotifications = signal(false);
+  readonly seedingNotifications = signal(false);
+  readonly visibleNotifications = computed(() =>
+    this.showAllNotifications() ? this.notificationItems() : this.notificationItems().slice(0, this.recentLimit)
+  );
+  readonly hasMoreNotifications = computed(() => this.notificationsTotal() > this.recentLimit);
+  readonly unreadBadgeText = computed(() => {
+    const count = this.unreadNotifications();
+    if (count > 99) return '99+';
+    return String(count);
+  });
+  private refreshTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly recentLimit = 3;
 
   private readonly avatarPalette = [
     '#0f766e',
@@ -62,6 +94,7 @@ export class UserMenuComponent {
     const user = this.user();
     return (user?.displayName || user?.email || 'User').trim();
   });
+  readonly isDarkTheme = computed(() => this.theme.mode() === 'dark');
   readonly userEmail = computed(() => (this.user()?.email || '').trim());
   readonly firstName = computed(() => this.extractFirstName(this.userDisplayName(), this.userEmail()));
   readonly initials = computed(() => this.extractInitials(this.userDisplayName(), this.userEmail()));
@@ -79,7 +112,11 @@ export class UserMenuComponent {
       'chevron-down-outline': chevronDownOutline,
       'person-circle-outline': personCircleOutline,
       'shield-checkmark-outline': shieldCheckmarkOutline,
-      'log-out-outline': logOutOutline
+      'log-out-outline': logOutOutline,
+      'notifications-outline': notificationsOutline,
+      'close-outline': closeOutline,
+      'checkmark-done-outline': checkmarkDoneOutline,
+      'open-outline': openOutline
     });
 
     effect(() => {
@@ -91,13 +128,209 @@ export class UserMenuComponent {
     });
   }
 
+  ngOnInit(): void {
+    this.refreshNotifications(false);
+    this.refreshTimer = setInterval(() => this.refreshNotifications(true), 15000);
+  }
+
+  ngOnDestroy(): void {
+    if (this.refreshTimer) {
+      clearInterval(this.refreshTimer);
+      this.refreshTimer = null;
+    }
+  }
+
   openMenu(event: Event): void {
+    this.notificationsOpen.set(false);
     this.menuEvent.set(event);
     this.menuOpen.set(true);
   }
 
   closeMenu(): void {
     this.menuOpen.set(false);
+  }
+
+  toggleNotifications(event: Event): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.closeMenu();
+
+    const next = !this.notificationsOpen();
+    if (next) {
+      this.notificationsEvent.set(event);
+    }
+    this.notificationsOpen.set(next);
+    if (!next) {
+      this.showAllNotifications.set(false);
+      return;
+    }
+
+    if (this.showAllNotifications()) {
+      this.loadAllNotifications(false);
+      return;
+    }
+    this.loadRecentNotifications(false);
+  }
+
+  closeNotifications(): void {
+    this.notificationsOpen.set(false);
+    this.showAllNotifications.set(false);
+  }
+
+  viewAllNotifications(event: Event): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.showAllNotifications.set(true);
+    this.loadAllNotifications(false);
+  }
+
+  showRecentNotifications(event: Event): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.showAllNotifications.set(false);
+    this.loadRecentNotifications(false);
+  }
+
+  markAllNotificationsRead(event: Event): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.notificationsApi.markAllRead().subscribe({
+      next: () => {
+        this.notificationItems.update(items =>
+          items.map(item => ({ ...item, read: true, readAt: item.readAt || new Date().toISOString() }))
+        );
+        this.unreadNotifications.set(0);
+      },
+      error: () => {
+        this.notificationsError.set('Could not mark notifications as read.');
+      }
+    });
+  }
+
+  seedDemoNotifications(event: Event): void {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const user = this.user();
+    if (!user || (!user.id && !user.email)) {
+      this.notificationsError.set('Could not identify the current user for demo notifications.');
+      return;
+    }
+
+    this.notificationsError.set('');
+    this.seedingNotifications.set(true);
+
+    const targetPayload = {
+      targetUserId: user.id || undefined,
+      targetEmail: user.email || undefined,
+      targetDisplayName: user.displayName || user.email || 'You'
+    };
+
+    const samples: Array<{
+      title: string;
+      message: string;
+      route: string;
+      entityType: string;
+      entityId: string;
+      metadata: Record<string, unknown>;
+    }> = [
+      {
+        title: 'New SMS received',
+        message: 'A customer sent a new message and is waiting for a reply.',
+        route: '/messages',
+        entityType: 'sms',
+        entityId: `sms-${Date.now()}`,
+        metadata: { channel: 'sms', severity: 'high' }
+      },
+      {
+        title: 'Invoice needs approval',
+        message: 'Draft invoice INV-430501 is ready for review.',
+        route: '/invoices',
+        entityType: 'invoice',
+        entityId: 'inv-430501',
+        metadata: { lane: 'draft', action: 'review' }
+      },
+      {
+        title: 'Customer profile updated',
+        message: 'A customer profile was updated with new vehicle details.',
+        route: '/customers',
+        entityType: 'customer',
+        entityId: 'customer-update',
+        metadata: { source: 'profile', action: 'view' }
+      },
+      {
+        title: 'Weekly report is ready',
+        message: 'Your weekly operations report is available to review.',
+        route: '/reports',
+        entityType: 'report',
+        entityId: 'ops-weekly',
+        metadata: { period: 'weekly', action: 'open' }
+      }
+    ];
+
+    forkJoin(
+      samples.map(sample =>
+        this.notificationsApi.createMention({
+          ...targetPayload,
+          ...sample
+        })
+      )
+    ).subscribe({
+      next: () => {
+        this.seedingNotifications.set(false);
+        if (this.showAllNotifications()) {
+          this.loadAllNotifications(false);
+          return;
+        }
+        this.loadRecentNotifications(false);
+      },
+      error: () => {
+        this.seedingNotifications.set(false);
+        this.notificationsError.set('Could not generate demo notifications.');
+      }
+    });
+  }
+
+  openNotification(notification: AppNotification, event: Event): void {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const targetRoute = this.normalizeRoute(notification.route);
+    const navigate = () => {
+      this.router.navigateByUrl(targetRoute);
+      this.closeNotifications();
+    };
+
+    if (notification.read) {
+      navigate();
+      return;
+    }
+
+    this.notificationsApi.markRead(notification.id).subscribe({
+      next: () => {
+        this.notificationItems.update(items =>
+          items.map(item => (item.id === notification.id ? { ...item, read: true, readAt: new Date().toISOString() } : item))
+        );
+        this.unreadNotifications.set(Math.max(0, this.unreadNotifications() - 1));
+        navigate();
+      },
+      error: () => {
+        this.notificationsError.set('Could not open notification right now.');
+        navigate();
+      }
+    });
+  }
+
+  notificationTimeLabel(iso: string): string {
+    const ts = Date.parse(iso);
+    if (!Number.isFinite(ts)) return '';
+    const deltaMs = Date.now() - ts;
+    const mins = Math.max(1, Math.floor(deltaMs / 60000));
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
   }
 
   onAvatarError(): void {
@@ -107,6 +340,68 @@ export class UserMenuComponent {
   signOut(): void {
     this.closeMenu();
     this.auth.signOut('/login');
+  }
+
+  onThemeToggle(checked: boolean): void {
+    this.theme.setMode(checked ? 'dark' : 'light');
+  }
+
+  private refreshNotifications(background: boolean): void {
+    if (this.notificationsOpen() && this.showAllNotifications()) {
+      this.loadAllNotifications(background);
+      return;
+    }
+    this.loadRecentNotifications(background);
+  }
+
+  private loadRecentNotifications(background: boolean): void {
+    if (!background) {
+      this.notificationsLoading.set(true);
+      this.notificationsError.set('');
+    }
+
+    this.notificationsApi.listRecent(this.recentLimit).subscribe({
+      next: res => {
+        this.notificationItems.set(Array.isArray(res.items) ? res.items : []);
+        this.notificationsTotal.set(Number.isFinite(res.total) ? res.total : this.notificationItems().length);
+        this.unreadNotifications.set(Number.isFinite(res.unreadCount) ? res.unreadCount : 0);
+        this.notificationsLoading.set(false);
+      },
+      error: () => {
+        if (!background) {
+          this.notificationsError.set('Notifications unavailable.');
+          this.notificationsLoading.set(false);
+        }
+      }
+    });
+  }
+
+  private loadAllNotifications(background: boolean): void {
+    if (!background) {
+      this.notificationsLoading.set(true);
+      this.notificationsError.set('');
+    }
+
+    this.notificationsApi.listAll(200).subscribe({
+      next: res => {
+        this.notificationItems.set(Array.isArray(res.items) ? res.items : []);
+        this.notificationsTotal.set(Number.isFinite(res.total) ? res.total : this.notificationItems().length);
+        this.unreadNotifications.set(Number.isFinite(res.unreadCount) ? res.unreadCount : 0);
+        this.notificationsLoading.set(false);
+      },
+      error: () => {
+        if (!background) {
+          this.notificationsError.set('Could not load notifications.');
+          this.notificationsLoading.set(false);
+        }
+      }
+    });
+  }
+
+  private normalizeRoute(value: string): string {
+    const route = (value || '').trim();
+    if (!route) return '/dashboard';
+    return route.startsWith('/') ? route : `/${route}`;
   }
 
   private extractFirstName(displayName: string, email: string): string {

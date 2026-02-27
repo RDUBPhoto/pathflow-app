@@ -1,0 +1,848 @@
+import { Injectable, computed, signal } from '@angular/core';
+
+export type InvoiceStage = 'draft' | 'approved' | 'sent' | 'paid' | 'cancelled';
+export type InvoiceLineType = 'part' | 'labor';
+
+export type InvoiceCard = {
+  id: string;
+  customerId?: string;
+  customerName: string;
+  customerEmail?: string;
+  invoiceNumber: string;
+  invoicedAt: string;
+  total: number;
+  vehicle: string;
+  template: string;
+  stage: InvoiceStage;
+};
+
+export type InvoiceLane = {
+  id: InvoiceStage;
+  title: string;
+  color: string;
+};
+
+export type InvoiceLineItem = {
+  id: string;
+  type: InvoiceLineType;
+  code: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  taxRate: number;
+  lineSubtotal: number;
+  taxAmount: number;
+  lineTotal: number;
+};
+
+export type InvoiceTimelineEntry = {
+  id: string;
+  createdAt: string;
+  message: string;
+};
+
+export type InvoiceDetail = {
+  id: string;
+  invoiceNumber: string;
+  stage: InvoiceStage;
+  template: string;
+
+  customerId?: string;
+  customerName: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  customerAddress?: string;
+  vehicle: string;
+
+  businessName: string;
+  businessEmail?: string;
+  businessPhone?: string;
+  businessAddress?: string;
+  businessLogoUrl?: string;
+
+  description: string;
+  flags: string;
+  jobType: string;
+  referralSource: string;
+  staffNote: string;
+  customerNote: string;
+
+  issueDate: string;
+  dueDate: string;
+  paymentDate?: string;
+  exportedDate?: string;
+
+  includePaymentLink: boolean;
+  paymentProviderKey?: string;
+  paymentLinkUrl?: string;
+
+  lineItems: InvoiceLineItem[];
+  subtotal: number;
+  taxTotal: number;
+  total: number;
+
+  createdAt: string;
+  updatedAt: string;
+  timeline: InvoiceTimelineEntry[];
+};
+
+type InvoiceCustomerLookup = {
+  id?: string | null;
+  email?: string | null;
+  name?: string | null;
+};
+
+export type InvoiceDraftPayload = {
+  customerId?: string | null;
+  customerName?: string | null;
+  customerEmail?: string | null;
+  customerPhone?: string | null;
+  customerAddress?: string | null;
+  vehicle?: string | null;
+
+  businessName?: string | null;
+  businessEmail?: string | null;
+  businessPhone?: string | null;
+  businessAddress?: string | null;
+  businessLogoUrl?: string | null;
+
+  template?: string | null;
+  description?: string | null;
+  flags?: string | null;
+  jobType?: string | null;
+  referralSource?: string | null;
+  staffNote?: string | null;
+  customerNote?: string | null;
+
+  issueDate?: string | null;
+  dueDate?: string | null;
+  paymentDate?: string | null;
+  exportedDate?: string | null;
+
+  includePaymentLink?: boolean;
+  paymentProviderKey?: string | null;
+  paymentLinkUrl?: string | null;
+
+  lineItems?: Array<Partial<InvoiceLineItem>> | null;
+  stage?: InvoiceStage | null;
+};
+
+export const INVOICE_LANES: InvoiceLane[] = [
+  { id: 'draft', title: 'Draft', color: '#ef4444' },
+  { id: 'approved', title: 'Approved', color: '#0ea5e9' },
+  { id: 'sent', title: 'Sent', color: '#14b8a6' },
+  { id: 'paid', title: 'Paid', color: '#22c55e' },
+  { id: 'cancelled', title: 'Cancelled', color: '#f59e0b' }
+];
+
+const MOCK_INVOICES: InvoiceDetail[] = [
+  {
+    id: 'inv-430501',
+    invoiceNumber: 'INV-430501',
+    stage: 'draft',
+    template: 'Parts Invoice',
+    customerId: '9f5337ab-3ca6-4f79-b3c6-cf7f9c7372fd',
+    customerName: 'Robert Wojtow',
+    customerEmail: 'RDUBPhoto@gmail.com',
+    customerPhone: '(513) 678-9899',
+    customerAddress: '3724 Forsyth Park, Schertz, TX 78154',
+    vehicle: '2020 LINCOLN Navigator',
+    businessName: 'Exodus 4x4',
+    businessEmail: 'service@exodus4x4.com',
+    businessPhone: '(555) 555-0100',
+    businessAddress: 'San Antonio, TX',
+    businessLogoUrl: '/exodus-logo.png',
+    description: 'Initial estimate for parts + labor',
+    flags: '',
+    jobType: 'General Repair',
+    referralSource: 'Website',
+    staffNote: 'Awaiting customer approval',
+    customerNote: 'Thank you for choosing Exodus 4x4.',
+    issueDate: '2026-02-20',
+    dueDate: '2026-02-27',
+    paymentDate: '',
+    exportedDate: '',
+    includePaymentLink: false,
+    paymentProviderKey: '',
+    paymentLinkUrl: '',
+    lineItems: [
+      {
+        id: 'li-inv-430501-1',
+        type: 'part',
+        code: 'PART-120',
+        description: 'Brake pad set',
+        quantity: 1,
+        unitPrice: 249.99,
+        taxRate: 8.25,
+        lineSubtotal: 249.99,
+        taxAmount: 20.62,
+        lineTotal: 270.61
+      },
+      {
+        id: 'li-inv-430501-2',
+        type: 'labor',
+        code: 'LAB-42',
+        description: 'Brake service labor',
+        quantity: 3,
+        unitPrice: 285.58,
+        taxRate: 0,
+        lineSubtotal: 856.74,
+        taxAmount: 0,
+        lineTotal: 856.74
+      }
+    ],
+    subtotal: 1106.73,
+    taxTotal: 20.62,
+    total: 1127.35,
+    createdAt: '2026-02-20T15:10:00.000Z',
+    updatedAt: '2026-02-20T15:10:00.000Z',
+    timeline: [
+      {
+        id: 'timeline-inv-430501-1',
+        createdAt: '2026-02-20T15:10:00.000Z',
+        message: 'Draft created.'
+      }
+    ]
+  },
+  {
+    id: 'inv-430502',
+    invoiceNumber: 'INV-430502',
+    stage: 'draft',
+    template: 'Labor only',
+    customerId: 'f88e7547-d3e3-4722-a73e-f7f0adf95c8b',
+    customerName: 'Avery Chen',
+    customerEmail: 'avery@example.com',
+    customerPhone: '(555) 991-1223',
+    customerAddress: '',
+    vehicle: '2021 Ford Bronco',
+    businessName: 'Exodus 4x4',
+    businessEmail: 'service@exodus4x4.com',
+    businessPhone: '(555) 555-0100',
+    businessAddress: 'San Antonio, TX',
+    businessLogoUrl: '/exodus-logo.png',
+    description: 'Labor-only estimate',
+    flags: '',
+    jobType: 'Labor',
+    referralSource: 'Phone',
+    staffNote: '',
+    customerNote: '',
+    issueDate: '2026-02-20',
+    dueDate: '2026-02-27',
+    paymentDate: '',
+    exportedDate: '',
+    includePaymentLink: false,
+    paymentProviderKey: '',
+    paymentLinkUrl: '',
+    lineItems: [
+      {
+        id: 'li-inv-430502-1',
+        type: 'labor',
+        code: 'LAB-18',
+        description: 'Diagnostic labor',
+        quantity: 2,
+        unitPrice: 196.25,
+        taxRate: 0,
+        lineSubtotal: 392.5,
+        taxAmount: 0,
+        lineTotal: 392.5
+      }
+    ],
+    subtotal: 392.5,
+    taxTotal: 0,
+    total: 392.5,
+    createdAt: '2026-02-20T16:00:00.000Z',
+    updatedAt: '2026-02-20T16:00:00.000Z',
+    timeline: [
+      {
+        id: 'timeline-inv-430502-1',
+        createdAt: '2026-02-20T16:00:00.000Z',
+        message: 'Draft created.'
+      }
+    ]
+  },
+  {
+    id: 'inv-430478',
+    invoiceNumber: 'INV-430478',
+    stage: 'approved',
+    template: 'Alignment',
+    customerName: 'Jordan Miles',
+    customerEmail: 'jordan@example.com',
+    customerPhone: '(555) 201-8841',
+    customerAddress: '',
+    vehicle: '2019 Jeep Wrangler',
+    businessName: 'Exodus 4x4',
+    businessEmail: 'service@exodus4x4.com',
+    businessPhone: '(555) 555-0100',
+    businessAddress: 'San Antonio, TX',
+    businessLogoUrl: '/exodus-logo.png',
+    description: 'Alignment service',
+    flags: '',
+    jobType: 'Alignment',
+    referralSource: 'Walk-in',
+    staffNote: '',
+    customerNote: '',
+    issueDate: '2026-02-19',
+    dueDate: '2026-02-26',
+    paymentDate: '',
+    exportedDate: '',
+    includePaymentLink: false,
+    paymentProviderKey: '',
+    paymentLinkUrl: '',
+    lineItems: [
+      {
+        id: 'li-inv-430478-1',
+        type: 'labor',
+        code: 'ALIGN-01',
+        description: '4-wheel alignment',
+        quantity: 1,
+        unitPrice: 86.25,
+        taxRate: 0,
+        lineSubtotal: 86.25,
+        taxAmount: 0,
+        lineTotal: 86.25
+      }
+    ],
+    subtotal: 86.25,
+    taxTotal: 0,
+    total: 86.25,
+    createdAt: '2026-02-19T13:00:00.000Z',
+    updatedAt: '2026-02-19T13:00:00.000Z',
+    timeline: [
+      {
+        id: 'timeline-inv-430478-1',
+        createdAt: '2026-02-19T13:00:00.000Z',
+        message: 'Invoice approved.'
+      }
+    ]
+  },
+  {
+    id: 'inv-430477',
+    invoiceNumber: 'INV-430477',
+    stage: 'sent',
+    template: 'Parts Only',
+    customerName: 'Sam Patel',
+    customerEmail: 'sam@example.com',
+    customerPhone: '(555) 303-4422',
+    customerAddress: '',
+    vehicle: '2017 Toyota 4Runner',
+    businessName: 'Exodus 4x4',
+    businessEmail: 'service@exodus4x4.com',
+    businessPhone: '(555) 555-0100',
+    businessAddress: 'San Antonio, TX',
+    businessLogoUrl: '/exodus-logo.png',
+    description: 'Parts invoice',
+    flags: '',
+    jobType: 'Parts',
+    referralSource: 'Website',
+    staffNote: '',
+    customerNote: '',
+    issueDate: '2026-02-18',
+    dueDate: '2026-02-25',
+    paymentDate: '',
+    exportedDate: '',
+    includePaymentLink: true,
+    paymentProviderKey: 'authorize-net',
+    paymentLinkUrl: 'https://pay.pathflow.com/authorize-net/checkout?invoiceId=inv-430477&invoice=INV-430477',
+    lineItems: [
+      {
+        id: 'li-inv-430477-1',
+        type: 'part',
+        code: 'PART-200',
+        description: 'Air filter kit',
+        quantity: 2,
+        unitPrice: 105.7,
+        taxRate: 7.95,
+        lineSubtotal: 211.4,
+        taxAmount: 16.8,
+        lineTotal: 228.2
+      }
+    ],
+    subtotal: 211.4,
+    taxTotal: 16.8,
+    total: 228.2,
+    createdAt: '2026-02-18T14:05:00.000Z',
+    updatedAt: '2026-02-18T14:05:00.000Z',
+    timeline: [
+      {
+        id: 'timeline-inv-430477-1',
+        createdAt: '2026-02-18T14:05:00.000Z',
+        message: 'Invoice sent to customer.'
+      }
+    ]
+  },
+  {
+    id: 'inv-430476',
+    invoiceNumber: 'INV-430476',
+    stage: 'paid',
+    template: 'Parts Invoice',
+    customerName: 'Casey Nguyen',
+    customerEmail: 'casey@example.com',
+    customerPhone: '(555) 884-2100',
+    customerAddress: '',
+    vehicle: '2022 Gladiator Rubicon',
+    businessName: 'Exodus 4x4',
+    businessEmail: 'service@exodus4x4.com',
+    businessPhone: '(555) 555-0100',
+    businessAddress: 'San Antonio, TX',
+    businessLogoUrl: '/exodus-logo.png',
+    description: 'Completed invoice',
+    flags: '',
+    jobType: 'Service',
+    referralSource: 'Referral',
+    staffNote: '',
+    customerNote: '',
+    issueDate: '2026-02-18',
+    dueDate: '2026-02-25',
+    paymentDate: '2026-02-19',
+    exportedDate: '',
+    includePaymentLink: true,
+    paymentProviderKey: 'authorize-net',
+    paymentLinkUrl: 'https://pay.pathflow.com/authorize-net/checkout?invoiceId=inv-430476&invoice=INV-430476',
+    lineItems: [
+      {
+        id: 'li-inv-430476-1',
+        type: 'part',
+        code: 'PART-350',
+        description: 'Suspension hardware',
+        quantity: 4,
+        unitPrice: 252,
+        taxRate: 8.5,
+        lineSubtotal: 1008,
+        taxAmount: 85.68,
+        lineTotal: 1093.68
+      },
+      {
+        id: 'li-inv-430476-2',
+        type: 'labor',
+        code: 'LAB-90',
+        description: 'Install labor',
+        quantity: 2,
+        unitPrice: 115.61,
+        taxRate: 0,
+        lineSubtotal: 231.22,
+        taxAmount: 0,
+        lineTotal: 231.22
+      }
+    ],
+    subtotal: 1239.22,
+    taxTotal: 85.68,
+    total: 1324.9,
+    createdAt: '2026-02-18T10:30:00.000Z',
+    updatedAt: '2026-02-19T08:00:00.000Z',
+    timeline: [
+      {
+        id: 'timeline-inv-430476-1',
+        createdAt: '2026-02-18T10:30:00.000Z',
+        message: 'Invoice sent to customer.'
+      },
+      {
+        id: 'timeline-inv-430476-2',
+        createdAt: '2026-02-19T08:00:00.000Z',
+        message: 'Payment received.'
+      }
+    ]
+  },
+  {
+    id: 'inv-430454',
+    invoiceNumber: 'INV-430454',
+    stage: 'cancelled',
+    template: 'Credit Memo',
+    customerName: 'Morgan Lee',
+    customerEmail: 'morgan@example.com',
+    customerPhone: '(555) 771-9001',
+    customerAddress: '',
+    vehicle: '2020 Tacoma TRD',
+    businessName: 'Exodus 4x4',
+    businessEmail: 'service@exodus4x4.com',
+    businessPhone: '(555) 555-0100',
+    businessAddress: 'San Antonio, TX',
+    businessLogoUrl: '/exodus-logo.png',
+    description: 'Cancelled invoice',
+    flags: '',
+    jobType: 'Credit',
+    referralSource: 'Phone',
+    staffNote: '',
+    customerNote: '',
+    issueDate: '2026-02-12',
+    dueDate: '2026-02-19',
+    paymentDate: '',
+    exportedDate: '',
+    includePaymentLink: false,
+    paymentProviderKey: '',
+    paymentLinkUrl: '',
+    lineItems: [
+      {
+        id: 'li-inv-430454-1',
+        type: 'part',
+        code: 'CR-10',
+        description: 'Credit adjustment',
+        quantity: 1,
+        unitPrice: 159,
+        taxRate: 0,
+        lineSubtotal: 159,
+        taxAmount: 0,
+        lineTotal: 159
+      }
+    ],
+    subtotal: 159,
+    taxTotal: 0,
+    total: 159,
+    createdAt: '2026-02-12T09:00:00.000Z',
+    updatedAt: '2026-02-12T11:00:00.000Z',
+    timeline: [
+      {
+        id: 'timeline-inv-430454-1',
+        createdAt: '2026-02-12T11:00:00.000Z',
+        message: 'Invoice cancelled.'
+      }
+    ]
+  }
+];
+
+@Injectable({ providedIn: 'root' })
+export class InvoicesDataService {
+  private readonly state = signal<InvoiceDetail[]>(MOCK_INVOICES.map(item => this.cloneInvoice(item)));
+
+  readonly invoiceDetails = computed(() => this.state().map(item => this.cloneInvoice(item)));
+  readonly invoices = computed(() => this.state().map(item => this.toCard(item)));
+
+  previewNextInvoiceNumber(): string {
+    return `INV-${this.nextInvoiceSequence()}`;
+  }
+
+  createDraftInvoice(payload: InvoiceDraftPayload = {}): InvoiceDetail {
+    const sequence = this.nextInvoiceSequence();
+    const nowIso = new Date().toISOString();
+    const today = this.formatIsoDate(new Date());
+
+    const invoice = this.normalizeInvoice({
+      id: `inv-${sequence}`,
+      invoiceNumber: `INV-${sequence}`,
+      stage: payload.stage || 'draft',
+      template: this.safeText(payload.template) || 'Other',
+
+      customerId: this.safeText(payload.customerId) || '',
+      customerName: this.safeText(payload.customerName) || 'Customer',
+      customerEmail: this.safeText(payload.customerEmail) || '',
+      customerPhone: this.safeText(payload.customerPhone) || '',
+      customerAddress: this.safeText(payload.customerAddress) || '',
+      vehicle: this.safeText(payload.vehicle) || 'Vehicle TBD',
+
+      businessName: this.safeText(payload.businessName) || 'Shop',
+      businessEmail: this.safeText(payload.businessEmail) || '',
+      businessPhone: this.safeText(payload.businessPhone) || '',
+      businessAddress: this.safeText(payload.businessAddress) || '',
+      businessLogoUrl: this.safeText(payload.businessLogoUrl) || '',
+
+      description: this.safeText(payload.description) || '',
+      flags: this.safeText(payload.flags) || '',
+      jobType: this.safeText(payload.jobType) || '',
+      referralSource: this.safeText(payload.referralSource) || '',
+      staffNote: this.safeText(payload.staffNote) || '',
+      customerNote: this.safeText(payload.customerNote) || '',
+
+      issueDate: this.safeText(payload.issueDate) || today,
+      dueDate: this.safeText(payload.dueDate) || today,
+      paymentDate: this.safeText(payload.paymentDate) || '',
+      exportedDate: this.safeText(payload.exportedDate) || '',
+
+      includePaymentLink: !!payload.includePaymentLink,
+      paymentProviderKey: this.safeText(payload.paymentProviderKey) || '',
+      paymentLinkUrl: this.safeText(payload.paymentLinkUrl) || '',
+
+      lineItems: this.normalizeLineItems(payload.lineItems || []),
+      subtotal: 0,
+      taxTotal: 0,
+      total: 0,
+
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      timeline: [
+        {
+          id: `timeline-${sequence}-created`,
+          createdAt: nowIso,
+          message: 'Draft created.'
+        }
+      ]
+    });
+
+    this.state.update(current => [invoice, ...current]);
+    return this.cloneInvoice(invoice);
+  }
+
+  getInvoiceById(id: string): InvoiceDetail | null {
+    const key = String(id || '').trim();
+    if (!key) return null;
+    const lookup = key.toLowerCase();
+    const item = this.state().find(invoice => {
+      if (invoice.id === key) return true;
+      return String(invoice.invoiceNumber || '').trim().toLowerCase() === lookup;
+    });
+    return item ? this.cloneInvoice(item) : null;
+  }
+
+  saveInvoice(invoice: InvoiceDetail): InvoiceDetail {
+    const incoming = this.cloneInvoice(invoice);
+    const nowIso = new Date().toISOString();
+
+    this.state.update(current => {
+      const index = current.findIndex(item => item.id === incoming.id);
+      if (index === -1) {
+        const created = this.normalizeInvoice({
+          ...incoming,
+          id: incoming.id || `inv-${this.nextInvoiceSequence()}`,
+          invoiceNumber: incoming.invoiceNumber || this.previewNextInvoiceNumber(),
+          createdAt: incoming.createdAt || nowIso,
+          updatedAt: nowIso
+        });
+        return [created, ...current];
+      }
+
+      const existing = current[index];
+      const previousStage = existing.stage;
+      const nextStage = incoming.stage;
+      const timeline = this.mergeTimeline(existing.timeline, incoming.timeline);
+      if (previousStage !== nextStage) {
+        timeline.push({
+          id: `timeline-${incoming.id}-${Date.now()}`,
+          createdAt: nowIso,
+          message: `Stage updated to ${this.stageLabel(nextStage)}.`
+        });
+      }
+
+      const merged = this.normalizeInvoice({
+        ...existing,
+        ...incoming,
+        createdAt: existing.createdAt || incoming.createdAt || nowIso,
+        updatedAt: nowIso,
+        timeline
+      });
+
+      const next = [...current];
+      next[index] = merged;
+      return next;
+    });
+
+    return this.getInvoiceById(incoming.id) || this.cloneInvoice(this.normalizeInvoice(incoming));
+  }
+
+  setStage(id: string, stage: InvoiceStage, note?: string): InvoiceDetail | null {
+    const key = String(id || '').trim();
+    if (!key) return null;
+
+    const nowIso = new Date().toISOString();
+    let updated: InvoiceDetail | null = null;
+
+    this.state.update(current => {
+      const index = current.findIndex(item => item.id === key);
+      if (index === -1) return current;
+
+      const existing = current[index];
+      const timeline = [...existing.timeline];
+      timeline.push({
+        id: `timeline-${key}-${Date.now()}`,
+        createdAt: nowIso,
+        message: note?.trim() || `Stage updated to ${this.stageLabel(stage)}.`
+      });
+
+      const nextInvoice = this.normalizeInvoice({
+        ...existing,
+        stage,
+        updatedAt: nowIso,
+        timeline
+      });
+
+      const next = [...current];
+      next[index] = nextInvoice;
+      updated = this.cloneInvoice(nextInvoice);
+      return next;
+    });
+
+    return updated;
+  }
+
+  forCustomer(lookup: InvoiceCustomerLookup): InvoiceCard[] {
+    const id = this.normalize(lookup.id);
+    const email = this.normalize(lookup.email);
+    const name = this.normalize(lookup.name);
+
+    if (!id && !email && !name) return [];
+
+    return this.invoices().filter(invoice => {
+      const invoiceId = this.normalize(invoice.customerId);
+      const invoiceEmail = this.normalize(invoice.customerEmail);
+      const invoiceName = this.normalize(invoice.customerName);
+
+      if (id && invoiceId && id === invoiceId) return true;
+      if (email && invoiceEmail && email === invoiceEmail) return true;
+      if (name && invoiceName && name === invoiceName) return true;
+      return false;
+    });
+  }
+
+  private safeText(value: unknown): string {
+    return String(value || '').trim();
+  }
+
+  private normalize(value: string | null | undefined): string {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  private toCard(invoice: InvoiceDetail): InvoiceCard {
+    return {
+      id: invoice.id,
+      customerId: this.safeText(invoice.customerId) || undefined,
+      customerName: invoice.customerName,
+      customerEmail: this.safeText(invoice.customerEmail) || undefined,
+      invoiceNumber: invoice.invoiceNumber,
+      invoicedAt: this.formatInvoiceDate(invoice.issueDate || invoice.createdAt),
+      total: this.roundCurrency(invoice.total),
+      vehicle: this.safeText(invoice.vehicle) || 'Vehicle TBD',
+      template: this.safeText(invoice.template) || 'Other',
+      stage: invoice.stage
+    };
+  }
+
+  private normalizeInvoice(invoice: InvoiceDetail): InvoiceDetail {
+    const lineItems = this.normalizeLineItems(invoice.lineItems || []);
+    const subtotal = this.roundCurrency(lineItems.reduce((sum, line) => sum + line.lineSubtotal, 0));
+    const taxTotal = this.roundCurrency(lineItems.reduce((sum, line) => sum + line.taxAmount, 0));
+    const total = this.roundCurrency(subtotal + taxTotal);
+
+    return {
+      ...invoice,
+      customerId: this.safeText(invoice.customerId),
+      customerName: this.safeText(invoice.customerName) || 'Customer',
+      customerEmail: this.safeText(invoice.customerEmail),
+      customerPhone: this.safeText(invoice.customerPhone),
+      customerAddress: this.safeText(invoice.customerAddress),
+      vehicle: this.safeText(invoice.vehicle) || 'Vehicle TBD',
+      businessName: this.safeText(invoice.businessName) || 'Shop',
+      businessEmail: this.safeText(invoice.businessEmail),
+      businessPhone: this.safeText(invoice.businessPhone),
+      businessAddress: this.safeText(invoice.businessAddress),
+      businessLogoUrl: this.safeText(invoice.businessLogoUrl),
+      description: this.safeText(invoice.description),
+      flags: this.safeText(invoice.flags),
+      jobType: this.safeText(invoice.jobType),
+      referralSource: this.safeText(invoice.referralSource),
+      staffNote: this.safeText(invoice.staffNote),
+      customerNote: this.safeText(invoice.customerNote),
+      issueDate: this.safeText(invoice.issueDate) || this.formatIsoDate(new Date()),
+      dueDate: this.safeText(invoice.dueDate) || this.formatIsoDate(new Date()),
+      paymentDate: this.safeText(invoice.paymentDate),
+      exportedDate: this.safeText(invoice.exportedDate),
+      includePaymentLink: !!invoice.includePaymentLink,
+      paymentProviderKey: this.safeText(invoice.paymentProviderKey),
+      paymentLinkUrl: this.safeText(invoice.paymentLinkUrl),
+      lineItems,
+      subtotal,
+      taxTotal,
+      total,
+      createdAt: this.safeText(invoice.createdAt) || new Date().toISOString(),
+      updatedAt: this.safeText(invoice.updatedAt) || new Date().toISOString(),
+      timeline: this.normalizeTimeline(invoice.timeline || [])
+    };
+  }
+
+  private normalizeLineItems(items: Array<Partial<InvoiceLineItem>>): InvoiceLineItem[] {
+    return (Array.isArray(items) ? items : []).map((line, index) => {
+      const quantity = this.safeNumber(line.quantity, 1);
+      const unitPrice = this.safeNumber(line.unitPrice, 0);
+      const taxRate = this.safeNumber(line.taxRate, 0);
+      const lineSubtotal = this.roundCurrency(quantity * unitPrice);
+      const taxAmount = this.roundCurrency((lineSubtotal * taxRate) / 100);
+      const lineTotal = this.roundCurrency(lineSubtotal + taxAmount);
+      return {
+        id: this.safeText(line.id) || `li-${Date.now()}-${index}`,
+        type: line.type === 'labor' ? 'labor' : 'part',
+        code: this.safeText(line.code),
+        description: this.safeText(line.description),
+        quantity,
+        unitPrice,
+        taxRate,
+        lineSubtotal,
+        taxAmount,
+        lineTotal
+      };
+    });
+  }
+
+  private normalizeTimeline(items: InvoiceTimelineEntry[]): InvoiceTimelineEntry[] {
+    const source = Array.isArray(items) ? items : [];
+    const normalized = source
+      .map((entry, index) => ({
+        id: this.safeText(entry.id) || `timeline-${Date.now()}-${index}`,
+        createdAt: this.safeText(entry.createdAt) || new Date().toISOString(),
+        message: this.safeText(entry.message)
+      }))
+      .filter(entry => !!entry.message);
+
+    return normalized.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  }
+
+  private mergeTimeline(existing: InvoiceTimelineEntry[], incoming: InvoiceTimelineEntry[]): InvoiceTimelineEntry[] {
+    const map = new Map<string, InvoiceTimelineEntry>();
+    for (const entry of this.normalizeTimeline(existing)) {
+      map.set(entry.id, entry);
+    }
+    for (const entry of this.normalizeTimeline(incoming)) {
+      map.set(entry.id, entry);
+    }
+    return Array.from(map.values()).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  }
+
+  private safeNumber(value: unknown, fallback: number): number {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return fallback;
+    return numeric < 0 ? 0 : numeric;
+  }
+
+  private roundCurrency(value: number): number {
+    return Math.round((value + Number.EPSILON) * 100) / 100;
+  }
+
+  private cloneInvoice(invoice: InvoiceDetail): InvoiceDetail {
+    return {
+      ...invoice,
+      lineItems: invoice.lineItems.map(line => ({ ...line })),
+      timeline: invoice.timeline.map(entry => ({ ...entry }))
+    };
+  }
+
+  private nextInvoiceSequence(): number {
+    const max = this.state().reduce((highest, invoice) => {
+      const invoiceNumberMatch = String(invoice.invoiceNumber || '').match(/(\d+)/);
+      const idMatch = String(invoice.id || '').match(/(\d+)/);
+      const invoiceNumber = invoiceNumberMatch ? Number(invoiceNumberMatch[1]) : NaN;
+      const idNumber = idMatch ? Number(idMatch[1]) : NaN;
+      const candidate = Math.max(
+        Number.isFinite(invoiceNumber) ? invoiceNumber : 0,
+        Number.isFinite(idNumber) ? idNumber : 0
+      );
+      return Math.max(highest, candidate);
+    }, 430500);
+
+    return max + 1;
+  }
+
+  private formatInvoiceDate(value: string | Date): string {
+    const date = value instanceof Date ? value : new Date(value);
+    if (!Number.isFinite(date.getTime())) return this.safeText(value);
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'numeric',
+      day: 'numeric',
+      year: 'numeric'
+    }).format(date);
+  }
+
+  private formatIsoDate(date: Date): string {
+    const value = new Date(date.getTime());
+    value.setMinutes(value.getMinutes() - value.getTimezoneOffset());
+    return value.toISOString().slice(0, 10);
+  }
+
+  private stageLabel(stage: InvoiceStage): string {
+    return stage.charAt(0).toUpperCase() + stage.slice(1);
+  }
+}

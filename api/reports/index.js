@@ -9,7 +9,9 @@ const TABLES = {
   emailMessages: "emailmessages",
   smsMessages: "smsmessages",
   purchaseOrders: "purchaseorders",
-  schedule: "schedule"
+  schedule: "schedule",
+  inventoryNeeds: "inventoryneeds",
+  inventoryItems: "inventoryitems"
 };
 
 const STAGE_ORDER = ["lead", "quote", "scheduled", "inprogress", "completed", "invoiced"];
@@ -53,6 +55,131 @@ function readScope(context, req) {
   const routeScope = asString(context && context.bindingData && context.bindingData.scope).toLowerCase();
   if (routeScope) return routeScope;
   return asString(req && req.query && req.query.scope).toLowerCase() || "all";
+}
+
+function powerBiConfigFromEnv() {
+  return {
+    tenantId: asString(process.env.POWERBI_TENANT_ID),
+    clientId: asString(process.env.POWERBI_CLIENT_ID),
+    clientSecret: asString(process.env.POWERBI_CLIENT_SECRET),
+    workspaceId: asString(process.env.POWERBI_WORKSPACE_ID),
+    reportId: asString(process.env.POWERBI_REPORT_ID),
+    reportWebUrl: asString(process.env.POWERBI_REPORT_WEB_URL)
+  };
+}
+
+function powerBiStatus(config) {
+  const missingSecureKeys = [];
+  if (!config.tenantId) missingSecureKeys.push("POWERBI_TENANT_ID");
+  if (!config.clientId) missingSecureKeys.push("POWERBI_CLIENT_ID");
+  if (!config.clientSecret) missingSecureKeys.push("POWERBI_CLIENT_SECRET");
+  if (!config.workspaceId) missingSecureKeys.push("POWERBI_WORKSPACE_ID");
+  if (!config.reportId) missingSecureKeys.push("POWERBI_REPORT_ID");
+
+  const secureEmbedReady = missingSecureKeys.length === 0;
+  const webEmbedReady = !!config.reportWebUrl;
+
+  return {
+    secureEmbedReady,
+    webEmbedReady,
+    configured: secureEmbedReady || webEmbedReady,
+    missingSecureKeys,
+    reportWebUrl: config.reportWebUrl || null
+  };
+}
+
+async function powerBiServiceToken(config) {
+  const tokenUrl = `https://login.microsoftonline.com/${encodeURIComponent(config.tenantId)}/oauth2/v2.0/token`;
+  const body = new URLSearchParams({
+    grant_type: "client_credentials",
+    client_id: config.clientId,
+    client_secret: config.clientSecret,
+    scope: "https://analysis.windows.net/powerbi/api/.default"
+  });
+
+  const response = await fetch(tokenUrl, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: body.toString()
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`AAD token request failed (${response.status}): ${detail || "Unknown response"}`);
+  }
+  const jsonBody = await response.json();
+  const token = asString(jsonBody.access_token);
+  if (!token) throw new Error("AAD token response did not include access_token.");
+  return token;
+}
+
+async function powerBiReportMetadata(config, accessToken) {
+  const endpoint = `https://api.powerbi.com/v1.0/myorg/groups/${encodeURIComponent(config.workspaceId)}/reports/${encodeURIComponent(config.reportId)}`;
+  const response = await fetch(endpoint, {
+    method: "GET",
+    headers: {
+      authorization: `Bearer ${accessToken}`
+    }
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Power BI report lookup failed (${response.status}): ${detail || "Unknown response"}`);
+  }
+  const jsonBody = await response.json();
+  return {
+    id: asString(jsonBody.id),
+    name: asString(jsonBody.name),
+    embedUrl: asString(jsonBody.embedUrl)
+  };
+}
+
+async function powerBiEmbedToken(config, accessToken) {
+  const endpoint = `https://api.powerbi.com/v1.0/myorg/groups/${encodeURIComponent(config.workspaceId)}/reports/${encodeURIComponent(config.reportId)}/GenerateToken`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${accessToken}`
+    },
+    body: JSON.stringify({ accessLevel: "View" })
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Power BI embed token request failed (${response.status}): ${detail || "Unknown response"}`);
+  }
+  const jsonBody = await response.json();
+  return {
+    token: asString(jsonBody.token),
+    tokenId: asString(jsonBody.tokenId),
+    expiration: asString(jsonBody.expiration)
+  };
+}
+
+async function buildPowerBiEmbedConfig() {
+  const config = powerBiConfigFromEnv();
+  const status = powerBiStatus(config);
+  if (!status.secureEmbedReady) {
+    return {
+      ...status,
+      mode: status.webEmbedReady ? "web" : "unconfigured"
+    };
+  }
+
+  const accessToken = await powerBiServiceToken(config);
+  const report = await powerBiReportMetadata(config, accessToken);
+  const embed = await powerBiEmbedToken(config, accessToken);
+
+  return {
+    ...status,
+    mode: "secure-embed",
+    reportId: report.id || config.reportId,
+    reportName: report.name || null,
+    embedUrl: report.embedUrl || null,
+    embedToken: embed.token || null,
+    embedTokenId: embed.tokenId || null,
+    embedTokenExpiration: embed.expiration || null,
+    workspaceId: config.workspaceId
+  };
 }
 
 function startOfDay(date) {
@@ -153,6 +280,211 @@ async function listPartition(client) {
   return out;
 }
 
+function isoDateTime(date) {
+  if (!(date instanceof Date) || !Number.isFinite(date.getTime())) return "";
+  return date.toISOString();
+}
+
+function seedAt(now, dayOffset, hour = 9, minute = 0) {
+  const shifted = addDays(now, dayOffset);
+  return new Date(
+    shifted.getFullYear(),
+    shifted.getMonth(),
+    shifted.getDate(),
+    hour,
+    minute,
+    0,
+    0
+  );
+}
+
+async function upsertPartitionEntities(client, rows) {
+  for (const row of rows) {
+    await client.upsertEntity({ partitionKey: PARTITION, ...row }, "Merge");
+  }
+}
+
+async function seedDemoReportData() {
+  const workItemsClient = await getTableClient(TABLES.workItems);
+  const now = new Date();
+  const stamped = isoDateTime(now);
+
+  const stageLabel = {
+    lead: "Leads",
+    quote: "Quotes",
+    scheduled: "Scheduled",
+    inprogress: "In Progress",
+    completed: "Completed",
+    invoiced: "Invoiced"
+  };
+
+  const rows = [
+    {
+      rowKey: "seed-report-item-01",
+      title: "Avery Chen - Brake Inspection",
+      customerName: "Avery Chen",
+      source: "web",
+      laneId: "seed-report-lane-lead",
+      laneName: stageLabel.lead,
+      createdAt: isoDateTime(seedAt(now, -6, 10)),
+      updatedAt: stamped,
+      expectedDate: isoDateTime(seedAt(now, 10, 9)),
+      expectedAmount: 980,
+      isReportSeed: true
+    },
+    {
+      rowKey: "seed-report-item-02",
+      title: "Jordan Miles - Lift Kit Quote",
+      customerName: "Jordan Miles",
+      source: "email",
+      laneId: "seed-report-lane-quote",
+      laneName: stageLabel.quote,
+      createdAt: isoDateTime(seedAt(now, -7, 11)),
+      updatedAt: stamped,
+      expectedDate: isoDateTime(seedAt(now, 6, 9)),
+      quoteAmount: 1840,
+      expectedAmount: 1840,
+      isReportSeed: true
+    },
+    {
+      rowKey: "seed-report-item-03",
+      title: "Morgan Lee - Transmission Service",
+      customerName: "Morgan Lee",
+      source: "phone",
+      laneId: "seed-report-lane-scheduled",
+      laneName: stageLabel.scheduled,
+      createdAt: isoDateTime(seedAt(now, -9, 9)),
+      updatedAt: stamped,
+      expectedDate: isoDateTime(seedAt(now, 2, 13)),
+      quoteAmount: 2300,
+      expectedAmount: 2300,
+      isReportSeed: true
+    },
+    {
+      rowKey: "seed-report-item-04",
+      title: "Sam Patel - Differential Rebuild",
+      customerName: "Sam Patel",
+      source: "walk-in",
+      laneId: "seed-report-lane-inprogress",
+      laneName: stageLabel.inprogress,
+      createdAt: isoDateTime(seedAt(now, -4, 8)),
+      updatedAt: stamped,
+      expectedDate: isoDateTime(seedAt(now, 1, 10)),
+      expectedAmount: 1650,
+      isReportSeed: true
+    },
+    {
+      rowKey: "seed-report-item-05",
+      title: "Riley Jones - Alignment + Tires",
+      customerName: "Riley Jones",
+      source: "sms",
+      laneId: "seed-report-lane-completed",
+      laneName: stageLabel.completed,
+      createdAt: isoDateTime(seedAt(now, -12, 8)),
+      updatedAt: stamped,
+      closedAt: isoDateTime(seedAt(now, -1, 16)),
+      realizedAmount: 1420,
+      expectedAmount: 1420,
+      isReportSeed: true
+    },
+    {
+      rowKey: "seed-report-item-06",
+      title: "Robert Wojtow - F-250 Repair",
+      customerName: "Robert Wojtow",
+      source: "manual",
+      laneId: "seed-report-lane-invoiced",
+      laneName: stageLabel.invoiced,
+      createdAt: isoDateTime(seedAt(now, -20, 8)),
+      updatedAt: stamped,
+      closedAt: isoDateTime(seedAt(now, -6, 15)),
+      dueAt: isoDateTime(seedAt(now, 10, 23)),
+      realizedAmount: 1324.9,
+      paidAmount: 0,
+      isReportSeed: true
+    },
+    {
+      rowKey: "seed-report-item-07",
+      title: "Casey Nguyen - Suspension Refresh",
+      customerName: "Casey Nguyen",
+      source: "web",
+      laneId: "seed-report-lane-invoiced",
+      laneName: stageLabel.invoiced,
+      createdAt: isoDateTime(seedAt(now, -35, 9)),
+      updatedAt: stamped,
+      closedAt: isoDateTime(seedAt(now, -30, 14)),
+      dueAt: isoDateTime(seedAt(now, -5, 23)),
+      realizedAmount: 980,
+      paidAmount: 150,
+      isReportSeed: true
+    },
+    {
+      rowKey: "seed-report-item-08",
+      title: "John Smith - Driveline Service",
+      customerName: "John Smith",
+      source: "email",
+      laneId: "seed-report-lane-invoiced",
+      laneName: stageLabel.invoiced,
+      createdAt: isoDateTime(seedAt(now, -60, 10)),
+      updatedAt: stamped,
+      closedAt: isoDateTime(seedAt(now, -58, 14)),
+      dueAt: isoDateTime(seedAt(now, -20, 23)),
+      realizedAmount: 2100,
+      paidAmount: 2100,
+      isReportSeed: true
+    },
+    {
+      rowKey: "seed-report-item-09",
+      title: "Avery Chen - Invoice Follow-up",
+      customerName: "Avery Chen",
+      source: "phone",
+      laneId: "seed-report-lane-invoiced",
+      laneName: stageLabel.invoiced,
+      createdAt: isoDateTime(seedAt(now, -75, 11)),
+      updatedAt: stamped,
+      closedAt: isoDateTime(seedAt(now, -70, 15)),
+      dueAt: isoDateTime(seedAt(now, -35, 23)),
+      realizedAmount: 760,
+      paidAmount: 100,
+      isReportSeed: true
+    },
+    {
+      rowKey: "seed-report-item-10",
+      title: "Morgan Lee - Fleet Service Follow-up",
+      customerName: "Morgan Lee",
+      source: "web",
+      laneId: "seed-report-lane-quote",
+      laneName: stageLabel.quote,
+      createdAt: isoDateTime(seedAt(now, -1, 13)),
+      updatedAt: stamped,
+      expectedDate: isoDateTime(seedAt(now, 42, 10)),
+      quoteAmount: 3200,
+      expectedAmount: 3200,
+      isReportSeed: true
+    },
+    {
+      rowKey: "seed-report-item-11",
+      title: "Jordan Miles - Future Build Slot",
+      customerName: "Jordan Miles",
+      source: "manual",
+      laneId: "seed-report-lane-scheduled",
+      laneName: stageLabel.scheduled,
+      createdAt: isoDateTime(seedAt(now, -2, 10)),
+      updatedAt: stamped,
+      expectedDate: isoDateTime(seedAt(now, 35, 9)),
+      expectedAmount: 2750,
+      isReportSeed: true
+    }
+  ];
+
+  await upsertPartitionEntities(workItemsClient, rows);
+
+  const invoicesSeeded = rows.filter(item => item.laneName === stageLabel.invoiced).length;
+  return {
+    workItemsSeeded: rows.length,
+    invoicesSeeded
+  };
+}
+
 function safeDate(entity) {
   const explicitCreated = parseDate(entity.createdAt);
   if (explicitCreated) return explicitCreated;
@@ -197,6 +529,27 @@ function normalizePurchaseOrder(entity) {
   };
 }
 
+function normalizeInventoryNeed(entity) {
+  return {
+    id: asString(entity.rowKey),
+    customerId: asString(entity.customerId),
+    scheduleStart: parseDate(entity.scheduleStart),
+    qty: Math.max(1, Math.floor(asNumber(entity.qty, 1))),
+    sku: asString(entity.sku),
+    status: asString(entity.status).toLowerCase() || "needs-order",
+    createdAt: parseDate(entity.createdAt) || safeDate(entity),
+    updatedAt: parseDate(entity.updatedAt) || safeDate(entity)
+  };
+}
+
+function normalizeInventoryItem(entity) {
+  return {
+    id: asString(entity.rowKey),
+    sku: asString(entity.sku),
+    unitCost: Math.max(0, asNumber(entity.unitCost, 0))
+  };
+}
+
 function normalizeSchedule(entity) {
   return {
     id: asString(entity.rowKey),
@@ -220,6 +573,8 @@ function buildWindow(req) {
   const to = parsedTo ? endOfDay(parsedTo) : defaultTo;
   const monthsBack = clamp(Math.floor(asNumber(req && req.query && req.query.monthsBack, 12)), 1, 36);
   const futureDays = clamp(Math.floor(asNumber(req && req.query && req.query.futureDays, 90)), 1, 365);
+  const forecastMonths = clamp(Math.floor(asNumber(req && req.query && req.query.forecastMonths, 6)), 1, 24);
+  const openingCash = Number(asNumber(req && req.query && req.query.openingCash, 0).toFixed(2));
   const futureEnd = endOfDay(addDays(now, futureDays));
 
   return {
@@ -228,6 +583,8 @@ function buildWindow(req) {
     to,
     monthsBack,
     futureDays,
+    forecastMonths,
+    openingCash,
     futureEnd
   };
 }
@@ -360,6 +717,8 @@ function buildModel(raw) {
   const events = raw.events.map(entity => normalizeEvent(entity, laneById));
   const purchaseOrders = raw.purchaseOrders.map(normalizePurchaseOrder);
   const schedules = raw.schedule.map(normalizeSchedule);
+  const inventoryNeeds = raw.inventoryNeeds.map(normalizeInventoryNeed);
+  const inventoryItems = raw.inventoryItems.map(normalizeInventoryItem);
 
   const communications = [];
   for (const entity of raw.emailMessages) {
@@ -383,9 +742,241 @@ function buildModel(raw) {
     events,
     purchaseOrders,
     schedules,
+    inventoryNeeds,
+    inventoryItems,
     customers,
     communications
   };
+}
+
+function monthRowsFromWindow(window) {
+  const months = [];
+  const monthsMap = new Map();
+  const base = firstOfMonth(window.now);
+  for (let i = 0; i < window.forecastMonths; i++) {
+    const start = new Date(base.getFullYear(), base.getMonth() + i, 1, 0, 0, 0, 0);
+    const end = endOfDay(new Date(start.getFullYear(), start.getMonth() + 1, 0));
+    const key = monthKey(start);
+    const row = {
+      period_key: key,
+      period_start: isoDate(start),
+      period_end: isoDate(end)
+    };
+    months.push(row);
+    monthsMap.set(key, row);
+  }
+  return { months, monthsMap };
+}
+
+function estimateHistoricalMetrics(model, window) {
+  const historyStart = addDays(window.now, -180);
+  let realizedSales = 0;
+  let realizedCount = 0;
+  let poSpend = 0;
+  let poCount = 0;
+  let quoteCount = 0;
+  let quoteConverted = 0;
+
+  for (const item of model.workItems) {
+    const closedAt = item.closedAt || item.updatedAt || item.createdAt;
+    if ((item.stage === "invoiced" || item.stage === "completed") && closedAt && closedAt >= historyStart) {
+      if (item.realizedAmount > 0) {
+        realizedSales += item.realizedAmount;
+        realizedCount += 1;
+      }
+    }
+  }
+
+  for (const event of model.events) {
+    if (!event.workItemId || !event.eventAt || event.eventAt < historyStart) continue;
+    if (event.type === "moved" && event.toStage === "quote") quoteCount += 1;
+    if (event.type === "moved" && (event.toStage === "invoiced" || event.toStage === "completed")) {
+      quoteConverted += 1;
+    }
+  }
+
+  for (const po of model.purchaseOrders) {
+    if (!po.activityDate || po.activityDate < historyStart) continue;
+    if (po.status === "received" || po.status === "ordered") {
+      poSpend += po.subtotal;
+      poCount += 1;
+    }
+  }
+
+  const avgInvoiceAmount = realizedCount > 0 ? Number((realizedSales / realizedCount).toFixed(2)) : 650;
+  const cogsRatio = realizedSales > 0
+    ? clamp(Number((poSpend / realizedSales).toFixed(4)), 0.1, 0.85)
+    : 0.4;
+  const quoteWinRate = quoteCount > 0
+    ? clamp(Number((quoteConverted / quoteCount).toFixed(4)), 0.2, 0.95)
+    : 0.62;
+  const avgPoSpend = poCount > 0 ? Number((poSpend / poCount).toFixed(2)) : avgInvoiceAmount * cogsRatio;
+
+  return {
+    avgInvoiceAmount,
+    cogsRatio,
+    quoteWinRate,
+    avgPoSpend
+  };
+}
+
+function estimateNeedCost(need, inventoryBySku, fallbackUnitCost) {
+  const sku = asString(need.sku).toLowerCase();
+  const item = sku ? inventoryBySku.get(sku) : null;
+  const unitCost = item ? item.unitCost : fallbackUnitCost;
+  return Number((Math.max(1, need.qty) * Math.max(0, unitCost || 0)).toFixed(2));
+}
+
+function buildProductionForecast(model, window) {
+  const { months, monthsMap } = monthRowsFromWindow(window);
+  const metrics = estimateHistoricalMetrics(model, window);
+  const inventoryBySku = new Map(
+    model.inventoryItems
+      .filter(item => item.sku)
+      .map(item => [item.sku.toLowerCase(), item])
+  );
+
+  const scheduledCustomerMonths = new Set();
+  const customerOpenAmount = new Map();
+  for (const item of model.workItems) {
+    if (!item.customerId) continue;
+    if (!["lead", "quote", "scheduled", "inprogress"].includes(item.stage)) continue;
+    const baseAmount = item.expectedAmount || item.quoteAmount || 0;
+    if (baseAmount <= 0) continue;
+    const current = customerOpenAmount.get(item.customerId) || 0;
+    customerOpenAmount.set(item.customerId, Math.max(current, baseAmount));
+  }
+
+  for (const schedule of model.schedules) {
+    if (schedule.isBlocked || !schedule.start) continue;
+    const key = monthKey(schedule.start);
+    const month = monthsMap.get(key);
+    if (!month) continue;
+    const customerKey = schedule.customerId ? `${schedule.customerId}:${key}` : "";
+    if (customerKey) scheduledCustomerMonths.add(customerKey);
+    month.scheduled_jobs = (month.scheduled_jobs || 0) + 1;
+    const customerEstimate = schedule.customerId ? (customerOpenAmount.get(schedule.customerId) || 0) : 0;
+    const estimate = customerEstimate > 0 ? customerEstimate : metrics.avgInvoiceAmount;
+    month.scheduled_revenue = Number(((month.scheduled_revenue || 0) + estimate).toFixed(2));
+  }
+
+  const stageWeights = {
+    lead: 0.22,
+    quote: metrics.quoteWinRate,
+    scheduled: 0.85,
+    inprogress: 0.95
+  };
+
+  for (const item of model.workItems) {
+    if (!["lead", "quote", "scheduled", "inprogress"].includes(item.stage)) continue;
+    const target = item.expectedDate || item.updatedAt || item.createdAt;
+    if (!target) continue;
+    const key = monthKey(target);
+    const month = monthsMap.get(key);
+    if (!month) continue;
+    if (item.stage === "scheduled" && item.customerId && scheduledCustomerMonths.has(`${item.customerId}:${key}`)) {
+      continue;
+    }
+    const baseAmount = item.expectedAmount || item.quoteAmount || metrics.avgInvoiceAmount;
+    const weighted = baseAmount * (stageWeights[item.stage] || 0.5);
+    month.pipeline_weighted_revenue = Number(((month.pipeline_weighted_revenue || 0) + weighted).toFixed(2));
+    month.pipeline_items = (month.pipeline_items || 0) + 1;
+  }
+
+  for (const po of model.purchaseOrders) {
+    const poDate = po.activityDate;
+    if (!poDate) continue;
+    const key = monthKey(poDate);
+    const month = monthsMap.get(key);
+    if (!month) continue;
+    if (po.status === "draft" || po.status === "ordered") {
+      month.committed_po_spend = Number(((month.committed_po_spend || 0) + po.subtotal).toFixed(2));
+    }
+  }
+
+  for (const need of model.inventoryNeeds) {
+    if (need.status !== "needs-order" && need.status !== "po-draft") continue;
+    const needDate = need.scheduleStart || need.updatedAt || need.createdAt;
+    if (!needDate) continue;
+    const key = monthKey(needDate);
+    const month = monthsMap.get(key);
+    if (!month) continue;
+    const needCost = estimateNeedCost(need, inventoryBySku, metrics.avgPoSpend / 4 || 60);
+    month.pending_need_spend = Number(((month.pending_need_spend || 0) + needCost).toFixed(2));
+  }
+
+  return months.map(month => {
+    const scheduledRevenue = Number((month.scheduled_revenue || 0).toFixed(2));
+    const weightedRevenue = Number((month.pipeline_weighted_revenue || 0).toFixed(2));
+    const projectedRevenue = Number((scheduledRevenue + weightedRevenue).toFixed(2));
+    const baseCogs = Number((projectedRevenue * metrics.cogsRatio).toFixed(2));
+    const committedSpend = Number(((month.committed_po_spend || 0) + (month.pending_need_spend || 0)).toFixed(2));
+    const projectedPartsCogs = Math.max(baseCogs, committedSpend);
+    const projectedLaborCost = Number((projectedRevenue * 0.18).toFixed(2));
+    const projectedGrossProfit = Number((projectedRevenue - projectedPartsCogs - projectedLaborCost).toFixed(2));
+    const projectedGrossMarginPct = projectedRevenue > 0
+      ? Number(((projectedGrossProfit / projectedRevenue) * 100).toFixed(2))
+      : 0;
+
+    return {
+      period_key: month.period_key,
+      period_start: month.period_start,
+      period_end: month.period_end,
+      scheduled_jobs: month.scheduled_jobs || 0,
+      pipeline_items: month.pipeline_items || 0,
+      scheduled_revenue: scheduledRevenue,
+      pipeline_weighted_revenue: weightedRevenue,
+      projected_revenue: projectedRevenue,
+      committed_po_spend: Number((month.committed_po_spend || 0).toFixed(2)),
+      pending_need_spend: Number((month.pending_need_spend || 0).toFixed(2)),
+      projected_parts_cogs: Number(projectedPartsCogs.toFixed(2)),
+      projected_labor_cost: projectedLaborCost,
+      projected_gross_profit: projectedGrossProfit,
+      projected_gross_margin_pct: projectedGrossMarginPct
+    };
+  });
+}
+
+function buildCashflowForecast(model, window, productionForecast) {
+  const monthMap = new Map(productionForecast.map(row => [row.period_key, row]));
+  const out = [];
+  let openingCash = Number((window.openingCash || 0).toFixed(2));
+
+  for (const month of productionForecast) {
+    let invoiceCollectionsDue = 0;
+    for (const item of model.workItems) {
+      if (item.stage !== "invoiced" || item.outstandingAmount <= 0) continue;
+      const dueDate = item.dueAt || item.closedAt || item.updatedAt || item.createdAt;
+      if (!dueDate || monthKey(dueDate) !== month.period_key) continue;
+      invoiceCollectionsDue += item.outstandingAmount;
+    }
+
+    const forecastCollections = Number((month.projected_revenue * 0.62).toFixed(2));
+    const projectedInflow = Number((invoiceCollectionsDue + forecastCollections).toFixed(2));
+    const projectedOutflow = Number((
+      month.projected_parts_cogs
+      + month.projected_labor_cost
+      + (month.committed_po_spend * 0.15)
+    ).toFixed(2));
+    const netCashflow = Number((projectedInflow - projectedOutflow).toFixed(2));
+    const endingCash = Number((openingCash + netCashflow).toFixed(2));
+
+    out.push({
+      period_key: month.period_key,
+      period_start: month.period_start,
+      period_end: month.period_end,
+      opening_cash: openingCash,
+      invoice_collections_due: Number(invoiceCollectionsDue.toFixed(2)),
+      forecast_collections: forecastCollections,
+      projected_inflow: projectedInflow,
+      projected_outflow: projectedOutflow,
+      net_cashflow: netCashflow,
+      ending_cash: endingCash
+    });
+    openingCash = endingCash;
+  }
+
+  return out;
 }
 
 function buildOverview(model, window) {
@@ -659,6 +1250,8 @@ function buildPayload(model, window) {
   const invoiceAging = buildInvoiceAging(model, window);
   const leadSources = buildLeadSources(model, window);
   const communicationVolume = buildCommunicationVolume(model, window);
+  const productionForecast = buildProductionForecast(model, window);
+  const cashflowForecast = buildCashflowForecast(model, window, productionForecast);
 
   return {
     generatedAt: new Date().toISOString(),
@@ -666,7 +1259,9 @@ function buildPayload(model, window) {
       periodStart: isoDate(window.from),
       periodEnd: isoDate(window.to),
       monthsBack: window.monthsBack,
-      futureDays: window.futureDays
+      futureDays: window.futureDays,
+      forecastMonths: window.forecastMonths,
+      openingCash: window.openingCash
     },
     tables: {
       kpiSummary,
@@ -674,7 +1269,9 @@ function buildPayload(model, window) {
       salesTrend,
       invoiceAging,
       leadSources,
-      communicationVolume
+      communicationVolume,
+      productionForecast,
+      cashflowForecast
     }
   };
 }
@@ -702,22 +1299,69 @@ function responseByScope(scope, payload) {
   if (normalized === "communications" || normalized === "communication-volume") {
     return { ...payload, table: "communicationVolume", rows: payload.tables.communicationVolume };
   }
+  if (normalized === "production-forecast" || normalized === "productionforecast") {
+    return { ...payload, table: "productionForecast", rows: payload.tables.productionForecast };
+  }
+  if (normalized === "cashflow-forecast" || normalized === "cashflowforecast") {
+    return { ...payload, table: "cashflowForecast", rows: payload.tables.cashflowForecast };
+  }
   return null;
 }
 
 module.exports = async function (context, req) {
   const method = asString(req.method || "GET").toUpperCase();
+  const scope = readScope(context, req);
   if (method === "OPTIONS") {
     context.res = { status: 204 };
     return;
   }
-  if (method !== "GET") {
-    context.res = json(405, { error: "Method not allowed" });
-    return;
-  }
 
   try {
-    const scope = readScope(context, req);
+    if (method === "POST") {
+      if (scope !== "seed-demo") {
+        context.res = json(405, { error: "Method not allowed" });
+        return;
+      }
+
+      const seedSummary = await seedDemoReportData();
+      context.res = json(200, {
+        ok: true,
+        scope,
+        message: "Demo reporting data seeded.",
+        ...seedSummary
+      });
+      return;
+    }
+
+    if (method !== "GET") {
+      context.res = json(405, { error: "Method not allowed" });
+      return;
+    }
+
+    if (scope === "powerbi-embed" || scope === "powerbi-config") {
+      const includeToken = asBool(req && req.query && req.query.includeToken);
+      const status = powerBiStatus(powerBiConfigFromEnv());
+      if (!includeToken || !status.secureEmbedReady) {
+        context.res = json(200, {
+          ok: true,
+          scope,
+          powerBi: {
+            ...status,
+            mode: status.secureEmbedReady ? "secure-embed" : (status.webEmbedReady ? "web" : "unconfigured")
+          }
+        });
+        return;
+      }
+
+      const embedConfig = await buildPowerBiEmbedConfig();
+      context.res = json(200, {
+        ok: true,
+        scope,
+        powerBi: embedConfig
+      });
+      return;
+    }
+
     const window = buildWindow(req);
 
     const [
@@ -728,7 +1372,9 @@ module.exports = async function (context, req) {
       emailClient,
       smsClient,
       purchaseOrdersClient,
-      scheduleClient
+      scheduleClient,
+      inventoryNeedsClient,
+      inventoryItemsClient
     ] = await Promise.all([
       getTableClient(TABLES.lanes),
       getTableClient(TABLES.workItems),
@@ -737,7 +1383,9 @@ module.exports = async function (context, req) {
       getTableClient(TABLES.emailMessages),
       getTableClient(TABLES.smsMessages),
       getTableClient(TABLES.purchaseOrders),
-      getTableClient(TABLES.schedule)
+      getTableClient(TABLES.schedule),
+      getTableClient(TABLES.inventoryNeeds),
+      getTableClient(TABLES.inventoryItems)
     ]);
 
     const [
@@ -748,7 +1396,9 @@ module.exports = async function (context, req) {
       emailMessages,
       smsMessages,
       purchaseOrders,
-      schedule
+      schedule,
+      inventoryNeeds,
+      inventoryItems
     ] = await Promise.all([
       listPartition(lanesClient),
       listPartition(workItemsClient),
@@ -757,7 +1407,9 @@ module.exports = async function (context, req) {
       listPartition(emailClient),
       listPartition(smsClient),
       listPartition(purchaseOrdersClient),
-      listPartition(scheduleClient)
+      listPartition(scheduleClient),
+      listPartition(inventoryNeedsClient),
+      listPartition(inventoryItemsClient)
     ]);
 
     const model = buildModel({
@@ -768,7 +1420,9 @@ module.exports = async function (context, req) {
       emailMessages,
       smsMessages,
       purchaseOrders,
-      schedule
+      schedule,
+      inventoryNeeds,
+      inventoryItems
     });
 
     const payload = buildPayload(model, window);
@@ -784,7 +1438,12 @@ module.exports = async function (context, req) {
           "sales-trend",
           "invoice-aging",
           "lead-sources",
-          "communications"
+          "communications",
+          "production-forecast",
+          "cashflow-forecast",
+          "seed-demo",
+          "powerbi-config",
+          "powerbi-embed"
         ]
       });
       return;

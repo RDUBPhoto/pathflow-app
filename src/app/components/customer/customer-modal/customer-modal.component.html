@@ -7,7 +7,7 @@
       </ion-toolbar>
     </ion-header>
 
-    <ion-content class="ion-padding">
+    <ion-content class="ion-padding modal-form-content">
       <div *ngIf="loadingForm(); else formTpl" style="display:flex;justify-content:center;align-items:center;height:60vh;">
         <ion-spinner name="crescent"></ion-spinner>
       </div>
@@ -155,12 +155,18 @@
           <ion-textarea autoGrow="true" [ngModel]="notes()" (ngModelChange)="notes.set($event)"></ion-textarea>
         </ion-item>
 
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:14px;">
-          <ion-button fill="clear" (click)="close()">Cancel</ion-button>
-          <ion-button [disabled]="!canSave() || loading()" (click)="save()">
-            <ion-spinner *ngIf="loading()" name="crescent" style="margin-right:8px;"></ion-spinner>
-            Save
-          </ion-button>
-        </div>
       </ng-template>
     </ion-content>
+    <ion-footer class="modal-form-footer">
+      <ion-toolbar>
+        <div class="modal-footer-row">
+          <div class="modal-footer-right">
+            <ion-button fill="clear" (click)="close()">Cancel</ion-button>
+            <ion-button [disabled]="!canSave() || loading() || loadingForm()" (click)="save()">
+              <ion-spinner *ngIf="loading()" name="crescent" style="margin-right:8px;"></ion-spinner>
+              Save
+            </ion-button>
+          </div>
+        </div>
+      </ion-toolbar>
+    </ion-footer>

@@ -48,7 +48,7 @@ export const registeredGuard: CanActivateFn = async (_route, state) => {
     });
   }
 
-  if (auth.needsRegistration()) {
+  if (auth.needsRegistration() || auth.isAccessLocked()) {
     return router.createUrlTree(['/register'], {
       queryParams: { redirect: state.url }
     });
@@ -69,7 +69,7 @@ export const registrationGuard: CanActivateFn = async (_route, state) => {
     });
   }
 
-  if (!auth.needsRegistration()) {
+  if (!auth.needsRegistration() && !auth.isAccessLocked()) {
     return router.createUrlTree(['/dashboard']);
   }
 

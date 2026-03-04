@@ -1,15 +1,40 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, map } from 'rxjs';
+import { Observable, concatMap, from, map, of, reduce } from 'rxjs';
 
 export type Customer = {
   id: string;
+  business?: string;
+  accountManager?: string;
+  creator?: string;
+  position?: string;
+  title?: string;
   name: string;
   firstName?: string;
   lastName?: string;
   phone?: string;
+  mobile?: string;
   email?: string;
   address?: string;
+  address1?: string;
+  address2?: string;
+  address3?: string;
+  town?: string;
+  county?: string;
+  state?: string;
+  postcode?: string;
+  country?: string;
+  accountReference?: string;
+  priceList?: string;
+  paymentTerm?: string;
+  lastQuoteActivity?: string;
+  lastJobActivity?: string;
+  lastInvoiceActivity?: string;
+  lastOpportunityActivity?: string;
+  lastTaskActivity?: string;
+  dateLeft?: string;
+  tags?: string;
+  contactTags?: string;
   vin?: string;
   vehicleMake?: string;
   vehicleModel?: string;
@@ -82,8 +107,20 @@ export type MergeCustomerResponse = {
   customer?: Customer;
 };
 
+export type CustomerImportRow = Partial<Omit<Customer, 'id'>>;
+
+export type CustomerImportResponse = {
+  ok: boolean;
+  created: number;
+  updated: number;
+  skipped: number;
+  errors: Array<{ index: number; error: string }>;
+};
+
 @Injectable({ providedIn: 'root' })
 export class CustomersApi {
+  private readonly importBatchSize = 100;
+
   constructor(private http: HttpClient) {}
 
   list(): Observable<Customer[]> {
@@ -123,6 +160,53 @@ export class CustomersApi {
       targetId,
       ...rest
     });
+  }
+
+  importRows(rows: CustomerImportRow[]): Observable<CustomerImportResponse> {
+    if (!rows.length) {
+      return of({
+        ok: true,
+        created: 0,
+        updated: 0,
+        skipped: 0,
+        errors: []
+      });
+    }
+
+    const batches: CustomerImportRow[][] = [];
+    for (let i = 0; i < rows.length; i += this.importBatchSize) {
+      batches.push(rows.slice(i, i + this.importBatchSize));
+    }
+
+    return from(batches).pipe(
+      concatMap((batch, batchIndex) =>
+        this.http.post<CustomerImportResponse>('/api/customers', {
+          op: 'import',
+          rows: batch
+        }).pipe(
+          map(result => ({
+            ok: result?.ok !== false,
+            created: Number(result?.created || 0),
+            updated: Number(result?.updated || 0),
+            skipped: Number(result?.skipped || 0),
+            errors: (Array.isArray(result?.errors) ? result.errors : []).map(error => ({
+              index: Number(error?.index || 0) + (batchIndex * this.importBatchSize),
+              error: String(error?.error || 'Unknown import error')
+            }))
+          }))
+        )
+      ),
+      reduce<CustomerImportResponse, CustomerImportResponse>(
+        (acc, chunk) => ({
+          ok: acc.ok && chunk.ok,
+          created: acc.created + chunk.created,
+          updated: acc.updated + chunk.updated,
+          skipped: acc.skipped + chunk.skipped,
+          errors: acc.errors.concat(chunk.errors)
+        }),
+        { ok: true, created: 0, updated: 0, skipped: 0, errors: [] }
+      )
+    );
   }
 
   delete(id: string): Observable<{ ok: boolean }> {

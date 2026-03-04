@@ -9,6 +9,7 @@ const SMS_TABLE = "smsmessages";
 const SENDER_TABLE = "smssenders";
 const PARTITION = "main";
 const SENDER_DEFAULT_ROW_KEY = "default";
+const AUTO_CREATED_CREATOR = "Auto-Created Lead";
 
 function asString(value) {
   return value == null ? "" : String(value).trim();
@@ -266,6 +267,7 @@ function customerFromEntity(entity) {
     email: asString(entity.email),
     phone: asString(entity.phone),
     vin: asString(entity.vin),
+    creator: asString(entity.creator),
     notes: asString(entity.notes),
     createdAt: asString(entity.createdAt),
     updatedAt: asString(entity.updatedAt),
@@ -353,6 +355,7 @@ async function createCustomer(customersClient, inbound) {
     email: asString(inbound.email),
     phone: asString(inbound.phone),
     vin: asString(inbound.vin),
+    creator: AUTO_CREATED_CREATOR,
     notes: mergeNotes("", inbound.message, inbound.sourceName),
     leadSource: "web",
     createdAt: now,
@@ -390,6 +393,7 @@ async function updateCustomerFromInbound(customersClient, customer, inbound) {
   if (!asString(customer.email) && asString(inbound.email)) patch.email = asString(inbound.email);
   if (!asString(customer.phone) && asString(inbound.phone)) patch.phone = asString(inbound.phone);
   if (!asString(customer.vin) && asString(inbound.vin)) patch.vin = asString(inbound.vin);
+  if (!asString(customer.creator)) patch.creator = AUTO_CREATED_CREATOR;
 
   const nextNotes = mergeNotes(customer.notes, inbound.message, inbound.sourceName);
   if (nextNotes !== asString(customer.notes)) patch.notes = nextNotes;

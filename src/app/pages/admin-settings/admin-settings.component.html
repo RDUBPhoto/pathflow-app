@@ -123,6 +123,234 @@
         </ion-card-content>
       </ion-card>
 
+      <ion-card class="glass-surface" *ngIf="activeSection() === 'customerImport'">
+        <ion-card-header>
+          <ion-card-title>
+            <ion-icon name="cloud-upload-outline"></ion-icon>
+            Data Imports
+          </ion-card-title>
+        </ion-card-header>
+        <ion-card-content>
+          <div class="import-type-toggle" role="tablist" aria-label="Import data type">
+            <button
+              type="button"
+              class="import-type-btn"
+              [class.active]="selectedImportType === 'customers'"
+              (click)="selectedImportType = 'customers'">
+              Customers
+            </button>
+            <button
+              type="button"
+              class="import-type-btn"
+              [class.active]="selectedImportType === 'inventory'"
+              (click)="selectedImportType = 'inventory'">
+              Inventory
+            </button>
+          </div>
+
+          <div *ngIf="selectedImportType === 'customers'">
+            <div class="customer-import-grid">
+              <div class="customer-import-column">
+                <div class="customer-import-section-title">Upload File</div>
+                <div class="sms-help">
+                  Upload a CSV, XLSX, or XLS export and map source headers to Pathflow customer fields.
+                </div>
+                <input
+                  #customerImportFileInput
+                  type="file"
+                  accept=".csv,.xlsx,.xls"
+                  hidden
+                  (change)="onCustomerImportFileSelected($event)" />
+                <div class="sms-actions">
+                  <ion-button (click)="customerImportFileInput.click()">
+                    <ion-icon slot="start" name="cloud-upload-outline"></ion-icon>
+                    Choose file
+                  </ion-button>
+                </div>
+
+                <div class="customer-import-summary" *ngIf="customerImportFileName">
+                  <div><strong>File:</strong> {{ customerImportFileName }}</div>
+                  <div><strong>Rows:</strong> {{ customerImportRows.length }}</div>
+                  <div><strong>Mapped columns:</strong> {{ mappedCustomerImportCount() }} / {{ customerImportHeaders.length }}</div>
+                </div>
+
+                <div class="sms-feedback success" *ngIf="customerImportStatus">{{ customerImportStatus }}</div>
+                <div class="sms-feedback error" *ngIf="customerImportError">{{ customerImportError }}</div>
+
+                <div class="customer-import-warning" *ngIf="missingExpectedImportHeaders().length">
+                  <div class="warning-title">Missing expected headers from this export:</div>
+                  <div class="warning-list">
+                    <span class="warning-pill" *ngFor="let header of missingExpectedImportHeaders()">{{ header }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="customer-import-column" *ngIf="customerImportHeaders.length">
+                <div class="customer-import-section-title">Field Mapping</div>
+                <div class="sms-help">
+                  Map source columns to target customer fields. Keep at least one identity field mapped:
+                  email, phone/mobile, or name.
+                </div>
+                <div class="customer-import-mapping-list">
+                  <div class="customer-import-mapping-row" *ngFor="let mapping of customerImportMappings; let i = index">
+                    <div class="mapping-source">
+                      <span class="source-label">{{ mapping.source }}</span>
+                    </div>
+                    <ion-item lines="none">
+                      <ion-label position="stacked">Target field</ion-label>
+                      <ion-select
+                        interface="popover"
+                        [(ngModel)]="customerImportMappings[i].target">
+                        <ion-select-option value="">Skip</ion-select-option>
+                        <ion-select-option *ngFor="let field of customerImportTargetFields" [value]="field.key">
+                          {{ field.label }}
+                        </ion-select-option>
+                      </ion-select>
+                    </ion-item>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="customer-import-preview" *ngIf="customerImportRows.length">
+              <div class="customer-import-section-title">Preview (first 5 rows)</div>
+              <div class="customer-import-table-wrap">
+                <table class="customer-import-table">
+                  <thead>
+                    <tr>
+                      <th *ngFor="let header of customerImportHeaders">{{ header }}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr *ngFor="let row of customerImportRows.slice(0, 5)">
+                      <td *ngFor="let header of customerImportHeaders">{{ row[header] }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="sms-actions" *ngIf="customerImportRows.length">
+              <ion-button
+                (click)="importCustomersFromFile()"
+                [disabled]="!canRunCustomerImport()">
+                <ion-icon slot="start" name="save-outline"></ion-icon>
+                {{ customerImporting() ? 'Importing...' : 'Import Customers' }}
+              </ion-button>
+            </div>
+
+            <div class="customer-import-results" *ngIf="customerImportResult() as result">
+              <div class="customer-import-section-title">Last Import Result</div>
+              <div class="customer-import-result-badges">
+                <ion-badge color="success">Created {{ result.created }}</ion-badge>
+                <ion-badge color="primary">Updated {{ result.updated }}</ion-badge>
+                <ion-badge color="medium">Skipped {{ result.skipped }}</ion-badge>
+                <ion-badge color="danger" *ngIf="result.errors.length">Errors {{ result.errors.length }}</ion-badge>
+              </div>
+              <div class="customer-import-error-list" *ngIf="result.errors.length">
+                <div class="error-row" *ngFor="let err of result.errors.slice(0, 10)">
+                  Row {{ err.index }}: {{ err.error }}
+                </div>
+                <div class="sms-help" *ngIf="result.errors.length > 10">
+                  Showing first 10 of {{ result.errors.length }} errors.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="customer-import-results" *ngIf="selectedImportType === 'inventory'">
+            <div class="customer-import-section-title">Inventory Import (Coming soon)</div>
+            <div class="sms-help">
+              Inventory import will support CSV/XLSX upload with field mapping for SKU, supplier, cost, quantity,
+              and reorder thresholds. This tab is now in place so future imports can live under one Data Imports section.
+            </div>
+          </div>
+        </ion-card-content>
+      </ion-card>
+
+      <ion-card class="glass-surface" *ngIf="activeSection() === 'schedule'">
+        <ion-card-header>
+          <ion-card-title>
+            <ion-icon name="settings-outline"></ion-icon>
+            Schedule Settings
+          </ion-card-title>
+        </ion-card-header>
+        <ion-card-content>
+          <div class="sms-help">
+            These settings drive calendar behavior across the app and are used for scheduling and time-based reporting.
+          </div>
+
+          <div class="schedule-settings-grid">
+            <ion-item>
+              <ion-label position="stacked">Open time</ion-label>
+              <ion-select
+                interface="popover"
+                [ngModel]="scheduleOpenHour"
+                (ngModelChange)="scheduleOpenHour = +$event">
+                <ion-select-option *ngFor="let option of openHourOptions" [value]="option.value">
+                  {{ option.label }}
+                </ion-select-option>
+              </ion-select>
+            </ion-item>
+
+            <ion-item>
+              <ion-label position="stacked">Close time</ion-label>
+              <ion-select
+                interface="popover"
+                [ngModel]="scheduleCloseHour"
+                (ngModelChange)="scheduleCloseHour = +$event">
+                <ion-select-option *ngFor="let option of closeHourOptions" [value]="option.value">
+                  {{ option.label }}
+                </ion-select-option>
+              </ion-select>
+            </ion-item>
+
+            <ion-item lines="none" class="schedule-weekend-toggle">
+              <ion-label>Show weekends</ion-label>
+              <ion-checkbox
+                slot="end"
+                [ngModel]="scheduleShowWeekends"
+                (ngModelChange)="scheduleShowWeekends = !!$event">
+              </ion-checkbox>
+            </ion-item>
+          </div>
+
+          <div class="schedule-bays-header">
+            <div class="schedule-bays-title">Bays (Lifts/Categories)</div>
+            <ion-button size="small" fill="outline" (click)="addScheduleBay()">
+              <ion-icon slot="start" name="add-outline"></ion-icon>
+              Add Bay
+            </ion-button>
+          </div>
+
+          <div class="schedule-bays-list">
+            <div class="schedule-bay-row" *ngFor="let bay of scheduleBays; let i = index">
+              <ion-item>
+                <ion-label position="stacked">Bay {{ i + 1 }}</ion-label>
+                <ion-input [(ngModel)]="bay.name" placeholder="Bay name"></ion-input>
+              </ion-item>
+              <ion-button
+                fill="clear"
+                color="danger"
+                [disabled]="scheduleBays.length <= 1"
+                (click)="removeScheduleBay(bay.id)">
+                <ion-icon name="trash-outline"></ion-icon>
+              </ion-button>
+            </div>
+          </div>
+
+          <div class="sms-actions">
+            <ion-button (click)="saveScheduleSettings()" [disabled]="!canSaveScheduleSettings()">
+              <ion-icon slot="start" name="save-outline"></ion-icon>
+              Save schedule settings
+            </ion-button>
+          </div>
+
+          <div class="sms-feedback success" *ngIf="scheduleStatus">{{ scheduleStatus }}</div>
+          <div class="sms-feedback error" *ngIf="scheduleError">{{ scheduleError }}</div>
+        </ion-card-content>
+      </ion-card>
+
       <ion-card class="glass-surface" *ngIf="activeSection() === 'sms'">
         <ion-card-header>
           <ion-card-title>

@@ -12,7 +12,7 @@ type InvoiceKpi = {
   label: string;
   value: number;
   kind: 'count' | 'currency';
-  tone: 'open' | 'paid' | 'cancelled' | 'neutral';
+  tone: 'open' | 'accepted' | 'declined' | 'expired' | 'neutral';
 };
 
 @Component({
@@ -37,7 +37,7 @@ type InvoiceKpi = {
 })
 export default class InvoicesComponent {
   private readonly invoicesData = inject(InvoicesDataService);
-  private readonly laneDisplayOrder: InvoiceStage[] = ['draft', 'approved', 'sent', 'paid', 'cancelled'];
+  private readonly laneDisplayOrder: InvoiceStage[] = ['draft', 'sent', 'accepted', 'declined', 'expired'];
 
   readonly lanes = [...INVOICE_LANES].sort(
     (a, b) => this.laneDisplayOrder.indexOf(a.id) - this.laneDisplayOrder.indexOf(b.id)
@@ -63,31 +63,33 @@ export default class InvoicesComponent {
       return haystack.includes(query);
     });
   });
-  readonly openStages: InvoiceStage[] = ['draft', 'approved', 'sent'];
+  readonly openStages: InvoiceStage[] = ['draft', 'sent'];
   readonly kpis = computed<InvoiceKpi[]>(() => {
     const source = this.filteredInvoices();
     const openCount = this.countByStage(this.openStages, source);
     const openBalance = this.sumByStage(this.openStages, source);
-    const paidCount = this.countByStage(['paid'], source);
-    const paidTotal = this.sumByStage(['paid'], source);
-    const cancelledCount = this.countByStage(['cancelled'], source);
+    const acceptedCount = this.countByStage(['accepted'], source);
+    const acceptedTotal = this.sumByStage(['accepted'], source);
+    const declinedCount = this.countByStage(['declined'], source);
+    const expiredCount = this.countByStage(['expired'], source);
 
     return [
       { id: 'open-count', label: 'Open Invoices', value: openCount, kind: 'count', tone: 'open' },
       { id: 'open-balance', label: 'Open Balance', value: openBalance, kind: 'currency', tone: 'open' },
-      { id: 'paid-count', label: 'Paid Invoices', value: paidCount, kind: 'count', tone: 'paid' },
-      { id: 'paid-total', label: 'Paid Total', value: paidTotal, kind: 'currency', tone: 'paid' },
-      { id: 'cancelled-count', label: 'Cancelled', value: cancelledCount, kind: 'count', tone: 'cancelled' }
+      { id: 'accepted-count', label: 'Accepted', value: acceptedCount, kind: 'count', tone: 'accepted' },
+      { id: 'accepted-total', label: 'Accepted Total', value: acceptedTotal, kind: 'currency', tone: 'accepted' },
+      { id: 'declined-count', label: 'Declined', value: declinedCount, kind: 'count', tone: 'declined' },
+      { id: 'expired-count', label: 'Expired', value: expiredCount, kind: 'count', tone: 'expired' }
     ];
   });
 
   readonly laneCards = computed(() => {
     const grouped: Record<InvoiceStage, InvoiceCard[]> = {
       draft: [],
-      approved: [],
       sent: [],
-      paid: [],
-      cancelled: []
+      accepted: [],
+      declined: [],
+      expired: []
     };
     for (const invoice of this.filteredInvoices()) {
       grouped[invoice.stage].push(invoice);

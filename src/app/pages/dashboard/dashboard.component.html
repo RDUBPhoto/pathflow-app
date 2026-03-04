@@ -27,7 +27,7 @@
           <ion-label class="ion-text-wrap">
             <div style="font-weight:600">{{ l.name }}</div>
           </ion-label>
-          <ion-select interface="popover" [value]="laneColor(l.id) || ''" (ionChange)="setLaneColor(l.id, $event.detail.value)">
+          <ion-select interface="popover" [value]="laneColor(l) || ''" (ionChange)="setLaneColor(l, $event.detail.value)">
             <ion-select-option value="">None</ion-select-option>
             <ion-select-option *ngFor="let c of palette" [value]="c.hex">
               <span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:1px solid rgba(0,0,0,.2);margin-right:8px;vertical-align:middle;" [style.background]="c.hex"></span>{{ c.label }}
@@ -79,7 +79,7 @@
         cdkDrag
         [cdkDragDisabled]="isMobileLayout()"
         *ngFor="let lane of lanes(); trackBy: trackLane"
-        [style.--lane-color]="laneColor(lane.id)">
+        [style.--lane-color]="laneColor(lane)">
         <ng-template cdkDragPreview>
           <div class="lane lane-preview"></div>
         </ng-template>

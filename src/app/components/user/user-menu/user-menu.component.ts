@@ -295,7 +295,7 @@ export class UserMenuComponent implements OnInit, OnDestroy {
     event.preventDefault();
     event.stopPropagation();
 
-    const targetRoute = this.normalizeRoute(notification.route);
+    const targetRoute = this.resolveNotificationRoute(notification);
     const navigate = () => {
       this.router.navigateByUrl(targetRoute);
       this.closeNotifications();
@@ -402,6 +402,95 @@ export class UserMenuComponent implements OnInit, OnDestroy {
     const route = (value || '').trim();
     if (!route) return '/dashboard';
     return route.startsWith('/') ? route : `/${route}`;
+  }
+
+  private resolveNotificationRoute(notification: AppNotification): string {
+    const entityRoute = this.resolveEntityRoute(notification);
+    if (entityRoute) return entityRoute;
+
+    const routeDerived = this.resolveRouteDerivedTarget(notification.route);
+    if (routeDerived) return routeDerived;
+
+    return this.normalizeRoute(notification.route);
+  }
+
+  private resolveEntityRoute(notification: AppNotification): string | null {
+    const entityType = String(notification.entityType || '').trim().toLowerCase();
+    const metadata = this.asRecord(notification.metadata);
+
+    const invoiceId = this.firstNonEmpty([
+      entityType === 'invoice' ? notification.entityId : null,
+      this.readMetadataString(metadata, 'invoiceId'),
+      this.readRouteQueryParam(notification.route, 'invoiceId')
+    ]);
+    if (invoiceId) {
+      return `/invoices/${encodeURIComponent(invoiceId)}`;
+    }
+
+    const customerId = this.firstNonEmpty([
+      entityType === 'customer' ? notification.entityId : null,
+      this.readMetadataString(metadata, 'customerId'),
+      this.readRouteQueryParam(notification.route, 'customerId')
+    ]);
+    if (customerId) {
+      if (entityType === 'sms' || entityType === 'message' || entityType === 'messages') {
+        return `/customers/${encodeURIComponent(customerId)}?tab=sms`;
+      }
+      if (entityType === 'email') {
+        return `/customers/${encodeURIComponent(customerId)}?tab=email`;
+      }
+      return `/customers/${encodeURIComponent(customerId)}`;
+    }
+
+    return null;
+  }
+
+  private resolveRouteDerivedTarget(route: string): string | null {
+    const normalized = this.normalizeRoute(route);
+
+    const invoiceId = this.readRouteQueryParam(normalized, 'invoiceId');
+    if (invoiceId) {
+      return `/invoices/${encodeURIComponent(invoiceId)}`;
+    }
+
+    const customerId = this.readRouteQueryParam(normalized, 'customerId');
+    if (customerId) {
+      if (normalized.startsWith('/messages')) {
+        return `/customers/${encodeURIComponent(customerId)}?tab=sms`;
+      }
+      if (normalized.startsWith('/customers')) {
+        return `/customers/${encodeURIComponent(customerId)}`;
+      }
+    }
+
+    return null;
+  }
+
+  private readRouteQueryParam(route: string, key: string): string {
+    const value = String(route || '').trim();
+    if (!value) return '';
+    const queryIndex = value.indexOf('?');
+    if (queryIndex < 0) return '';
+    const query = value.slice(queryIndex + 1);
+    const params = new URLSearchParams(query);
+    return (params.get(key) || '').trim();
+  }
+
+  private asRecord(value: unknown): Record<string, unknown> {
+    if (value && typeof value === 'object') return value as Record<string, unknown>;
+    return {};
+  }
+
+  private readMetadataString(metadata: Record<string, unknown>, key: string): string {
+    return String(metadata[key] ?? '').trim();
+  }
+
+  private firstNonEmpty(values: Array<unknown>): string {
+    for (const candidate of values) {
+      const text = String(candidate ?? '').trim();
+      if (text) return text;
+    }
+    return '';
   }
 
   private extractFirstName(displayName: string, email: string): string {

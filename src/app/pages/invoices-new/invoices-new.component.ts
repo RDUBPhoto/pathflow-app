@@ -199,7 +199,7 @@ export default class InvoicesNewComponent {
 
       if (mentions.length) {
         const actor = this.auth.user()?.displayName || this.auth.user()?.email || 'A teammate';
-        const route = `/invoices?invoiceId=${encodeURIComponent(createdInvoice.id)}`;
+        const route = `/invoices/${encodeURIComponent(createdInvoice.id)}`;
         const title = `${actor} mentioned you in ${createdInvoice.invoiceNumber}`;
         const message = `${customerName} invoice was created from ${template.name} and you were tagged to review it.`;
 

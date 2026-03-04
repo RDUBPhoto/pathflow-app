@@ -5,11 +5,81 @@ const TABLE = "schedule";
 const PARTITION = "main";
 const CUSTOMERS_TABLE = "customers";
 const INVENTORY_NEEDS_TABLE = "inventoryneeds";
+const WORKITEMS_TABLE = "workitems";
+const LANES_TABLE = "lanes";
 
 function pick(v, d = "") { return typeof v === "string" ? v : (v == null ? d : String(v)); }
 function bool(v) { return v === true || v === "true" || v === 1 || v === "1"; }
 function asString(v) { return v == null ? "" : String(v).trim(); }
 function asNumber(v, d = 0) { const n = Number(v); return Number.isFinite(n) ? n : d; }
+function toMillis(value) {
+  const parsed = Date.parse(asString(value));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+function safeDuration(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+function elapsedMs(fromValue, toValue) {
+  const from = toMillis(fromValue);
+  const to = toMillis(toValue);
+  if (!from || !to || to <= from) return 0;
+  return to - from;
+}
+function laneStageKey(lane) {
+  const explicit = asString(lane && lane.stageKey).toLowerCase();
+  if (explicit) return explicit;
+  const name = asString(lane && lane.name).toLowerCase();
+  if (!name) return "custom";
+  if (/lead/.test(name)) return "lead";
+  if (/quote/.test(name)) return "quote";
+  if (/sched|appointment|calendar/.test(name)) return "scheduled";
+  if (/progress|in[- ]?progress/.test(name)) return "inprogress";
+  if (/complete|completed|done|ready|pickup/.test(name)) return "completed";
+  if (/invoiced|invoice|paid/.test(name)) return "invoiced";
+  return "custom";
+}
+
+function isActiveScheduleRecord(record, nowMs) {
+  if (!record || bool(record.isBlocked)) return false;
+  const customerId = asString(record.customerId);
+  const resource = asString(record.resource);
+  if (!customerId || !resource) return false;
+  const startMs = toMillis(record.start);
+  const endMs = toMillis(record.end);
+  if (!startMs || !endMs || endMs <= startMs) return false;
+  return startMs <= nowMs && nowMs < endMs;
+}
+
+function compareSchedulePriority(a, b) {
+  const aUpdated = Math.max(toMillis(a.updatedAt), toMillis(a.createdAt));
+  const bUpdated = Math.max(toMillis(b.updatedAt), toMillis(b.createdAt));
+  if (aUpdated !== bUpdated) return aUpdated - bUpdated;
+  const aStart = toMillis(a.start);
+  const bStart = toMillis(b.start);
+  if (aStart !== bStart) return aStart - bStart;
+  return asString(a.id).localeCompare(asString(b.id));
+}
+
+function activeBayOccupants(records, nowMs) {
+  const byResource = new Map();
+  for (const record of records || []) {
+    if (!isActiveScheduleRecord(record, nowMs)) continue;
+    const resourceKey = asString(record.resource).toLowerCase();
+    if (!resourceKey) continue;
+    const current = byResource.get(resourceKey);
+    if (!current || compareSchedulePriority(current, record) < 0) {
+      byResource.set(resourceKey, record);
+    }
+  }
+
+  const customerIds = new Set();
+  for (const occupant of byResource.values()) {
+    const customerId = asString(occupant.customerId).toLowerCase();
+    if (customerId) customerIds.add(customerId);
+  }
+  return customerIds;
+}
 
 function normalizeNeedStatus(raw) {
   const value = asString(raw).toLowerCase();
@@ -218,6 +288,92 @@ async function clearScheduleNeeds(conn, scheduleId) {
   }
 }
 
+async function reconcileWorkTimers(conn, context) {
+  const schedulesClient = await getTableClient(conn, TABLE);
+  const lanesClient = await getTableClient(conn, LANES_TABLE);
+  const itemsClient = await getTableClient(conn, WORKITEMS_TABLE);
+
+  const schedules = [];
+  const scheduleIter = schedulesClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${PARTITION}'` } });
+  for await (const entity of scheduleIter) {
+    schedules.push({
+      id: entity.rowKey,
+      start: pick(entity.start),
+      end: pick(entity.end),
+      resource: pick(entity.resource),
+      customerId: pick(entity.customerId),
+      isBlocked: bool(entity.isBlocked),
+      createdAt: pick(entity.createdAt),
+      updatedAt: pick(entity.updatedAt)
+    });
+  }
+
+  const laneStageById = new Map();
+  const laneIter = lanesClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${PARTITION}'` } });
+  for await (const lane of laneIter) {
+    laneStageById.set(asString(lane.rowKey), laneStageKey(lane));
+  }
+
+  const nowIso = new Date().toISOString();
+  const nowMs = toMillis(nowIso);
+  const activeCustomers = activeBayOccupants(schedules, nowMs);
+
+  let touched = 0;
+  const itemsIter = itemsClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${PARTITION}'` } });
+  for await (const item of itemsIter) {
+    const itemId = asString(item.rowKey);
+    if (!itemId) continue;
+    const customerId = asString(item.customerId).toLowerCase();
+    const checkedInAt = asString(item.checkedInAt);
+    const completedAt = asString(item.completedAt);
+    if (!customerId || !checkedInAt || completedAt) continue;
+
+    const stage = laneStageById.get(asString(item.laneId)) || "custom";
+    if (stage === "completed") continue;
+
+    const currentlyPaused = bool(item.isPaused) || !!asString(item.pausedAt);
+    const shouldBeActive = activeCustomers.has(customerId);
+
+    if (!shouldBeActive && !currentlyPaused) {
+      const resumedAt = asString(item.lastWorkResumedAt) || checkedInAt;
+      const workIncrement = elapsedMs(resumedAt, nowIso);
+      await itemsClient.upsertEntity(
+        {
+          partitionKey: PARTITION,
+          rowKey: itemId,
+          isPaused: true,
+          pausedAt: nowIso,
+          lastWorkResumedAt: "",
+          workDurationMs: safeDuration(item.workDurationMs) + workIncrement,
+          updatedAt: nowIso
+        },
+        "Merge"
+      );
+      touched += 1;
+      continue;
+    }
+
+    if (shouldBeActive && currentlyPaused) {
+      const pauseIncrement = elapsedMs(item.pausedAt, nowIso);
+      await itemsClient.upsertEntity(
+        {
+          partitionKey: PARTITION,
+          rowKey: itemId,
+          isPaused: false,
+          pausedAt: "",
+          lastWorkResumedAt: nowIso,
+          pauseDurationMs: safeDuration(item.pauseDurationMs) + pauseIncrement,
+          updatedAt: nowIso
+        },
+        "Merge"
+      );
+      touched += 1;
+    }
+  }
+
+  context.log(`schedule/work-timers reconciled: ${touched} item(s) updated`);
+}
+
 module.exports = async function (context, req) {
   const method = (req.method || "GET").toUpperCase();
   const id = context.bindingData && context.bindingData.id ? String(context.bindingData.id) : "";
@@ -301,6 +457,7 @@ module.exports = async function (context, req) {
           isBlocked,
           partRequests: requestedPartRequests || []
         });
+        try { await reconcileWorkTimers(conn, context); } catch (error) { context.log.warn(`work timer reconcile failed: ${String(error && error.message || error)}`); }
         context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true, id: rowKey } };
         return;
       } else {
@@ -336,6 +493,7 @@ module.exports = async function (context, req) {
             : bool(current && current.isBlocked),
           partRequests: effectivePartRequests
         });
+        try { await reconcileWorkTimers(conn, context); } catch (error) { context.log.warn(`work timer reconcile failed: ${String(error && error.message || error)}`); }
         context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true, id: rid } };
         return;
       }
@@ -344,6 +502,7 @@ module.exports = async function (context, req) {
     if (method === "DELETE" && id) {
       await client.deleteEntity(PARTITION, id);
       await clearScheduleNeeds(conn, id);
+      try { await reconcileWorkTimers(conn, context); } catch (error) { context.log.warn(`work timer reconcile failed: ${String(error && error.message || error)}`); }
       context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true } };
       return;
     }

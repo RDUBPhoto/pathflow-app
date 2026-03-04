@@ -154,6 +154,7 @@ ion-content {
   overflow: auto;
   border-radius: 12px;
   border: 1px solid var(--app-border-subtle);
+  height: 100%;
 }
 
 .scheduler-stage {
@@ -167,6 +168,7 @@ daypilot-month {
   display: block;
   width: 100%;
   min-width: 0;
+  height: 100%;
 }
 
 daypilot-scheduler {
@@ -300,6 +302,10 @@ html[data-theme='light'] .month-shell ::ng-deep .month_default_main {
   --dp-month-cell-header-color: #334155;
   --dp-month-cell-header-bg-color: #e9eff8;
   --dp-month-event-color: #0f172a;
+}
+
+.dp_177259385247784113 {
+  height: 100%;
 }
 
 html:not([data-theme='light']) .month-shell ::ng-deep .month_default_main {

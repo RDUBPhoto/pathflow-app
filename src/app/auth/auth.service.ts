@@ -487,6 +487,11 @@ export class AuthService {
   }
 
   private async fetchClientPrincipal(): Promise<ClientPrincipal | null> {
+    // Static Web Apps auth endpoint isn't available during local Angular dev.
+    if (this.isLocalHost) {
+      return null;
+    }
+
     try {
       const response = await fetch('/.auth/me', {
         method: 'GET',

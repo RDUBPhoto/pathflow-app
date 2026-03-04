@@ -8,6 +8,7 @@ const LANES_TABLE = "lanes";
 const WORKITEMS_TABLE = "workitems";
 const PARTITION = "main";
 const SIGNATURE_ROW = "__signature__";
+const AUTO_CREATED_CREATOR = "Auto-Created Lead";
 
 function asString(value) {
   return value == null ? "" : String(value).trim();
@@ -485,6 +486,7 @@ async function createCustomerFromInbound(customersClient, senderEmail, senderNam
       email,
       phone: "",
       address: "",
+      creator: AUTO_CREATED_CREATOR,
       createdAt: now,
       updatedAt: now
     },

@@ -5,12 +5,37 @@ const { randomUUID } = require("crypto");
 const TABLE = "customers";
 const PARTITION = "main";
 const CUSTOMER_FIELDS = [
+  "business",
+  "accountManager",
+  "creator",
+  "position",
+  "title",
   "name",
   "firstName",
   "lastName",
   "phone",
+  "mobile",
   "email",
   "address",
+  "address1",
+  "address2",
+  "address3",
+  "town",
+  "county",
+  "state",
+  "postcode",
+  "country",
+  "accountReference",
+  "priceList",
+  "paymentTerm",
+  "lastQuoteActivity",
+  "lastJobActivity",
+  "lastInvoiceActivity",
+  "lastOpportunityActivity",
+  "lastTaskActivity",
+  "dateLeft",
+  "tags",
+  "contactTags",
   "vin",
   "vehicleMake",
   "vehicleModel",
@@ -67,6 +92,43 @@ function toStr(v) { return v == null ? "" : String(v); }
 function pick(b, k) { return toStr(b[k]).trim(); }
 function setIfPresent(target, body, key) { if (Object.prototype.hasOwnProperty.call(body, key)) target[key] = pick(body, key); }
 function escapedFilterValue(value) { return toStr(value).replace(/'/g, "''"); }
+function parseJsonRaw(raw) {
+  const text = toStr(raw).trim();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function parseBody(reqBody, rawBody) {
+  if (reqBody == null) {
+    return rawBody == null ? {} : parseJsonRaw(rawBody);
+  }
+
+  if (Buffer.isBuffer(reqBody)) {
+    return parseJsonRaw(reqBody.toString("utf8"));
+  }
+
+  if (typeof reqBody === "string") {
+    return parseJsonRaw(reqBody);
+  }
+
+  if (typeof reqBody === "object") {
+    // Azure/SWA can sometimes provide body as a Buffer-like shape.
+    if (reqBody.type === "Buffer" && Array.isArray(reqBody.data)) {
+      try {
+        return parseJsonRaw(Buffer.from(reqBody.data).toString("utf8"));
+      } catch {
+        return null;
+      }
+    }
+    return reqBody;
+  }
+
+  return {};
+}
 
 function normalizeEmail(value) {
   return toStr(value).trim().toLowerCase();
@@ -96,12 +158,37 @@ function fullName(firstName, lastName, name) {
 function toCustomerDto(entity) {
   return {
     id: toStr(entity.rowKey),
+    business: toStr(entity.business),
+    accountManager: toStr(entity.accountManager),
+    creator: toStr(entity.creator),
+    position: toStr(entity.position),
+    title: toStr(entity.title),
     name: toStr(entity.name),
     firstName: toStr(entity.firstName),
     lastName: toStr(entity.lastName),
     phone: toStr(entity.phone),
+    mobile: toStr(entity.mobile),
     email: toStr(entity.email),
     address: toStr(entity.address),
+    address1: toStr(entity.address1),
+    address2: toStr(entity.address2),
+    address3: toStr(entity.address3),
+    town: toStr(entity.town),
+    county: toStr(entity.county),
+    state: toStr(entity.state),
+    postcode: toStr(entity.postcode),
+    country: toStr(entity.country),
+    accountReference: toStr(entity.accountReference),
+    priceList: toStr(entity.priceList),
+    paymentTerm: toStr(entity.paymentTerm),
+    lastQuoteActivity: toStr(entity.lastQuoteActivity),
+    lastJobActivity: toStr(entity.lastJobActivity),
+    lastInvoiceActivity: toStr(entity.lastInvoiceActivity),
+    lastOpportunityActivity: toStr(entity.lastOpportunityActivity),
+    lastTaskActivity: toStr(entity.lastTaskActivity),
+    dateLeft: toStr(entity.dateLeft),
+    tags: toStr(entity.tags),
+    contactTags: toStr(entity.contactTags),
     vin: toStr(entity.vin),
     vehicleMake: toStr(entity.vehicleMake),
     vehicleModel: toStr(entity.vehicleModel),
@@ -146,6 +233,47 @@ function toCustomerDto(entity) {
     createdAt: toStr(entity.createdAt),
     updatedAt: toStr(entity.updatedAt)
   };
+}
+
+function importAddressFromParts(row) {
+  const parts = [
+    toStr(row.address1).trim(),
+    toStr(row.address2).trim(),
+    toStr(row.address3).trim(),
+    toStr(row.town).trim(),
+    toStr(row.state).trim(),
+    toStr(row.postcode).trim(),
+    toStr(row.country).trim()
+  ].filter(Boolean);
+  return parts.join(", ");
+}
+
+function findExistingByIdentity(customers, row) {
+  const probe = {
+    email: normalizeEmail(row.email),
+    phone: normalizePhone(row.phone || row.mobile),
+    name: normalizeName(fullName(row.firstName, row.lastName, row.name))
+  };
+  if (!probe.email && !probe.phone && !probe.name) return null;
+  let best = null;
+  let bestScore = 0;
+  for (const customer of customers) {
+    let score = 0;
+    if (probe.email && normalizeEmail(customer.email) === probe.email) score += 100;
+    if (probe.phone) {
+      const candidatePhone = normalizePhone(customer.phone || customer.mobile);
+      if (candidatePhone && candidatePhone === probe.phone) score += 80;
+    }
+    if (probe.name) {
+      const candidateName = normalizeName(fullName(customer.firstName, customer.lastName, customer.name));
+      if (candidateName && candidateName === probe.name) score += 50;
+    }
+    if (score > bestScore) {
+      best = customer;
+      bestScore = score;
+    }
+  }
+  return bestScore >= 80 ? best : null;
 }
 
 async function listCustomers(client) {
@@ -322,8 +450,17 @@ module.exports = async function (context, req) {
     }
 
     if (method === "POST") {
-      const b = req.body || {};
-      const op = String(b.op || "").toLowerCase();
+      const parsedBody = parseBody(req.body, req.rawBody);
+      if (parsedBody == null) {
+        context.res = {
+          status: 400,
+          headers: { "content-type": "application/json" },
+          body: { error: "Invalid request payload. Please retry import." }
+        };
+        return;
+      }
+      const b = Array.isArray(parsedBody) ? { op: "import", rows: parsedBody } : parsedBody;
+      const op = String(b.op || (Array.isArray(b.rows) ? "import" : "")).toLowerCase();
       const id = toStr(b.id);
 
       if (op === "delete" && id) {
@@ -402,12 +539,177 @@ module.exports = async function (context, req) {
         return;
       }
 
+      if (op === "import") {
+        const rows = Array.isArray(b.rows) ? b.rows : [];
+        if (!rows.length) {
+          context.res = {
+            status: 400,
+            headers: { "content-type": "application/json" },
+            body: { error: "rows required" }
+          };
+          return;
+        }
+
+        const existingCustomers = await listCustomers(client);
+        let created = 0;
+        let updated = 0;
+        let skipped = 0;
+        const errors = [];
+
+        for (let i = 0; i < rows.length; i += 1) {
+          const source = rows[i] || {};
+          try {
+            const firstName = pick(source, "firstName");
+            const lastName = pick(source, "lastName");
+            const name = fullName(firstName, lastName, pick(source, "name"));
+            const email = pick(source, "email");
+            const phone = pick(source, "phone");
+            const mobile = pick(source, "mobile");
+            const primaryPhone = phone || mobile;
+            const address = pick(source, "address") || importAddressFromParts(source);
+            const fallbackName = name || pick(source, "business") || email || primaryPhone;
+
+            if (!fallbackName && !email && !primaryPhone) {
+              skipped += 1;
+              continue;
+            }
+
+            const existing = findExistingByIdentity(existingCustomers, {
+              name: fallbackName,
+              firstName,
+              lastName,
+              email,
+              phone: primaryPhone,
+              mobile
+            });
+
+            if (!existing) {
+              const rowKey = randomUUID();
+              const now = new Date().toISOString();
+              const entity = {
+                partitionKey: PARTITION,
+                rowKey,
+                business: pick(source, "business"),
+                accountManager: pick(source, "accountManager"),
+                creator: pick(source, "creator"),
+                position: pick(source, "position"),
+                title: pick(source, "title"),
+                name: fallbackName,
+                firstName,
+                lastName,
+                phone: primaryPhone,
+                mobile,
+                email,
+                address,
+                address1: pick(source, "address1"),
+                address2: pick(source, "address2"),
+                address3: pick(source, "address3"),
+                town: pick(source, "town"),
+                county: pick(source, "county"),
+                state: pick(source, "state"),
+                postcode: pick(source, "postcode"),
+                country: pick(source, "country"),
+                accountReference: pick(source, "accountReference"),
+                priceList: pick(source, "priceList"),
+                paymentTerm: pick(source, "paymentTerm"),
+                lastQuoteActivity: pick(source, "lastQuoteActivity"),
+                lastJobActivity: pick(source, "lastJobActivity"),
+                lastInvoiceActivity: pick(source, "lastInvoiceActivity"),
+                lastOpportunityActivity: pick(source, "lastOpportunityActivity"),
+                lastTaskActivity: pick(source, "lastTaskActivity"),
+                dateLeft: pick(source, "dateLeft"),
+                tags: pick(source, "tags"),
+                contactTags: pick(source, "contactTags"),
+                notes: pick(source, "notes"),
+                createdAt: pick(source, "createdAt") || now,
+                updatedAt: now
+              };
+              await client.upsertEntity(entity, "Merge");
+              existingCustomers.push(toCustomerDto(entity));
+              created += 1;
+              continue;
+            }
+
+            const patch = {
+              partitionKey: PARTITION,
+              rowKey: toStr(existing.id),
+              updatedAt: new Date().toISOString()
+            };
+
+            const mergeValue = (key, value) => {
+              const incoming = toStr(value).trim();
+              if (!incoming) return;
+              const current = toStr(existing[key]).trim();
+              if (!current) patch[key] = incoming;
+            };
+
+            mergeValue("business", source.business);
+            mergeValue("accountManager", source.accountManager);
+            mergeValue("creator", source.creator);
+            mergeValue("position", source.position);
+            mergeValue("title", source.title);
+            mergeValue("name", fallbackName);
+            mergeValue("firstName", firstName);
+            mergeValue("lastName", lastName);
+            mergeValue("phone", primaryPhone);
+            mergeValue("mobile", mobile);
+            mergeValue("email", email);
+            mergeValue("address", address);
+            mergeValue("address1", source.address1);
+            mergeValue("address2", source.address2);
+            mergeValue("address3", source.address3);
+            mergeValue("town", source.town);
+            mergeValue("county", source.county);
+            mergeValue("state", source.state);
+            mergeValue("postcode", source.postcode);
+            mergeValue("country", source.country);
+            mergeValue("accountReference", source.accountReference);
+            mergeValue("priceList", source.priceList);
+            mergeValue("paymentTerm", source.paymentTerm);
+            mergeValue("lastQuoteActivity", source.lastQuoteActivity);
+            mergeValue("lastJobActivity", source.lastJobActivity);
+            mergeValue("lastInvoiceActivity", source.lastInvoiceActivity);
+            mergeValue("lastOpportunityActivity", source.lastOpportunityActivity);
+            mergeValue("lastTaskActivity", source.lastTaskActivity);
+            mergeValue("dateLeft", source.dateLeft);
+            mergeValue("tags", source.tags);
+            mergeValue("contactTags", source.contactTags);
+
+            const mergedNotes = combineNotes(existing.notes, source.notes);
+            if (mergedNotes && mergedNotes !== toStr(existing.notes).trim()) {
+              patch.notes = mergedNotes;
+            }
+
+            const keys = Object.keys(patch);
+            if (keys.length <= 3) {
+              skipped += 1;
+              continue;
+            }
+            await client.upsertEntity(patch, "Merge");
+            updated += 1;
+          } catch (err) {
+            errors.push({ index: i, error: String((err && err.message) || err) });
+          }
+        }
+
+        context.res = {
+          status: 200,
+          headers: { "content-type": "application/json" },
+          body: { ok: true, created, updated, skipped, errors }
+        };
+        return;
+      }
+
       const name = pick(b, "name");
       const phone = pick(b, "phone");
       const email = pick(b, "email");
 
       if (!id && !name) {
-        context.res = { status: 400, headers: { "content-type": "application/json" }, body: { error: "name required" } };
+        context.res = {
+          status: 400,
+          headers: { "content-type": "application/json" },
+          body: { error: "Name is required when creating a single customer." }
+        };
         return;
       }
 
@@ -417,12 +719,37 @@ module.exports = async function (context, req) {
         const entity = {
           partitionKey: PARTITION,
           rowKey,
+          business: pick(b, "business"),
+          accountManager: pick(b, "accountManager"),
+          creator: pick(b, "creator"),
+          position: pick(b, "position"),
+          title: pick(b, "title"),
           name,
           firstName: pick(b, "firstName"),
           lastName: pick(b, "lastName"),
           phone,
+          mobile: pick(b, "mobile"),
           email,
           address: pick(b, "address"),
+          address1: pick(b, "address1"),
+          address2: pick(b, "address2"),
+          address3: pick(b, "address3"),
+          town: pick(b, "town"),
+          county: pick(b, "county"),
+          state: pick(b, "state"),
+          postcode: pick(b, "postcode"),
+          country: pick(b, "country"),
+          accountReference: pick(b, "accountReference"),
+          priceList: pick(b, "priceList"),
+          paymentTerm: pick(b, "paymentTerm"),
+          lastQuoteActivity: pick(b, "lastQuoteActivity"),
+          lastJobActivity: pick(b, "lastJobActivity"),
+          lastInvoiceActivity: pick(b, "lastInvoiceActivity"),
+          lastOpportunityActivity: pick(b, "lastOpportunityActivity"),
+          lastTaskActivity: pick(b, "lastTaskActivity"),
+          dateLeft: pick(b, "dateLeft"),
+          tags: pick(b, "tags"),
+          contactTags: pick(b, "contactTags"),
           vin: pick(b, "vin"),
           vehicleMake: pick(b, "vehicleMake"),
           vehicleModel: pick(b, "vehicleModel"),
@@ -473,11 +800,36 @@ module.exports = async function (context, req) {
       } else {
         const patch = { partitionKey: PARTITION, rowKey: id };
         if (name) patch.name = name;
+        setIfPresent(patch, b, "business");
+        setIfPresent(patch, b, "accountManager");
+        setIfPresent(patch, b, "creator");
+        setIfPresent(patch, b, "position");
+        setIfPresent(patch, b, "title");
         setIfPresent(patch, b, "firstName");
         setIfPresent(patch, b, "lastName");
         if (phone || Object.prototype.hasOwnProperty.call(b, "phone")) patch.phone = phone;
+        setIfPresent(patch, b, "mobile");
         if (email || Object.prototype.hasOwnProperty.call(b, "email")) patch.email = email;
         setIfPresent(patch, b, "address");
+        setIfPresent(patch, b, "address1");
+        setIfPresent(patch, b, "address2");
+        setIfPresent(patch, b, "address3");
+        setIfPresent(patch, b, "town");
+        setIfPresent(patch, b, "county");
+        setIfPresent(patch, b, "state");
+        setIfPresent(patch, b, "postcode");
+        setIfPresent(patch, b, "country");
+        setIfPresent(patch, b, "accountReference");
+        setIfPresent(patch, b, "priceList");
+        setIfPresent(patch, b, "paymentTerm");
+        setIfPresent(patch, b, "lastQuoteActivity");
+        setIfPresent(patch, b, "lastJobActivity");
+        setIfPresent(patch, b, "lastInvoiceActivity");
+        setIfPresent(patch, b, "lastOpportunityActivity");
+        setIfPresent(patch, b, "lastTaskActivity");
+        setIfPresent(patch, b, "dateLeft");
+        setIfPresent(patch, b, "tags");
+        setIfPresent(patch, b, "contactTags");
         setIfPresent(patch, b, "vin");
         setIfPresent(patch, b, "vehicleMake");
         setIfPresent(patch, b, "vehicleModel");

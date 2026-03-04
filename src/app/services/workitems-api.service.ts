@@ -13,6 +13,11 @@ export type WorkItem = {
   checkedInAt?: string;
   completedAt?: string;
   calendarOverrideAt?: string;
+  isPaused?: boolean;
+  pausedAt?: string;
+  lastWorkResumedAt?: string;
+  workDurationMs?: number;
+  pauseDurationMs?: number;
 };
 
 @Injectable({ providedIn: 'root' })

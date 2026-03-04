@@ -332,6 +332,73 @@ export default class DashboardComponent implements OnDestroy {
     return this.lanes().find(lane => lane.id === item.laneId) || null;
   }
 
+  private asMillis(value: string | null | undefined): number {
+    const parsed = Date.parse(String(value || '').trim());
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  private elapsedMs(fromIso: string | null | undefined, toIso: string): number {
+    const from = this.asMillis(fromIso);
+    const to = this.asMillis(toIso);
+    if (!from || !to || to <= from) return 0;
+    return to - from;
+  }
+
+  private safeDuration(value: unknown): number {
+    const duration = Number(value);
+    return Number.isFinite(duration) && duration > 0 ? duration : 0;
+  }
+
+  private buildPausePatch(item: WorkItem, nowIso: string): Partial<WorkItem> {
+    const resumedAt = (item.lastWorkResumedAt || '').trim() || (item.checkedInAt || '').trim();
+    const increment = this.elapsedMs(resumedAt, nowIso);
+    return {
+      isPaused: true,
+      pausedAt: nowIso,
+      lastWorkResumedAt: '',
+      workDurationMs: this.safeDuration(item.workDurationMs) + increment
+    };
+  }
+
+  private buildResumePatch(item: WorkItem, nowIso: string): Partial<WorkItem> {
+    const pausedAt = (item.pausedAt || '').trim();
+    const increment = this.elapsedMs(pausedAt, nowIso);
+    const patch: Partial<WorkItem> = {
+      isPaused: false,
+      pausedAt: '',
+      lastWorkResumedAt: nowIso,
+      pauseDurationMs: this.safeDuration(item.pauseDurationMs) + increment
+    };
+    if (!(item.checkedInAt || '').trim()) patch.checkedInAt = nowIso;
+    return patch;
+  }
+
+  private buildCompletionTimingPatch(item: WorkItem, nowIso: string): Partial<WorkItem> {
+    const isPaused = !!item.isPaused || !!(item.pausedAt || '').trim();
+    const workIncrement = isPaused
+      ? 0
+      : this.elapsedMs((item.lastWorkResumedAt || '').trim() || (item.checkedInAt || '').trim(), nowIso);
+    const pauseIncrement = isPaused ? this.elapsedMs(item.pausedAt, nowIso) : 0;
+
+    return {
+      isPaused: false,
+      pausedAt: '',
+      lastWorkResumedAt: '',
+      workDurationMs: this.safeDuration(item.workDurationMs) + workIncrement,
+      pauseDurationMs: this.safeDuration(item.pauseDurationMs) + pauseIncrement
+    };
+  }
+
+  private resetWorkTimingPatch(): Partial<WorkItem> {
+    return {
+      isPaused: false,
+      pausedAt: '',
+      lastWorkResumedAt: '',
+      workDurationMs: 0,
+      pauseDurationMs: 0
+    };
+  }
+
   canCheckIn(it: WorkItem, lane: Lane): boolean {
     const customerId = (it.customerId || '').trim();
     if (!customerId) return false;
@@ -413,7 +480,18 @@ export default class DashboardComponent implements OnDestroy {
 
     const checkedInAt = new Date().toISOString();
     this.status.set('Checking in customer');
-    this.itemsApi.update({ id: it.id, laneId: inProgressLaneId, checkedInAt }).subscribe({
+    this.itemsApi.update({
+      id: it.id,
+      laneId: inProgressLaneId,
+      checkedInAt,
+      completedAt: '',
+      calendarOverrideAt: '',
+      isPaused: false,
+      pausedAt: '',
+      lastWorkResumedAt: checkedInAt,
+      workDurationMs: this.safeDuration(it.workDurationMs),
+      pauseDurationMs: this.safeDuration(it.pauseDurationMs)
+    }).subscribe({
       next: () => {
         this.items.update(current => {
           const next: Record<string, WorkItem[]> = {};
@@ -430,7 +508,13 @@ export default class DashboardComponent implements OnDestroy {
             ...it,
             laneId: inProgressLaneId,
             checkedInAt,
-            completedAt: ''
+            completedAt: '',
+            calendarOverrideAt: '',
+            isPaused: false,
+            pausedAt: '',
+            lastWorkResumedAt: checkedInAt,
+            workDurationMs: this.safeDuration(it.workDurationMs),
+            pauseDurationMs: this.safeDuration(it.pauseDurationMs)
           });
           next[inProgressLaneId] = target;
           return next;
@@ -453,7 +537,14 @@ export default class DashboardComponent implements OnDestroy {
     if (!this.canRevertCheckIn(it, lane)) return;
 
     this.status.set('Reverting check-in');
-    this.itemsApi.update({ id: it.id, laneId: scheduledId, checkedInAt: '', completedAt: '' }).subscribe({
+    this.itemsApi.update({
+      id: it.id,
+      laneId: scheduledId,
+      checkedInAt: '',
+      completedAt: '',
+      calendarOverrideAt: '',
+      ...this.resetWorkTimingPatch()
+    }).subscribe({
       next: () => {
         this.items.update(current => {
           const next: Record<string, WorkItem[]> = {};
@@ -465,7 +556,9 @@ export default class DashboardComponent implements OnDestroy {
             ...it,
             laneId: scheduledId,
             checkedInAt: '',
-            completedAt: ''
+            completedAt: '',
+            calendarOverrideAt: '',
+            ...this.resetWorkTimingPatch()
           });
           next[scheduledId] = scheduled;
           return next;
@@ -721,22 +814,68 @@ export default class DashboardComponent implements OnDestroy {
     if (!value || typeof value !== 'object') return {};
     const input = value as Record<string, unknown>;
     const out: Record<string, string> = {};
-    for (const [laneId, color] of Object.entries(input)) {
-      const id = String(laneId || '').trim();
+    for (const [laneKey, color] of Object.entries(input)) {
+      const key = String(laneKey || '').trim();
       const hex = String(color || '').trim();
-      if (!id || !hex) continue;
-      out[id] = hex;
+      if (!key || !hex) continue;
+      out[key] = hex;
     }
     return out;
   }
 
-  laneColor(laneId: string): string {
-    return this.laneColors()[laneId] || '';
+  private normalizeLaneName(name: string | null | undefined): string {
+    const value = String(name || '').trim().toLowerCase();
+    if (!value) return '';
+    return value.replace(/\s+/g, '-').replace(/[^a-z0-9_-]/g, '');
   }
 
-  setLaneColor(laneId: string, color: string) {
+  private laneColorStableKey(lane: Lane): string {
+    const explicitStage = String(lane.stageKey || '').trim().toLowerCase();
+    if (explicitStage) return `stage:${explicitStage === 'quote' ? 'lead' : explicitStage}`;
+    const inferredStage = this.laneStageKey(lane);
+    if (inferredStage && inferredStage !== 'custom') return `stage:${inferredStage}`;
+    const normalizedName = this.normalizeLaneName(lane.name);
+    return normalizedName ? `name:${normalizedName}` : `id:${lane.id}`;
+  }
+
+  private laneColorLookupKeys(target: Lane | string): string[] {
+    if (typeof target === 'string') {
+      const id = target.trim();
+      return id ? [`id:${id}`, id] : [];
+    }
+    const id = String(target.id || '').trim();
+    const stable = this.laneColorStableKey(target);
+    const legacyName = this.normalizeLaneName(target.name);
+    const keys = [id ? `id:${id}` : '', stable, id, legacyName];
+    return keys.filter((value, index, list) => value && list.indexOf(value) === index);
+  }
+
+  private laneColorPersistKeys(target: Lane | string): string[] {
+    if (typeof target === 'string') return this.laneColorLookupKeys(target);
+    const id = String(target.id || '').trim();
+    const stable = this.laneColorStableKey(target);
+    const keys = [id ? `id:${id}` : '', stable, id];
+    return keys.filter((value, index, list) => value && list.indexOf(value) === index);
+  }
+
+  laneColor(target: Lane | string): string {
+    const map = this.laneColors();
+    for (const key of this.laneColorLookupKeys(target)) {
+      const value = map[key];
+      if (value) return value;
+    }
+    return '';
+  }
+
+  setLaneColor(target: Lane | string, color: string) {
+    const keys = this.laneColorPersistKeys(target);
+    if (!keys.length) return;
     const m = { ...this.laneColors() };
-    if (!color) delete m[laneId]; else m[laneId] = color;
+    if (!color) {
+      for (const key of keys) delete m[key];
+    } else {
+      for (const key of keys) m[key] = color;
+    }
     this.laneColors.set(m);
   }
 
@@ -1404,13 +1543,6 @@ export default class DashboardComponent implements OnDestroy {
     } else {
       const moved = map[sourceId][event.previousIndex];
       const toCompleted = this.isCompletedLaneById(targetLaneId);
-      if (moved && (moved.checkedInAt || '').trim()) {
-        const fromInProgress = this.isInProgressLaneById(sourceId);
-        if (fromInProgress && !toCompleted) {
-          this.status.set('Checked-in jobs stay in Work In-Progress until moved to Completed.');
-          return;
-        }
-      }
       const movedCustomerId = (moved?.customerId || '').trim();
       if (movedCustomerId && this.isScheduleRequiredLaneById(targetLaneId) && !this.hasCalendarEvent(movedCustomerId)) {
         if (!toCompleted) {
@@ -1429,25 +1561,56 @@ export default class DashboardComponent implements OnDestroy {
       transferArrayItem(map[sourceId], map[targetId], event.previousIndex, event.currentIndex);
       this.items.set(map);
       const updated = map[targetId][event.currentIndex];
+      const fromInProgress = this.isInProgressLaneById(sourceId);
       const toInProgress = this.isInProgressLaneById(targetLaneId);
-      const needsAutoCheckIn = toInProgress && !(updated.checkedInAt || '').trim();
+      const hasCheckIn = !!(updated.checkedInAt || '').trim();
+      const needsAutoCheckIn = toInProgress && !hasCheckIn;
+      const needsResume = toInProgress && hasCheckIn &&
+        (!!updated.isPaused || !!(updated.pausedAt || '').trim() || !(updated.lastWorkResumedAt || '').trim());
+      const needsPause = fromInProgress && !toInProgress && !toCompleted && hasCheckIn && !updated.isPaused;
+      const needsCompletionTiming = toCompleted && hasCheckIn;
       const autoCheckInAt = needsAutoCheckIn ? new Date().toISOString() : '';
       const nowIso = new Date().toISOString();
       const needsCalendarOverride = !!(movedCustomerId && toCompleted && !this.hasCalendarEvent(movedCustomerId));
       if (needsAutoCheckIn) {
-        updated.checkedInAt = autoCheckInAt;
-        updated.completedAt = '';
-        updated.calendarOverrideAt = '';
+        Object.assign(updated, {
+          checkedInAt: autoCheckInAt,
+          completedAt: '',
+          calendarOverrideAt: '',
+          isPaused: false,
+          pausedAt: '',
+          lastWorkResumedAt: autoCheckInAt,
+          workDurationMs: this.safeDuration(updated.workDurationMs),
+          pauseDurationMs: this.safeDuration(updated.pauseDurationMs)
+        });
       }
       const updateBody: Partial<WorkItem> & { id: string } = { id: updated.id, laneId: targetLaneId };
       if (needsAutoCheckIn) {
         updateBody.checkedInAt = autoCheckInAt;
         updateBody.completedAt = '';
         updateBody.calendarOverrideAt = '';
+        updateBody.isPaused = false;
+        updateBody.pausedAt = '';
+        updateBody.lastWorkResumedAt = autoCheckInAt;
+        updateBody.workDurationMs = this.safeDuration(updated.workDurationMs);
+        updateBody.pauseDurationMs = this.safeDuration(updated.pauseDurationMs);
+      } else if (needsResume) {
+        const patch = this.buildResumePatch(updated, nowIso);
+        Object.assign(updated, patch);
+        Object.assign(updateBody, patch);
+      } else if (needsPause) {
+        const patch = this.buildPausePatch(updated, nowIso);
+        Object.assign(updated, patch);
+        Object.assign(updateBody, patch);
       }
       if (toCompleted) {
         updateBody.completedAt = nowIso;
         updated.completedAt = nowIso;
+        if (needsCompletionTiming) {
+          const patch = this.buildCompletionTimingPatch(updated, nowIso);
+          Object.assign(updated, patch);
+          Object.assign(updateBody, patch);
+        }
         if (needsCalendarOverride) {
           updateBody.calendarOverrideAt = '';
           updated.calendarOverrideAt = '';

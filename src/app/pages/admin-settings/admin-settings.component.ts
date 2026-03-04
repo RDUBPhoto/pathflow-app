@@ -23,6 +23,7 @@ import {
   IonTitle,
   IonToolbar
 } from '@ionic/angular/standalone';
+import { ActivatedRoute } from '@angular/router';
 import { addIcons } from 'ionicons';
 import {
   cloudUploadOutline,
@@ -58,6 +59,12 @@ import { InventoryApiService, InventoryConnector } from '../../services/inventor
 import { AppSettingsApiService } from '../../services/app-settings-api.service';
 import { TenantContextService } from '../../services/tenant-context.service';
 import { environment } from '../../../environments/environment';
+import {
+  CustomerImportResponse,
+  CustomerImportRow,
+  CustomersApi
+} from '../../services/customers-api.service';
+import * as XLSX from 'xlsx';
 
 interface AdminUser {
   id: string;
@@ -74,8 +81,20 @@ interface AppIntegration {
   summary: string;
 }
 
+type Bay = { id: string; name: string };
+type ScheduleSettings = {
+  bays: Bay[];
+  openHour: number;
+  closeHour: number;
+  showWeekends: boolean;
+  holidays: string[];
+  federalYear: number;
+  federalInitialized: boolean;
+};
+
 const ADMIN_USERS_SETTING_KEY = 'admin.users';
 const ADMIN_INTEGRATIONS_SETTING_KEY = 'admin.integrations';
+const SCHEDULE_SETTINGS_KEY = 'schedule.settings';
 const DEFAULT_ADMIN_USERS: AdminUser[] = [
   {
     id: 'u-1',
@@ -126,7 +145,15 @@ const DEFAULT_INTEGRATIONS: AppIntegration[] = [
   }
 ];
 
-type AdminSectionKey = 'branding' | 'users' | 'sms' | 'widget' | 'email' | 'integrations';
+type AdminSectionKey =
+  | 'branding'
+  | 'users'
+  | 'customerImport'
+  | 'schedule'
+  | 'sms'
+  | 'widget'
+  | 'email'
+  | 'integrations';
 
 type AdminSection = {
   key: AdminSectionKey;
@@ -154,6 +181,123 @@ type WidgetLeadResponse = {
     confirmationMessageId: string | null;
     confirmationError: string | null;
   };
+};
+
+const ZIGAFLOW_EXPECTED_HEADERS = [
+  'Business',
+  'Account Manager',
+  'Creator',
+  'Position',
+  'Title',
+  'First Name',
+  'Last Name',
+  'Notes',
+  'Tags',
+  'Telephone',
+  'Mobile',
+  'Email',
+  'Address 1',
+  'Address 2',
+  'Address 3',
+  'Town',
+  'County/State/Province',
+  'State',
+  'Postcode',
+  'Country',
+  'Account Reference',
+  'Price List',
+  'Payment Term',
+  'Last Quote Activity',
+  'Last Job Activity',
+  'Last Invoice Activity',
+  'Last Opportunity Activity',
+  'Last Task Activity',
+  'Date Left',
+  'ContactTags'
+] as const;
+
+const CUSTOMER_IMPORT_TARGET_FIELDS: Array<{ key: keyof CustomerImportRow; label: string }> = [
+  { key: 'business', label: 'Business' },
+  { key: 'accountManager', label: 'Account Manager' },
+  { key: 'creator', label: 'User (Logged in)' },
+  { key: 'position', label: 'Position' },
+  { key: 'title', label: 'Title' },
+  { key: 'firstName', label: 'First Name' },
+  { key: 'lastName', label: 'Last Name' },
+  { key: 'name', label: 'Full Name' },
+  { key: 'notes', label: 'Notes' },
+  { key: 'tags', label: 'Tags' },
+  { key: 'phone', label: 'Telephone' },
+  { key: 'mobile', label: 'Mobile' },
+  { key: 'email', label: 'Email' },
+  { key: 'address', label: 'Address (single line)' },
+  { key: 'address1', label: 'Address 1' },
+  { key: 'address2', label: 'Address 2' },
+  { key: 'address3', label: 'Address 3' },
+  { key: 'town', label: 'City' },
+  { key: 'county', label: 'County / State / Province' },
+  { key: 'state', label: 'State' },
+  { key: 'postcode', label: 'Postcode' },
+  { key: 'country', label: 'Country' },
+  { key: 'accountReference', label: 'Account Reference' },
+  { key: 'priceList', label: 'Price List' },
+  { key: 'paymentTerm', label: 'Payment Term' },
+  { key: 'lastQuoteActivity', label: 'Last Quote Activity' },
+  { key: 'lastJobActivity', label: 'Last Job Activity' },
+  { key: 'lastInvoiceActivity', label: 'Last Invoice Activity' },
+  { key: 'lastOpportunityActivity', label: 'Last Opportunity Activity' },
+  { key: 'lastTaskActivity', label: 'Last Task Activity' },
+  { key: 'dateLeft', label: 'Date Left' },
+  { key: 'contactTags', label: 'Contact Tags' }
+];
+
+const CUSTOMER_IMPORT_HEADER_MAP: Record<string, keyof CustomerImportRow> = {
+  business: 'business',
+  company: 'business',
+  accountmanager: 'accountManager',
+  creator: 'creator',
+  userloggedin: 'creator',
+  createdby: 'creator',
+  createdbyuser: 'creator',
+  position: 'position',
+  title: 'title',
+  firstname: 'firstName',
+  lastname: 'lastName',
+  fullname: 'name',
+  name: 'name',
+  customername: 'name',
+  notes: 'notes',
+  tags: 'tags',
+  telephone: 'phone',
+  phone: 'phone',
+  phonenumber: 'phone',
+  mobile: 'mobile',
+  mobilenumber: 'mobile',
+  email: 'email',
+  emailaddress: 'email',
+  address: 'address',
+  address1: 'address1',
+  address2: 'address2',
+  address3: 'address3',
+  city: 'town',
+  town: 'town',
+  countystateprovince: 'county',
+  county: 'county',
+  state: 'state',
+  postcode: 'postcode',
+  zipcode: 'postcode',
+  zip: 'postcode',
+  country: 'country',
+  accountreference: 'accountReference',
+  pricelist: 'priceList',
+  paymentterm: 'paymentTerm',
+  lastquoteactivity: 'lastQuoteActivity',
+  lastjobactivity: 'lastJobActivity',
+  lastinvoiceactivity: 'lastInvoiceActivity',
+  lastopportunityactivity: 'lastOpportunityActivity',
+  lasttaskactivity: 'lastTaskActivity',
+  dateleft: 'dateLeft',
+  contacttags: 'contactTags'
 };
 
 @Component({
@@ -197,6 +341,8 @@ export default class AdminSettingsComponent implements OnInit {
   private readonly inventoryApi = inject(InventoryApiService);
   private readonly settingsApi = inject(AppSettingsApiService);
   private readonly tenantContext = inject(TenantContextService);
+  private readonly route = inject(ActivatedRoute);
+  private readonly customersApi = inject(CustomersApi);
 
   readonly users = signal<AdminUser[]>(this.cloneDefaultUsers());
   readonly integrations = signal<AppIntegration[]>(this.cloneDefaultIntegrations());
@@ -216,6 +362,18 @@ export default class AdminSettingsComponent implements OnInit {
       label: 'User Access',
       description: 'Roles and team member management',
       icon: 'shield-checkmark-outline'
+    },
+    {
+      key: 'customerImport',
+      label: 'Data Imports',
+      description: 'Import customers, inventory, and more',
+      icon: 'cloud-upload-outline'
+    },
+    {
+      key: 'schedule',
+      label: 'Schedule',
+      description: 'Business hours, weekends, and calendar bays',
+      icon: 'settings-outline'
     },
     {
       key: 'sms',
@@ -247,6 +405,17 @@ export default class AdminSettingsComponent implements OnInit {
   readonly logoUrl = computed(() => this.branding.logoUrl());
   readonly hasCustomLogo = computed(() => this.logoUrl() !== this.branding.defaultLogoUrl);
   readonly widgetTenantId = computed(() => this.tenantContext.tenantId());
+  readonly openHourOptions = Array.from({ length: 24 }, (_, hour) => ({
+    value: hour,
+    label: this.formatHourLabel(hour)
+  }));
+  readonly closeHourOptions = Array.from({ length: 24 }, (_, index) => {
+    const value = index + 1;
+    return {
+      value,
+      label: this.formatHourLabel(value % 24)
+    };
+  });
 
   newUserName = '';
   newUserEmail = '';
@@ -300,7 +469,25 @@ export default class AdminSettingsComponent implements OnInit {
   widgetTestSmsOptIn = true;
   supplierStatus = '';
   supplierError = '';
+  scheduleStatus = '';
+  scheduleError = '';
+  scheduleOpenHour = 7;
+  scheduleCloseHour = 16;
+  scheduleShowWeekends = false;
+  scheduleBays: Bay[] = [];
+  private scheduleSettingsLoaded = false;
   private adminSettingsLoaded = false;
+  readonly customerImporting = signal(false);
+  readonly customerImportResult = signal<CustomerImportResponse | null>(null);
+  readonly customerImportTargetFields = CUSTOMER_IMPORT_TARGET_FIELDS;
+  readonly customerImportExpectedHeaders = [...ZIGAFLOW_EXPECTED_HEADERS];
+  selectedImportType: 'customers' | 'inventory' = 'customers';
+  customerImportFileName = '';
+  customerImportHeaders: string[] = [];
+  customerImportRows: Array<Record<string, string>> = [];
+  customerImportMappings: Array<{ source: string; target: keyof CustomerImportRow | '' }> = [];
+  customerImportStatus = '';
+  customerImportError = '';
 
   constructor() {
     addIcons({
@@ -325,6 +512,11 @@ export default class AdminSettingsComponent implements OnInit {
   }
 
   ngOnInit(): void {
+    const sectionParam = (this.route.snapshot.queryParamMap.get('section') || '').trim();
+    const matchingSection = this.sections.find(section => section.key === sectionParam);
+    if (matchingSection) {
+      this.activeSection.set(matchingSection.key);
+    }
     this.loadPersistedAdminSettings();
     this.loadSmsConfig();
     this.loadEmailAdminData();
@@ -368,6 +560,169 @@ export default class AdminSettingsComponent implements OnInit {
 
   setActiveSection(section: AdminSectionKey): void {
     this.activeSection.set(section);
+  }
+
+  async onCustomerImportFileSelected(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    this.customerImportError = '';
+    this.customerImportStatus = '';
+    this.customerImportResult.set(null);
+
+    try {
+      const workbook = XLSX.read(await file.arrayBuffer(), {
+        type: 'array',
+        cellDates: true
+      });
+      const firstSheetName = workbook.SheetNames?.[0];
+      const sheet = firstSheetName ? workbook.Sheets[firstSheetName] : null;
+      if (!sheet) {
+        this.customerImportError = 'No worksheet found in this file.';
+        return;
+      }
+
+      const headerMatrix = XLSX.utils.sheet_to_json<(string | number | null)[]>(sheet, {
+        header: 1,
+        raw: false,
+        blankrows: false
+      });
+      const rawHeaders = (headerMatrix[0] || [])
+        .map(value => String(value ?? '').trim())
+        .filter(Boolean);
+      if (!rawHeaders.length) {
+        this.customerImportError = 'No header row found. Include a header row in row 1.';
+        return;
+      }
+
+      const records = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+        raw: false,
+        defval: '',
+        blankrows: false
+      });
+      const rows = records.map(record => {
+        const mapped: Record<string, string> = {};
+        for (const header of rawHeaders) {
+          mapped[header] = String(record[header] ?? '').trim();
+        }
+        return mapped;
+      });
+
+      this.customerImportFileName = file.name;
+      this.customerImportHeaders = rawHeaders;
+      this.customerImportRows = rows;
+      this.customerImportMappings = rawHeaders.map(source => ({
+        source,
+        target: this.autoMapCustomerImportHeader(source)
+      }));
+      this.customerImportStatus = `Loaded ${rows.length} row(s) from ${file.name}.`;
+    } catch {
+      this.customerImportError = 'Could not read this file. Use a valid CSV or Excel file.';
+    }
+  }
+
+  mappedCustomerImportCount(): number {
+    return this.customerImportMappings.filter(item => !!item.target).length;
+  }
+
+  missingExpectedImportHeaders(): string[] {
+    if (!this.customerImportHeaders.length) return [];
+    const existing = new Set(this.customerImportHeaders.map(header => this.normalizeImportHeader(header)));
+    return this.customerImportExpectedHeaders.filter(
+      expected => !existing.has(this.normalizeImportHeader(expected))
+    );
+  }
+
+  canRunCustomerImport(): boolean {
+    if (this.customerImporting()) return false;
+    if (!this.customerImportRows.length) return false;
+    const hasIdentityField = this.customerImportMappings.some(item =>
+      item.target === 'email' ||
+      item.target === 'phone' ||
+      item.target === 'mobile' ||
+      item.target === 'name' ||
+      item.target === 'firstName' ||
+      item.target === 'lastName'
+    );
+    return hasIdentityField;
+  }
+
+  importCustomersFromFile(): void {
+    if (!this.canRunCustomerImport()) {
+      this.customerImportError =
+        'Map at least one identity column (email, phone/mobile, name or first/last name) before importing.';
+      return;
+    }
+
+    const rows = this.buildMappedCustomerImportRows();
+    if (!rows.length) {
+      this.customerImportError = 'No non-empty rows found after mapping.';
+      return;
+    }
+
+    this.customerImporting.set(true);
+    this.customerImportError = '';
+    this.customerImportStatus = '';
+    this.customerImportResult.set(null);
+
+    this.customersApi
+      .importRows(rows)
+      .pipe(finalize(() => this.customerImporting.set(false)))
+      .subscribe({
+        next: result => {
+          this.customerImportResult.set(result);
+          this.customerImportStatus =
+            `Import finished. Created ${result.created}, updated ${result.updated}, ` +
+            `skipped ${result.skipped}${result.errors.length ? `, errors ${result.errors.length}` : ''}.`;
+        },
+        error: err => {
+          const message = this.extractApiError(err, 'Customer import failed.');
+          if (message.toLowerCase().includes('name required')) {
+            this.customerImportError =
+              'Customer import failed. The API received this as a single-customer request instead of an import batch. Please retry (we now send smaller batches).';
+            return;
+          }
+          this.customerImportError = message;
+        }
+      });
+  }
+
+  private buildMappedCustomerImportRows(): CustomerImportRow[] {
+    const activeMappings = this.customerImportMappings.filter(item => !!item.target) as Array<{
+      source: string;
+      target: keyof CustomerImportRow;
+    }>;
+
+    return this.customerImportRows
+      .map(sourceRow => {
+        const out: CustomerImportRow = {};
+        for (const mapping of activeMappings) {
+          const value = String(sourceRow[mapping.source] ?? '').trim();
+          if (!value) continue;
+          out[mapping.target] = value as never;
+        }
+
+        if (!out.name) {
+          const firstName = String(out.firstName || '').trim();
+          const lastName = String(out.lastName || '').trim();
+          const full = `${firstName} ${lastName}`.trim();
+          if (full) out.name = full;
+        }
+
+        return out;
+      })
+      .filter(row => Object.keys(row).length > 0);
+  }
+
+  private autoMapCustomerImportHeader(header: string): keyof CustomerImportRow | '' {
+    return CUSTOMER_IMPORT_HEADER_MAP[this.normalizeImportHeader(header)] || '';
+  }
+
+  private normalizeImportHeader(value: string): string {
+    return String(value || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
   }
 
   toggleIntegration(key: string): void {
@@ -1166,6 +1521,67 @@ export default class AdminSettingsComponent implements OnInit {
     return /^[A-HJ-NPR-Z0-9]{17}$/.test(String(value || '').trim().toUpperCase());
   }
 
+  addScheduleBay(): void {
+    const id = `bay-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    this.scheduleBays = [
+      ...this.scheduleBays,
+      {
+        id,
+        name: `Bay ${this.scheduleBays.length + 1}`
+      }
+    ];
+    this.scheduleStatus = '';
+    this.scheduleError = '';
+  }
+
+  removeScheduleBay(id: string): void {
+    this.scheduleBays = this.scheduleBays.filter(bay => bay.id !== id);
+    this.scheduleStatus = '';
+    this.scheduleError = '';
+  }
+
+  canSaveScheduleSettings(): boolean {
+    return !this.scheduleValidationError();
+  }
+
+  saveScheduleSettings(): void {
+    const validationError = this.scheduleValidationError();
+    if (validationError) {
+      this.scheduleError = validationError;
+      this.scheduleStatus = '';
+      return;
+    }
+
+    const openHour = Math.min(23, Math.max(0, Number(this.scheduleOpenHour) || 0));
+    let closeHour = Math.min(24, Math.max(1, Number(this.scheduleCloseHour) || 1));
+    if (closeHour <= openHour) {
+      closeHour = Math.min(24, openHour + 1);
+    }
+
+    const current = this.defaultScheduleSettings();
+    const settings: ScheduleSettings = {
+      ...current,
+      openHour,
+      closeHour,
+      showWeekends: !!this.scheduleShowWeekends,
+      bays: this.scheduleBays.map(bay => ({
+        id: bay.id,
+        name: (bay.name || '').trim() || bay.id
+      }))
+    };
+
+    this.settingsApi.setValue(SCHEDULE_SETTINGS_KEY, settings).subscribe({
+      next: () => {
+        this.scheduleStatus = 'Schedule settings saved.';
+        this.scheduleError = '';
+      },
+      error: () => {
+        this.scheduleError = 'Could not save schedule settings.';
+        this.scheduleStatus = '';
+      }
+    });
+  }
+
   private cloneDefaultUsers(): AdminUser[] {
     return DEFAULT_ADMIN_USERS.map(item => ({ ...item }));
   }
@@ -1177,12 +1593,87 @@ export default class AdminSettingsComponent implements OnInit {
   private loadPersistedAdminSettings(): void {
     forkJoin({
       users: this.settingsApi.getValue<AdminUser[]>(ADMIN_USERS_SETTING_KEY),
-      integrations: this.settingsApi.getValue<AppIntegration[]>(ADMIN_INTEGRATIONS_SETTING_KEY)
-    }).subscribe(({ users, integrations }) => {
+      integrations: this.settingsApi.getValue<AppIntegration[]>(ADMIN_INTEGRATIONS_SETTING_KEY),
+      schedule: this.settingsApi.getValue<ScheduleSettings>(SCHEDULE_SETTINGS_KEY)
+    }).subscribe(({ users, integrations, schedule }) => {
       this.users.set(this.normalizeUsers(users));
       this.integrations.set(this.normalizeIntegrations(integrations));
+      this.applyScheduleSettings(this.normalizeScheduleSettings(schedule));
       this.adminSettingsLoaded = true;
+      this.scheduleSettingsLoaded = true;
     });
+  }
+
+  private defaultScheduleSettings(): ScheduleSettings {
+    return {
+      bays: [
+        { id: 'bay-1', name: 'Two-Post Lift 1' },
+        { id: 'bay-2', name: 'Two-Post Lift 2' },
+        { id: 'bay-3', name: 'Two-Post Lift 3' },
+        { id: 'bay-4', name: 'Two-Post Lift 4' },
+        { id: 'bay-5', name: 'Four-Post Lift' }
+      ],
+      openHour: 7,
+      closeHour: 16,
+      showWeekends: false,
+      holidays: [],
+      federalYear: new Date().getFullYear(),
+      federalInitialized: false
+    };
+  }
+
+  private normalizeScheduleSettings(value: unknown): ScheduleSettings {
+    const parsed = value && typeof value === 'object' ? (value as Partial<ScheduleSettings>) : {};
+    const base = this.defaultScheduleSettings();
+    const bays = Array.isArray(parsed.bays)
+      ? parsed.bays
+          .map(item => (item && typeof item === 'object' ? item : null))
+          .filter((item): item is Bay => !!item)
+          .map((item, index) => {
+            const id = String((item as Partial<Bay>).id || '').trim() || `bay-${Date.now()}-${index}`;
+            const name = String((item as Partial<Bay>).name || '').trim() || id;
+            return { id, name };
+          })
+      : [];
+    return {
+      bays: bays.length ? bays : base.bays,
+      openHour: Number.isFinite(parsed.openHour) ? Number(parsed.openHour) : base.openHour,
+      closeHour: Number.isFinite(parsed.closeHour) ? Number(parsed.closeHour) : base.closeHour,
+      showWeekends: typeof parsed.showWeekends === 'boolean' ? parsed.showWeekends : base.showWeekends,
+      holidays: Array.isArray(parsed.holidays) ? parsed.holidays.map(v => String(v || '')) : base.holidays,
+      federalYear: Number.isFinite(parsed.federalYear) ? Number(parsed.federalYear) : base.federalYear,
+      federalInitialized:
+        typeof parsed.federalInitialized === 'boolean' ? parsed.federalInitialized : base.federalInitialized
+    };
+  }
+
+  private applyScheduleSettings(settings: ScheduleSettings): void {
+    this.scheduleOpenHour = settings.openHour;
+    this.scheduleCloseHour = settings.closeHour;
+    this.scheduleShowWeekends = !!settings.showWeekends;
+    this.scheduleBays = settings.bays.map(bay => ({ ...bay }));
+  }
+
+  private scheduleValidationError(): string {
+    const openHour = Math.min(23, Math.max(0, Number(this.scheduleOpenHour) || 0));
+    const closeHour = Math.min(24, Math.max(1, Number(this.scheduleCloseHour) || 1));
+    if (closeHour <= openHour) {
+      return 'Close time must be after open time.';
+    }
+    if (!this.scheduleBays.length) {
+      return 'At least one bay is required.';
+    }
+    if (this.scheduleBays.some(bay => !(bay.name || '').trim())) {
+      return 'Each bay needs a name.';
+    }
+    return '';
+  }
+
+  private formatHourLabel(hour24: number): string {
+    const normalized = ((hour24 % 24) + 24) % 24;
+    const suffix = normalized >= 12 ? 'PM' : 'AM';
+    const hour12 = normalized % 12 || 12;
+    return `${hour12}:00 ${suffix}`;
   }
 
   private normalizeUsers(value: unknown): AdminUser[] {

@@ -6,9 +6,9 @@
     <ion-title>Schedule</ion-title>
     <app-company-switcher></app-company-switcher>
     <ion-buttons slot="end" class="ion-margin-end">
-      <ion-button (click)="openSettings()">
+      <ion-button fill="clear" [routerLink]="['/admin-settings']" [queryParams]="{ section: 'schedule' }">
         <ion-icon slot="start" name="settings-outline"></ion-icon>
-        Settings
+        Calendar Settings
       </ion-button>
       <app-user-menu></app-user-menu>
       <ion-spinner name="crescent" *ngIf="loading()"></ion-spinner>
@@ -189,150 +189,6 @@
           </div>
         </div>
         <div class="validation-error footer-validation" *ngIf="editorValidationError()">{{ editorValidationError() }}</div>
-      </ion-toolbar>
-    </ion-footer>
-  </ng-template>
-</ion-modal>
-
-<ion-modal [isOpen]="settingsOpen()" (didDismiss)="settingsOpen.set(false)">
-  <ng-template>
-    <ion-header>
-      <ion-toolbar>
-        <ion-title>Schedule Settings</ion-title>
-        <ion-buttons slot="end">
-          <ion-button (click)="settingsOpen.set(false)">Close</ion-button>
-        </ion-buttons>
-      </ion-toolbar>
-    </ion-header>
-    <ion-content class="ion-padding glass-bg settings-content modal-form-content">
-      <div class="settings-section glass-surface">
-        <div class="settings-section-head">
-          <h3>Business Hours</h3>
-          <p>Define when scheduling is available.</p>
-        </div>
-
-        <div class="hours-grid">
-          <ion-item lines="none">
-            <ion-label position="stacked">Open time</ion-label>
-            <ion-select
-              interface="popover"
-              [value]="settingsOpenHour()"
-              (ionChange)="onSettingsOpenHourChange($event.detail.value)">
-              <ion-select-option *ngFor="let option of openHourOptions" [value]="option.value">
-                {{ option.label }}
-              </ion-select-option>
-            </ion-select>
-          </ion-item>
-
-          <ion-item lines="none">
-            <ion-label position="stacked">Close time</ion-label>
-            <ion-select
-              interface="popover"
-              [value]="settingsCloseHour()"
-              (ionChange)="onSettingsCloseHourChange($event.detail.value)">
-              <ion-select-option *ngFor="let option of closeHourOptions" [value]="option.value">
-                {{ option.label }}
-              </ion-select-option>
-            </ion-select>
-          </ion-item>
-        </div>
-
-        <ion-item lines="none" class="weekend-toggle">
-          <ion-label>
-            <div class="toggle-title">Show weekends</div>
-            <div class="toggle-help">Display Saturday and Sunday in the scheduler.</div>
-          </ion-label>
-          <ion-toggle slot="end" [checked]="settingsShowWeekends()" (ionChange)="settingsShowWeekends.set($event.detail.checked)"></ion-toggle>
-        </ion-item>
-      </div>
-
-      <div class="settings-section glass-surface">
-        <div class="settings-section-head">
-          <h3>Bays (Lifts/Categories)</h3>
-          <p>Manage lift categories shown on the calendar.</p>
-        </div>
-        <ion-button size="small" fill="outline" (click)="addBay()">
-          <ion-icon name="add-outline" slot="start"></ion-icon>
-          Add bay
-        </ion-button>
-
-        <div class="bay-list">
-          <ion-item lines="none" *ngFor="let b of settingsBays()">
-            <ion-input [ngModel]="b.name" (ngModelChange)="b.name = $event"></ion-input>
-            <ion-button slot="end" size="small" fill="clear" color="danger" (click)="removeBay(b.id)">
-              <ion-icon name="trash-outline"></ion-icon>
-            </ion-button>
-          </ion-item>
-        </div>
-      </div>
-
-      <div class="settings-section glass-surface">
-        <div class="settings-section-head">
-          <h3>Custom Holidays</h3>
-          <p>Closed dates you want blocked on the schedule.</p>
-        </div>
-        <div class="holiday-add-row">
-          <ion-item lines="none">
-            <ion-label position="stacked">Add holiday</ion-label>
-            <ion-input type="date" [ngModel]="newHolidayDate()" (ngModelChange)="newHolidayDate.set($event)"></ion-input>
-          </ion-item>
-          <ion-button size="small" fill="outline" (click)="addHoliday()" [disabled]="!newHolidayDate().trim()">Add</ion-button>
-        </div>
-
-        <div class="holiday-list">
-          <ion-item lines="none" *ngFor="let h of settingsHolidays()">
-            <ion-label>{{ h }}</ion-label>
-            <ion-button slot="end" size="small" fill="clear" color="danger" (click)="removeHoliday(h)">
-              <ion-icon name="trash-outline"></ion-icon>
-            </ion-button>
-          </ion-item>
-        </div>
-      </div>
-
-      <div class="settings-section glass-surface">
-        <div class="settings-section-head">
-          <h3>US Federal Holidays</h3>
-          <p>Apply standard federal holidays for a specific year.</p>
-        </div>
-        <div class="federal-toolbar">
-          <ion-item lines="none">
-            <ion-label position="stacked">Year</ion-label>
-            <ion-input
-              type="number"
-              min="1900"
-              max="2100"
-              [ngModel]="settingsFederalYear()"
-              (ngModelChange)="updateFederalYear($event)">
-            </ion-input>
-          </ion-item>
-          <ion-button size="small" fill="outline" (click)="applyFederalHolidays()">Add all</ion-button>
-        </div>
-
-        <div class="federal-list">
-          <ion-item lines="none" *ngFor="let f of federalHolidayList()">
-            <ion-label>
-              <div class="federal-name">{{ f.name }}</div>
-              <div class="federal-date">{{ f.date }}</div>
-            </ion-label>
-            <ion-toggle
-              slot="end"
-              [checked]="settingsHolidays().includes(f.date)"
-              (ionChange)="toggleFederalHoliday(f.date, $event.detail.checked)">
-            </ion-toggle>
-          </ion-item>
-        </div>
-      </div>
-
-    </ion-content>
-    <ion-footer class="modal-form-footer">
-      <ion-toolbar>
-        <div class="modal-footer-row">
-          <div class="modal-footer-right">
-            <ion-button fill="outline" (click)="settingsOpen.set(false)">Cancel</ion-button>
-            <ion-button class="settings-save-button" fill="solid" (click)="saveSettings()" [disabled]="!canSaveSettings()">Save</ion-button>
-          </div>
-        </div>
-        <div class="validation-error footer-validation" *ngIf="settingsValidationError()">{{ settingsValidationError() }}</div>
       </ion-toolbar>
     </ion-footer>
   </ng-template>

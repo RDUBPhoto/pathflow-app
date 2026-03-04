@@ -287,7 +287,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   }
 
   invoiceAttentionCount(): number {
-    return this.customerInvoices().filter(invoice => invoice.stage !== 'paid').length;
+    return this.customerInvoices().filter(invoice => invoice.stage === 'draft' || invoice.stage === 'sent').length;
   }
 
   readonly palette: ColorOpt[] = [
@@ -1384,8 +1384,9 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   }
 
   invoiceBadgeColor(invoice: InvoiceCard): string {
-    if (invoice.stage === 'paid') return 'success';
-    if (invoice.stage === 'cancelled') return 'danger';
+    if (invoice.stage === 'accepted') return 'success';
+    if (invoice.stage === 'declined') return 'danger';
+    if (invoice.stage === 'expired') return 'medium';
     if (invoice.stage === 'draft') return 'warning';
     if (invoice.stage === 'sent') return 'primary';
     return 'medium';

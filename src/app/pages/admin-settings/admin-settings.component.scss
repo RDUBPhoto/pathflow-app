@@ -198,6 +198,172 @@ ion-card-title {
   gap: 12px;
 }
 
+.customer-import-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.import-type-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 999px;
+  padding: 4px;
+  background: color-mix(in srgb, var(--app-surface-2) 82%, transparent);
+}
+
+.import-type-btn {
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--app-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+
+.import-type-btn.active {
+  background: var(--app-nav-active-bg);
+  color: var(--app-nav-active-text);
+}
+
+.customer-import-column {
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 12px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--app-surface-2) 82%, transparent);
+}
+
+.customer-import-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.customer-import-summary {
+  margin-top: 10px;
+  font-size: 12px;
+  display: grid;
+  gap: 4px;
+  color: var(--app-text-muted);
+}
+
+.customer-import-warning {
+  margin-top: 10px;
+  border: 1px solid color-mix(in srgb, var(--ion-color-warning, #f59e0b) 35%, var(--app-border-subtle));
+  border-radius: 10px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--ion-color-warning, #f59e0b) 10%, transparent);
+}
+
+.customer-import-warning .warning-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.customer-import-warning .warning-list {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.customer-import-warning .warning-pill {
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+.customer-import-mapping-list {
+  margin-top: 10px;
+  display: grid;
+  gap: 8px;
+  max-height: 420px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.customer-import-mapping-row {
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 10px;
+  padding: 8px;
+  background: var(--app-control-bg);
+}
+
+.customer-import-mapping-row .mapping-source {
+  margin-bottom: 6px;
+}
+
+.customer-import-mapping-row .source-label {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.customer-import-preview {
+  margin-top: 14px;
+}
+
+.customer-import-table-wrap {
+  margin-top: 8px;
+  overflow: auto;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 10px;
+}
+
+.customer-import-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 820px;
+  font-size: 12px;
+}
+
+.customer-import-table th,
+.customer-import-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--app-border-subtle);
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.customer-import-table th {
+  font-weight: 700;
+  background: color-mix(in srgb, var(--app-surface-2) 85%, transparent);
+}
+
+.customer-import-results {
+  margin-top: 14px;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 10px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--app-surface-2) 82%, transparent);
+}
+
+.customer-import-result-badges {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.customer-import-error-list {
+  margin-top: 10px;
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.customer-import-error-list .error-row {
+  color: var(--ion-color-danger, #ef4444);
+}
+
 .email-column {
   border: 1px solid var(--app-border-subtle);
   border-radius: 12px;
@@ -383,6 +549,10 @@ ion-card-title {
   }
 
   .widget-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .customer-import-grid {
     grid-template-columns: 1fr;
   }
 

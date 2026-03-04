@@ -64,7 +64,7 @@
 
 .invoices-kpis {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -89,12 +89,16 @@
   background: #f59e0b;
 }
 
-.kpi-card.tone-paid::before {
+.kpi-card.tone-accepted::before {
   background: #22c55e;
 }
 
-.kpi-card.tone-cancelled::before {
+.kpi-card.tone-declined::before {
   background: #ef4444;
+}
+
+.kpi-card.tone-expired::before {
+  background: #64748b;
 }
 
 .kpi-label {

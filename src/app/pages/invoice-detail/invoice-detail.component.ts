@@ -2,6 +2,7 @@ import { CommonModule, CurrencyPipe, DatePipe } from '@angular/common';
 import { Component, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { IonButton, IonButtons, IonContent, IonHeader, IonTitle, IonToolbar } from '@ionic/angular/standalone';
+import { firstValueFrom } from 'rxjs';
 import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
 import { PageBackButtonComponent } from '../../components/navigation/page-back-button/page-back-button.component';
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
@@ -12,7 +13,9 @@ import {
   InvoiceStage,
   InvoicesDataService
 } from '../../services/invoices-data.service';
+import { Lane, LanesApi } from '../../services/lanes-api.service';
 import { PaymentGatewaySettingsService } from '../../services/payment-gateway-settings.service';
+import { WorkItem, WorkItemsApi } from '../../services/workitems-api.service';
 
 type StatusTone = 'neutral' | 'success' | 'error';
 
@@ -41,6 +44,8 @@ export default class InvoiceDetailComponent {
   private readonly router = inject(Router);
   private readonly invoicesData = inject(InvoicesDataService);
   private readonly paymentSettings = inject(PaymentGatewaySettingsService);
+  private readonly lanesApi = inject(LanesApi);
+  private readonly workItemsApi = inject(WorkItemsApi);
 
   readonly loading = signal(true);
   readonly saving = signal(false);
@@ -51,7 +56,7 @@ export default class InvoiceDetailComponent {
   readonly invoice = signal<InvoiceDetail | null>(null);
   private readonly baselineSnapshot = signal('');
 
-  readonly stageOptions: InvoiceStage[] = ['draft', 'approved', 'sent', 'paid', 'cancelled'];
+  readonly stageOptions: InvoiceStage[] = ['draft', 'sent', 'accepted', 'declined', 'expired'];
   readonly paymentAvailability = this.paymentSettings.paymentLinkAvailability;
 
   readonly totals = computed(() => {
@@ -200,6 +205,7 @@ export default class InvoiceDetailComponent {
     this.saving.set(true);
     this.clearStatus();
     try {
+      const previousStage = this.invoicesData.getInvoiceById(current.id)?.stage || current.stage;
       let next = this.cloneInvoice(current);
       next.lineItems = next.lineItems.map(line => this.recalculateLine(line));
 
@@ -217,9 +223,16 @@ export default class InvoiceDetailComponent {
       }
 
       const saved = this.invoicesData.saveInvoice(next);
+      const autoCompleteOutcome = await this.autoCompleteWorkItemOnInvoiceAccepted(previousStage, saved);
       this.invoice.set(saved);
       this.baselineSnapshot.set(this.snapshot(saved));
-      this.setStatus(`${saved.invoiceNumber} saved.`, 'success');
+      if (autoCompleteOutcome === 'completed') {
+        this.setStatus(`${saved.invoiceNumber} saved. Work item moved to Completed.`, 'success');
+      } else if (autoCompleteOutcome === 'failed') {
+        this.setStatus(`${saved.invoiceNumber} saved. Could not auto-complete active work item.`, 'neutral');
+      } else {
+        this.setStatus(`${saved.invoiceNumber} saved.`, 'success');
+      }
     } catch {
       this.setStatus('Could not save invoice.', 'error');
     } finally {
@@ -276,6 +289,133 @@ export default class InvoiceDetailComponent {
     };
   }
 
+  private async autoCompleteWorkItemOnInvoiceAccepted(
+    previousStage: InvoiceStage,
+    saved: InvoiceDetail
+  ): Promise<'completed' | 'failed' | 'noop'> {
+    if (previousStage === 'accepted' || saved.stage !== 'accepted') return 'noop';
+
+    const customerId = String(saved.customerId || '').trim();
+    if (!customerId) return 'noop';
+
+    try {
+      const [lanes, allItems] = await Promise.all([
+        firstValueFrom(this.lanesApi.list()),
+        firstValueFrom(this.workItemsApi.list())
+      ]);
+      const completedLaneId = this.completedLaneId(lanes || []);
+      if (!completedLaneId) return 'failed';
+
+      const target = this.findActiveWorkItemForCustomer(allItems || [], lanes || [], customerId);
+      if (!target) return 'noop';
+
+      const nowIso = new Date().toISOString();
+      const patch: Partial<WorkItem> & { id: string } = {
+        id: target.id,
+        laneId: completedLaneId,
+        completedAt: nowIso,
+        calendarOverrideAt: ''
+      };
+      Object.assign(patch, this.buildCompletionTimingPatch(target, nowIso));
+
+      await firstValueFrom(this.workItemsApi.update(patch));
+      return 'completed';
+    } catch {
+      return 'failed';
+    }
+  }
+
+  private findActiveWorkItemForCustomer(
+    allItems: WorkItem[],
+    lanes: Lane[],
+    customerId: string
+  ): WorkItem | null {
+    const lookup = customerId.trim().toLowerCase();
+    if (!lookup) return null;
+
+    const candidates = (allItems || []).filter(item => {
+      const itemCustomer = String(item.customerId || '').trim().toLowerCase();
+      if (!itemCustomer || itemCustomer !== lookup) return false;
+      if (!String(item.checkedInAt || '').trim()) return false;
+      if (String(item.completedAt || '').trim()) return false;
+      return true;
+    });
+    if (!candidates.length) return null;
+
+    const inProgress = candidates.filter(item => this.laneStageKey(this.findLaneById(lanes, item.laneId)) === 'inprogress');
+    const ordered = (inProgress.length ? inProgress : candidates).sort(
+      (a, b) => this.itemWorkSortTime(b) - this.itemWorkSortTime(a)
+    );
+    return ordered[0] || null;
+  }
+
+  private findLaneById(lanes: Lane[], laneId: string): Lane | null {
+    if (!laneId) return null;
+    return (lanes || []).find(lane => lane.id === laneId) || null;
+  }
+
+  private completedLaneId(lanes: Lane[]): string | null {
+    const explicit = (lanes || []).find(lane => String(lane.stageKey || '').trim().toLowerCase() === 'completed');
+    if (explicit?.id) return explicit.id;
+
+    const inferred = (lanes || []).find(lane => /complete|completed|done|ready|pickup/.test(String(lane.name || '').toLowerCase()));
+    return inferred?.id || null;
+  }
+
+  private laneStageKey(lane: Lane | null): string {
+    const explicit = String(lane?.stageKey || '').trim().toLowerCase();
+    if (explicit) return explicit;
+    const name = String(lane?.name || '').trim().toLowerCase();
+    if (!name) return 'custom';
+    if (/in[- ]?progress|work in progress|progress/.test(name)) return 'inprogress';
+    if (/complete|completed|done|pickup|ready/.test(name)) return 'completed';
+    return 'custom';
+  }
+
+  private itemWorkSortTime(item: WorkItem): number {
+    return Math.max(
+      this.asMillis(item.checkedInAt),
+      this.asMillis(item.updatedAt),
+      this.asMillis(item.createdAt)
+    );
+  }
+
+  private asMillis(value: string | null | undefined): number {
+    const parsed = Date.parse(String(value || '').trim());
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  private elapsedMs(fromIso: string | null | undefined, toIso: string): number {
+    const from = this.asMillis(fromIso);
+    const to = this.asMillis(toIso);
+    if (!from || !to || to <= from) return 0;
+    return to - from;
+  }
+
+  private safeDuration(value: unknown): number {
+    const duration = Number(value);
+    return Number.isFinite(duration) && duration > 0 ? duration : 0;
+  }
+
+  private buildCompletionTimingPatch(item: WorkItem, nowIso: string): Partial<WorkItem> {
+    const isPaused = !!item.isPaused || !!String(item.pausedAt || '').trim();
+    const workIncrement = isPaused
+      ? 0
+      : this.elapsedMs(
+          String(item.lastWorkResumedAt || '').trim() || String(item.checkedInAt || '').trim(),
+          nowIso
+        );
+    const pauseIncrement = isPaused ? this.elapsedMs(item.pausedAt, nowIso) : 0;
+
+    return {
+      isPaused: false,
+      pausedAt: '',
+      lastWorkResumedAt: '',
+      workDurationMs: this.safeDuration(item.workDurationMs) + workIncrement,
+      pauseDurationMs: this.safeDuration(item.pauseDurationMs) + pauseIncrement
+    };
+  }
+
   private recalculateLine(line: InvoiceLineItem): InvoiceLineItem {
     const quantity = this.safeNumber(line.quantity, 0);
     const unitPrice = this.safeNumber(line.unitPrice, 0);
@@ -305,7 +445,7 @@ export default class InvoiceDetailComponent {
   }
 
   private isStage(value: string): value is InvoiceStage {
-    return value === 'draft' || value === 'approved' || value === 'sent' || value === 'paid' || value === 'cancelled';
+    return value === 'draft' || value === 'sent' || value === 'accepted' || value === 'declined' || value === 'expired';
   }
 
   private clearStatus(): void {

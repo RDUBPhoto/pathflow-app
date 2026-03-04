@@ -4,9 +4,9 @@ import { FormsModule } from '@angular/forms';
 import {
   IonHeader, IonToolbar, IonTitle, IonContent, IonButtons, IonButton,
   IonIcon, IonModal, IonItem, IonLabel, IonSelect, IonSelectOption,
-  IonInput, IonTextarea, IonCheckbox, IonSpinner, IonToggle, IonFooter
+  IonInput, IonTextarea, IonCheckbox, IonSpinner, IonFooter
 } from '@ionic/angular/standalone';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { DayPilot, DayPilotModule, DayPilotMonthComponent, DayPilotSchedulerComponent } from '@daypilot/daypilot-lite-angular';
 import { addIcons } from 'ionicons';
 import {
@@ -52,10 +52,11 @@ const SCHEDULE_VIEW_ANCHOR_KEY = 'schedule.viewStart';
     CommonModule, FormsModule, DayPilotModule,
     IonHeader, IonToolbar, IonTitle, IonContent, IonButtons, IonButton,
     IonIcon, IonModal, IonItem, IonLabel, IonSelect, IonSelectOption,
-    IonInput, IonTextarea, IonCheckbox, IonSpinner, IonToggle, IonFooter,
+    IonInput, IonTextarea, IonCheckbox, IonSpinner, IonFooter,
     UserMenuComponent,
     PageBackButtonComponent,
-    CompanySwitcherComponent
+    CompanySwitcherComponent,
+    RouterLink
   ],
   templateUrl: './schedule.component.html',
   styleUrls: ['./schedule.component.scss']

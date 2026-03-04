@@ -431,6 +431,53 @@ html[data-theme='light'] ion-button[disabled][fill='outline'] {
   --color: #5b6472;
 }
 
+ion-button[disabled]::part(native) {
+  opacity: 1 !important;
+  filter: none !important;
+}
+
+html:not([data-theme='light']) ion-button[disabled]:not([fill])::part(native),
+html:not([data-theme='light']) ion-button[disabled][fill='solid']::part(native) {
+  background: #3a4556 !important;
+  color: #c4cfde !important;
+  -webkit-text-fill-color: #c4cfde !important;
+  border-color: rgba(148, 163, 184, 0.35) !important;
+}
+
+html:not([data-theme='light']) ion-button[disabled][fill='outline']::part(native) {
+  background: rgba(148, 163, 184, 0.15) !important;
+  color: #c4cfde !important;
+  -webkit-text-fill-color: #c4cfde !important;
+  border-color: rgba(148, 163, 184, 0.4) !important;
+}
+
+html:not([data-theme='light']) ion-button[disabled][fill='clear']::part(native) {
+  background: transparent !important;
+  color: #9fb0c8 !important;
+  -webkit-text-fill-color: #9fb0c8 !important;
+}
+
+html[data-theme='light'] ion-button[disabled]:not([fill])::part(native),
+html[data-theme='light'] ion-button[disabled][fill='solid']::part(native) {
+  background: #e6ebf2 !important;
+  color: #5a6474 !important;
+  -webkit-text-fill-color: #5a6474 !important;
+  border-color: #cbd4e1 !important;
+}
+
+html[data-theme='light'] ion-button[disabled][fill='outline']::part(native) {
+  background: rgba(148, 163, 184, 0.18) !important;
+  color: #5b6472 !important;
+  -webkit-text-fill-color: #5b6472 !important;
+  border-color: rgba(148, 163, 184, 0.5) !important;
+}
+
+html[data-theme='light'] ion-button[disabled][fill='clear']::part(native) {
+  background: transparent !important;
+  color: #6b7280 !important;
+  -webkit-text-fill-color: #6b7280 !important;
+}
+
 ion-content.glass-bg.ion-padding {
   --padding-bottom: calc(72px + env(safe-area-inset-bottom));
 }
@@ -452,6 +499,15 @@ ion-footer.modal-form-footer ion-toolbar {
   --min-height: 64px;
   --padding-start: 12px;
   --padding-end: 12px;
+}
+
+/* Ionic applies toolbar vars to solid buttons in toolbars.
+   In modal footers this can invert text/background unexpectedly (e.g. transparent text). */
+ion-footer.modal-form-footer ion-button:not([fill]),
+ion-footer.modal-form-footer ion-button[fill='solid'],
+ion-footer.modal-form-footer ion-button.button-solid {
+  --ion-toolbar-color: var(--background);
+  --ion-toolbar-background: var(--color);
 }
 
 html:not([data-theme='light']) ion-footer.modal-form-footer ion-button[disabled]:not([fill]),

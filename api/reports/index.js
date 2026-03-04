@@ -54,7 +54,28 @@ function json(status, body) {
 function readScope(context, req) {
   const routeScope = asString(context && context.bindingData && context.bindingData.scope).toLowerCase();
   if (routeScope) return routeScope;
-  return asString(req && req.query && req.query.scope).toLowerCase() || "all";
+
+  const queryScope = asString(req && req.query && req.query.scope).toLowerCase();
+  if (queryScope) return queryScope;
+
+  // Some runtime/proxy combinations can drop optional route binding data on POST requests.
+  // Fallback to parsing the scope segment directly from the request URL path.
+  const rawUrl = asString(req && (req.originalUrl || req.url));
+  if (rawUrl) {
+    try {
+      const parsedUrl = new URL(rawUrl, "http://localhost");
+      const queryScopeFromUrl = asString(parsedUrl.searchParams.get("scope")).toLowerCase();
+      if (queryScopeFromUrl) return queryScopeFromUrl;
+
+      const segments = parsedUrl.pathname.split("/").filter(Boolean);
+      const reportsIndex = segments.findIndex((segment) => segment.toLowerCase() === "reports");
+      if (reportsIndex >= 0 && segments.length > reportsIndex + 1) {
+        return asString(decodeURIComponent(segments[reportsIndex + 1])).toLowerCase();
+      }
+    } catch (_) {}
+  }
+
+  return "all";
 }
 
 function powerBiConfigFromEnv() {

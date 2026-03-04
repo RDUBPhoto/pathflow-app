@@ -8,6 +8,16 @@ const PARTITION = "main";
 
 function pick(v, d = "") { return typeof v === "string" ? v : (v == null ? d : String(v)); }
 function num(v, d = 0) { const n = Number(v); return Number.isFinite(n) ? n : d; }
+function flag(v, d = false) {
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return v !== 0;
+  if (typeof v === "string") {
+    const s = v.trim().toLowerCase();
+    if (s === "true" || s === "1" || s === "yes") return true;
+    if (s === "false" || s === "0" || s === "no") return false;
+  }
+  return d;
+}
 function kindOf(name) {
   const s = String(name || "").toLowerCase();
   if (/quote/.test(s)) return "quote";
@@ -125,7 +135,12 @@ module.exports = async function (context, req) {
           updatedAt: pick(e.updatedAt),
           checkedInAt: pick(e.checkedInAt),
           completedAt: pick(e.completedAt),
-          calendarOverrideAt: pick(e.calendarOverrideAt)
+          calendarOverrideAt: pick(e.calendarOverrideAt),
+          isPaused: flag(e.isPaused, false),
+          pausedAt: pick(e.pausedAt),
+          lastWorkResumedAt: pick(e.lastWorkResumedAt),
+          workDurationMs: num(e.workDurationMs, 0),
+          pauseDurationMs: num(e.pauseDurationMs, 0)
         });
       }
       out.sort((a,b) =>
@@ -155,6 +170,15 @@ module.exports = async function (context, req) {
       const checkedInAt = Object.prototype.hasOwnProperty.call(b, "checkedInAt") ? pick(b.checkedInAt).trim() : null;
       const completedAt = Object.prototype.hasOwnProperty.call(b, "completedAt") ? pick(b.completedAt).trim() : null;
       const calendarOverrideAt = Object.prototype.hasOwnProperty.call(b, "calendarOverrideAt") ? pick(b.calendarOverrideAt).trim() : null;
+      const isPaused = Object.prototype.hasOwnProperty.call(b, "isPaused") ? flag(b.isPaused, false) : null;
+      const pausedAt = Object.prototype.hasOwnProperty.call(b, "pausedAt") ? pick(b.pausedAt).trim() : null;
+      const lastWorkResumedAt = Object.prototype.hasOwnProperty.call(b, "lastWorkResumedAt")
+        ? pick(b.lastWorkResumedAt).trim()
+        : null;
+      const workDurationMs = Object.prototype.hasOwnProperty.call(b, "workDurationMs") ? num(b.workDurationMs, 0) : null;
+      const pauseDurationMs = Object.prototype.hasOwnProperty.call(b, "pauseDurationMs")
+        ? num(b.pauseDurationMs, 0)
+        : null;
 
       if (!rid && (!title || !laneId)) { context.res = { status: 400, headers: { "content-type": "application/json" }, body: { error: "title and laneId required" } }; return; }
 
@@ -173,7 +197,12 @@ module.exports = async function (context, req) {
           sort: max + 10,
           createdAt: now,
           updatedAt: now,
-          calendarOverrideAt: ""
+          calendarOverrideAt: "",
+          isPaused: false,
+          pausedAt: "",
+          lastWorkResumedAt: "",
+          workDurationMs: 0,
+          pauseDurationMs: 0
         }, "Merge");
         await events.upsertEntity({ partitionKey: PARTITION, rowKey: randomUUID(), type: "created", workItemId: rowKey, laneId, at: now }, "Merge");
         context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true, id: rowKey } };
@@ -189,6 +218,11 @@ module.exports = async function (context, req) {
         if (checkedInAt !== null) patch.checkedInAt = checkedInAt;
         if (completedAt !== null) patch.completedAt = completedAt;
         if (calendarOverrideAt !== null) patch.calendarOverrideAt = calendarOverrideAt;
+        if (isPaused !== null) patch.isPaused = isPaused;
+        if (pausedAt !== null) patch.pausedAt = pausedAt;
+        if (lastWorkResumedAt !== null) patch.lastWorkResumedAt = lastWorkResumedAt;
+        if (workDurationMs !== null) patch.workDurationMs = workDurationMs;
+        if (pauseDurationMs !== null) patch.pauseDurationMs = pauseDurationMs;
         await items.upsertEntity(patch, "Merge");
         if (moved) {
           let max = 0;

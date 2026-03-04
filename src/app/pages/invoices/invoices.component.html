@@ -18,8 +18,9 @@
         class="kpi-card glass-surface"
         *ngFor="let kpi of kpis(); trackBy: trackKpi"
         [class.tone-open]="kpi.tone === 'open'"
-        [class.tone-paid]="kpi.tone === 'paid'"
-        [class.tone-cancelled]="kpi.tone === 'cancelled'">
+        [class.tone-accepted]="kpi.tone === 'accepted'"
+        [class.tone-declined]="kpi.tone === 'declined'"
+        [class.tone-expired]="kpi.tone === 'expired'">
         <div class="kpi-label">{{ kpi.label }}</div>
         <div class="kpi-value" *ngIf="kpi.kind === 'count'">{{ kpi.value }}</div>
         <div class="kpi-value" *ngIf="kpi.kind === 'currency'">

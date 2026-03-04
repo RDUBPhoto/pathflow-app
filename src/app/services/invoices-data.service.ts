@@ -1,6 +1,6 @@
 import { Injectable, computed, signal } from '@angular/core';
 
-export type InvoiceStage = 'draft' | 'approved' | 'sent' | 'paid' | 'cancelled';
+export type InvoiceStage = 'draft' | 'sent' | 'accepted' | 'declined' | 'expired';
 export type InvoiceLineType = 'part' | 'labor';
 
 export type InvoiceCard = {
@@ -129,10 +129,10 @@ export type InvoiceDraftPayload = {
 
 export const INVOICE_LANES: InvoiceLane[] = [
   { id: 'draft', title: 'Draft', color: '#ef4444' },
-  { id: 'approved', title: 'Approved', color: '#0ea5e9' },
   { id: 'sent', title: 'Sent', color: '#14b8a6' },
-  { id: 'paid', title: 'Paid', color: '#22c55e' },
-  { id: 'cancelled', title: 'Cancelled', color: '#f59e0b' }
+  { id: 'accepted', title: 'Accepted', color: '#22c55e' },
+  { id: 'declined', title: 'Declined', color: '#f59e0b' },
+  { id: 'expired', title: 'Expired', color: '#64748b' }
 ];
 
 const MOCK_INVOICES: InvoiceDetail[] = [
@@ -263,7 +263,7 @@ const MOCK_INVOICES: InvoiceDetail[] = [
   {
     id: 'inv-430478',
     invoiceNumber: 'INV-430478',
-    stage: 'approved',
+    stage: 'accepted',
     template: 'Alignment',
     customerName: 'Jordan Miles',
     customerEmail: 'jordan@example.com',
@@ -311,7 +311,7 @@ const MOCK_INVOICES: InvoiceDetail[] = [
       {
         id: 'timeline-inv-430478-1',
         createdAt: '2026-02-19T13:00:00.000Z',
-        message: 'Invoice approved.'
+        message: 'Invoice accepted.'
       }
     ]
   },
@@ -373,7 +373,7 @@ const MOCK_INVOICES: InvoiceDetail[] = [
   {
     id: 'inv-430476',
     invoiceNumber: 'INV-430476',
-    stage: 'paid',
+    stage: 'accepted',
     template: 'Parts Invoice',
     customerName: 'Casey Nguyen',
     customerEmail: 'casey@example.com',
@@ -438,14 +438,14 @@ const MOCK_INVOICES: InvoiceDetail[] = [
       {
         id: 'timeline-inv-430476-2',
         createdAt: '2026-02-19T08:00:00.000Z',
-        message: 'Payment received.'
+        message: 'Invoice accepted.'
       }
     ]
   },
   {
     id: 'inv-430454',
     invoiceNumber: 'INV-430454',
-    stage: 'cancelled',
+    stage: 'declined',
     template: 'Credit Memo',
     customerName: 'Morgan Lee',
     customerEmail: 'morgan@example.com',
@@ -493,7 +493,7 @@ const MOCK_INVOICES: InvoiceDetail[] = [
       {
         id: 'timeline-inv-430454-1',
         createdAt: '2026-02-12T11:00:00.000Z',
-        message: 'Invoice cancelled.'
+        message: 'Invoice declined.'
       }
     ]
   }

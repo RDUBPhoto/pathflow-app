@@ -213,7 +213,7 @@
             </div>
 
             <div class="customer-import-preview" *ngIf="customerImportRows.length">
-              <div class="customer-import-section-title">Preview (first 5 rows)</div>
+              <div class="customer-import-section-title">Preview</div>
               <div class="customer-import-table-wrap">
                 <table class="customer-import-table">
                   <thead>
@@ -222,11 +222,28 @@
                     </tr>
                   </thead>
                   <tbody>
-                    <tr *ngFor="let row of customerImportRows.slice(0, 5)">
+                    <tr *ngFor="let row of customerImportPreviewRows()">
                       <td *ngFor="let header of customerImportHeaders">{{ row[header] }}</td>
                     </tr>
                   </tbody>
                 </table>
+              </div>
+              <div class="table-pager" *ngIf="customerImportRows.length > customerImportPreviewPageSize">
+                <ion-button
+                  size="small"
+                  fill="outline"
+                  (click)="prevCustomerImportPreviewPage()"
+                  [disabled]="customerImportPreviewPage() <= 1">
+                  Previous
+                </ion-button>
+                <span>Page {{ customerImportPreviewPage() }} of {{ customerImportPreviewTotalPages() }}</span>
+                <ion-button
+                  size="small"
+                  fill="outline"
+                  (click)="nextCustomerImportPreviewPage()"
+                  [disabled]="customerImportPreviewPage() >= customerImportPreviewTotalPages()">
+                  Next
+                </ion-button>
               </div>
             </div>
 
@@ -280,62 +297,71 @@
             These settings drive calendar behavior across the app and are used for scheduling and time-based reporting.
           </div>
 
-          <div class="schedule-settings-grid">
-            <ion-item>
-              <ion-label position="stacked">Open time</ion-label>
-              <ion-select
-                interface="popover"
-                [ngModel]="scheduleOpenHour"
-                (ngModelChange)="scheduleOpenHour = +$event">
-                <ion-select-option *ngFor="let option of openHourOptions" [value]="option.value">
-                  {{ option.label }}
-                </ion-select-option>
-              </ion-select>
-            </ion-item>
+          <div class="schedule-settings-shell">
+            <div class="schedule-settings-grid">
+              <div class="schedule-field-card">
+                <ion-item lines="none" class="schedule-field-item">
+                  <ion-label position="stacked">Open time</ion-label>
+                  <ion-select
+                    interface="popover"
+                    [ngModel]="scheduleOpenHour"
+                    (ngModelChange)="scheduleOpenHour = +$event">
+                    <ion-select-option *ngFor="let option of openHourOptions" [value]="option.value">
+                      {{ option.label }}
+                    </ion-select-option>
+                  </ion-select>
+                </ion-item>
+              </div>
 
-            <ion-item>
-              <ion-label position="stacked">Close time</ion-label>
-              <ion-select
-                interface="popover"
-                [ngModel]="scheduleCloseHour"
-                (ngModelChange)="scheduleCloseHour = +$event">
-                <ion-select-option *ngFor="let option of closeHourOptions" [value]="option.value">
-                  {{ option.label }}
-                </ion-select-option>
-              </ion-select>
-            </ion-item>
+              <div class="schedule-field-card">
+                <ion-item lines="none" class="schedule-field-item">
+                  <ion-label position="stacked">Close time</ion-label>
+                  <ion-select
+                    interface="popover"
+                    [ngModel]="scheduleCloseHour"
+                    (ngModelChange)="scheduleCloseHour = +$event">
+                    <ion-select-option *ngFor="let option of closeHourOptions" [value]="option.value">
+                      {{ option.label }}
+                    </ion-select-option>
+                  </ion-select>
+                </ion-item>
+              </div>
+            </div>
 
-            <ion-item lines="none" class="schedule-weekend-toggle">
-              <ion-label>Show weekends</ion-label>
-              <ion-checkbox
-                slot="end"
+            <div class="schedule-weekend-card">
+              <div class="schedule-weekend-copy">
+                <div class="label">Show weekends</div>
+                <div class="meta">Include Saturday/Sunday in scheduler views and reports.</div>
+              </div>
+              <ion-toggle
                 [ngModel]="scheduleShowWeekends"
                 (ngModelChange)="scheduleShowWeekends = !!$event">
-              </ion-checkbox>
-            </ion-item>
-          </div>
+              </ion-toggle>
+            </div>
 
-          <div class="schedule-bays-header">
-            <div class="schedule-bays-title">Bays (Lifts/Categories)</div>
-            <ion-button size="small" fill="outline" (click)="addScheduleBay()">
-              <ion-icon slot="start" name="add-outline"></ion-icon>
-              Add Bay
-            </ion-button>
-          </div>
-
-          <div class="schedule-bays-list">
-            <div class="schedule-bay-row" *ngFor="let bay of scheduleBays; let i = index">
-              <ion-item>
-                <ion-label position="stacked">Bay {{ i + 1 }}</ion-label>
-                <ion-input [(ngModel)]="bay.name" placeholder="Bay name"></ion-input>
-              </ion-item>
-              <ion-button
-                fill="clear"
-                color="danger"
-                [disabled]="scheduleBays.length <= 1"
-                (click)="removeScheduleBay(bay.id)">
-                <ion-icon name="trash-outline"></ion-icon>
+            <div class="schedule-bays-header">
+              <div class="schedule-bays-title">Bays (Lifts/Categories)</div>
+              <ion-button size="small" fill="outline" (click)="addScheduleBay()">
+                <ion-icon slot="start" name="add-outline"></ion-icon>
+                Add Bay
               </ion-button>
+            </div>
+
+            <div class="schedule-bays-list">
+              <div class="schedule-bay-row" *ngFor="let bay of scheduleBays; let i = index">
+                <ion-item lines="none" class="schedule-bay-item">
+                  <ion-label position="stacked">Bay {{ i + 1 }}</ion-label>
+                  <ion-input [(ngModel)]="bay.name" placeholder="Bay name"></ion-input>
+                </ion-item>
+                <ion-button
+                  fill="clear"
+                  color="danger"
+                  class="schedule-delete-btn"
+                  [disabled]="scheduleBays.length <= 1"
+                  (click)="removeScheduleBay(bay.id)">
+                  <ion-icon name="trash-outline"></ion-icon>
+                </ion-button>
+              </div>
             </div>
           </div>
 
@@ -553,8 +579,13 @@
               </div>
               <div class="sms-form">
                 <ion-item>
-                  <ion-label position="stacked">Name</ion-label>
-                  <ion-input [(ngModel)]="widgetTestName" placeholder="Jane Customer"></ion-input>
+                  <ion-label position="stacked">First Name</ion-label>
+                  <ion-input [(ngModel)]="widgetTestFirstName" placeholder="Jane"></ion-input>
+                </ion-item>
+
+                <ion-item>
+                  <ion-label position="stacked">Last Name</ion-label>
+                  <ion-input [(ngModel)]="widgetTestLastName" placeholder="Customer"></ion-input>
                 </ion-item>
 
                 <ion-item>

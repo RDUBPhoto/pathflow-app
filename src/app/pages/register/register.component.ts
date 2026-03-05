@@ -38,6 +38,8 @@ export default class RegisterComponent {
   readonly saving = signal(false);
   readonly error = signal('');
   readonly locationName = signal('Pathflow HQ');
+  readonly hasMultipleLocations = signal<'single' | 'multiple'>('single');
+  readonly extraLocationNames = signal<string[]>([]);
   readonly selectedPlan = signal<'trial' | 'monthly' | 'annual'>('trial');
   readonly billingMode = signal(false);
   readonly cardholderName = signal('');
@@ -122,9 +124,27 @@ export default class RegisterComponent {
   readonly canSubmit = computed(() =>
     !this.saving() &&
     (this.isBillingUpdateMode() || this.auth.canBootstrapRegistration()) &&
-    (this.isBillingUpdateMode() || this.locationName().trim().length >= 3) &&
+    (this.isBillingUpdateMode() || this.registrationLocationsValid()) &&
     (!this.requiresBilling() || this.billingValid())
   );
+  readonly registrationLocationsValid = computed(() => {
+    const base = this.locationName().trim();
+    if (base.length < 3) return false;
+    if (this.hasMultipleLocations() !== 'multiple') return true;
+    const extras = this.extraLocationNames().map(value => String(value || '').trim());
+    if (!extras.length) return false;
+    return extras.every(value => value.length >= 3);
+  });
+  readonly registrationLocationNames = computed(() => {
+    const base = this.locationName().trim();
+    const extras = this.extraLocationNames()
+      .map(value => String(value || '').trim())
+      .filter(Boolean);
+    if (this.hasMultipleLocations() !== 'multiple') {
+      return base ? [base] : [];
+    }
+    return [base, ...extras].filter(Boolean);
+  });
 
   readonly submitLabel = computed(() => {
     if (this.requiresBilling()) {
@@ -183,7 +203,7 @@ export default class RegisterComponent {
     const response = this.isBillingUpdateMode()
       ? await this.auth.updateBilling(billingPayload as ReturnType<RegisterComponent['buildBillingPayload']>, selectedCycle)
       : await this.auth.registerWorkspace(
-          this.locationName().trim(),
+          this.registrationLocationNames(),
           billingPayload || undefined,
           selectedCycle
         );
@@ -209,6 +229,32 @@ export default class RegisterComponent {
   setPlanCycle(cycle: 'trial' | 'monthly' | 'annual'): void {
     if (this.isBillingUpdateMode() && cycle === 'trial') return;
     this.selectedPlan.set(cycle);
+  }
+
+  setLocationMode(mode: 'single' | 'multiple'): void {
+    this.hasMultipleLocations.set(mode);
+    if (mode !== 'multiple') {
+      this.extraLocationNames.set([]);
+    } else if (!this.extraLocationNames().length) {
+      this.extraLocationNames.set(['']);
+    }
+  }
+
+  addLocationField(): void {
+    this.extraLocationNames.set([...this.extraLocationNames(), '']);
+  }
+
+  removeLocationField(index: number): void {
+    const current = this.extraLocationNames();
+    if (index < 0 || index >= current.length) return;
+    this.extraLocationNames.set(current.filter((_, idx) => idx !== index));
+  }
+
+  updateLocationField(index: number, value: string): void {
+    const current = [...this.extraLocationNames()];
+    if (index < 0 || index >= current.length) return;
+    current[index] = value ?? '';
+    this.extraLocationNames.set(current);
   }
 
   private normalizeRedirect(path: string | null): string {

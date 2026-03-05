@@ -82,6 +82,22 @@ function normalizeRoleList(values) {
   return Array.from(out);
 }
 
+function configuredSuperAdminEmails() {
+  const raw = asString(process.env.SUPERADMIN_EMAILS);
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map(value => normalizeEmail(value))
+    .filter(Boolean);
+}
+
+function principalIsConfiguredSuperAdmin(principal) {
+  const email = normalizeEmail(principal && principal.email);
+  if (!email) return false;
+  const configured = configuredSuperAdminEmails();
+  return configured.includes(email);
+}
+
 function humanizeTenantId(tenantId) {
   const value = asString(tenantId).replace(/[-_]+/g, " ").trim();
   if (!value) return "Location";
@@ -395,7 +411,7 @@ function parseUserRoles(userEntity) {
 
 function buildUserLocations(userEntity, tenants) {
   const tenantList = Array.isArray(tenants) ? tenants : [];
-  const allLocations = asBool(userEntity && userEntity.allLocations);
+  const allLocations = asBool(userEntity && userEntity.allLocations) || asBool(userEntity && userEntity.isSuperAdmin);
   const allowedIds = parseUserLocationIds(userEntity);
   const toLocation = item => ({ id: item.id, name: item.name });
 
@@ -424,7 +440,7 @@ function pickBillingTenant(userEntity, allTenants, defaultLocationId, locations)
   const byId = new Map(tenantList.map(item => [item.id, item]));
   if (defaultLocationId && byId.has(defaultLocationId)) return byId.get(defaultLocationId);
 
-  const allLocations = asBool(userEntity && userEntity.allLocations);
+  const allLocations = asBool(userEntity && userEntity.allLocations) || asBool(userEntity && userEntity.isSuperAdmin);
   if (!allLocations) {
     const allowed = parseUserLocationIds(userEntity);
     for (const id of allowed) {
@@ -462,6 +478,36 @@ function buildBillingProfileFromTenant(tenant) {
 
 function buildMeResponse(principal, userEntity, allTenants, canBootstrap) {
   if (!userEntity) {
+    if (principalIsConfiguredSuperAdmin(principal)) {
+      const locations = (Array.isArray(allTenants) ? allTenants : []).map(item => ({ id: item.id, name: item.name }));
+      return {
+        ok: true,
+        canBootstrap: false,
+        profile: {
+          email: asString(principal && principal.email),
+          displayName: asString(principal && principal.displayName || principal && principal.email),
+          isSuperAdmin: true,
+          roles: normalizeRoleList(["authenticated", "admin"]),
+          defaultLocationId: locations[0]?.id || "",
+          locations,
+          emailVerified: true,
+          billingStatus: "active",
+          trialStartsAt: "",
+          trialEndsAt: "",
+          accessLocked: false,
+          accessLockReason: "",
+          planCycle: "monthly"
+        },
+        locations: allTenants,
+        principal: {
+          userId: asString(principal && principal.userId),
+          email: asString(principal && principal.email),
+          displayName: asString(principal && principal.displayName),
+          identityProvider: asString(principal && principal.identityProvider)
+        }
+      };
+    }
+
     return {
       ok: true,
       canBootstrap: !!canBootstrap,
@@ -481,6 +527,7 @@ function buildMeResponse(principal, userEntity, allTenants, canBootstrap) {
   const defaultLocationId = pickDefaultLocation(userEntity, locations);
   const billingTenant = pickBillingTenant(userEntity, allTenants, defaultLocationId, locations);
   const billingProfile = buildBillingProfileFromTenant(billingTenant);
+  const isSuperAdmin = asBool(userEntity.isSuperAdmin) || principalIsConfiguredSuperAdmin(principal);
 
   return {
     ok: true,
@@ -488,8 +535,8 @@ function buildMeResponse(principal, userEntity, allTenants, canBootstrap) {
     profile: {
       email: normalizeEmail(userEntity.email || principal.email),
       displayName: asString(userEntity.displayName || principal.displayName || principal.email),
-      isSuperAdmin: asBool(userEntity.isSuperAdmin),
-      roles,
+      isSuperAdmin,
+      roles: isSuperAdmin ? normalizeRoleList([...roles, "admin"]) : roles,
       defaultLocationId,
       locations,
       emailVerified: asBool(userEntity.emailVerified) || !!asString(userEntity.emailVerifiedAt),
@@ -756,7 +803,8 @@ module.exports = async function (context, req) {
       }
 
       const allowedIds = parseUserLocationIds(userEntity);
-      const canManageLocation = asBool(userEntity.allLocations) || !allowedIds.length || allowedIds.includes(targetLocationId);
+      const hasGlobalLocationAccess = asBool(userEntity.allLocations) || asBool(userEntity.isSuperAdmin);
+      const canManageLocation = hasGlobalLocationAccess || !allowedIds.length || allowedIds.includes(targetLocationId);
       if (!canManageLocation) {
         context.res = json(403, { ok: false, error: "You do not have access to update billing for this location." });
         return;
@@ -800,15 +848,22 @@ module.exports = async function (context, req) {
         billing = normalized;
       }
 
-      const locationName = asString(body.locationName || "Exodus 4x4").slice(0, 120) || "Exodus 4x4";
+      const requestedLocations = Array.isArray(body.locations) ? body.locations : [];
+      const normalizedLocationNames = requestedLocations
+        .map(item => {
+          if (typeof item === "string") return asString(item);
+          if (item && typeof item === "object") return asString(item.name || item.locationName || item.id);
+          return "";
+        })
+        .map(value => value.slice(0, 120))
+        .filter(Boolean);
+      const locationNames = normalizedLocationNames.length
+        ? normalizedLocationNames
+        : [asString(body.locationName || "Exodus 4x4").slice(0, 120) || "Exodus 4x4"];
+
       const allTenants = await listTenants(tenantClient);
       const existingTenantIds = new Set(allTenants.map(item => item.id));
-      const requestedLocationId = sanitizeTenantId(asString(body.locationId || locationName || "exodus-4x4"));
-      const locationId = ensureUniqueTenantId(requestedLocationId, existingTenantIds);
-      if (!locationId) {
-        context.res = json(400, { ok: false, error: "Invalid location id." });
-        return;
-      }
+      const createdLocations = [];
 
       const trialStart = new Date();
       const trialEnd = new Date(trialStart.getTime() + 7 * 24 * 60 * 60 * 1000);
@@ -816,23 +871,43 @@ module.exports = async function (context, req) {
       const trialEndsAt = trialEnd.toISOString();
       const billingStatus = billing ? normalizeBillingStatus(billing.mode) : "trial";
 
-      await tenantClient.upsertEntity(
-        {
-          partitionKey: TENANTS_PARTITION,
-          rowKey: locationId,
-          name: locationName,
-          status: "active",
-          billingStatus,
-          billingLast4: billing ? billing.last4 : "",
-          billingUpdatedAt: now,
-          trialStartsAt: now,
-          trialEndsAt,
-          planCycle: normalizePlanCycle(body.planCycle),
-          updatedAt: now,
-          createdAt: now
-        },
-        "Merge"
-      );
+      for (const locationNameRaw of locationNames) {
+        const locationName = asString(locationNameRaw).slice(0, 120) || "Exodus 4x4";
+        const requestedLocationId = sanitizeTenantId(asString(locationName || "exodus-4x4"));
+        const locationId = ensureUniqueTenantId(requestedLocationId, existingTenantIds);
+        if (!locationId) {
+          context.res = json(400, { ok: false, error: "Invalid location id." });
+          return;
+        }
+        existingTenantIds.add(locationId);
+        createdLocations.push({ id: locationId, name: locationName });
+
+        await tenantClient.upsertEntity(
+          {
+            partitionKey: TENANTS_PARTITION,
+            rowKey: locationId,
+            name: locationName,
+            status: "active",
+            billingStatus,
+            billingLast4: billing ? billing.last4 : "",
+            billingUpdatedAt: now,
+            trialStartsAt: now,
+            trialEndsAt,
+            planCycle: normalizePlanCycle(body.planCycle),
+            updatedAt: now,
+            createdAt: now
+          },
+          "Merge"
+        );
+      }
+
+      const defaultLocationId = createdLocations[0]?.id || "";
+      const defaultLocationName = createdLocations[0]?.name || "Exodus 4x4";
+      const locationIds = createdLocations.map(item => item.id).filter(Boolean);
+      if (!defaultLocationId || !locationIds.length) {
+        context.res = json(400, { ok: false, error: "At least one valid location is required." });
+        return;
+      }
 
       const roles = normalizeRoleList(["authenticated", "admin"]);
       await userClient.upsertEntity(
@@ -846,8 +921,8 @@ module.exports = async function (context, req) {
           rolesJson: JSON.stringify(roles),
           isSuperAdmin: false,
           allLocations: false,
-          defaultLocationId: locationId,
-          locationIdsJson: JSON.stringify([locationId]),
+          defaultLocationId,
+          locationIdsJson: JSON.stringify(locationIds),
           emailVerified: false,
           emailVerifiedAt: "",
           updatedAt: now,
@@ -862,14 +937,14 @@ module.exports = async function (context, req) {
       const verifyToken = await issueEmailVerificationToken(tokenClient, {
         email: principal.email,
         userId: principal.userId,
-        locationId,
-        locationName
+        locationId: defaultLocationId,
+        locationName: defaultLocationName
       });
       const verifyUrl = `${buildVerifyBaseUrl(req)}/api/access?op=verify-email&token=${encodeURIComponent(verifyToken)}`;
       await sendVerificationEmail(context, {
         email: principal.email,
         displayName: asString(principal.displayName || principal.email),
-        locationName,
+        locationName: defaultLocationName,
         verifyUrl
       });
     }

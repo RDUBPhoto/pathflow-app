@@ -49,6 +49,11 @@ export const routes: Routes = [
           import('./pages/customer-profile/customer-profile.component').then(m => m.default)
       },
       {
+        path: 'customers/duplicates',
+        loadComponent: () =>
+          import('./pages/customers-merge/customers-merge.component').then(m => m.default)
+      },
+      {
         path: 'customers/:id',
         canDeactivate: [customerProfileUnsavedGuard],
         loadComponent: () =>

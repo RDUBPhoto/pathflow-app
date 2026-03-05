@@ -1,0 +1,96 @@
+<ion-header class="glass-header">
+  <ion-toolbar>
+    <ion-buttons slot="start">
+      <app-page-back-button></app-page-back-button>
+    </ion-buttons>
+    <ion-title>Duplicate Review</ion-title>
+    <app-company-switcher></app-company-switcher>
+    <ion-buttons slot="end" class="ion-margin-end">
+      <app-user-menu></app-user-menu>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content class="ion-padding glass-bg merge-content">
+  <section class="merge-summary glass-surface">
+    <div class="summary-copy">
+      <h2>Potential duplicates</h2>
+      <p *ngIf="total() > 0">{{ total() }} duplicate pair{{ total() === 1 ? '' : 's' }} detected.</p>
+      <p *ngIf="total() === 0">No duplicate pairs were detected.</p>
+    </div>
+    <div class="summary-actions">
+      <ion-badge color="warning" *ngIf="total() > 0">{{ total() }}</ion-badge>
+      <ion-button fill="outline" (click)="refresh()" [disabled]="loading() || merging()">Refresh</ion-button>
+    </div>
+  </section>
+
+  <div class="feedback success" *ngIf="status()">{{ status() }}</div>
+  <div class="feedback error" *ngIf="error()">{{ error() }}</div>
+
+  <section class="loading-row" *ngIf="loading()">
+    <ion-spinner name="crescent"></ion-spinner>
+    <span>Loading duplicate pairs...</span>
+  </section>
+
+  <section class="pair-nav glass-surface" *ngIf="!loading() && selectedPair() && leftCustomer() && rightCustomer()">
+    <div class="pair-nav-copy">
+      <strong>Pair {{ selectedIndex() + 1 }} of {{ pairs().length }}</strong>
+      <span>{{ reasonLabel(selectedPair()!.reasons) }} ({{ selectedPair()!.confidence ?? selectedPair()!.score }}% confidence)</span>
+    </div>
+    <div class="pair-nav-actions">
+      <ion-button size="small" fill="outline" (click)="previousPair()" [disabled]="!canGoPrevious() || merging() || ignoring()">
+        ← Previous
+      </ion-button>
+      <ion-button size="small" fill="outline" (click)="nextPair()" [disabled]="!canGoNext() || merging() || ignoring()">
+        Next →
+      </ion-button>
+      <ion-button size="small" color="medium" fill="clear" (click)="ignoreCurrentPair()" [disabled]="merging() || ignoring()">
+        {{ ignoring() ? 'Ignoring...' : 'Ignore duplicate' }}
+      </ion-button>
+    </div>
+  </section>
+
+  <section class="compare-grid" *ngIf="!loading() && selectedPair() && leftCustomer() && rightCustomer()">
+    <article class="customer-card glass-surface">
+      <div class="card-head">
+        <h3>{{ customerName(leftCustomer()) }}</h3>
+        <ion-button size="small" fill="clear" (click)="openCustomer(leftCustomer()!.id)">Open profile</ion-button>
+      </div>
+      <div class="customer-fields">
+        <div><span>Name</span><strong>{{ customerName(leftCustomer()) }}</strong></div>
+        <div><span>Email</span><strong>{{ customerEmails(leftCustomer()) || '—' }}</strong></div>
+        <div><span>Phone</span><strong>{{ leftCustomer()!.phone || leftCustomer()!.mobile || '—' }}</strong></div>
+        <div><span>Address</span><strong>{{ leftCustomer()!.address || '—' }}</strong></div>
+        <div><span>Vehicle</span><strong>{{ customerVehicle(leftCustomer()) || '—' }}</strong></div>
+        <div><span>Notes</span><strong>{{ leftCustomer()!.notes || '—' }}</strong></div>
+      </div>
+      <ion-button expand="block" color="success" (click)="mergeInto('left')" [disabled]="merging() || ignoring()">
+        Merge Right Into Left
+      </ion-button>
+    </article>
+
+    <article class="vs-card">
+      <div class="vs-label">Match Reason</div>
+      <div class="vs-reason">{{ reasonLabel(selectedPair()!.reasons) }}</div>
+      <div class="vs-score">{{ selectedPair()!.confidence ?? selectedPair()!.score }}% confidence</div>
+    </article>
+
+    <article class="customer-card glass-surface">
+      <div class="card-head">
+        <h3>{{ customerName(rightCustomer()) }}</h3>
+        <ion-button size="small" fill="clear" (click)="openCustomer(rightCustomer()!.id)">Open profile</ion-button>
+      </div>
+      <div class="customer-fields">
+        <div><span>Name</span><strong>{{ customerName(rightCustomer()) }}</strong></div>
+        <div><span>Email</span><strong>{{ customerEmails(rightCustomer()) || '—' }}</strong></div>
+        <div><span>Phone</span><strong>{{ rightCustomer()!.phone || rightCustomer()!.mobile || '—' }}</strong></div>
+        <div><span>Address</span><strong>{{ rightCustomer()!.address || '—' }}</strong></div>
+        <div><span>Vehicle</span><strong>{{ customerVehicle(rightCustomer()) || '—' }}</strong></div>
+        <div><span>Notes</span><strong>{{ rightCustomer()!.notes || '—' }}</strong></div>
+      </div>
+      <ion-button expand="block" color="success" (click)="mergeInto('right')" [disabled]="merging() || ignoring()">
+        Merge Left Into Right
+      </ion-button>
+    </article>
+  </section>
+</ion-content>

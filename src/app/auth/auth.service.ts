@@ -267,7 +267,7 @@ export class AuthService {
   }
 
   async registerWorkspace(
-    locationNameInput: string,
+    locationNamesInput: string[],
     billing?: RegistrationBillingPayload,
     planCycle: 'monthly' | 'annual' = 'monthly'
   ): Promise<{ ok: boolean; error?: string }> {
@@ -276,9 +276,13 @@ export class AuthService {
       return { ok: false, error: 'Sign in before creating your workspace.' };
     }
 
-    const locationName = String(locationNameInput || '').trim();
-    if (!locationName) {
-      return { ok: false, error: 'Location name is required.' };
+    const locationNames = Array.from(new Set(
+      (Array.isArray(locationNamesInput) ? locationNamesInput : [])
+        .map(value => String(value || '').trim())
+        .filter(Boolean)
+    ));
+    if (!locationNames.length) {
+      return { ok: false, error: 'At least one location name is required.' };
     }
 
     try {
@@ -288,8 +292,18 @@ export class AuthService {
 
         const now = new Date();
         const weekFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-        const locationId = this.sanitizeTenantId(locationName) || DEFAULT_LOCATION_ID;
-        const location: AuthLocation = { id: locationId, name: locationName };
+        const locations: AuthLocation[] = [];
+        for (let index = 0; index < locationNames.length; index += 1) {
+          const name = locationNames[index];
+          const baseId = this.sanitizeTenantId(name) || `${DEFAULT_LOCATION_ID}-${index + 1}`;
+          let nextId = baseId;
+          let suffix = 2;
+          while (locations.some(item => item.id === nextId)) {
+            nextId = `${baseId}-${suffix++}`;
+          }
+          locations.push({ id: nextId, name });
+        }
+        const defaultLocationId = locations[0]?.id || DEFAULT_LOCATION_ID;
         this.setDevUser(
           {
             ...dev,
@@ -299,8 +313,8 @@ export class AuthService {
             registered: true,
             canBootstrap: false,
             isSuperAdmin: true,
-            locations: [location],
-            defaultLocationId: locationId,
+            locations,
+            defaultLocationId,
             billingStatus: billing ? 'active' : 'trial',
             trialStartsAt: now.toISOString(),
             trialEndsAt: weekFromNow.toISOString(),
@@ -322,7 +336,8 @@ export class AuthService {
         },
         body: JSON.stringify({
           op: 'bootstrap',
-          locationName,
+          locations: locationNames,
+          locationName: locationNames[0],
           planCycle,
           billing: billing || null
         })

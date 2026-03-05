@@ -475,6 +475,61 @@ ion-modal.side-panel::part(content) {
 .board::-webkit-scrollbar-thumb,
 .cards::-webkit-scrollbar-thumb { border-radius: 8px; background: var(--app-scrollbar, rgba(0,0,0,.2)); }
 
+.onboarding-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  pointer-events: none;
+}
+
+.onboarding-spotlight {
+  position: fixed;
+  border-radius: 12px;
+  border: 2px solid rgba(56, 132, 255, 0.92);
+  box-shadow:
+    0 0 0 9999px rgba(7, 12, 20, 0.7),
+    0 0 0 6px rgba(56, 132, 255, 0.18),
+    0 10px 22px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.onboarding-bubble {
+  position: fixed;
+  border-radius: 12px;
+  border: 1px solid var(--app-border-subtle);
+  background: color-mix(in srgb, var(--app-surface-bg) 96%, #0a1220 4%);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.42);
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.onboarding-step-label {
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+  font-weight: 700;
+}
+
+.onboarding-bubble h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.onboarding-bubble p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--app-text-muted);
+}
+
+.onboarding-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 @media (max-width: 900px) {
   .board {
     height: auto;

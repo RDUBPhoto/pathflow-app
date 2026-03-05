@@ -39,13 +39,18 @@ type UICustomer = Customer & {
   styleUrls: ['./customers.component.scss']
 })
 export default class CustomersComponent {
+  readonly pageSize = 25;
   customers = signal<UICustomer[]>([]);
   loading = signal<boolean>(false);
   status = signal<string>('');
+  duplicateTotal = signal<number>(0);
+  duplicateLoading = signal<boolean>(false);
+  duplicateError = signal<string>('');
 
   sortKey = signal<SortKey>('name');
   sortDir = signal<SortDir>('asc');
   searchTerm = signal<string>('');
+  page = signal<number>(1);
 
   filtered = computed(() => {
     const key = this.sortKey();
@@ -57,11 +62,12 @@ export default class CustomersComponent {
         const f1 = (c.name || '').toLowerCase();
         const f2 = (c.phone || '').toLowerCase();
         const f3 = (c.email || '').toLowerCase();
+        const f8 = ((c as any).secondaryEmail || '').toLowerCase();
         const f4 = (c.vehicleYear || '').toLowerCase();
         const f5 = (c.vehicleMake || '').toLowerCase();
         const f6 = (c.vehicleModel || '').toLowerCase();
         const f7 = (c.vehicleTrim || '').toLowerCase();
-        return f1.includes(q) || f2.includes(q) || f3.includes(q) || f4.includes(q) || f5.includes(q) || f6.includes(q) || f7.includes(q);
+        return f1.includes(q) || f2.includes(q) || f3.includes(q) || f8.includes(q) || f4.includes(q) || f5.includes(q) || f6.includes(q) || f7.includes(q);
       });
     }
     arr.sort((a, b) => {
@@ -74,6 +80,25 @@ export default class CustomersComponent {
     return arr;
   });
 
+  totalPages = computed(() => Math.max(1, Math.ceil(this.filtered().length / this.pageSize)));
+
+  pagedCustomers = computed(() => {
+    const total = this.filtered().length;
+    const maxPage = Math.max(1, Math.ceil(total / this.pageSize));
+    const page = Math.max(1, Math.min(this.page(), maxPage));
+    const start = (page - 1) * this.pageSize;
+    return this.filtered().slice(start, start + this.pageSize);
+  });
+
+  pageStart = computed(() => {
+    if (!this.filtered().length) return 0;
+    const maxPage = this.totalPages();
+    const page = Math.max(1, Math.min(this.page(), maxPage));
+    return (page - 1) * this.pageSize + 1;
+  });
+
+  pageEnd = computed(() => this.pageStart() + this.pagedCustomers().length - 1);
+
   constructor(private api: CustomersApi, private router: Router) {
     this.refresh();
   }
@@ -84,11 +109,30 @@ export default class CustomersComponent {
     this.api.list().subscribe({
       next: customers => {
         this.customers.set(customers as UICustomer[]);
+        this.page.set(1);
         this.loading.set(false);
+        this.loadDuplicateSummary();
       },
       error: err => {
         this.status.set(`Load error ${err?.status || ''}`);
         this.loading.set(false);
+        this.duplicateTotal.set(0);
+      }
+    });
+  }
+
+  loadDuplicateSummary() {
+    this.duplicateLoading.set(true);
+    this.duplicateError.set('');
+    this.api.duplicateSummary(25).subscribe({
+      next: summary => {
+        this.duplicateTotal.set(Number(summary?.total || 0));
+        this.duplicateLoading.set(false);
+      },
+      error: () => {
+        this.duplicateLoading.set(false);
+        this.duplicateError.set('Duplicate scan unavailable.');
+        this.duplicateTotal.set(0);
       }
     });
   }
@@ -100,14 +144,25 @@ export default class CustomersComponent {
       this.sortKey.set(k);
       this.sortDir.set('asc');
     }
+    this.page.set(1);
   }
 
   onSearchChange(v: string) {
     this.searchTerm.set(v ?? '');
+    this.page.set(1);
   }
 
   clearSearch() {
     this.searchTerm.set('');
+    this.page.set(1);
+  }
+
+  prevPage() {
+    this.page.update(value => Math.max(1, value - 1));
+  }
+
+  nextPage() {
+    this.page.update(value => Math.min(this.totalPages(), value + 1));
   }
 
   openAdd() {
@@ -116,6 +171,10 @@ export default class CustomersComponent {
 
   openEdit(c: UICustomer) {
     this.router.navigate(['/customers', c.id]);
+  }
+
+  openDuplicateReview() {
+    this.router.navigate(['/customers/duplicates']);
   }
 
   vehicleSummaryFor(c: UICustomer): string {

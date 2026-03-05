@@ -47,7 +47,7 @@ import { PageBackButtonComponent } from '../../components/navigation/page-back-b
 import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
 import { formatLocalDateTime, toLocalDateTimeInput, toLocalDateTimeStorage } from '../../utils/datetime-local';
 
-type CustomerTab = 'notes' | 'schedule' | 'invoices' | 'sms' | 'email';
+type CustomerTab = 'vehicle' | 'notes' | 'schedule' | 'invoices' | 'sms' | 'email';
 type CustomerMobileTab = 'profile' | CustomerTab;
 type EmailView = 'list' | 'detail' | 'compose';
 type TabActivityDismissState = Record<CustomerTab, boolean>;
@@ -92,6 +92,11 @@ type ScheduleDraft = {
   endInput: string;
   resource: string;
   notes: string;
+};
+type DuplicateSavePrompt = {
+  mode: 'create' | 'update';
+  candidate: DuplicateCandidate;
+  payload: Omit<Customer, 'id'> & { id?: string };
 };
 
 @Component({
@@ -148,7 +153,11 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   readonly saving = signal(false);
   readonly status = signal('');
   readonly error = signal('');
-  readonly activeTab = signal<CustomerTab>('notes');
+  readonly duplicateMatches = signal<DuplicateCandidate[]>([]);
+  readonly duplicateLoading = signal(false);
+  readonly duplicateSavePrompt = signal<DuplicateSavePrompt | null>(null);
+  readonly validationAttempted = signal(false);
+  readonly activeTab = signal<CustomerTab>('vehicle');
   readonly isMobileLayout = signal(false);
   readonly mobileTab = signal<CustomerMobileTab>('profile');
 
@@ -156,6 +165,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   lastName = '';
   phone = '';
   email = '';
+  secondaryEmail = '';
   address = '';
   notes = '';
   customerCreatedAt = '';
@@ -210,6 +220,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   readonly emailView = signal<EmailView>('list');
   readonly selectedEmailId = signal<string | null>(null);
   readonly dismissedTabActivity = signal<TabActivityDismissState>({
+    vehicle: false,
     notes: false,
     schedule: false,
     invoices: false,
@@ -262,6 +273,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   );
 
   readonly tabs: Array<{ key: CustomerTab; label: string; icon: string }> = [
+    { key: 'vehicle', label: 'Vehicle', icon: 'car-outline' },
     { key: 'notes', label: 'Notes', icon: 'document-text-outline' },
     { key: 'schedule', label: 'Scheduled', icon: 'calendar-outline' },
     { key: 'invoices', label: 'Invoices', icon: 'cash-outline' },
@@ -270,6 +282,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   ];
   readonly mobileTabs: Array<{ key: CustomerMobileTab; label: string; icon: string }> = [
     { key: 'profile', label: 'Profile', icon: 'person-outline' },
+    { key: 'vehicle', label: 'Vehicle', icon: 'car-outline' },
     { key: 'notes', label: 'Notes', icon: 'document-text-outline' },
     { key: 'schedule', label: 'Scheduled', icon: 'calendar-outline' },
     { key: 'invoices', label: 'Invoices', icon: 'cash-outline' },
@@ -343,6 +356,8 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
         this.unreadActivityCount.set(0);
         this.emailThread.set([]);
         this.unreadEmailActivityCount.set(0);
+        this.duplicateMatches.set([]);
+        this.duplicateLoading.set(false);
       }
     });
 
@@ -422,10 +437,13 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   async saveCustomer(): Promise<void> {
     this.status.set('');
     this.error.set('');
+    this.duplicateSavePrompt.set(null);
+    this.validationAttempted.set(true);
     const first = this.firstName.trim();
     const last = this.lastName.trim();
     const phone = this.phone.trim();
     const email = this.email.trim();
+    const secondaryEmail = this.secondaryEmail.trim();
     const year = this.vehicleYear.trim();
 
     if (!this.hasCustomerChanges()) {
@@ -447,6 +465,10 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
       this.error.set('A valid email address is required.');
       return;
     }
+    if (!this.isSecondaryEmailValid()) {
+      this.error.set('Secondary email must be a valid email address.');
+      return;
+    }
 
     if (!this.isVehicleYearValid()) {
       this.error.set('Vehicle year must be a 4-digit value.');
@@ -465,6 +487,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
       lastName: last,
       phone,
       email,
+      secondaryEmail,
       address: this.address.trim(),
       vin: this.vin.trim(),
       vehicleMake: this.vehicleMake.trim(),
@@ -502,68 +525,20 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
       if (!currentId) {
         const duplicate = await this.findTopDuplicate(payload);
         if (duplicate) {
-          const shouldMerge = window.confirm(
-            `This customer appears similar to "${duplicate.name || 'existing customer'}" (${this.duplicateReasonsLabel(duplicate.reasons)}). Merge into the existing customer?`
-          );
-          if (shouldMerge) {
-            this.saving.set(true);
-            const merged = await firstValueFrom(this.customersApi.mergeDraftInto(duplicate.id, payload));
-            const mergedId = merged.id || duplicate.id;
-            this.status.set('Customer merged into existing record.');
-            this.error.set('');
-            this.customerId.set(mergedId);
-            await this.router.navigate(['/customers', mergedId], {
-              replaceUrl: true,
-              queryParams: { tab: this.activeTab() }
-            });
-            this.captureInitialSnapshot();
-            return;
-          }
-
-          const continueAsNew = window.confirm('Create as a separate customer anyway?');
-          if (!continueAsNew) {
-            this.status.set('Save cancelled.');
-            return;
-          }
+          this.duplicateSavePrompt.set({ mode: 'create', candidate: duplicate, payload });
+          this.error.set('Possible duplicate found. Choose merge or save as separate.');
+          return;
         }
       } else {
         const duplicate = await this.findTopDuplicate(payload, currentId);
         if (duplicate) {
-          const shouldMergeExisting = window.confirm(
-            `This customer appears similar to "${duplicate.name || 'another customer'}" (${this.duplicateReasonsLabel(duplicate.reasons)}). Merge this current customer into that record?`
-          );
-          if (shouldMergeExisting) {
-            this.saving.set(true);
-            const merged = await firstValueFrom(this.customersApi.mergeCustomers(duplicate.id, currentId));
-            const mergedId = merged.id || duplicate.id;
-            this.status.set('Customers merged.');
-            this.error.set('');
-            this.customerId.set(mergedId);
-            await this.router.navigate(['/customers', mergedId], {
-              replaceUrl: true,
-              queryParams: { tab: this.activeTab() }
-            });
-            this.captureInitialSnapshot();
-            return;
-          }
+          this.duplicateSavePrompt.set({ mode: 'update', candidate: duplicate, payload });
+          this.error.set('Possible duplicate found. Choose merge or save as separate.');
+          return;
         }
       }
 
-      this.saving.set(true);
-      const res = await firstValueFrom(this.customersApi.upsert(payload));
-      this.status.set('Customer saved.');
-      this.error.set('');
-      const savedId = res.id;
-      if (!this.customerId()) {
-        this.customerId.set(savedId);
-        await this.router.navigate(['/customers', savedId], {
-          replaceUrl: true,
-          queryParams: { tab: this.activeTab() }
-        });
-        this.captureInitialSnapshot();
-        return;
-      }
-      this.captureInitialSnapshot();
+      await this.persistCustomer(payload);
     } catch (err) {
       this.error.set(this.extractError(err, 'Could not save customer.'));
     } finally {
@@ -1196,7 +1171,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     this.selectedTemplateId = '';
     this.selectedEmailId.set(null);
     this.emailView.set('compose');
-    this.emailTo = this.email.trim();
+    this.emailTo = this.email.trim() || this.secondaryEmail.trim();
     this.emailSubject = '';
     this.emailMessage = this.composeWithSignature('');
   }
@@ -1432,6 +1407,11 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     return !!value && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
   }
 
+  isSecondaryEmailValid(): boolean {
+    const value = this.secondaryEmail.trim();
+    return !value || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  }
+
   isPhoneValid(): boolean {
     return !!this.normalizeE164(this.phone.trim());
   }
@@ -1442,12 +1422,17 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     return /^\d{4}$/.test(year);
   }
 
+  showInlineValidation(): boolean {
+    return this.validationAttempted();
+  }
+
   hasCustomerChanges(): boolean {
     return this.buildCustomerSnapshot() !== this.initialCustomerSnapshot;
   }
 
   canSaveCustomer(): boolean {
     return this.hasCustomerChanges() && this.isEmailValid() && this.isPhoneValid() && this.isVehicleYearValid() &&
+      this.isSecondaryEmailValid() &&
       this.isAddressValid() &&
       !!this.firstName.trim() && !!this.lastName.trim();
   }
@@ -1546,10 +1531,12 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
         next: customer => {
           if (!customer) {
             this.error.set('Customer not found.');
+            this.duplicateMatches.set([]);
             this.resetForm();
             return;
           }
           this.fillForm(customer);
+          this.loadDuplicateMatchesForCurrent();
           if (this.activeTab() === 'schedule') {
             this.loadCustomerSchedule();
             return;
@@ -1565,6 +1552,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
         },
         error: err => {
           this.error.set(this.extractError(err, 'Could not load customer.'));
+          this.duplicateMatches.set([]);
           this.resetForm();
         }
       });
@@ -1577,7 +1565,8 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     this.lastName = customer.lastName || (parts.length > 1 ? parts[parts.length - 1] : '');
     this.phone = customer.phone || '';
     this.email = customer.email || '';
-    this.emailTo = customer.email || '';
+    this.secondaryEmail = customer.secondaryEmail || '';
+    this.emailTo = customer.email || customer.secondaryEmail || '';
     this.emailSubject = '';
     this.emailMessage = '';
     this.selectedTemplateId = '';
@@ -1617,6 +1606,8 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     this.addressSearching.set(false);
     this.addressNoMatches.set(false);
     this.addressValidated.set(!!this.address.trim());
+    this.validationAttempted.set(false);
+    this.duplicateSavePrompt.set(null);
     this.captureInitialSnapshot();
     if (this.vin) {
       this.lookupVIN({
@@ -1633,6 +1624,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     this.lastName = '';
     this.phone = '';
     this.email = '';
+    this.secondaryEmail = '';
     this.emailTo = '';
     this.emailSubject = '';
     this.emailMessage = '';
@@ -1685,7 +1677,119 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     this.emailStatus.set('');
     this.emailError.set('');
     this.unreadEmailActivityCount.set(0);
+    this.duplicateMatches.set([]);
+    this.duplicateLoading.set(false);
+    this.duplicateSavePrompt.set(null);
+    this.validationAttempted.set(false);
     this.captureInitialSnapshot();
+  }
+
+  reviewDuplicate(duplicateId?: string): void {
+    const currentId = String(this.customerId() || '').trim();
+    const otherId = String(duplicateId || this.duplicateMatches()[0]?.id || '').trim();
+    if (!currentId || !otherId || currentId === otherId) {
+      this.error.set('Could not open duplicate review for this customer.');
+      return;
+    }
+    this.status.set('');
+    this.error.set('');
+    void this.router.navigate(['/customers/duplicates'], {
+      queryParams: {
+        current: currentId,
+        other: otherId
+      }
+    });
+  }
+
+  dismissDuplicateSavePrompt(): void {
+    this.duplicateSavePrompt.set(null);
+    this.error.set('');
+  }
+
+  async ignoreDuplicateSavePrompt(): Promise<void> {
+    const pending = this.duplicateSavePrompt();
+    const currentId = String(this.customerId() || '').trim();
+    const candidateId = String(pending?.candidate?.id || '').trim();
+    if (!pending || pending.mode !== 'update' || !currentId || !candidateId || currentId === candidateId) {
+      this.duplicateSavePrompt.set(null);
+      this.error.set('');
+      return;
+    }
+
+    this.saving.set(true);
+    this.status.set('');
+    this.error.set('');
+    try {
+      await firstValueFrom(this.customersApi.markNotDuplicate(currentId, candidateId));
+      this.duplicateSavePrompt.set(null);
+      this.duplicateMatches.set(this.duplicateMatches().filter(item => String(item?.id || '').trim() !== candidateId));
+      this.status.set('Duplicate ignored. This pair will not be flagged again.');
+    } catch (err) {
+      this.error.set(this.extractError(err, 'Could not ignore duplicate.'));
+    } finally {
+      this.saving.set(false);
+    }
+  }
+
+  async saveAsSeparateAfterDuplicate(): Promise<void> {
+    const pending = this.duplicateSavePrompt();
+    if (!pending) return;
+    this.duplicateSavePrompt.set(null);
+    this.status.set('');
+    this.error.set('');
+    try {
+      await this.persistCustomer(pending.payload);
+    } catch (err) {
+      this.error.set(this.extractError(err, 'Could not save customer.'));
+    } finally {
+      this.saving.set(false);
+    }
+  }
+
+  async mergeAfterDuplicatePrompt(): Promise<void> {
+    const pending = this.duplicateSavePrompt();
+    if (!pending) return;
+    this.status.set('');
+    this.error.set('');
+    this.saving.set(true);
+    try {
+      if (pending.mode === 'create') {
+        const merged = await firstValueFrom(this.customersApi.mergeDraftInto(pending.candidate.id, pending.payload));
+        const mergedId = merged.id || pending.candidate.id;
+        this.duplicateSavePrompt.set(null);
+        this.status.set('Customer merged into existing record.');
+        this.customerId.set(mergedId);
+        await this.router.navigate(['/customers', mergedId], {
+          replaceUrl: true,
+          queryParams: { tab: this.activeTab() }
+        });
+        this.captureInitialSnapshot();
+        return;
+      }
+
+      const currentId = String(this.customerId() || '').trim();
+      if (!currentId) {
+        this.error.set('Current customer is missing. Save as separate instead.');
+        return;
+      }
+
+      // Preserve unsaved edits by applying draft values to target before merge.
+      await firstValueFrom(this.customersApi.mergeDraftInto(pending.candidate.id, pending.payload));
+      const merged = await firstValueFrom(this.customersApi.mergeCustomers(pending.candidate.id, currentId));
+      const mergedId = merged.id || pending.candidate.id;
+      this.duplicateSavePrompt.set(null);
+      this.status.set('Customers merged.');
+      this.customerId.set(mergedId);
+      await this.router.navigate(['/customers', mergedId], {
+        replaceUrl: true,
+        queryParams: { tab: this.activeTab() }
+      });
+      this.captureInitialSnapshot();
+    } catch (err) {
+      this.error.set(this.extractError(err, 'Could not merge customers.'));
+    } finally {
+      this.saving.set(false);
+    }
   }
 
   private markInboundMessagesRead(items: SmsMessage[]): void {
@@ -1811,6 +1915,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
 
   private resetTabActivityDismissals(activeTab?: CustomerTab): void {
     const next: TabActivityDismissState = {
+      vehicle: false,
       notes: false,
       schedule: false,
       invoices: false,
@@ -1968,23 +2073,115 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
         excludeId: excludeId || payload.id
       }));
       const items = Array.isArray(res?.items) ? res.items : [];
-      return items[0] || null;
+      return items.find(item => this.duplicateConfidence(item) >= 55) || null;
     } catch {
       return null;
     }
   }
 
-  private duplicateReasonsLabel(reasons: DuplicateReason[] | string[]): string {
+  private async persistCustomer(payload: Omit<Customer, 'id'> & { id?: string }): Promise<void> {
+    this.saving.set(true);
+    const res = await firstValueFrom(this.customersApi.upsert(payload));
+    this.status.set('Customer saved.');
+    this.error.set('');
+    this.validationAttempted.set(false);
+    const savedId = res.id;
+    if (!this.customerId()) {
+      this.customerId.set(savedId);
+      await this.router.navigate(['/customers', savedId], {
+        replaceUrl: true,
+        queryParams: { tab: this.activeTab() }
+      });
+      this.captureInitialSnapshot();
+      return;
+    }
+    this.captureInitialSnapshot();
+  }
+
+  private loadDuplicateMatchesForCurrent(): void {
+    const currentId = String(this.customerId() || '').trim();
+    if (!currentId) {
+      this.duplicateMatches.set([]);
+      this.duplicateLoading.set(false);
+      return;
+    }
+
+    const probe = {
+      id: currentId,
+      firstName: this.firstName.trim(),
+      lastName: this.lastName.trim(),
+      name: `${this.firstName} ${this.lastName}`.trim(),
+      email: this.email.trim(),
+      secondaryEmail: this.secondaryEmail.trim(),
+      phone: this.phone.trim(),
+      vin: this.vin.trim(),
+      excludeId: currentId
+    };
+
+    this.duplicateLoading.set(true);
+    this.customersApi.findDuplicates(probe).pipe(
+      finalize(() => this.duplicateLoading.set(false))
+    ).subscribe({
+      next: res => {
+        const items = (Array.isArray(res?.items) ? res.items : [])
+          .filter(item => this.duplicateConfidence(item) >= 55);
+        this.duplicateMatches.set(items);
+      },
+      error: () => {
+        this.duplicateMatches.set([]);
+      }
+    });
+  }
+
+  duplicateReasonsLabel(reasons: DuplicateReason[] | string[]): string {
     const normalized = Array.from(new Set((Array.isArray(reasons) ? reasons : [])
       .map(reason => String(reason || '').toLowerCase().trim())
       .filter(Boolean)));
     const labels = normalized.map(reason => {
+      if (reason === 'vin') return 'VIN match';
       if (reason === 'email') return 'email match';
       if (reason === 'phone') return 'phone match';
       if (reason === 'name') return 'name match';
       return reason;
     });
     return labels.length ? labels.join(', ') : 'possible duplicate';
+  }
+
+  duplicateConfidence(candidate: DuplicateCandidate | null | undefined): number {
+    const raw = Number(candidate?.confidence);
+    if (Number.isFinite(raw) && raw >= 0) return Math.max(0, Math.min(100, Math.round(raw)));
+    const score = Number(candidate?.score);
+    if (!Number.isFinite(score) || score < 0) return 0;
+    return Math.max(0, Math.min(100, Math.round(score)));
+  }
+
+  duplicateRecommendationLabel(candidate: DuplicateCandidate | null | undefined): string {
+    const recommendation = String(candidate?.recommendation || '').trim().toLowerCase();
+    if (recommendation === 'auto-merge') return 'Auto-merge recommended';
+    if (recommendation === 'review') return 'Manual review recommended';
+    return 'Possible duplicate';
+  }
+
+  async ignoreDuplicateForCurrent(duplicateId?: string): Promise<void> {
+    const currentId = String(this.customerId() || '').trim();
+    const otherId = String(duplicateId || this.duplicateMatches()[0]?.id || '').trim();
+    if (!currentId || !otherId || currentId === otherId) {
+      this.error.set('Could not ignore duplicate for this customer.');
+      return;
+    }
+
+    this.status.set('');
+    this.error.set('');
+    this.saving.set(true);
+    try {
+      await firstValueFrom(this.customersApi.markNotDuplicate(currentId, otherId));
+      this.duplicateMatches.set(this.duplicateMatches().filter(item => String(item?.id || '').trim() !== otherId));
+      this.status.set('Duplicate match ignored. It will not be flagged again.');
+    } catch (err) {
+      this.error.set(this.extractError(err, 'Could not ignore duplicate.'));
+    } finally {
+      this.saving.set(false);
+    }
   }
 
   private applyStoredFitmentToDetails(details: Record<string, string>): void {
@@ -2108,14 +2305,14 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   }
 
   private isTab(value: string): value is CustomerTab {
-    return value === 'notes' || value === 'schedule' || value === 'sms' || value === 'invoices' || value === 'email';
+    return value === 'vehicle' || value === 'notes' || value === 'schedule' || value === 'sms' || value === 'invoices' || value === 'email';
   }
 
   private normalizeTab(value: string): CustomerTab | null {
     if (this.isTab(value)) return value;
     if (value === 'email-history') return 'email';
     if (value === 'scheduled') return 'schedule';
-    if (value === 'profile' || value === 'vehicle') return 'notes';
+    if (value === 'profile') return 'vehicle';
     return null;
   }
 
@@ -2156,6 +2353,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
       lastName: this.lastName.trim(),
       phone: this.phone.trim(),
       email: this.email.trim(),
+      secondaryEmail: this.secondaryEmail.trim(),
       address: this.address.trim(),
       notes: this.notes.trim(),
       vin: this.vin.trim(),

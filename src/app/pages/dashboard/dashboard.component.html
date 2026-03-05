@@ -56,11 +56,11 @@
             style="margin-left:8px; transition: opacity .35s linear;">
         {{ status() }}
       </span>
-      <ion-button (click)="openSettings()">
+      <ion-button id="dashboard-settings-guide-target" (click)="openSettings()">
         <ion-icon slot="start" name="settings-outline"></ion-icon>
         Dashboard Settings
       </ion-button>
-      <app-user-menu></app-user-menu>
+      <app-user-menu id="dashboard-user-menu-guide-target"></app-user-menu>
     </ion-buttons>
   </ion-toolbar>
 </ion-header>
@@ -304,6 +304,37 @@
       </ion-footer>
     </ng-template>
   </ion-modal>
+
+  <ng-container *ngIf="onboardingActive()">
+    <div class="onboarding-overlay" *ngIf="onboardingRect() as rect">
+      <div class="onboarding-spotlight"
+        [style.top.px]="rect.top"
+        [style.left.px]="rect.left"
+        [style.width.px]="rect.width"
+        [style.height.px]="rect.height"></div>
+
+      <section class="onboarding-bubble" [ngStyle]="onboardingBubbleStyle()">
+        <div class="onboarding-step-label">
+          Step {{ onboardingStepIndex() + 1 }} of {{ onboardingSteps.length }}
+        </div>
+        <h3>{{ onboardingCurrentStep().title }}</h3>
+        <p>{{ onboardingCurrentStep().body }}</p>
+        <div class="onboarding-actions">
+          <ion-button fill="clear" size="small" (click)="skipOnboarding()">Skip</ion-button>
+          <ion-button
+            fill="outline"
+            size="small"
+            [disabled]="onboardingStepIndex() === 0"
+            (click)="prevOnboardingStep()">
+            Back
+          </ion-button>
+          <ion-button size="small" (click)="nextOnboardingStep()">
+            {{ onboardingStepIndex() === onboardingSteps.length - 1 ? 'Done' : 'Next' }}
+          </ion-button>
+        </div>
+      </section>
+    </div>
+  </ng-container>
 
   <ion-modal [isOpen]="deleteOpen()" (didDismiss)="cancelDelete()">
     <ng-template>

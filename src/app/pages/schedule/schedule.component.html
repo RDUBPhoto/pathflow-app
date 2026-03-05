@@ -6,10 +6,6 @@
     <ion-title>Schedule</ion-title>
     <app-company-switcher></app-company-switcher>
     <ion-buttons slot="end" class="ion-margin-end">
-      <ion-button fill="clear" [routerLink]="['/admin-settings']" [queryParams]="{ section: 'schedule' }">
-        <ion-icon slot="start" name="settings-outline"></ion-icon>
-        Calendar Settings
-      </ion-button>
       <app-user-menu></app-user-menu>
       <ion-spinner name="crescent" *ngIf="loading()"></ion-spinner>
     </ion-buttons>

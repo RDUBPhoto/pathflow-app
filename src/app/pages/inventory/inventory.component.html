@@ -72,7 +72,7 @@
           <ion-label position="stacked">Search Parts</ion-label>
           <ion-input
             [ngModel]="search()"
-            (ngModelChange)="search.set($event || '')"
+            (ngModelChange)="setSearch($event)"
             placeholder="Part name, SKU, category, supplier">
           </ion-input>
         </ion-item>
@@ -80,7 +80,7 @@
           <ion-label>Low stock only</ion-label>
           <ion-toggle
             [checked]="showLowStockOnly()"
-            (ionChange)="showLowStockOnly.set($event.detail.checked)">
+            (ionChange)="setShowLowStockOnly($event.detail.checked)">
           </ion-toggle>
         </ion-item>
       </div>
@@ -101,7 +101,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr *ngFor="let item of filteredItems(); trackBy: trackInventoryItem">
+            <tr *ngFor="let item of pagedItems(); trackBy: trackInventoryItem">
               <td>
                 <div class="part-name">{{ item.name }}</div>
                 <div class="part-meta">SKU {{ item.sku }} · {{ item.category }}</div>
@@ -127,11 +127,18 @@
                 </ion-button>
               </td>
             </tr>
-            <tr *ngIf="!filteredItems().length">
+            <tr *ngIf="!pagedItems().length">
               <td colspan="9" class="empty-row">No inventory matches your search.</td>
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <div class="table-pager" *ngIf="filteredItems().length > 0">
+        <ion-button size="small" fill="outline" (click)="prevPage()" [disabled]="page() <= 1">Previous</ion-button>
+        <span>Page {{ page() }} of {{ totalPages() }}</span>
+        <ion-button size="small" fill="outline" (click)="nextPage()" [disabled]="page() >= totalPages()">Next</ion-button>
+        <span>Showing {{ pageStart() }}-{{ pageEnd() }} of {{ filteredItems().length }}</span>
       </div>
     </section>
 

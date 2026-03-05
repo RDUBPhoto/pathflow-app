@@ -20,6 +20,7 @@
         <div class="hero-since" *ngIf="customerCreatedAt">Customer since {{ customerSinceLabel() }}</div>
         <div class="hero-meta">
           <span>{{ email || 'No email set' }}</span>
+          <span *ngIf="secondaryEmail">Alt: {{ secondaryEmail }}</span>
           <span>{{ phone || 'No phone set' }}</span>
         </div>
       </div>
@@ -36,6 +37,61 @@
       </div>
       <div class="save-feedback success" *ngIf="status()">{{ status() }}</div>
       <div class="save-feedback error" *ngIf="error()">{{ error() }}</div>
+    </div>
+  </section>
+
+  <section class="duplicate-decision-banner glass-surface" *ngIf="duplicateSavePrompt() as pending">
+    <div class="duplicate-banner-copy">
+      <strong>Possible duplicate detected</strong>
+      <span>
+        {{ pending.candidate.name || 'Existing customer' }} matches by
+        {{ duplicateReasonsLabel(pending.candidate.reasons) }}
+        ({{ duplicateConfidence(pending.candidate) }}% confidence).
+      </span>
+      <span>{{ duplicateRecommendationLabel(pending.candidate) }}</span>
+    </div>
+    <div class="duplicate-decision-actions">
+      <ion-button size="small" color="warning" (click)="mergeAfterDuplicatePrompt()" [disabled]="saving()">
+        Merge into Existing
+      </ion-button>
+      <ion-button size="small" fill="outline" (click)="saveAsSeparateAfterDuplicate()" [disabled]="saving()">
+        Save as Separate
+      </ion-button>
+      <ion-button
+        size="small"
+        fill="clear"
+        *ngIf="pending.mode === 'update'"
+        (click)="reviewDuplicate(pending.candidate.id)"
+        [disabled]="saving()">
+        Review Pair
+      </ion-button>
+      <ion-button
+        size="small"
+        fill="clear"
+        *ngIf="pending.mode === 'update'"
+        (click)="ignoreDuplicateSavePrompt()"
+        [disabled]="saving()">
+        Ignore Match
+      </ion-button>
+      <ion-button size="small" fill="clear" (click)="dismissDuplicateSavePrompt()" [disabled]="saving()">
+        Dismiss
+      </ion-button>
+    </div>
+  </section>
+
+  <section class="duplicate-banner glass-surface" *ngIf="customerId() && duplicateMatches().length > 0">
+    <div class="duplicate-banner-copy">
+      <strong>Possible duplicate customer found</strong>
+      <span>
+        Matched by {{ duplicateReasonsLabel(duplicateMatches()[0].reasons) }} with
+        {{ duplicateMatches()[0].name || 'another profile' }}
+        ({{ duplicateConfidence(duplicateMatches()[0]) }}% confidence).
+      </span>
+      <span>{{ duplicateRecommendationLabel(duplicateMatches()[0]) }}</span>
+    </div>
+    <div class="duplicate-decision-actions">
+      <ion-button size="small" color="warning" (click)="reviewDuplicate()">Review &amp; Merge</ion-button>
+      <ion-button size="small" fill="clear" (click)="ignoreDuplicateForCurrent()">Ignore Match</ion-button>
     </div>
   </section>
 
@@ -57,7 +113,7 @@
   </nav>
 
   <section class="customer-layout">
-    <ng-template #profilePanelsTemplate>
+    <ng-template #contactPanelTemplate>
       <section class="section-panel glass-surface contact-panel">
         <div class="panel-title">
           <ion-icon name="person-outline"></ion-icon>
@@ -69,25 +125,33 @@
             <ion-label position="stacked">First Name *</ion-label>
             <ion-input [(ngModel)]="firstName"></ion-input>
           </ion-item>
-          <div class="field-error" *ngIf="hasCustomerChanges() && !firstName.trim()">First name is required.</div>
+          <div class="field-error" *ngIf="showInlineValidation() && !firstName.trim()">First name is required.</div>
 
           <ion-item>
             <ion-label position="stacked">Last Name *</ion-label>
             <ion-input [(ngModel)]="lastName"></ion-input>
           </ion-item>
-          <div class="field-error" *ngIf="hasCustomerChanges() && !lastName.trim()">Last name is required.</div>
+          <div class="field-error" *ngIf="showInlineValidation() && !lastName.trim()">Last name is required.</div>
 
           <ion-item>
             <ion-label position="stacked">Phone *</ion-label>
             <ion-input [(ngModel)]="phone" placeholder="(555) 555-5555"></ion-input>
           </ion-item>
-          <div class="field-error" *ngIf="hasCustomerChanges() && !isPhoneValid()">Enter a valid phone number.</div>
+          <div class="field-error" *ngIf="showInlineValidation() && !isPhoneValid()">Enter a valid phone number.</div>
 
           <ion-item>
             <ion-label position="stacked">Email *</ion-label>
             <ion-input [(ngModel)]="email" type="email"></ion-input>
           </ion-item>
-          <div class="field-error" *ngIf="hasCustomerChanges() && !isEmailValid()">Enter a valid email address.</div>
+          <div class="field-error" *ngIf="showInlineValidation() && !isEmailValid()">Enter a valid email address.</div>
+
+          <ion-item>
+            <ion-label position="stacked">Secondary Email</ion-label>
+            <ion-input [(ngModel)]="secondaryEmail" type="email"></ion-input>
+          </ion-item>
+          <div class="field-error" *ngIf="showInlineValidation() && !isSecondaryEmailValid()">
+            Enter a valid secondary email address.
+          </div>
 
           <div class="address-field">
             <ion-item class="address-item">
@@ -119,162 +183,162 @@
           </div>
         </div>
       </section>
+    </ng-template>
 
-      <section class="section-panel glass-surface">
-        <div class="panel-title">
-          <ion-icon name="car-outline"></ion-icon>
-          Vehicle Details
+    <ng-template #vehicleDetailsTemplate>
+      <div class="panel-title">
+        <ion-icon name="car-outline"></ion-icon>
+        Vehicle Details
+      </div>
+
+      <div class="vin-row">
+        <ion-item>
+          <ion-label position="stacked">VIN</ion-label>
+          <ion-input [(ngModel)]="vin" maxlength="17"></ion-input>
+        </ion-item>
+        <ion-button class="vin-btn" fill="outline" (click)="lookupVIN()">Decode VIN</ion-button>
+        <ion-button
+          class="vin-btn remove-vehicle-btn"
+          color="danger"
+          fill="outline"
+          (click)="confirmRemoveVehicle()"
+          [disabled]="!hasVehicleData()">
+          Remove Vehicle
+        </ion-button>
+      </div>
+
+      <div class="vin-status" *ngIf="vinStatus">{{ vinStatus }}</div>
+
+      <div class="vin-grid" *ngIf="hasVinDetails()">
+        <div class="vin-item" *ngFor="let kv of (vinDecoded() | keyvalue)">
+          <div class="vin-key">{{ kv.key }}</div>
+          <div class="vin-value">{{ kv.value || '—' }}</div>
+        </div>
+      </div>
+
+      <div class="form-grid">
+        <ion-item>
+          <ion-label position="stacked">Make</ion-label>
+          <ion-input [(ngModel)]="vehicleMake"></ion-input>
+        </ion-item>
+
+        <ion-item>
+          <ion-label position="stacked">Model</ion-label>
+          <ion-input [(ngModel)]="vehicleModel"></ion-input>
+        </ion-item>
+
+        <ion-item>
+          <ion-label position="stacked">Year</ion-label>
+          <ion-input [(ngModel)]="vehicleYear"></ion-input>
+        </ion-item>
+        <div class="field-error" *ngIf="showInlineValidation() && !isVehicleYearValid()">
+          Vehicle year must be 4 digits.
         </div>
 
-        <div class="vin-row">
+        <ion-item>
+          <ion-label position="stacked">Trim</ion-label>
+          <ion-input [(ngModel)]="vehicleTrim"></ion-input>
+        </ion-item>
+
+        <ion-item>
+          <ion-label position="stacked">Doors</ion-label>
+          <ion-input [(ngModel)]="vehicleDoors"></ion-input>
+        </ion-item>
+
+        <ion-item>
+          <ion-label position="stacked">Bed Length</ion-label>
+          <ion-input [(ngModel)]="bedLength"></ion-input>
+        </ion-item>
+
+        <ion-item>
+          <ion-label position="stacked">Cab Type</ion-label>
+          <ion-input [(ngModel)]="cabType"></ion-input>
+        </ion-item>
+
+        <ion-item>
+          <ion-label position="stacked">Engine Cylinders</ion-label>
+          <ion-input [(ngModel)]="engineCylinders"></ion-input>
+        </ion-item>
+
+        <ion-item>
+          <ion-label position="stacked">Transmission</ion-label>
+          <ion-input [(ngModel)]="transmissionStyle"></ion-input>
+        </ion-item>
+
+        <ion-item *ngIf="engineModel">
+          <ion-label position="stacked">Engine Model</ion-label>
+          <ion-input [value]="engineModel" readonly></ion-input>
+        </ion-item>
+      </div>
+
+      <div class="fitment-section">
+        <div class="color-title">Wheel / Tire Fitment</div>
+        <div class="fitment-grid">
           <ion-item>
-            <ion-label position="stacked">VIN</ion-label>
-            <ion-input [(ngModel)]="vin" maxlength="17"></ion-input>
+            <ion-label position="stacked">Bolt Pattern</ion-label>
+            <ion-input [value]="boltPattern || '—'" readonly></ion-input>
           </ion-item>
-          <ion-button class="vin-btn" fill="outline" (click)="lookupVIN()">Decode VIN</ion-button>
-          <ion-button
-            class="vin-btn remove-vehicle-btn"
-            color="danger"
-            fill="outline"
-            (click)="confirmRemoveVehicle()"
-            [disabled]="!hasVehicleData()">
-            Remove Vehicle
-          </ion-button>
+          <ion-item>
+            <ion-label position="stacked">Rear Bolt Pattern</ion-label>
+            <ion-input [value]="rearBoltPattern || '—'" readonly></ion-input>
+          </ion-item>
+          <ion-item>
+            <ion-label position="stacked">PCD (mm)</ion-label>
+            <ion-input [value]="pcd || '—'" readonly></ion-input>
+          </ion-item>
+          <ion-item>
+            <ion-label position="stacked">Rear PCD (mm)</ion-label>
+            <ion-input [value]="rearPcd || '—'" readonly></ion-input>
+          </ion-item>
+          <ion-item>
+            <ion-label position="stacked">Front Tire</ion-label>
+            <ion-input [value]="frontTireSize || '—'" readonly></ion-input>
+          </ion-item>
+          <ion-item>
+            <ion-label position="stacked">Rear Tire</ion-label>
+            <ion-input [value]="rearTireSize || '—'" readonly></ion-input>
+          </ion-item>
+          <ion-item>
+            <ion-label position="stacked">Front Rim</ion-label>
+            <ion-input [value]="frontRimSize || '—'" readonly></ion-input>
+          </ion-item>
+          <ion-item>
+            <ion-label position="stacked">Rear Rim</ion-label>
+            <ion-input [value]="rearRimSize || '—'" readonly></ion-input>
+          </ion-item>
+          <ion-item>
+            <ion-label position="stacked">Centre Bore</ion-label>
+            <ion-input [value]="centreBore || '—'" readonly></ion-input>
+          </ion-item>
+          <ion-item>
+            <ion-label position="stacked">Wheel Fasteners</ion-label>
+            <ion-input [value]="wheelFasteners || '—'" readonly></ion-input>
+          </ion-item>
+          <ion-item>
+            <ion-label position="stacked">Wheel Torque</ion-label>
+            <ion-input [value]="wheelTorque || '—'" readonly></ion-input>
+          </ion-item>
         </div>
+      </div>
 
-        <div class="vin-status" *ngIf="vinStatus">{{ vinStatus }}</div>
-
-        <div class="vin-grid" *ngIf="hasVinDetails()">
-          <div class="vin-item" *ngFor="let kv of (vinDecoded() | keyvalue)">
-            <div class="vin-key">{{ kv.key }}</div>
-            <div class="vin-value">{{ kv.value || '—' }}</div>
-          </div>
+      <div class="color-wrap">
+        <div class="color-title">Vehicle Color</div>
+        <div class="color-palette">
+          <button
+            type="button"
+            class="color-btn"
+            *ngFor="let opt of palette"
+            [class.active]="vehicleColor === opt.hex"
+            (click)="vehicleColor = opt.hex">
+            <span class="swatch" [style.background]="opt.hex"></span>
+            <span>{{ opt.label }}</span>
+          </button>
         </div>
-
-        <div class="form-grid">
-          <ion-item>
-            <ion-label position="stacked">Make</ion-label>
-            <ion-input [(ngModel)]="vehicleMake"></ion-input>
-          </ion-item>
-
-          <ion-item>
-            <ion-label position="stacked">Model</ion-label>
-            <ion-input [(ngModel)]="vehicleModel"></ion-input>
-          </ion-item>
-
-          <ion-item>
-            <ion-label position="stacked">Year</ion-label>
-            <ion-input [(ngModel)]="vehicleYear"></ion-input>
-          </ion-item>
-          <div class="field-error" *ngIf="hasCustomerChanges() && !isVehicleYearValid()">
-            Vehicle year must be 4 digits.
-          </div>
-
-          <ion-item>
-            <ion-label position="stacked">Trim</ion-label>
-            <ion-input [(ngModel)]="vehicleTrim"></ion-input>
-          </ion-item>
-
-          <ion-item>
-            <ion-label position="stacked">Doors</ion-label>
-            <ion-input [(ngModel)]="vehicleDoors"></ion-input>
-          </ion-item>
-
-          <ion-item>
-            <ion-label position="stacked">Bed Length</ion-label>
-            <ion-input [(ngModel)]="bedLength"></ion-input>
-          </ion-item>
-
-          <ion-item>
-            <ion-label position="stacked">Cab Type</ion-label>
-            <ion-input [(ngModel)]="cabType"></ion-input>
-          </ion-item>
-
-          <ion-item>
-            <ion-label position="stacked">Engine Cylinders</ion-label>
-            <ion-input [(ngModel)]="engineCylinders"></ion-input>
-          </ion-item>
-
-          <ion-item>
-            <ion-label position="stacked">Transmission</ion-label>
-            <ion-input [(ngModel)]="transmissionStyle"></ion-input>
-          </ion-item>
-
-          <ion-item *ngIf="engineModel">
-            <ion-label position="stacked">Engine Model</ion-label>
-            <ion-input [value]="engineModel" readonly></ion-input>
-          </ion-item>
-        </div>
-
-        <div class="fitment-section">
-          <div class="color-title">Wheel / Tire Fitment</div>
-          <div class="fitment-grid">
-            <ion-item>
-              <ion-label position="stacked">Bolt Pattern</ion-label>
-              <ion-input [value]="boltPattern || '—'" readonly></ion-input>
-            </ion-item>
-            <ion-item>
-              <ion-label position="stacked">Rear Bolt Pattern</ion-label>
-              <ion-input [value]="rearBoltPattern || '—'" readonly></ion-input>
-            </ion-item>
-            <ion-item>
-              <ion-label position="stacked">PCD (mm)</ion-label>
-              <ion-input [value]="pcd || '—'" readonly></ion-input>
-            </ion-item>
-            <ion-item>
-              <ion-label position="stacked">Rear PCD (mm)</ion-label>
-              <ion-input [value]="rearPcd || '—'" readonly></ion-input>
-            </ion-item>
-            <ion-item>
-              <ion-label position="stacked">Front Tire</ion-label>
-              <ion-input [value]="frontTireSize || '—'" readonly></ion-input>
-            </ion-item>
-            <ion-item>
-              <ion-label position="stacked">Rear Tire</ion-label>
-              <ion-input [value]="rearTireSize || '—'" readonly></ion-input>
-            </ion-item>
-            <ion-item>
-              <ion-label position="stacked">Front Rim</ion-label>
-              <ion-input [value]="frontRimSize || '—'" readonly></ion-input>
-            </ion-item>
-            <ion-item>
-              <ion-label position="stacked">Rear Rim</ion-label>
-              <ion-input [value]="rearRimSize || '—'" readonly></ion-input>
-            </ion-item>
-            <ion-item>
-              <ion-label position="stacked">Centre Bore</ion-label>
-              <ion-input [value]="centreBore || '—'" readonly></ion-input>
-            </ion-item>
-            <ion-item>
-              <ion-label position="stacked">Wheel Fasteners</ion-label>
-              <ion-input [value]="wheelFasteners || '—'" readonly></ion-input>
-            </ion-item>
-            <ion-item>
-              <ion-label position="stacked">Wheel Torque</ion-label>
-              <ion-input [value]="wheelTorque || '—'" readonly></ion-input>
-            </ion-item>
-          </div>
-        </div>
-
-        <div class="color-wrap">
-          <div class="color-title">Vehicle Color</div>
-          <div class="color-palette">
-            <button
-              type="button"
-              class="color-btn"
-              *ngFor="let opt of palette"
-              [class.active]="vehicleColor === opt.hex"
-              (click)="vehicleColor = opt.hex">
-              <span class="swatch" [style.background]="opt.hex"></span>
-              <span>{{ opt.label }}</span>
-            </button>
-          </div>
-        </div>
-      </section>
+      </div>
     </ng-template>
 
     <div class="left-column" *ngIf="!isMobileLayout()">
-      <ng-container *ngTemplateOutlet="profilePanelsTemplate"></ng-container>
+      <ng-container *ngTemplateOutlet="contactPanelTemplate"></ng-container>
     </div>
 
     <nav class="tab-rail glass-surface" *ngIf="!isMobileLayout()" aria-label="Customer detail tabs">
@@ -298,7 +362,7 @@
     </nav>
 
     <section class="mobile-profile-column" *ngIf="isMobileLayout() && mobileTab() === 'profile'">
-      <ng-container *ngTemplateOutlet="profilePanelsTemplate"></ng-container>
+      <ng-container *ngTemplateOutlet="contactPanelTemplate"></ng-container>
     </section>
 
     <section
@@ -334,6 +398,10 @@
       </div>
 
       <div class="right-content" [class.sms-active]="activeTab() === 'sms'">
+        <section class="right-panel" *ngIf="activeTab() === 'vehicle'">
+          <ng-container *ngTemplateOutlet="vehicleDetailsTemplate"></ng-container>
+        </section>
+
         <section class="right-panel" *ngIf="activeTab() === 'notes'">
           <ion-item>
             <ion-label position="stacked">Service Notes</ion-label>

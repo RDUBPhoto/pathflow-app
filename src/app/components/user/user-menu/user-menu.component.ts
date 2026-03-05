@@ -64,6 +64,7 @@ export class UserMenuComponent implements OnInit, OnDestroy {
   readonly notificationsTotal = signal(0);
   readonly unreadNotifications = signal(0);
   readonly showAllNotifications = signal(false);
+  readonly notificationsDrawerOpen = signal(false);
   readonly seedingNotifications = signal(false);
   readonly visibleNotifications = computed(() =>
     this.showAllNotifications() ? this.notificationItems() : this.notificationItems().slice(0, this.recentLimit)
@@ -162,6 +163,7 @@ export class UserMenuComponent implements OnInit, OnDestroy {
     this.notificationsOpen.set(next);
     if (!next) {
       this.showAllNotifications.set(false);
+      this.notificationsDrawerOpen.set(false);
       return;
     }
 
@@ -175,13 +177,21 @@ export class UserMenuComponent implements OnInit, OnDestroy {
   closeNotifications(): void {
     this.notificationsOpen.set(false);
     this.showAllNotifications.set(false);
+    this.notificationsDrawerOpen.set(false);
   }
 
   viewAllNotifications(event: Event): void {
     event.preventDefault();
     event.stopPropagation();
+    this.notificationsOpen.set(false);
+    this.notificationsDrawerOpen.set(true);
     this.showAllNotifications.set(true);
     this.loadAllNotifications(false);
+  }
+
+  closeNotificationsDrawer(): void {
+    this.notificationsDrawerOpen.set(false);
+    this.showAllNotifications.set(false);
   }
 
   showRecentNotifications(event: Event): void {
@@ -347,7 +357,7 @@ export class UserMenuComponent implements OnInit, OnDestroy {
   }
 
   private refreshNotifications(background: boolean): void {
-    if (this.notificationsOpen() && this.showAllNotifications()) {
+    if ((this.notificationsOpen() || this.notificationsDrawerOpen()) && this.showAllNotifications()) {
       this.loadAllNotifications(background);
       return;
     }
@@ -363,8 +373,10 @@ export class UserMenuComponent implements OnInit, OnDestroy {
     this.notificationsApi.listRecent(this.recentLimit).subscribe({
       next: res => {
         this.notificationItems.set(Array.isArray(res.items) ? res.items : []);
-        this.notificationsTotal.set(Number.isFinite(res.total) ? res.total : this.notificationItems().length);
-        this.unreadNotifications.set(Number.isFinite(res.unreadCount) ? res.unreadCount : 0);
+        const unreadFromItems = this.notificationItems().filter(item => !item.read).length;
+        const unread = Number.isFinite(res.unreadCount) ? Number(res.unreadCount) : unreadFromItems;
+        this.notificationsTotal.set(Number.isFinite(res.total) ? Number(res.total) : this.notificationItems().length);
+        this.unreadNotifications.set(Math.max(0, unread));
         this.notificationsLoading.set(false);
       },
       error: () => {
@@ -385,8 +397,10 @@ export class UserMenuComponent implements OnInit, OnDestroy {
     this.notificationsApi.listAll(200).subscribe({
       next: res => {
         this.notificationItems.set(Array.isArray(res.items) ? res.items : []);
-        this.notificationsTotal.set(Number.isFinite(res.total) ? res.total : this.notificationItems().length);
-        this.unreadNotifications.set(Number.isFinite(res.unreadCount) ? res.unreadCount : 0);
+        const unreadFromItems = this.notificationItems().filter(item => !item.read).length;
+        const unread = Number.isFinite(res.unreadCount) ? Number(res.unreadCount) : unreadFromItems;
+        this.notificationsTotal.set(Number.isFinite(res.total) ? Number(res.total) : this.notificationItems().length);
+        this.unreadNotifications.set(Math.max(0, unread));
         this.notificationsLoading.set(false);
       },
       error: () => {

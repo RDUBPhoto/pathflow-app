@@ -311,6 +311,19 @@
   text-align: center;
 }
 
+.table-pager {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.table-pager span {
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
 .summary-grid {
   display: grid;
   grid-template-columns: minmax(0, 0.85fr) minmax(340px, 1.15fr);

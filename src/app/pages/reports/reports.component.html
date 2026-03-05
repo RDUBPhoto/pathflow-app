@@ -225,7 +225,7 @@
               </tr>
             </thead>
             <tbody>
-              <tr *ngFor="let row of trend(); trackBy: trackTrend">
+              <tr *ngFor="let row of pagedTrend(); trackBy: trackTrend">
                 <td>{{ formatDate(row.period_start) }}</td>
                 <td>{{ row.leads_count }}</td>
                 <td>{{ row.quote_count }}</td>
@@ -235,6 +235,11 @@
               </tr>
             </tbody>
           </table>
+        </div>
+        <div class="table-pager" *ngIf="trend().length > 0">
+          <ion-button size="small" fill="outline" (click)="prevTrendPage()" [disabled]="trendPage() <= 1">Previous</ion-button>
+          <span>Page {{ trendPage() }} of {{ trendTotalPages() }}</span>
+          <ion-button size="small" fill="outline" (click)="nextTrendPage()" [disabled]="trendPage() >= trendTotalPages()">Next</ion-button>
         </div>
         <ng-template #noTrendData>
           <div class="reports-empty">No monthly trend data yet.</div>
@@ -263,7 +268,7 @@
                 </tr>
               </thead>
               <tbody>
-                <tr *ngFor="let row of productionForecast(); trackBy: trackProductionForecast">
+                <tr *ngFor="let row of pagedProductionForecast(); trackBy: trackProductionForecast">
                   <td>{{ formatDate(row.period_start) }}</td>
                   <td>{{ row.scheduled_jobs }}</td>
                   <td>{{ row.pipeline_items }}</td>
@@ -275,6 +280,19 @@
                 </tr>
               </tbody>
             </table>
+          </div>
+          <div class="table-pager" *ngIf="productionForecast().length > 0">
+            <ion-button
+              size="small"
+              fill="outline"
+              (click)="prevProductionForecastPage()"
+              [disabled]="productionForecastPage() <= 1">Previous</ion-button>
+            <span>Page {{ productionForecastPage() }} of {{ productionForecastTotalPages() }}</span>
+            <ion-button
+              size="small"
+              fill="outline"
+              (click)="nextProductionForecastPage()"
+              [disabled]="productionForecastPage() >= productionForecastTotalPages()">Next</ion-button>
           </div>
           <ng-template #noProductionForecastData>
             <div class="reports-empty">No production forecast data yet.</div>
@@ -300,7 +318,7 @@
                 </tr>
               </thead>
               <tbody>
-                <tr *ngFor="let row of cashflowForecast(); trackBy: trackCashflowForecast">
+                <tr *ngFor="let row of pagedCashflowForecast(); trackBy: trackCashflowForecast">
                   <td>{{ formatDate(row.period_start) }}</td>
                   <td>{{ formatCurrency(row.opening_cash) }}</td>
                   <td>{{ formatCurrency(row.projected_inflow) }}</td>
@@ -310,6 +328,19 @@
                 </tr>
               </tbody>
             </table>
+          </div>
+          <div class="table-pager" *ngIf="cashflowForecast().length > 0">
+            <ion-button
+              size="small"
+              fill="outline"
+              (click)="prevCashflowForecastPage()"
+              [disabled]="cashflowForecastPage() <= 1">Previous</ion-button>
+            <span>Page {{ cashflowForecastPage() }} of {{ cashflowForecastTotalPages() }}</span>
+            <ion-button
+              size="small"
+              fill="outline"
+              (click)="nextCashflowForecastPage()"
+              [disabled]="cashflowForecastPage() >= cashflowForecastTotalPages()">Next</ion-button>
           </div>
           <ng-template #noCashflowForecastData>
             <div class="reports-empty">No cashflow forecast data yet.</div>

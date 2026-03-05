@@ -34,7 +34,9 @@ import { UserScopedSettingsService } from '../../services/user-scoped-settings.s
 import { catchError, forkJoin, of } from 'rxjs';
 
 type ColorOpt = { label: string; hex: string };
+type OnboardingStep = { selector: string; title: string; body: string };
 const LANE_COLORS_SETTING_KEY = 'dashboard.laneColors';
+const DASHBOARD_ONBOARDING_KEY = 'dashboard.onboarding.v1.completed';
 
 @Component({
   selector: 'app-dashboard',
@@ -98,6 +100,51 @@ export default class DashboardComponent implements OnDestroy {
   unreadSmsIdsByCustomer = signal<Record<string, string[]>>({});
   unreadEmailIdsByCustomer = signal<Record<string, string[]>>({});
   isMobileLayout = signal(false);
+  onboardingActive = signal(false);
+  onboardingStepIndex = signal(0);
+  onboardingRect = signal<{ top: number; left: number; width: number; height: number } | null>(null);
+  onboardingCurrentStep = computed(() => this.onboardingSteps[this.onboardingStepIndex()] || null);
+  onboardingBubbleStyle = computed(() => {
+    const rect = this.onboardingRect();
+    if (!rect || typeof window === 'undefined') return {};
+    const width = 340;
+    const margin = 14;
+    const panelHeight = 180;
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    let left = rect.left;
+    let top = rect.top + rect.height + 12;
+
+    if (left + width > viewportWidth - margin) left = viewportWidth - width - margin;
+    if (left < margin) left = margin;
+    if (top + panelHeight > viewportHeight - margin) top = rect.top - panelHeight - 12;
+    if (top < margin) top = margin;
+
+    return {
+      left: `${Math.round(left)}px`,
+      top: `${Math.round(top)}px`,
+      width: `${width}px`
+    };
+  });
+
+  private onboardingChecked = false;
+  readonly onboardingSteps: OnboardingStep[] = [
+    {
+      selector: '#dashboard-user-menu-guide-target',
+      title: 'Account & Admin',
+      body: 'Use this top-right menu for account actions and Admin Settings.'
+    },
+    {
+      selector: '#dashboard-settings-guide-target',
+      title: 'Dashboard Settings',
+      body: 'Configure lanes and board behavior here before you start moving customers through workflow.'
+    },
+    {
+      selector: '#workspace-nav-guide-target',
+      title: 'Main Navigation',
+      body: 'Use this left navigation to move between dashboard, calendar, customers, inventory, invoices, and reports.'
+    }
+  ];
 
   searchResults = computed(() => {
     const q = this.searchTerm().trim().toLowerCase();
@@ -191,14 +238,113 @@ export default class DashboardComponent implements OnDestroy {
     if (this.laneColorPersistTimer) { clearTimeout(this.laneColorPersistTimer); this.laneColorPersistTimer = null; }
   }
 
+  ionViewWillEnter() {
+    this.loadAll();
+    this.refreshUnreadActivity();
+    this.maybeStartOnboarding();
+  }
+
   @HostListener('window:resize')
   onWindowResize() {
     this.updateResponsiveLayout();
+    this.refreshOnboardingTarget();
   }
 
   private updateResponsiveLayout() {
     if (typeof window === 'undefined') return;
     this.isMobileLayout.set(window.innerWidth <= 900);
+  }
+
+  private maybeStartOnboarding(): void {
+    if (this.onboardingChecked) return;
+    this.onboardingChecked = true;
+    this.userSettings.getValue<boolean>(DASHBOARD_ONBOARDING_KEY).subscribe({
+      next: done => {
+        if (done === true) return;
+        setTimeout(() => this.startOnboarding(), 180);
+      },
+      error: () => {
+        setTimeout(() => this.startOnboarding(), 180);
+      }
+    });
+  }
+
+  private startOnboarding(): void {
+    this.onboardingStepIndex.set(0);
+    this.onboardingActive.set(true);
+    this.refreshOnboardingTarget(true);
+  }
+
+  private refreshOnboardingTarget(autoAdvance = false): void {
+    if (!this.onboardingActive()) return;
+    const step = this.onboardingCurrentStep();
+    if (!step) {
+      this.completeOnboarding();
+      return;
+    }
+
+    const element = this.resolveOnboardingElement(step.selector);
+    if (!element) {
+      if (autoAdvance) {
+        this.nextOnboardingStep(true);
+      } else {
+        this.onboardingRect.set(null);
+      }
+      return;
+    }
+
+    element.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+    const rect = element.getBoundingClientRect();
+    if (!rect.width || !rect.height) {
+      if (autoAdvance) this.nextOnboardingStep(true);
+      return;
+    }
+
+    const pad = 8;
+    this.onboardingRect.set({
+      top: Math.max(6, rect.top - pad),
+      left: Math.max(6, rect.left - pad),
+      width: rect.width + (pad * 2),
+      height: rect.height + (pad * 2)
+    });
+  }
+
+  private resolveOnboardingElement(selector: string): HTMLElement | null {
+    if (typeof document === 'undefined') return null;
+    const node = document.querySelector(selector);
+    if (!(node instanceof HTMLElement)) return null;
+    const style = window.getComputedStyle(node);
+    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return null;
+    return node;
+  }
+
+  nextOnboardingStep(fromAutoAdvance = false): void {
+    if (!this.onboardingActive()) return;
+    const next = this.onboardingStepIndex() + 1;
+    if (next >= this.onboardingSteps.length) {
+      this.completeOnboarding();
+      return;
+    }
+    this.onboardingStepIndex.set(next);
+    this.refreshOnboardingTarget(fromAutoAdvance);
+  }
+
+  prevOnboardingStep(): void {
+    if (!this.onboardingActive()) return;
+    const prev = this.onboardingStepIndex() - 1;
+    if (prev < 0) return;
+    this.onboardingStepIndex.set(prev);
+    this.refreshOnboardingTarget();
+  }
+
+  skipOnboarding(): void {
+    this.completeOnboarding();
+  }
+
+  private completeOnboarding(): void {
+    this.onboardingActive.set(false);
+    this.onboardingRect.set(null);
+    this.userSettings.setValue(DASHBOARD_ONBOARDING_KEY, true).subscribe({ error: () => {} });
   }
 
   private checkApi() {
@@ -637,15 +783,47 @@ export default class DashboardComponent implements OnDestroy {
   private removeCardFromLaneById(itId: string) {
     if (!itId) return;
     this.status.set('Removing from lane');
+    const snapshot = this.removeItemsLocally([itId]);
     this.itemsApi.delete(itId).subscribe({
-      next: () => {
-        const map = { ...this.items() };
-        for (const k of Object.keys(map)) map[k] = map[k].filter(w => w.id !== itId);
-        this.items.set(map);
-        this.status.set('Removed');
-      },
-      error: () => this.status.set('Remove error')
+      next: () => this.status.set('Removed'),
+      error: () => {
+        this.items.set(snapshot);
+        this.status.set('Remove error');
+      }
     });
+  }
+
+  private removeItemsLocally(itemIds: string[]): Record<string, WorkItem[]> {
+    const ids = new Set(itemIds.map(id => (id || '').trim()).filter(Boolean));
+    const current = this.items();
+    const snapshot: Record<string, WorkItem[]> = {};
+    const next: Record<string, WorkItem[]> = {};
+
+    for (const [laneId, rows] of Object.entries(current)) {
+      const cloned = [...rows];
+      snapshot[laneId] = cloned;
+      next[laneId] = ids.size ? cloned.filter(item => !ids.has(item.id)) : cloned;
+    }
+
+    this.items.set(next);
+    return snapshot;
+  }
+
+  private removeCustomerTargetItemIds(itemId: string, customerId: string): string[] {
+    const ids = new Set<string>();
+    const cleanedItemId = (itemId || '').trim();
+    if (cleanedItemId) ids.add(cleanedItemId);
+
+    const cleanedCustomerId = (customerId || '').trim();
+    const leadLaneId = this.leadLaneId();
+    if (!cleanedCustomerId || !leadLaneId) return [...ids];
+
+    for (const item of this.items()[leadLaneId] || []) {
+      if ((item.customerId || '').trim() !== cleanedCustomerId) continue;
+      if (!item.id) continue;
+      ids.add(item.id);
+    }
+    return [...ids];
   }
 
   cardRemoveLabel(): string {
@@ -684,14 +862,33 @@ export default class DashboardComponent implements OnDestroy {
     if (!itemId) return;
 
     this.status.set('Removing customer');
+    const targetItemIds = this.removeCustomerTargetItemIds(itemId, customerId);
+    const snapshot = this.removeItemsLocally(targetItemIds);
 
     const deleteWorkItem = () => {
-      this.itemsApi.delete(itemId).subscribe({
-        next: () => {
+      if (!targetItemIds.length) {
+        this.status.set('Customer removed');
+        return;
+      }
+      const deletes = targetItemIds.map(id =>
+        this.itemsApi.delete(id).pipe(catchError(() => of({ ok: false })))
+      );
+      forkJoin(deletes).subscribe({
+        next: results => {
+          const hasFailure = results.some(result => !result?.ok);
+          if (hasFailure) {
+            this.items.set(snapshot);
+            this.status.set('Remove error');
+            this.loadAll();
+            return;
+          }
           this.status.set('Customer removed');
-          this.loadAll();
         },
-        error: () => this.status.set('Remove error')
+        error: () => {
+          this.items.set(snapshot);
+          this.status.set('Remove error');
+          this.loadAll();
+        }
       });
     };
 

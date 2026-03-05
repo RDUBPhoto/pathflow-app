@@ -15,6 +15,7 @@ export type Customer = {
   phone?: string;
   mobile?: string;
   email?: string;
+  secondaryEmail?: string;
   address?: string;
   address1?: string;
   address2?: string;
@@ -80,7 +81,8 @@ export type Customer = {
   updatedAt?: string;
 };
 
-export type DuplicateReason = 'email' | 'phone' | 'name';
+export type DuplicateReason = 'vin' | 'email' | 'phone' | 'name';
+export type DuplicateRecommendation = 'auto-merge' | 'review' | 'no-match';
 
 export type DuplicateCandidate = {
   id: string;
@@ -88,8 +90,11 @@ export type DuplicateCandidate = {
   firstName?: string;
   lastName?: string;
   email?: string;
+  secondaryEmail?: string;
   phone?: string;
   score: number;
+  confidence?: number;
+  recommendation?: DuplicateRecommendation;
   reasons: DuplicateReason[];
 };
 
@@ -105,6 +110,22 @@ export type MergeCustomerResponse = {
   remapped?: Record<string, number>;
   sourceDeleted?: boolean;
   customer?: Customer;
+};
+
+export type DuplicatePair = {
+  leftId: string;
+  rightId: string;
+  score: number;
+  confidence?: number;
+  recommendation?: DuplicateRecommendation;
+  reasons: DuplicateReason[];
+};
+
+export type DuplicateSummaryResponse = {
+  ok: boolean;
+  total: number;
+  pairs: DuplicatePair[];
+  customersById?: Record<string, Partial<Customer>>;
 };
 
 export type CustomerImportRow = Partial<Omit<Customer, 'id'>>;
@@ -159,6 +180,30 @@ export class CustomersApi {
       op: 'mergeDraft',
       targetId,
       ...rest
+    });
+  }
+
+  duplicateSummary(limit = 25, includeCustomers = false): Observable<DuplicateSummaryResponse> {
+    const safeLimit = Math.max(1, Math.min(Number(limit) || 25, 200));
+    return this.http.post<DuplicateSummaryResponse>('/api/customers', {
+      op: 'duplicateSummary',
+      limit: safeLimit,
+      includeCustomers: !!includeCustomers
+    }).pipe(
+      map(res => ({
+        ok: res?.ok !== false,
+        total: Number(res?.total || 0),
+        pairs: Array.isArray(res?.pairs) ? res.pairs : [],
+        customersById: (res?.customersById && typeof res.customersById === 'object') ? res.customersById : {}
+      }))
+    );
+  }
+
+  markNotDuplicate(leftId: string, rightId: string): Observable<{ ok: boolean }> {
+    return this.http.post<{ ok: boolean }>('/api/customers', {
+      op: 'markNotDuplicate',
+      leftId,
+      rightId
     });
   }
 

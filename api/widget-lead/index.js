@@ -1,15 +1,23 @@
 const { SmsClient } = require("@azure/communication-sms");
 const { TableClient } = require("@azure/data-tables");
 const { randomUUID } = require("crypto");
+const { resolveTenantId } = require("../_shared/tenant");
 
 const CUSTOMERS_TABLE = "customers";
 const LANES_TABLE = "lanes";
 const WORKITEMS_TABLE = "workitems";
 const SMS_TABLE = "smsmessages";
 const SENDER_TABLE = "smssenders";
-const PARTITION = "main";
 const SENDER_DEFAULT_ROW_KEY = "default";
 const AUTO_CREATED_CREATOR = "Auto-Created Lead";
+const DUPLICATE_REASON_WEIGHTS = Object.freeze({
+  vin: 45,
+  email: 30,
+  phone: 15,
+  name: 10
+});
+const DUPLICATE_MAX_SCORE = Object.values(DUPLICATE_REASON_WEIGHTS).reduce((sum, value) => sum + Number(value || 0), 0) || 100;
+const LEGACY_PARTITION = "main";
 
 function asString(value) {
   return value == null ? "" : String(value).trim();
@@ -56,6 +64,12 @@ function isE164(value) {
 
 function isValidVin(value) {
   return /^[A-HJ-NPR-Z0-9]{17}$/.test(asString(value).toUpperCase());
+}
+
+function normalizeVin(value) {
+  const cleaned = asString(value).toUpperCase().replace(/\s+/g, "");
+  if (!cleaned) return "";
+  return isValidVin(cleaned) ? cleaned : "";
 }
 
 function smsMode() {
@@ -146,9 +160,26 @@ function configuredAllowedOrigins() {
     .filter(Boolean);
 }
 
+function isLocalDevOrigin(origin) {
+  const value = asString(origin);
+  if (!value) return false;
+  try {
+    const parsed = new URL(value);
+    const host = asString(parsed.hostname).toLowerCase();
+    return host === "localhost" || host === "127.0.0.1" || host === "::1" || host.endsWith(".localhost");
+  } catch {
+    return false;
+  }
+}
+
+function localDevOriginsAllowed() {
+  return asString(process.env.WIDGET_ALLOW_LOCAL_ORIGINS || "true").toLowerCase() !== "false";
+}
+
 function resolveCorsOrigin(req) {
   const origin = readHeader(req && req.headers, "origin");
   if (!origin) return "";
+  if (localDevOriginsAllowed() && isLocalDevOrigin(origin)) return origin;
 
   const allowed = configuredAllowedOrigins();
   if (!allowed.length) return "*";
@@ -213,6 +244,7 @@ function isWidgetAuthorized(req, body) {
 function isOriginAllowed(req) {
   const origin = readHeader(req && req.headers, "origin");
   if (!origin) return true;
+  if (localDevOriginsAllowed() && isLocalDevOrigin(origin)) return true;
 
   const allowed = configuredAllowedOrigins();
   if (!allowed.length) return true;
@@ -230,8 +262,9 @@ async function getTableClient(table) {
   return client;
 }
 
-async function ensureLeadsLane(lanesClient) {
-  const iter = lanesClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${PARTITION}'` } });
+async function ensureLeadsLane(lanesClient, tenantId) {
+  const safeTenant = escapedFilterValue(tenantId);
+  const iter = lanesClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${safeTenant}'` } });
   let maxSort = 0;
   let existing = null;
   for await (const entity of iter) {
@@ -248,7 +281,7 @@ async function ensureLeadsLane(lanesClient) {
   const id = randomUUID();
   await lanesClient.upsertEntity(
     {
-      partitionKey: PARTITION,
+      partitionKey: tenantId,
       rowKey: id,
       name: "Leads",
       sort: maxSort + 10
@@ -275,39 +308,87 @@ function customerFromEntity(entity) {
   };
 }
 
-async function findMatchingCustomer(customersClient, inbound) {
+async function findMatchingCustomer(customersClient, inbound, tenantId) {
   const targetEmail = normalizeEmail(inbound.email);
   const targetPhone = normalizePhone(inbound.phone);
   const targetName = asString(inbound.name).toLowerCase();
-  if (!targetEmail && !targetPhone && !targetName) return null;
+  const targetVin = normalizeVin(inbound.vin);
+  if (!targetEmail && !targetPhone && !targetName && !targetVin) return null;
 
   let best = null;
-  const iter = customersClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${PARTITION}'` } });
+  const safeTenant = escapedFilterValue(tenantId);
+  const iter = customersClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${safeTenant}'` } });
   for await (const entity of iter) {
     const current = customerFromEntity(entity);
     let score = 0;
     const reasons = [];
 
+    if (targetVin && normalizeVin(current.vin) === targetVin) {
+      score += DUPLICATE_REASON_WEIGHTS.vin;
+      reasons.push("vin");
+    }
     if (targetEmail && normalizeEmail(current.email) === targetEmail) {
-      score += 100;
+      score += DUPLICATE_REASON_WEIGHTS.email;
       reasons.push("email");
     }
     if (targetPhone && normalizePhone(current.phone) === targetPhone) {
-      score += 80;
+      score += DUPLICATE_REASON_WEIGHTS.phone;
       reasons.push("phone");
     }
     if (targetName) {
       const currentName = asString(current.name || `${current.firstName} ${current.lastName}`.trim()).toLowerCase();
       if (currentName && currentName === targetName) {
-        score += 50;
+        score += DUPLICATE_REASON_WEIGHTS.name;
         reasons.push("name");
       }
     }
     if (!score) continue;
-    if (!best || score > best.score) best = { customer: current, score, reasons };
+    const confidence = Math.max(0, Math.min(100, Math.round((score / DUPLICATE_MAX_SCORE) * 100)));
+    if (!best || score > best.score) best = { customer: current, score, confidence, reasons };
   }
 
   return best;
+}
+
+function duplicateMatchThresholds() {
+  const auto = Number(process.env.WIDGET_DUPLICATE_AUTO_MERGE_PERCENT);
+  const review = Number(process.env.WIDGET_DUPLICATE_REVIEW_PERCENT);
+  const autoMerge = Number.isFinite(auto) ? Math.max(0, Math.min(100, Math.round(auto))) : 80;
+  const reviewNeeded = Number.isFinite(review) ? Math.max(0, Math.min(autoMerge, Math.round(review))) : 55;
+  return { autoMerge, reviewNeeded };
+}
+
+function duplicateMatchAction(confidence) {
+  const safeConfidence = Number.isFinite(Number(confidence)) ? Number(confidence) : 0;
+  const thresholds = duplicateMatchThresholds();
+  if (safeConfidence >= thresholds.autoMerge) return "auto-merge";
+  if (safeConfidence >= thresholds.reviewNeeded) return "review";
+  return "no-match";
+}
+
+function shouldForceReuseExistingCustomer(match) {
+  if (!match || !match.customer) return false;
+  const reasons = new Set(
+    (Array.isArray(match.reasons) ? match.reasons : [])
+      .map(value => asString(value).toLowerCase())
+      .filter(Boolean)
+  );
+  const hasName = reasons.has("name");
+  const hasVin = reasons.has("vin");
+  const hasEmail = reasons.has("email");
+  const hasPhone = reasons.has("phone");
+  if (hasName && hasVin) return true;
+  if (hasName && hasEmail && hasPhone) return true;
+  return false;
+}
+
+function shouldRespectTenantPartition() {
+  return asString(process.env.WIDGET_RESPECT_TENANT_PARTITION).toLowerCase() === "true";
+}
+
+function widgetPartitionTenant(req, body) {
+  if (shouldRespectTenantPartition()) return LEGACY_PARTITION;
+  return LEGACY_PARTITION;
 }
 
 function mergeNotes(existingNotes, message, sourceName) {
@@ -341,13 +422,13 @@ function applyConsentFields(entity, inbound, now, status) {
   if (inbound.smsOptIn) entity.smsConsentProvidedAt = now;
 }
 
-async function createCustomer(customersClient, inbound) {
+async function createCustomer(customersClient, inbound, tenantId) {
   const now = new Date().toISOString();
   const id = randomUUID();
   const names = splitName(inbound.name, inbound.email);
   const fullName = asString(inbound.name) || names.fullName || asString(inbound.email) || "Website Lead";
   const entity = {
-    partitionKey: PARTITION,
+    partitionKey: tenantId,
     rowKey: id,
     name: fullName,
     firstName: names.firstName,
@@ -376,10 +457,10 @@ async function createCustomer(customersClient, inbound) {
   };
 }
 
-async function updateCustomerFromInbound(customersClient, customer, inbound) {
+async function updateCustomerFromInbound(customersClient, customer, inbound, tenantId) {
   const now = new Date().toISOString();
   const patch = {
-    partitionKey: PARTITION,
+    partitionKey: tenantId,
     rowKey: customer.id,
     updatedAt: now,
     leadSource: "web"
@@ -409,12 +490,12 @@ async function updateCustomerFromInbound(customersClient, customer, inbound) {
   await customersClient.upsertEntity(patch, "Merge");
 }
 
-async function setCustomerConsentStatus(customersClient, customerId, status, extra = {}) {
+async function setCustomerConsentStatus(customersClient, tenantId, customerId, status, extra = {}) {
   if (!customerId || !status) return;
   const now = new Date().toISOString();
   await customersClient.upsertEntity(
     {
-      partitionKey: PARTITION,
+      partitionKey: tenantId,
       rowKey: customerId,
       smsConsentStatus: status,
       smsConsentUpdatedAt: now,
@@ -425,10 +506,11 @@ async function setCustomerConsentStatus(customersClient, customerId, status, ext
   );
 }
 
-async function findExistingLeadForCustomer(workItemsClient, laneId, customerId) {
+async function findExistingLeadForCustomer(workItemsClient, laneId, customerId, tenantId) {
+  const safeTenant = escapedFilterValue(tenantId);
   const safeLane = escapedFilterValue(laneId);
   const safeCustomer = escapedFilterValue(customerId);
-  const filter = `PartitionKey eq '${PARTITION}' and laneId eq '${safeLane}' and customerId eq '${safeCustomer}'`;
+  const filter = `PartitionKey eq '${safeTenant}' and laneId eq '${safeLane}' and customerId eq '${safeCustomer}'`;
   const iter = workItemsClient.listEntities({ queryOptions: { filter } });
 
   let latest = null;
@@ -443,10 +525,11 @@ async function findExistingLeadForCustomer(workItemsClient, laneId, customerId) 
   return latest;
 }
 
-async function nextLaneSort(workItemsClient, laneId) {
+async function nextLaneSort(workItemsClient, laneId, tenantId) {
+  const safeTenant = escapedFilterValue(tenantId);
   const safeLane = escapedFilterValue(laneId);
   const iter = workItemsClient.listEntities({
-    queryOptions: { filter: `PartitionKey eq '${PARTITION}' and laneId eq '${safeLane}'` }
+    queryOptions: { filter: `PartitionKey eq '${safeTenant}' and laneId eq '${safeLane}'` }
   });
   let maxSort = 0;
   for await (const entity of iter) {
@@ -466,14 +549,14 @@ function buildLeadTitle(customer, vin) {
   return `${base} — ${suffix}`.slice(0, 240);
 }
 
-async function createLead(workItemsClient, laneId, inbound, customer) {
+async function createLead(workItemsClient, laneId, inbound, customer, tenantId) {
   const id = randomUUID();
   const now = new Date().toISOString();
-  const sort = await nextLaneSort(workItemsClient, laneId);
+  const sort = await nextLaneSort(workItemsClient, laneId, tenantId);
   const sourceName = intakeSourceName(inbound.raw);
   await workItemsClient.upsertEntity(
     {
-      partitionKey: PARTITION,
+      partitionKey: tenantId,
       rowKey: id,
       laneId,
       title: buildLeadTitle(customer, inbound.vin),
@@ -497,20 +580,27 @@ async function createLead(workItemsClient, laneId, inbound, customer) {
   return id;
 }
 
-async function touchLead(workItemsClient, id, inbound) {
+async function touchLead(workItemsClient, id, inbound, tenantId, laneId, customer) {
   const sourceName = intakeSourceName(inbound.raw);
+  const nextSort = laneId ? await nextLaneSort(workItemsClient, laneId, tenantId) : null;
   await workItemsClient.upsertEntity(
     {
-      partitionKey: PARTITION,
+      partitionKey: tenantId,
       rowKey: id,
       updatedAt: new Date().toISOString(),
+      title: buildLeadTitle(customer, inbound.vin),
+      customerId: asString(customer && customer.id),
+      customerName: asString(customer && customer.name),
       source: "web",
       leadSource: "web",
       intakeSource: sourceName,
       origin: sourceName,
       channel: "website",
+      contactEmail: asString(customer && customer.email),
+      contactPhone: asString(customer && customer.phone),
       vin: asString(inbound.vin),
-      message: asString(inbound.message)
+      message: asString(inbound.message),
+      ...(Number.isFinite(Number(nextSort)) ? { sort: Number(nextSort) } : {})
     },
     "Merge"
   );
@@ -524,9 +614,9 @@ function deliveryStatusFromRaw(raw) {
   return "queued";
 }
 
-async function resolveSenderNumber(senderClient) {
+async function resolveSenderNumber(senderClient, tenantId) {
   try {
-    const configured = await senderClient.getEntity(PARTITION, SENDER_DEFAULT_ROW_KEY);
+    const configured = await senderClient.getEntity(tenantId, SENDER_DEFAULT_ROW_KEY);
     const sender = normalizeE164(configured.fromNumber);
     if (sender) return sender;
   } catch (_) {}
@@ -609,11 +699,11 @@ async function sendOptInConfirmation(to, from, message) {
   };
 }
 
-async function saveSmsOutboundConfirmation(smsClient, customer, to, from, message, sendResult) {
+async function saveSmsOutboundConfirmation(smsClient, tenantId, customer, to, from, message, sendResult) {
   const now = new Date().toISOString();
   await smsClient.upsertEntity(
     {
-      partitionKey: PARTITION,
+      partitionKey: tenantId,
       rowKey: randomUUID(),
       customerId: asString(customer && customer.id),
       customerName: asString(customer && customer.name),
@@ -686,6 +776,8 @@ function inboundFromBody(req, body) {
 module.exports = async function (context, req) {
   const method = asString(req.method || "GET").toUpperCase();
   const body = parseRequestBody(req);
+  const requestedTenantId = resolveTenantId(req, body);
+  const tenantId = widgetPartitionTenant(req, body);
 
   if (method === "OPTIONS") {
     context.res = { status: 204, headers: corsHeaders(req) };
@@ -701,6 +793,8 @@ module.exports = async function (context, req) {
     context.res = json(req, 200, {
       ok: true,
       route: "widget/lead",
+      tenantId,
+      requestedTenantId,
       securedByApiKey: !!asString(process.env.WIDGET_API_KEY),
       accepts: ["name", "phone", "email", "vin", "message", "smsOptIn"],
       requiredFields: ["email or phone", "name (recommended)", "vin (required: 17 chars, A-HJ-NPR-Z0-9)", "smsOptIn (if phone will receive SMS)"]
@@ -741,35 +835,55 @@ module.exports = async function (context, req) {
     const lanesClient = await getTableClient(LANES_TABLE);
     const workItemsClient = await getTableClient(WORKITEMS_TABLE);
 
-    const match = await findMatchingCustomer(customersClient, inbound);
+    const match = await findMatchingCustomer(customersClient, inbound, tenantId);
+    const matchAction = duplicateMatchAction(match && Number(match.confidence));
+    const forceReuse = shouldForceReuseExistingCustomer(match);
     let customer = null;
     let customerCreated = false;
     let matchedBy = [];
 
-    if (match && match.customer) {
+    if (match && match.customer && (forceReuse || matchAction === "auto-merge")) {
       customer = match.customer;
       matchedBy = match.reasons;
-      await updateCustomerFromInbound(customersClient, match.customer, inbound);
+      await updateCustomerFromInbound(customersClient, match.customer, inbound, tenantId);
     } else {
-      customer = await createCustomer(customersClient, inbound);
+      customer = await createCustomer(customersClient, inbound, tenantId);
       customerCreated = true;
+      if (match && match.customer && matchAction === "review") {
+        const now = new Date().toISOString();
+        await customersClient.upsertEntity(
+          {
+            partitionKey: tenantId,
+            rowKey: customer.id,
+            duplicateReviewStatus: "pending",
+            duplicateReviewCandidateId: asString(match.customer.id),
+            duplicateReviewCandidateName: asString(match.customer.name),
+            duplicateReviewConfidence: Number(match.confidence) || 0,
+            duplicateReviewScore: Number(match.score) || 0,
+            duplicateReviewReasons: Array.isArray(match.reasons) ? match.reasons.join(",") : "",
+            duplicateReviewUpdatedAt: now,
+            updatedAt: now
+          },
+          "Merge"
+        );
+      }
     }
 
-    const leadsLane = await ensureLeadsLane(lanesClient);
+    const leadsLane = await ensureLeadsLane(lanesClient, tenantId);
     const allowDuplicates = asString(process.env.WIDGET_CREATE_DUPLICATE_LEADS).toLowerCase() === "true";
     let leadId = "";
     let leadCreated = false;
 
     if (!allowDuplicates && customer && customer.id) {
-      const existing = await findExistingLeadForCustomer(workItemsClient, leadsLane.id, customer.id);
+      const existing = await findExistingLeadForCustomer(workItemsClient, leadsLane.id, customer.id, tenantId);
       if (existing && existing.id) {
         leadId = existing.id;
-        await touchLead(workItemsClient, leadId, inbound);
+        await touchLead(workItemsClient, leadId, inbound, tenantId, leadsLane.id, customer);
       }
     }
 
     if (!leadId) {
-      leadId = await createLead(workItemsClient, leadsLane.id, inbound, customer);
+      leadId = await createLead(workItemsClient, leadsLane.id, inbound, customer, tenantId);
       leadCreated = true;
     }
 
@@ -786,17 +900,18 @@ module.exports = async function (context, req) {
     if (shouldSendOptInConfirmation(inbound)) {
       const senderClient = await getTableClient(SENDER_TABLE);
       const smsClient = await getTableClient(SMS_TABLE);
-      const sender = await resolveSenderNumber(senderClient);
+      const sender = await resolveSenderNumber(senderClient, tenantId);
       const message = buildOptInMessage();
       confirmation = await sendOptInConfirmation(inbound.phoneE164, sender, message);
       if (confirmation.sent) {
-        await saveSmsOutboundConfirmation(smsClient, customer, inbound.phoneE164, sender, message, confirmation);
+        await saveSmsOutboundConfirmation(smsClient, tenantId, customer, inbound.phoneE164, sender, message, confirmation);
         consentStatus = "pending-confirmation";
       }
       if (customer && customer.id) {
         const keyword = optInKeyword();
         await setCustomerConsentStatus(
           customersClient,
+          tenantId,
           customer.id,
           consentStatus,
           {
@@ -812,10 +927,19 @@ module.exports = async function (context, req) {
     context.res = json(req, 200, {
       ok: true,
       source: "widget",
+      tenantId,
+      requestedTenantId,
       customerId: customer && customer.id ? customer.id : null,
       customerName: customer && customer.name ? customer.name : null,
       customerCreated,
       matchedBy,
+      duplicateMatch: match && match.customer ? {
+        candidateId: asString(match.customer.id),
+        confidence: Number(match.confidence) || 0,
+        score: Number(match.score) || 0,
+        reasons: Array.isArray(match.reasons) ? match.reasons : [],
+        action: forceReuse ? "auto-merge" : matchAction
+      } : null,
       leadId,
       leadCreated,
       duplicateLeadSkipped: !leadCreated,

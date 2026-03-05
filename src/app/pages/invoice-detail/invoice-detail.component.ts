@@ -40,6 +40,7 @@ type StatusTone = 'neutral' | 'success' | 'error';
   styleUrls: ['./invoice-detail.component.scss']
 })
 export default class InvoiceDetailComponent {
+  readonly lineItemsPageSize = 10;
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly invoicesData = inject(InvoicesDataService);
@@ -52,6 +53,7 @@ export default class InvoiceDetailComponent {
   readonly error = signal('');
   readonly status = signal('');
   readonly statusTone = signal<StatusTone>('neutral');
+  readonly lineItemsPage = signal(1);
 
   readonly invoice = signal<InvoiceDetail | null>(null);
   private readonly baselineSnapshot = signal('');
@@ -75,6 +77,13 @@ export default class InvoiceDetailComponent {
   });
 
   readonly canSave = computed(() => !!this.invoice() && this.hasChanges() && !this.saving());
+  readonly lineItems = computed(() => this.invoice()?.lineItems || []);
+  readonly lineItemsTotalPages = computed(() => Math.max(1, Math.ceil(this.lineItems().length / this.lineItemsPageSize)));
+  readonly pagedLineItems = computed(() => {
+    const page = Math.max(1, Math.min(this.lineItemsPage(), this.lineItemsTotalPages()));
+    const start = (page - 1) * this.lineItemsPageSize;
+    return this.lineItems().slice(start, start + this.lineItemsPageSize);
+  });
 
   constructor() {
     this.route.paramMap.subscribe(params => {
@@ -145,6 +154,7 @@ export default class InvoiceDetailComponent {
       };
     });
     this.clearStatus();
+    this.lineItemsPage.set(this.lineItemsTotalPages());
   }
 
   removeLineItem(lineId: string): void {
@@ -159,6 +169,7 @@ export default class InvoiceDetailComponent {
       };
     });
     this.clearStatus();
+    this.lineItemsPage.update(value => Math.max(1, Math.min(value, this.lineItemsTotalPages())));
   }
 
   updateLineItemField(lineId: string, field: keyof InvoiceLineItem, rawValue: string): void {
@@ -252,6 +263,14 @@ export default class InvoiceDetailComponent {
     return line.id;
   }
 
+  prevLineItemsPage(): void {
+    this.lineItemsPage.update(value => Math.max(1, value - 1));
+  }
+
+  nextLineItemsPage(): void {
+    this.lineItemsPage.update(value => Math.min(this.lineItemsTotalPages(), value + 1));
+  }
+
   private loadInvoice(id: string): void {
     this.loading.set(true);
     this.error.set('');
@@ -274,6 +293,7 @@ export default class InvoiceDetailComponent {
 
     this.invoice.set(found);
     this.baselineSnapshot.set(this.snapshot(found));
+    this.lineItemsPage.set(1);
     this.loading.set(false);
   }
 

@@ -103,7 +103,7 @@ module.exports = async function (context, req) {
       if (key) {
         const setting = await getSetting(client, tenantId, key);
         if (!setting) {
-          context.res = json(404, { ok: false, tenantId, key, error: "Setting not found." });
+          context.res = json(200, { ok: true, tenantId, key, value: null, updatedAt: "" });
           return;
         }
         context.res = json(200, { ok: true, tenantId, ...setting });

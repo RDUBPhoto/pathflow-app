@@ -127,6 +127,32 @@
   opacity: 0.86;
 }
 
+.location-mode-row {
+  margin-top: 8px;
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.location-mode-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: #d7dfeb;
+}
+
+.location-mode-option input[type='radio'] {
+  accent-color: #2f74ff;
+}
+
+.location-actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .muted-tag {
   font-size: 11px;
   text-transform: uppercase;

@@ -51,8 +51,31 @@
           <h2>Workspace Details</h2>
         </div>
 
+        <div class="location-mode-row">
+          <label class="location-mode-option">
+            <input
+              type="radio"
+              name="locationMode"
+              value="single"
+              [checked]="hasMultipleLocations() === 'single'"
+              [disabled]="saving() || !auth.canBootstrapRegistration()"
+              (change)="setLocationMode('single')" />
+            <span>One location</span>
+          </label>
+          <label class="location-mode-option">
+            <input
+              type="radio"
+              name="locationMode"
+              value="multiple"
+              [checked]="hasMultipleLocations() === 'multiple'"
+              [disabled]="saving() || !auth.canBootstrapRegistration()"
+              (change)="setLocationMode('multiple')" />
+            <span>More than one location</span>
+          </label>
+        </div>
+
         <ion-item>
-          <ion-label position="stacked">Location name</ion-label>
+          <ion-label position="stacked">Primary location name</ion-label>
           <ion-input
             [disabled]="saving() || !auth.canBootstrapRegistration()"
             [value]="locationName()"
@@ -60,6 +83,36 @@
             placeholder="Pathflow HQ">
           </ion-input>
         </ion-item>
+
+        <ng-container *ngIf="hasMultipleLocations() === 'multiple'">
+          <ion-item *ngFor="let location of extraLocationNames(); let i = index">
+            <ion-label position="stacked">Additional location {{ i + 2 }}</ion-label>
+            <ion-input
+              [disabled]="saving() || !auth.canBootstrapRegistration()"
+              [value]="location"
+              (ionInput)="updateLocationField(i, $any($event.detail).value ?? '')"
+              placeholder="Pathflow North">
+            </ion-input>
+          </ion-item>
+
+          <div class="location-actions">
+            <button
+              type="button"
+              class="link-btn"
+              [disabled]="saving() || !auth.canBootstrapRegistration()"
+              (click)="addLocationField()">
+              + Add another location
+            </button>
+            <button
+              type="button"
+              class="link-btn"
+              *ngIf="extraLocationNames().length > 0"
+              [disabled]="saving() || !auth.canBootstrapRegistration()"
+              (click)="removeLocationField(extraLocationNames().length - 1)">
+              Remove last location
+            </button>
+          </div>
+        </ng-container>
       </section>
 
       <section class="form-card billing-card">

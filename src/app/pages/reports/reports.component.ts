@@ -66,6 +66,7 @@ import {
   styleUrls: ['./reports.component.scss']
 })
 export default class ReportsComponent implements OnInit {
+  readonly pageSize = 12;
   private readonly reportsApi = inject(ReportsApiService);
 
   readonly reportView = signal<
@@ -87,6 +88,9 @@ export default class ReportsComponent implements OnInit {
   readonly data = signal<ReportsResponse | null>(null);
   readonly powerBi = signal<PowerBiConfigResponse['powerBi'] | null>(null);
   readonly seeding = signal(false);
+  readonly trendPage = signal(1);
+  readonly productionForecastPage = signal(1);
+  readonly cashflowForecastPage = signal(1);
 
   readonly kpi = computed<ReportsKpiRow | null>(() => this.data()?.tables?.kpiSummary?.[0] || null);
   readonly funnel = computed<ReportsFunnelRow[]>(() => this.data()?.tables?.funnel || []);
@@ -100,6 +104,28 @@ export default class ReportsComponent implements OnInit {
   readonly cashflowForecast = computed<ReportsCashflowForecastRow[]>(
     () => this.data()?.tables?.cashflowForecast || []
   );
+  readonly trendTotalPages = computed(() => Math.max(1, Math.ceil(this.trend().length / this.pageSize)));
+  readonly productionForecastTotalPages = computed(() =>
+    Math.max(1, Math.ceil(this.productionForecast().length / this.pageSize))
+  );
+  readonly cashflowForecastTotalPages = computed(() =>
+    Math.max(1, Math.ceil(this.cashflowForecast().length / this.pageSize))
+  );
+  readonly pagedTrend = computed(() => {
+    const page = Math.max(1, Math.min(this.trendPage(), this.trendTotalPages()));
+    const start = (page - 1) * this.pageSize;
+    return this.trend().slice(start, start + this.pageSize);
+  });
+  readonly pagedProductionForecast = computed(() => {
+    const page = Math.max(1, Math.min(this.productionForecastPage(), this.productionForecastTotalPages()));
+    const start = (page - 1) * this.pageSize;
+    return this.productionForecast().slice(start, start + this.pageSize);
+  });
+  readonly pagedCashflowForecast = computed(() => {
+    const page = Math.max(1, Math.min(this.cashflowForecastPage(), this.cashflowForecastTotalPages()));
+    const start = (page - 1) * this.pageSize;
+    return this.cashflowForecast().slice(start, start + this.pageSize);
+  });
 
   constructor() {
     addIcons({
@@ -127,6 +153,9 @@ export default class ReportsComponent implements OnInit {
     }).subscribe({
       next: res => {
         this.data.set(res);
+        this.trendPage.set(1);
+        this.productionForecastPage.set(1);
+        this.cashflowForecastPage.set(1);
         this.loading.set(false);
       },
       error: err => {
@@ -263,6 +292,30 @@ export default class ReportsComponent implements OnInit {
 
   trackCashflowForecast(_index: number, row: ReportsCashflowForecastRow): string {
     return row.period_key;
+  }
+
+  prevTrendPage(): void {
+    this.trendPage.update(value => Math.max(1, value - 1));
+  }
+
+  nextTrendPage(): void {
+    this.trendPage.update(value => Math.min(this.trendTotalPages(), value + 1));
+  }
+
+  prevProductionForecastPage(): void {
+    this.productionForecastPage.update(value => Math.max(1, value - 1));
+  }
+
+  nextProductionForecastPage(): void {
+    this.productionForecastPage.update(value => Math.min(this.productionForecastTotalPages(), value + 1));
+  }
+
+  prevCashflowForecastPage(): void {
+    this.cashflowForecastPage.update(value => Math.max(1, value - 1));
+  }
+
+  nextCashflowForecastPage(): void {
+    this.cashflowForecastPage.update(value => Math.min(this.cashflowForecastTotalPages(), value + 1));
   }
 
   private rowsForView(

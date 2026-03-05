@@ -280,8 +280,8 @@
               <th></th>
             </tr>
           </thead>
-          <tbody *ngIf="detail.lineItems.length; else noLines">
-            <tr *ngFor="let line of detail.lineItems; trackBy: trackLineItem">
+          <tbody *ngIf="lineItems().length; else noLines">
+            <tr *ngFor="let line of pagedLineItems(); trackBy: trackLineItem">
               <td>
                 <select
                   [value]="line.type"
@@ -333,6 +333,20 @@
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <div class="table-pager" *ngIf="lineItems().length > 0">
+        <ion-button size="small" fill="outline" (click)="prevLineItemsPage()" [disabled]="lineItemsPage() <= 1">
+          Previous
+        </ion-button>
+        <span>Page {{ lineItemsPage() }} of {{ lineItemsTotalPages() }}</span>
+        <ion-button
+          size="small"
+          fill="outline"
+          (click)="nextLineItemsPage()"
+          [disabled]="lineItemsPage() >= lineItemsTotalPages()">
+          Next
+        </ion-button>
       </div>
 
       <ng-template #noLines>

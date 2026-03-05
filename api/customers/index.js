@@ -3,7 +3,17 @@ const { TableClient } = require("@azure/data-tables");
 const { randomUUID } = require("crypto");
 
 const TABLE = "customers";
+const NOT_DUPLICATES_TABLE = "customernotduplicates";
 const PARTITION = "main";
+const DUPLICATE_REASON_WEIGHTS = Object.freeze({
+  vin: 45,
+  email: 30,
+  phone: 15,
+  name: 10
+});
+const DUPLICATE_MAX_SCORE = Object.values(DUPLICATE_REASON_WEIGHTS).reduce((sum, value) => sum + Number(value || 0), 0) || 100;
+const DUPLICATE_AUTO_MERGE_THRESHOLD = 80;
+const DUPLICATE_REVIEW_THRESHOLD = 55;
 const CUSTOMER_FIELDS = [
   "business",
   "accountManager",
@@ -16,6 +26,7 @@ const CUSTOMER_FIELDS = [
   "phone",
   "mobile",
   "email",
+  "secondaryEmail",
   "address",
   "address1",
   "address2",
@@ -149,10 +160,28 @@ function normalizeName(value) {
     .trim();
 }
 
+function normalizeVin(value) {
+  const cleaned = toStr(value).toUpperCase().replace(/\s+/g, "");
+  if (!cleaned) return "";
+  return /^[A-HJ-NPR-Z0-9]{17}$/.test(cleaned) ? cleaned : "";
+}
+
 function fullName(firstName, lastName, name) {
   const explicit = toStr(name).trim();
   if (explicit) return explicit;
   return `${toStr(firstName).trim()} ${toStr(lastName).trim()}`.trim();
+}
+
+function normalizedEmailList(primary, secondary) {
+  const list = [normalizeEmail(primary), normalizeEmail(secondary)].filter(Boolean);
+  return Array.from(new Set(list));
+}
+
+function duplicatePairKey(leftId, rightId) {
+  const a = toStr(leftId).trim();
+  const b = toStr(rightId).trim();
+  if (!a || !b || a === b) return "";
+  return a < b ? `${a}::${b}` : `${b}::${a}`;
 }
 
 function toCustomerDto(entity) {
@@ -169,6 +198,7 @@ function toCustomerDto(entity) {
     phone: toStr(entity.phone),
     mobile: toStr(entity.mobile),
     email: toStr(entity.email),
+    secondaryEmail: toStr(entity.secondaryEmail),
     address: toStr(entity.address),
     address1: toStr(entity.address1),
     address2: toStr(entity.address2),
@@ -250,16 +280,19 @@ function importAddressFromParts(row) {
 
 function findExistingByIdentity(customers, row) {
   const probe = {
-    email: normalizeEmail(row.email),
+    emails: normalizedEmailList(row.email, row.secondaryEmail),
     phone: normalizePhone(row.phone || row.mobile),
     name: normalizeName(fullName(row.firstName, row.lastName, row.name))
   };
-  if (!probe.email && !probe.phone && !probe.name) return null;
+  if (!probe.emails.length && !probe.phone && !probe.name) return null;
   let best = null;
   let bestScore = 0;
   for (const customer of customers) {
     let score = 0;
-    if (probe.email && normalizeEmail(customer.email) === probe.email) score += 100;
+    if (probe.emails.length) {
+      const candidateEmails = normalizedEmailList(customer.email, customer.secondaryEmail);
+      if (candidateEmails.some(value => probe.emails.includes(value))) score += 100;
+    }
     if (probe.phone) {
       const candidatePhone = normalizePhone(customer.phone || customer.mobile);
       if (candidatePhone && candidatePhone === probe.phone) score += 80;
@@ -293,36 +326,83 @@ async function getCustomerEntity(client, id) {
   }
 }
 
-function probeFromBody(body) {
-  const name = normalizeName(fullName(pick(body, "firstName"), pick(body, "lastName"), pick(body, "name")));
-  const email = normalizeEmail(pick(body, "email"));
-  const phone = normalizePhone(pick(body, "phone"));
-  return { name, email, phone };
+async function listIgnoredDuplicateKeys(conn) {
+  const ignoredClient = TableClient.fromConnectionString(conn, NOT_DUPLICATES_TABLE);
+  try { await ignoredClient.createTable(); } catch (_) {}
+  const out = new Set();
+  const iter = ignoredClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${PARTITION}'` } });
+  for await (const entity of iter) {
+    const key = toStr(entity.rowKey).trim();
+    if (key) out.add(key);
+  }
+  return out;
 }
 
-function buildDuplicateCandidates(customers, probe, excludeId) {
+async function saveIgnoredDuplicate(conn, leftId, rightId) {
+  const key = duplicatePairKey(leftId, rightId);
+  if (!key) return false;
+  const ignoredClient = TableClient.fromConnectionString(conn, NOT_DUPLICATES_TABLE);
+  try { await ignoredClient.createTable(); } catch (_) {}
+  const [a, b] = key.split("::");
+  await ignoredClient.upsertEntity({
+    partitionKey: PARTITION,
+    rowKey: key,
+    leftId: a,
+    rightId: b,
+    updatedAt: new Date().toISOString()
+  }, "Merge");
+  return true;
+}
+
+function probeFromBody(body) {
+  const name = normalizeName(fullName(pick(body, "firstName"), pick(body, "lastName"), pick(body, "name")));
+  const emails = normalizedEmailList(pick(body, "email"), pick(body, "secondaryEmail"));
+  const phone = normalizePhone(pick(body, "phone") || pick(body, "mobile"));
+  const vin = normalizeVin(pick(body, "vin"));
+  return { name, emails, phone, vin };
+}
+
+function duplicateRecommendation(score) {
+  const confidence = Math.max(0, Math.min(100, Math.round((Number(score) / DUPLICATE_MAX_SCORE) * 100)));
+  if (confidence >= DUPLICATE_AUTO_MERGE_THRESHOLD) return { confidence, action: "auto-merge" };
+  if (confidence >= DUPLICATE_REVIEW_THRESHOLD) return { confidence, action: "review" };
+  return { confidence, action: "no-match" };
+}
+
+function buildDuplicateCandidates(customers, probe, excludeId, ignoredKeys) {
   const excluded = toStr(excludeId).trim();
   const out = [];
   for (const customer of customers) {
     const candidateId = toStr(customer.id);
     if (!candidateId || candidateId === excluded) continue;
+    if (excluded && ignoredKeys && ignoredKeys.has(duplicatePairKey(excluded, candidateId))) continue;
     const reasons = [];
     let score = 0;
 
-    if (probe.email && normalizeEmail(customer.email) === probe.email) {
+    if (probe.vin && normalizeVin(customer.vin) === probe.vin) {
+      reasons.push("vin");
+      score += DUPLICATE_REASON_WEIGHTS.vin;
+    }
+    const candidateEmails = normalizedEmailList(customer.email, customer.secondaryEmail);
+    if (probe.emails.length && candidateEmails.some(value => probe.emails.includes(value))) {
       reasons.push("email");
-      score += 100;
+      score += DUPLICATE_REASON_WEIGHTS.email;
     }
     if (probe.phone && normalizePhone(customer.phone) === probe.phone) {
       reasons.push("phone");
-      score += 80;
+      score += DUPLICATE_REASON_WEIGHTS.phone;
+    }
+    if (!reasons.includes("phone") && probe.phone && normalizePhone(customer.mobile) === probe.phone) {
+      reasons.push("phone");
+      score += DUPLICATE_REASON_WEIGHTS.phone;
     }
     const candidateName = normalizeName(fullName(customer.firstName, customer.lastName, customer.name));
     if (probe.name && candidateName && candidateName === probe.name) {
       reasons.push("name");
-      score += 50;
+      score += DUPLICATE_REASON_WEIGHTS.name;
     }
     if (!reasons.length) continue;
+    const recommendation = duplicateRecommendation(score);
 
     out.push({
       id: candidateId,
@@ -330,8 +410,11 @@ function buildDuplicateCandidates(customers, probe, excludeId) {
       firstName: toStr(customer.firstName),
       lastName: toStr(customer.lastName),
       email: toStr(customer.email),
+      secondaryEmail: toStr(customer.secondaryEmail),
       phone: toStr(customer.phone),
       score,
+      confidence: recommendation.confidence,
+      recommendation: recommendation.action,
       reasons
     });
   }
@@ -342,6 +425,142 @@ function buildDuplicateCandidates(customers, probe, excludeId) {
     String(a.id).localeCompare(String(b.id))
   );
   return out;
+}
+
+function addToGroup(groups, key, customerId) {
+  if (!key || !customerId) return;
+  const existing = groups.get(key);
+  if (existing) {
+    existing.push(customerId);
+    return;
+  }
+  groups.set(key, [customerId]);
+}
+
+function addPairReason(pairMap, leftId, rightId, reason, scoreIncrement) {
+  const a = leftId < rightId ? leftId : rightId;
+  const b = leftId < rightId ? rightId : leftId;
+  const key = `${a}::${b}`;
+  const existing = pairMap.get(key);
+  if (!existing) {
+    pairMap.set(key, {
+      leftId: a,
+      rightId: b,
+      reasons: [reason],
+      score: scoreIncrement
+    });
+    return;
+  }
+
+  if (!existing.reasons.includes(reason)) {
+    existing.reasons.push(reason);
+    existing.score += scoreIncrement;
+  }
+}
+
+function addPairsFromGroups(pairMap, groups, reason, scoreIncrement) {
+  for (const ids of groups.values()) {
+    if (!Array.isArray(ids) || ids.length < 2) continue;
+    for (let i = 0; i < ids.length; i += 1) {
+      const leftId = toStr(ids[i]).trim();
+      if (!leftId) continue;
+      for (let j = i + 1; j < ids.length; j += 1) {
+        const rightId = toStr(ids[j]).trim();
+        if (!rightId || rightId === leftId) continue;
+        addPairReason(pairMap, leftId, rightId, reason, scoreIncrement);
+      }
+    }
+  }
+}
+
+function duplicateSummaryCustomerPreview(customer) {
+  return {
+    id: toStr(customer.id),
+    name: toStr(customer.name),
+    firstName: toStr(customer.firstName),
+    lastName: toStr(customer.lastName),
+    email: toStr(customer.email),
+    secondaryEmail: toStr(customer.secondaryEmail),
+    phone: toStr(customer.phone),
+    mobile: toStr(customer.mobile),
+    address: toStr(customer.address),
+    vehicleYear: toStr(customer.vehicleYear),
+    vehicleMake: toStr(customer.vehicleMake),
+    vehicleModel: toStr(customer.vehicleModel),
+    notes: toStr(customer.notes)
+  };
+}
+
+function buildDuplicateSummary(customers, limit, includeCustomers, ignoredKeys) {
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 25, 200));
+  const ids = new Set();
+  const emails = new Map();
+  const phones = new Map();
+  const names = new Map();
+  const vins = new Map();
+
+  for (const customer of customers) {
+    const customerId = toStr(customer.id).trim();
+    if (!customerId || ids.has(customerId)) continue;
+    ids.add(customerId);
+
+    const emailsForCustomer = normalizedEmailList(customer.email, customer.secondaryEmail);
+    const phone = normalizePhone(customer.phone || customer.mobile);
+    const name = normalizeName(fullName(customer.firstName, customer.lastName, customer.name));
+    const vin = normalizeVin(customer.vin);
+
+    for (const email of emailsForCustomer) {
+      addToGroup(emails, email, customerId);
+    }
+    addToGroup(phones, phone, customerId);
+    addToGroup(names, name, customerId);
+    addToGroup(vins, vin, customerId);
+  }
+
+  const pairMap = new Map();
+  addPairsFromGroups(pairMap, vins, "vin", DUPLICATE_REASON_WEIGHTS.vin);
+  addPairsFromGroups(pairMap, emails, "email", DUPLICATE_REASON_WEIGHTS.email);
+  addPairsFromGroups(pairMap, phones, "phone", DUPLICATE_REASON_WEIGHTS.phone);
+  addPairsFromGroups(pairMap, names, "name", DUPLICATE_REASON_WEIGHTS.name);
+
+  let pairs = Array.from(pairMap.values());
+  if (ignoredKeys && ignoredKeys.size) {
+    pairs = pairs.filter(pair => !ignoredKeys.has(duplicatePairKey(pair.leftId, pair.rightId)));
+  }
+  pairs = pairs.map(pair => {
+    const recommendation = duplicateRecommendation(pair.score);
+    return {
+      ...pair,
+      confidence: recommendation.confidence,
+      recommendation: recommendation.action
+    };
+  });
+  pairs.sort((a, b) =>
+    b.score - a.score ||
+    a.leftId.localeCompare(b.leftId) ||
+    a.rightId.localeCompare(b.rightId)
+  );
+  const topPairs = pairs.slice(0, safeLimit);
+  let customersById = undefined;
+  if (includeCustomers) {
+    const idsForResponse = new Set();
+    for (const pair of topPairs) {
+      idsForResponse.add(pair.leftId);
+      idsForResponse.add(pair.rightId);
+    }
+    customersById = {};
+    for (const customer of customers) {
+      const customerId = toStr(customer.id).trim();
+      if (!customerId || !idsForResponse.has(customerId)) continue;
+      customersById[customerId] = duplicateSummaryCustomerPreview(customer);
+    }
+  }
+
+  return {
+    total: pairs.length,
+    pairs: topPairs,
+    customersById
+  };
 }
 
 function earliestTimestamp(a, b) {
@@ -375,6 +594,18 @@ function buildMergePatch(targetEntity, sourceEntity) {
     const targetValue = toStr(targetEntity[field]).trim();
     const sourceValue = toStr(sourceEntity[field]).trim();
     if (!targetValue && sourceValue) patch[field] = sourceValue;
+  }
+
+  const targetPrimary = normalizeEmail(patch.email != null ? patch.email : targetEntity.email);
+  const targetSecondary = normalizeEmail(patch.secondaryEmail != null ? patch.secondaryEmail : targetEntity.secondaryEmail);
+  const sourcePrimary = normalizeEmail(sourceEntity.email);
+  const sourceSecondary = normalizeEmail(sourceEntity.secondaryEmail);
+  if (!targetSecondary) {
+    if (sourcePrimary && sourcePrimary !== targetPrimary) {
+      patch.secondaryEmail = sourcePrimary;
+    } else if (sourceSecondary && sourceSecondary !== targetPrimary) {
+      patch.secondaryEmail = sourceSecondary;
+    }
   }
 
   const mergedNotes = combineNotes(targetEntity.notes, sourceEntity.notes);
@@ -471,14 +702,53 @@ module.exports = async function (context, req) {
 
       if (op === "findduplicates" || op === "duplicatecheck" || op === "checkduplicates") {
         const probe = probeFromBody(b);
-        if (!probe.email && !probe.phone && !probe.name) {
+        if (!probe.emails.length && !probe.phone && !probe.name && !probe.vin) {
           context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true, items: [] } };
           return;
         }
         const customers = await listCustomers(client);
         const excludeId = toStr(b.excludeId || b.id);
-        const items = buildDuplicateCandidates(customers, probe, excludeId);
+        const ignoredKeys = excludeId ? await listIgnoredDuplicateKeys(conn) : new Set();
+        const items = buildDuplicateCandidates(customers, probe, excludeId, ignoredKeys);
         context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true, items } };
+        return;
+      }
+
+      if (op === "duplicatesummary" || op === "duplicates") {
+        const customers = await listCustomers(client);
+        const includeCustomers = b.includeCustomers === true || toStr(b.includeCustomers).toLowerCase() === "true";
+        const ignoredKeys = await listIgnoredDuplicateKeys(conn);
+        const summary = buildDuplicateSummary(customers, b.limit, includeCustomers, ignoredKeys);
+        context.res = {
+          status: 200,
+          headers: { "content-type": "application/json" },
+          body: {
+            ok: true,
+            total: summary.total,
+            pairs: summary.pairs,
+            customersById: summary.customersById || {}
+          }
+        };
+        return;
+      }
+
+      if (op === "marknotduplicate" || op === "notduplicate") {
+        const leftId = toStr(b.leftId).trim();
+        const rightId = toStr(b.rightId).trim();
+        if (!leftId || !rightId || leftId === rightId) {
+          context.res = {
+            status: 400,
+            headers: { "content-type": "application/json" },
+            body: { error: "leftId and rightId are required." }
+          };
+          return;
+        }
+        await saveIgnoredDuplicate(conn, leftId, rightId);
+        context.res = {
+          status: 200,
+          headers: { "content-type": "application/json" },
+          body: { ok: true }
+        };
         return;
       }
 
@@ -563,11 +833,12 @@ module.exports = async function (context, req) {
             const lastName = pick(source, "lastName");
             const name = fullName(firstName, lastName, pick(source, "name"));
             const email = pick(source, "email");
+            const secondaryEmail = pick(source, "secondaryEmail");
             const phone = pick(source, "phone");
             const mobile = pick(source, "mobile");
             const primaryPhone = phone || mobile;
             const address = pick(source, "address") || importAddressFromParts(source);
-            const fallbackName = name || pick(source, "business") || email || primaryPhone;
+            const fallbackName = name || pick(source, "business") || email || secondaryEmail || primaryPhone;
 
             if (!fallbackName && !email && !primaryPhone) {
               skipped += 1;
@@ -579,6 +850,7 @@ module.exports = async function (context, req) {
               firstName,
               lastName,
               email,
+              secondaryEmail,
               phone: primaryPhone,
               mobile
             });
@@ -600,6 +872,7 @@ module.exports = async function (context, req) {
                 phone: primaryPhone,
                 mobile,
                 email,
+                secondaryEmail,
                 address,
                 address1: pick(source, "address1"),
                 address2: pick(source, "address2"),
@@ -654,6 +927,7 @@ module.exports = async function (context, req) {
             mergeValue("phone", primaryPhone);
             mergeValue("mobile", mobile);
             mergeValue("email", email);
+            mergeValue("secondaryEmail", secondaryEmail);
             mergeValue("address", address);
             mergeValue("address1", source.address1);
             mergeValue("address2", source.address2);
@@ -703,6 +977,7 @@ module.exports = async function (context, req) {
       const name = pick(b, "name");
       const phone = pick(b, "phone");
       const email = pick(b, "email");
+      const secondaryEmail = pick(b, "secondaryEmail");
 
       if (!id && !name) {
         context.res = {
@@ -730,6 +1005,7 @@ module.exports = async function (context, req) {
           phone,
           mobile: pick(b, "mobile"),
           email,
+          secondaryEmail,
           address: pick(b, "address"),
           address1: pick(b, "address1"),
           address2: pick(b, "address2"),
@@ -810,6 +1086,9 @@ module.exports = async function (context, req) {
         if (phone || Object.prototype.hasOwnProperty.call(b, "phone")) patch.phone = phone;
         setIfPresent(patch, b, "mobile");
         if (email || Object.prototype.hasOwnProperty.call(b, "email")) patch.email = email;
+        if (secondaryEmail || Object.prototype.hasOwnProperty.call(b, "secondaryEmail")) {
+          patch.secondaryEmail = secondaryEmail;
+        }
         setIfPresent(patch, b, "address");
         setIfPresent(patch, b, "address1");
         setIfPresent(patch, b, "address2");

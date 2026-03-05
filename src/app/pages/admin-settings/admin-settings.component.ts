@@ -19,6 +19,7 @@ import {
   IonLabel,
   IonSelect,
   IonSelectOption,
+  IonToggle,
   IonTextarea,
   IonTitle,
   IonToolbar
@@ -249,6 +250,7 @@ const CUSTOMER_IMPORT_TARGET_FIELDS: Array<{ key: keyof CustomerImportRow; label
   { key: 'lastTaskActivity', label: 'Last Task Activity' },
   { key: 'dateLeft', label: 'Date Left' },
   { key: 'contactTags', label: 'Contact Tags' }
+  ,{ key: 'vehicleModel', label: 'Vehicle' }
 ];
 
 const CUSTOMER_IMPORT_HEADER_MAP: Record<string, keyof CustomerImportRow> = {
@@ -268,6 +270,9 @@ const CUSTOMER_IMPORT_HEADER_MAP: Record<string, keyof CustomerImportRow> = {
   customername: 'name',
   notes: 'notes',
   tags: 'tags',
+  vehicle: 'vehicleModel',
+  vehicletag: 'vehicleModel',
+  customertag: 'vehicleModel',
   telephone: 'phone',
   phone: 'phone',
   phonenumber: 'phone',
@@ -323,6 +328,7 @@ const CUSTOMER_IMPORT_HEADER_MAP: Record<string, keyof CustomerImportRow> = {
     IonIcon,
     IonSelect,
     IonSelectOption,
+    IonToggle,
     IonTextarea,
     IonBadge,
     UserMenuComponent,
@@ -461,7 +467,8 @@ export default class AdminSettingsComponent implements OnInit {
   widgetError = '';
   readonly widgetSubmitting = signal(false);
   readonly widgetTestResult = signal<WidgetLeadResponse | null>(null);
-  widgetTestName = 'Website Lead Test';
+  widgetTestFirstName = '';
+  widgetTestLastName = '';
   widgetTestEmail = '';
   widgetTestPhone = '';
   widgetTestVin = '';
@@ -478,6 +485,8 @@ export default class AdminSettingsComponent implements OnInit {
   private scheduleSettingsLoaded = false;
   private adminSettingsLoaded = false;
   readonly customerImporting = signal(false);
+  readonly customerImportPreviewPage = signal(1);
+  readonly customerImportPreviewPageSize = 5;
   readonly customerImportResult = signal<CustomerImportResponse | null>(null);
   readonly customerImportTargetFields = CUSTOMER_IMPORT_TARGET_FIELDS;
   readonly customerImportExpectedHeaders = [...ZIGAFLOW_EXPECTED_HEADERS];
@@ -612,6 +621,7 @@ export default class AdminSettingsComponent implements OnInit {
       this.customerImportFileName = file.name;
       this.customerImportHeaders = rawHeaders;
       this.customerImportRows = rows;
+      this.customerImportPreviewPage.set(1);
       this.customerImportMappings = rawHeaders.map(source => ({
         source,
         target: this.autoMapCustomerImportHeader(source)
@@ -624,6 +634,24 @@ export default class AdminSettingsComponent implements OnInit {
 
   mappedCustomerImportCount(): number {
     return this.customerImportMappings.filter(item => !!item.target).length;
+  }
+
+  customerImportPreviewRows(): Array<Record<string, string>> {
+    const page = Math.max(1, Math.min(this.customerImportPreviewPage(), this.customerImportPreviewTotalPages()));
+    const start = (page - 1) * this.customerImportPreviewPageSize;
+    return this.customerImportRows.slice(start, start + this.customerImportPreviewPageSize);
+  }
+
+  customerImportPreviewTotalPages(): number {
+    return Math.max(1, Math.ceil(this.customerImportRows.length / this.customerImportPreviewPageSize));
+  }
+
+  prevCustomerImportPreviewPage(): void {
+    this.customerImportPreviewPage.update(value => Math.max(1, value - 1));
+  }
+
+  nextCustomerImportPreviewPage(): void {
+    this.customerImportPreviewPage.update(value => Math.min(this.customerImportPreviewTotalPages(), value + 1));
   }
 
   missingExpectedImportHeaders(): string[] {
@@ -1005,11 +1033,12 @@ export default class AdminSettingsComponent implements OnInit {
 
   canSubmitWidgetTest(): boolean {
     if (this.widgetSubmitting()) return false;
-    const name = this.widgetTestName.trim();
+    const firstName = this.widgetTestFirstName.trim();
+    const lastName = this.widgetTestLastName.trim();
     const email = this.widgetTestEmail.trim();
     const phone = this.widgetTestPhone.trim();
     const vin = this.widgetTestVin.trim().toUpperCase();
-    if (!name) return false;
+    if (!firstName || !lastName) return false;
     if (!email && !phone) return false;
     if (!this.isValidVin(vin)) return false;
     if (phone && !this.widgetTestSmsOptIn) return false;
@@ -1043,7 +1072,9 @@ export default class AdminSettingsComponent implements OnInit {
   submitWidgetTest(): void {
     const endpoint = this.resolveWidgetApiEndpoint(this.widgetApiUrl);
     this.widgetApiUrl = endpoint;
-    const name = this.widgetTestName.trim();
+    const firstName = this.widgetTestFirstName.trim();
+    const lastName = this.widgetTestLastName.trim();
+    const name = `${firstName} ${lastName}`.trim();
     const email = this.widgetTestEmail.trim();
     const phone = this.widgetTestPhone.trim();
     const vin = this.widgetTestVin.trim().toUpperCase();
@@ -1055,8 +1086,8 @@ export default class AdminSettingsComponent implements OnInit {
     this.widgetError = '';
     this.widgetTestResult.set(null);
 
-    if (!name) {
-      this.widgetError = 'Name is required.';
+    if (!firstName || !lastName) {
+      this.widgetError = 'First and last name are required.';
       return;
     }
     if (!email && !phone) {
@@ -1078,6 +1109,8 @@ export default class AdminSettingsComponent implements OnInit {
 
     const payload = {
       source: this.widgetSource.trim() || 'website-widget',
+      firstName,
+      lastName,
       name,
       email,
       phone,
@@ -1331,7 +1364,8 @@ export default class AdminSettingsComponent implements OnInit {
       `  const successMessage = '${this.escapeJsString(successMessage)}';`,
       "  root.innerHTML = [",
       "    '<form id=\"pathflowLeadForm\" style=\"display:grid;gap:10px;max-width:460px;font-family:Arial,sans-serif\">',",
-      "    '  <input name=\"name\" type=\"text\" placeholder=\"Full name\" required style=\"padding:10px;border:1px solid #cbd5e1;border-radius:8px;\">',",
+      "    '  <input name=\"firstName\" type=\"text\" placeholder=\"First name\" required style=\"padding:10px;border:1px solid #cbd5e1;border-radius:8px;\">',",
+      "    '  <input name=\"lastName\" type=\"text\" placeholder=\"Last name\" required style=\"padding:10px;border:1px solid #cbd5e1;border-radius:8px;\">',",
       "    '  <input name=\"email\" type=\"email\" placeholder=\"Email\" style=\"padding:10px;border:1px solid #cbd5e1;border-radius:8px;\">',",
       "    '  <input name=\"phone\" type=\"tel\" placeholder=\"Phone\" style=\"padding:10px;border:1px solid #cbd5e1;border-radius:8px;\">',",
       "    '  <input name=\"vin\" type=\"text\" required minlength=\"17\" maxlength=\"17\" pattern=\"[A-HJ-NPR-Z0-9]{17}\" placeholder=\"VIN (17 chars)\" style=\"padding:10px;border:1px solid #cbd5e1;border-radius:8px;\">',",
@@ -1353,7 +1387,9 @@ export default class AdminSettingsComponent implements OnInit {
       '    const formData = new FormData(form);',
       '    const payload = {',
       '      source: source,',
-      "      name: String(formData.get('name') || '').trim(),",
+      "      firstName: String(formData.get('firstName') || '').trim(),",
+      "      lastName: String(formData.get('lastName') || '').trim(),",
+      "      name: '',",
       "      email: String(formData.get('email') || '').trim(),",
       "      phone: String(formData.get('phone') || '').trim(),",
       "      vin: String(formData.get('vin') || '').trim().toUpperCase().replace(/\\s+/g, ''),",
@@ -1365,6 +1401,12 @@ export default class AdminSettingsComponent implements OnInit {
       '      smsConsentText: consentText,',
       '      optInPageUrl: window.location.href',
       '    };',
+      "    payload.name = (payload.firstName + ' ' + payload.lastName).trim();",
+      '    if (!payload.firstName || !payload.lastName) {',
+      "      status.textContent = 'First and last name are required.';",
+      "      status.style.color = '#dc2626';",
+      '      return;',
+      '    }',
       '    if (!payload.vin) {',
       "      status.textContent = 'VIN is required.';",
       "      status.style.color = '#dc2626';",
@@ -1413,35 +1455,38 @@ export default class AdminSettingsComponent implements OnInit {
 
   private resolveWidgetApiEndpoint(rawValue: string): string {
     const raw = String(rawValue || '').trim();
+    const localProxyEndpoint = this.localProxyWidgetEndpoint();
     if (raw) {
-      if (raw === '/api') return `${this.resolvePublicAppOrigin()}/api/widget/lead`;
-      if (raw.startsWith('/api/')) return `${this.resolvePublicAppOrigin()}${raw}`;
+      if (raw === '/api') return localProxyEndpoint || `${this.resolvePublicAppOrigin()}/api/widget/lead`;
+      if (raw.startsWith('/api/')) return localProxyEndpoint || `${this.resolvePublicAppOrigin()}${raw}`;
       try {
         const parsed = new URL(raw);
         if (!this.isLoopbackHost(parsed.hostname)) {
+          const canonicalOrigin = this.canonicalWidgetOrigin(parsed.origin);
           const path = (parsed.pathname || '').replace(/\/+$/, '');
-          if (!path || path === '/') return `${parsed.origin}/api/widget/lead`;
-          if (path === '/api') return `${parsed.origin}/api/widget/lead`;
-          if (path.startsWith('/api/')) return `${parsed.origin}${path}`;
-          return `${parsed.origin}/api/widget/lead`;
+          if (!path || path === '/') return `${canonicalOrigin}/api/widget/lead`;
+          if (path === '/api') return `${canonicalOrigin}/api/widget/lead`;
+          if (path.startsWith('/api/')) return `${canonicalOrigin}${path}`;
+          return `${canonicalOrigin}/api/widget/lead`;
         }
       } catch {
         // Ignore malformed input and fall back to the configured public endpoint.
       }
     }
+    if (localProxyEndpoint) return localProxyEndpoint;
     return `${this.resolvePublicAppOrigin()}/api/widget/lead`;
   }
 
   private resolvePublicAppOrigin(): string {
     if (typeof window !== 'undefined') {
       const browserOrigin = this.normalizePublicOrigin(window.location.origin || '');
-      if (browserOrigin) return browserOrigin;
+      if (browserOrigin) return this.canonicalWidgetOrigin(browserOrigin);
     }
 
     const configured = this.normalizePublicOrigin(environment.publicAppUrl || environment.apiBase || '');
-    if (configured) return configured;
+    if (configured) return this.canonicalWidgetOrigin(configured);
 
-    return 'https://wonderful-glacier-0f45f5110.6.azurestaticapps.net';
+    return 'https://www.pathflow-app.com';
   }
 
   private normalizePublicOrigin(value: string): string {
@@ -1459,6 +1504,28 @@ export default class AdminSettingsComponent implements OnInit {
   private isLoopbackHost(hostname: string): boolean {
     const host = String(hostname || '').trim().toLowerCase();
     return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.endsWith('.localhost');
+  }
+
+  private canonicalWidgetOrigin(origin: string): string {
+    const normalized = String(origin || '').trim();
+    if (!normalized) return normalized;
+    try {
+      const parsed = new URL(normalized);
+      const host = String(parsed.hostname || '').toLowerCase();
+      if (host === 'wonderful-glacier-0f45f5110.6.azurestaticapps.net') {
+        return 'https://www.pathflow-app.com';
+      }
+      return parsed.origin;
+    } catch {
+      return normalized;
+    }
+  }
+
+  private localProxyWidgetEndpoint(): string {
+    if (typeof window === 'undefined') return '';
+    const host = String(window.location.hostname || '').trim().toLowerCase();
+    if (this.isLoopbackHost(host)) return '/api/widget/lead';
+    return '';
   }
 
   private widgetConsentTextWithPolicyLinks(): string {

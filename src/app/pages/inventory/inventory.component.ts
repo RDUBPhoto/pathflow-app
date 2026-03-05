@@ -58,6 +58,7 @@ import { PurchaseOrdersApiService } from '../../services/purchase-orders-api.ser
   styleUrls: ['./inventory.component.scss']
 })
 export default class InventoryComponent implements OnInit {
+  readonly pageSize = 25;
   private readonly inventoryApi = inject(InventoryApiService);
   private readonly purchaseOrdersApi = inject(PurchaseOrdersApiService);
 
@@ -67,6 +68,7 @@ export default class InventoryComponent implements OnInit {
   readonly error = signal('');
   readonly search = signal('');
   readonly showLowStockOnly = signal(false);
+  readonly page = signal(1);
   readonly items = signal<InventoryItem[]>([]);
   readonly jobPartNeeds = signal<InventoryNeed[]>([]);
 
@@ -94,6 +96,19 @@ export default class InventoryComponent implements OnInit {
       return haystack.includes(query);
     });
   });
+  readonly totalPages = computed(() => Math.max(1, Math.ceil(this.filteredItems().length / this.pageSize)));
+  readonly pagedItems = computed(() => {
+    const maxPage = this.totalPages();
+    const page = Math.max(1, Math.min(this.page(), maxPage));
+    const start = (page - 1) * this.pageSize;
+    return this.filteredItems().slice(start, start + this.pageSize);
+  });
+  readonly pageStart = computed(() => {
+    if (!this.filteredItems().length) return 0;
+    const page = Math.max(1, Math.min(this.page(), this.totalPages()));
+    return (page - 1) * this.pageSize + 1;
+  });
+  readonly pageEnd = computed(() => this.pageStart() + this.pagedItems().length - 1);
 
   constructor() {
     addIcons({
@@ -115,6 +130,7 @@ export default class InventoryComponent implements OnInit {
       next: res => {
         this.items.set(Array.isArray(res.items) ? res.items : []);
         this.jobPartNeeds.set(Array.isArray(res.needs) ? res.needs : []);
+        this.page.set(1);
         this.loading.set(false);
       },
       error: err => {
@@ -239,6 +255,24 @@ export default class InventoryComponent implements OnInit {
 
   trackJobNeed(_index: number, item: InventoryNeed): string {
     return item.id;
+  }
+
+  setSearch(value: string): void {
+    this.search.set(value || '');
+    this.page.set(1);
+  }
+
+  setShowLowStockOnly(value: boolean): void {
+    this.showLowStockOnly.set(value);
+    this.page.set(1);
+  }
+
+  prevPage(): void {
+    this.page.update(value => Math.max(1, value - 1));
+  }
+
+  nextPage(): void {
+    this.page.update(value => Math.min(this.totalPages(), value + 1));
   }
 
   private extractError(err: any, fallback: string): string {

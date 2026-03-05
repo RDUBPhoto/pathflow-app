@@ -12,6 +12,14 @@
 </ion-header>
 
 <ion-content class="ion-padding glass-bg customers-content">
+  <section class="duplicates-bar glass-surface" *ngIf="duplicateTotal() > 0">
+    <div class="duplicates-copy">
+      <strong>Duplicates found</strong>
+      <span>{{ duplicateTotal() }} potential duplicate pair{{ duplicateTotal() === 1 ? '' : 's' }}</span>
+    </div>
+    <ion-button size="small" color="warning" (click)="openDuplicateReview()">Review</ion-button>
+  </section>
+
   <div class="customers-toolbar">
     <ion-item class="search-item">
       <ion-label position="stacked">Search</ion-label>
@@ -52,21 +60,27 @@
         </tr>
       </thead>
       <tbody>
-        <tr class="data-row" *ngFor="let c of filtered() | slice:0:50; trackBy: trackCustomer" (click)="openEdit(c)">
+        <tr class="data-row" *ngFor="let c of pagedCustomers(); trackBy: trackCustomer" (click)="openEdit(c)">
           <td>{{ c.name || 'Unnamed' }}</td>
           <td>{{ c.phone || '—' }}</td>
-          <td>{{ c.email || '—' }}</td>
+          <td>{{ c.email || c.secondaryEmail || '—' }}</td>
           <td>{{ vehicleSummaryFor(c) || '—' }}</td>
         </tr>
-        <tr *ngIf="!loading() && (filtered() | slice:0:50).length === 0">
+        <tr *ngIf="!loading() && !pagedCustomers().length">
           <td class="empty-row" colspan="4">No customers found</td>
         </tr>
       </tbody>
     </table>
   </div>
 
+  <div class="table-pager" *ngIf="filtered().length > 0">
+    <ion-button size="small" fill="outline" (click)="prevPage()" [disabled]="page() <= 1">Previous</ion-button>
+    <span>Page {{ page() }} of {{ totalPages() }}</span>
+    <ion-button size="small" fill="outline" (click)="nextPage()" [disabled]="page() >= totalPages()">Next</ion-button>
+  </div>
+
   <div class="summary-line">
-    Showing {{ (filtered() | slice:0:50).length }} of {{ filtered().length }}
+    Showing {{ pageStart() }}-{{ pageEnd() }} of {{ filtered().length }}
     <span *ngIf="searchTerm()"> for "{{ searchTerm() }}"</span>
   </div>
 </ion-content>

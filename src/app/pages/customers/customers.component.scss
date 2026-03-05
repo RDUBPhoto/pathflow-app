@@ -7,6 +7,28 @@
   --padding-bottom: calc(96px + env(safe-area-inset-bottom));
 }
 
+.duplicates-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--app-border-subtle);
+  border-left: 4px solid var(--ion-color-warning, #f5a623);
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+
+.duplicates-copy {
+  display: grid;
+  gap: 2px;
+}
+
+.duplicates-copy span {
+  font-size: 13px;
+  color: var(--app-text-muted);
+}
+
 .customers-toolbar {
   display: flex;
   justify-content: space-between;
@@ -92,6 +114,18 @@
 
 .empty-row {
   text-align: center;
+  color: var(--app-text-muted);
+}
+
+.table-pager {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.table-pager span {
+  font-size: 12px;
   color: var(--app-text-muted);
 }
 

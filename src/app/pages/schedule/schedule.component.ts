@@ -3,17 +3,11 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
   IonHeader, IonToolbar, IonTitle, IonContent, IonButtons, IonButton,
-  IonIcon, IonModal, IonItem, IonLabel, IonSelect, IonSelectOption,
+  IonModal, IonItem, IonLabel, IonSelect, IonSelectOption,
   IonInput, IonTextarea, IonCheckbox, IonSpinner, IonFooter
 } from '@ionic/angular/standalone';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { ActivatedRoute } from '@angular/router';
 import { DayPilot, DayPilotModule, DayPilotMonthComponent, DayPilotSchedulerComponent } from '@daypilot/daypilot-lite-angular';
-import { addIcons } from 'ionicons';
-import {
-  settingsOutline,
-  addOutline,
-  trashOutline
-} from 'ionicons/icons';
 import { CustomersApi, Customer } from '../../services/customers-api.service';
 import { ScheduleApi, ScheduleItem } from '../../services/schedule-api.service';
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
@@ -51,12 +45,11 @@ const SCHEDULE_VIEW_ANCHOR_KEY = 'schedule.viewStart';
   imports: [
     CommonModule, FormsModule, DayPilotModule,
     IonHeader, IonToolbar, IonTitle, IonContent, IonButtons, IonButton,
-    IonIcon, IonModal, IonItem, IonLabel, IonSelect, IonSelectOption,
+    IonModal, IonItem, IonLabel, IonSelect, IonSelectOption,
     IonInput, IonTextarea, IonCheckbox, IonSpinner, IonFooter,
     UserMenuComponent,
     PageBackButtonComponent,
     CompanySwitcherComponent,
-    RouterLink
   ],
   templateUrl: './schedule.component.html',
   styleUrls: ['./schedule.component.scss']
@@ -421,11 +414,6 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     private userSettings: UserScopedSettingsService,
     private route: ActivatedRoute
   ) {
-    addIcons({
-      'settings-outline': settingsOutline,
-      'add-outline': addOutline,
-      'trash-outline': trashOutline
-    });
     this.applySettings(this.defaultSettings());
     this.loadPersistedSettings();
     this.loadPersistedCalendarView();

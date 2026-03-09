@@ -8,7 +8,7 @@ export const environment = {
     primaryProvider: 'aad',
     providers: ['aad', 'google'],
     hostedEmailEnabled: true,
-    hostedEmailProvider: 'aad',
+    hostedEmailProvider: 'email',
     adminEmails: [] as string[],
     devBypass: false,
     localPasswordEnabled: false,

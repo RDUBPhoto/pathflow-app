@@ -26,6 +26,7 @@ import {
   InvoicesDataService
 } from '../../services/invoices-data.service';
 import { QuoteResponseApiService } from '../../services/quote-response-api.service';
+import { EmailApiService } from '../../services/email-api.service';
 
 type InvoiceKpi = {
   id: string;
@@ -62,6 +63,7 @@ export default class InvoicesComponent implements OnDestroy {
   private readonly route = inject(ActivatedRoute);
   private readonly invoicesData = inject(InvoicesDataService);
   private readonly quoteResponseApi = inject(QuoteResponseApiService);
+  private readonly emailApi = inject(EmailApiService);
   private readonly toastController = inject(ToastController);
   private readonly laneDisplayOrder: InvoiceBoardStage[] = ['draft', 'sent', 'accepted', 'declined'];
   private syncTimer: ReturnType<typeof setInterval> | null = null;
@@ -124,6 +126,9 @@ export default class InvoicesComponent implements OnDestroy {
   readonly deleteDialogOpen = signal(false);
   readonly deleteCandidate = signal<InvoiceCard | null>(null);
   readonly deleteError = signal('');
+  readonly cancelDialogOpen = signal(false);
+  readonly cancelCandidate = signal<InvoiceCard | null>(null);
+  readonly cancelError = signal('');
   readonly openMenuId = signal<string | null>(null);
 
   constructor(private readonly router: Router) {
@@ -213,6 +218,73 @@ export default class InvoicesComponent implements OnDestroy {
     await this.showDeleteToast('Quote removed.', 'success');
   }
 
+  requestCancelQuote(invoice: InvoiceCard, event?: Event): void {
+    event?.preventDefault();
+    event?.stopPropagation();
+    if (invoice.documentType !== 'quote' || invoice.stage !== 'sent') return;
+    this.openMenuId.set(null);
+    this.cancelError.set('');
+    this.cancelCandidate.set(invoice);
+    this.cancelDialogOpen.set(true);
+  }
+
+  cancelQuoteDialog(): void {
+    this.cancelDialogOpen.set(false);
+    this.cancelCandidate.set(null);
+    this.cancelError.set('');
+  }
+
+  async confirmCancelQuote(): Promise<void> {
+    const candidate = this.cancelCandidate();
+    if (!candidate) return;
+    const detail = this.invoicesData.getInvoiceById(candidate.id);
+    if (!detail || detail.documentType !== 'quote' || detail.stage !== 'sent') {
+      this.cancelError.set('Could not cancel this quote. Please refresh and try again.');
+      await this.showDeleteToast('Could not cancel this quote.', 'danger');
+      return;
+    }
+
+    this.invoicesData.setStage(
+      candidate.id,
+      'declined',
+      'Quote canceled by staff before customer approval.'
+    );
+
+    let emailSent = false;
+    const to = String(detail.customerEmail || candidate.customerEmail || '').trim();
+    if (to) {
+      const business = String(detail.businessName || '').trim() || 'Our team';
+      const subject = `Quote ${detail.invoiceNumber} canceled`;
+      const message = `Your quote ${detail.invoiceNumber} has been canceled. If you have questions, reply to this email and ${business} will help.`;
+      const html = `<div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#111827;">
+        <p>Your quote <strong>${detail.invoiceNumber}</strong> has been canceled.</p>
+        <p>If you have questions, reply to this email and <strong>${business}</strong> will help.</p>
+      </div>`;
+      try {
+        await firstValueFrom(this.emailApi.sendToCustomer({
+          customerId: String(detail.customerId || '').trim(),
+          customerName: String(detail.customerName || '').trim(),
+          to,
+          subject,
+          message,
+          html
+        }));
+        emailSent = true;
+      } catch {
+        emailSent = false;
+      }
+    }
+
+    this.cancelQuoteDialog();
+    if (emailSent) {
+      await this.showDeleteToast('Quote canceled and customer email sent.', 'success');
+    } else if (to) {
+      await this.showDeleteToast('Quote canceled, but customer email failed to send.', 'danger');
+    } else {
+      await this.showDeleteToast('Quote canceled. No customer email on file.', 'warning');
+    }
+  }
+
   toggleCardMenu(invoice: InvoiceCard, event?: Event): void {
     event?.preventDefault();
     event?.stopPropagation();
@@ -233,7 +305,7 @@ export default class InvoicesComponent implements OnDestroy {
     return tab === 'quotes' ? 'quote' : 'invoice';
   }
 
-  private async showDeleteToast(message: string, color: 'success' | 'danger'): Promise<void> {
+  private async showDeleteToast(message: string, color: 'success' | 'danger' | 'warning'): Promise<void> {
     const toast = await this.toastController.create({
       message,
       color,

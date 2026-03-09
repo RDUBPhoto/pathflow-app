@@ -90,7 +90,7 @@
                   <div class="invoice-customer">{{ invoice.customerName }}</div>
                   <div
                     class="invoice-card-menu-wrap"
-                    *ngIf="activeTab() === 'quotes' && lane.id === 'draft'"
+                    *ngIf="activeTab() === 'quotes' && (lane.id === 'draft' || lane.id === 'sent')"
                     (click)="$event.preventDefault(); $event.stopPropagation()">
                     <button
                       type="button"
@@ -103,8 +103,16 @@
                       <button
                         type="button"
                         class="invoice-card-menu-item danger"
+                        *ngIf="lane.id === 'draft'"
                         (click)="requestDeleteDraft(invoice, $event)">
                         Delete Draft
+                      </button>
+                      <button
+                        type="button"
+                        class="invoice-card-menu-item warning"
+                        *ngIf="lane.id === 'sent'"
+                        (click)="requestCancelQuote(invoice, $event)">
+                        Cancel Quote
                       </button>
                     </div>
                   </div>
@@ -143,3 +151,20 @@
     </div>
   </section>
 </ion-content>
+
+  <div class="quote-delete-modal-backdrop" *ngIf="cancelDialogOpen()" (click)="cancelQuoteDialog()"></div>
+  <section class="quote-delete-modal glass-surface" *ngIf="cancelDialogOpen()" role="dialog" aria-modal="true">
+    <h3>Cancel Sent Quote</h3>
+    <p>
+      Cancel
+      <strong>{{ cancelCandidate()?.invoiceNumber || 'this sent quote' }}</strong>
+      for
+      <strong>{{ cancelCandidate()?.customerName || 'this customer' }}</strong>?
+    </p>
+    <p>This moves the quote from <strong>Sent</strong> to <strong>Declined</strong> and emails the customer.</p>
+    <p class="quote-delete-modal-error" *ngIf="cancelError()">{{ cancelError() }}</p>
+    <div class="quote-delete-modal-actions">
+      <ion-button fill="outline" size="small" (click)="cancelQuoteDialog()">Back</ion-button>
+      <ion-button color="warning" size="small" (click)="confirmCancelQuote()">Cancel Quote</ion-button>
+    </div>
+  </section>

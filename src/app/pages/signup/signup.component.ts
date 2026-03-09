@@ -47,8 +47,14 @@ export default class SignupComponent {
 
   readonly redirectTo = signal('/dashboard');
   readonly googleEnabled = computed(() => environment.auth.providers.includes('google'));
-  readonly emailSignupEnabled = computed(
+  readonly hostedEmailEnabled = computed(
+    () => !this.localServerMode && !!environment.auth.hostedEmailEnabled && !!String(environment.auth.hostedEmailProvider || '').trim()
+  );
+  readonly localEmailCredentialsEnabled = computed(
     () => environment.auth.localPasswordEnabled || environment.auth.devBypass || this.isLocalHost
+  );
+  readonly emailSignupEnabled = computed(
+    () => this.localEmailCredentialsEnabled() || this.hostedEmailEnabled()
   );
 
   readonly step = signal<1 | 2>(1);
@@ -77,7 +83,7 @@ export default class SignupComponent {
 
   readonly submitCta = computed(() => {
     if (this.selectedMethod() === 'email') {
-      return 'Create account and continue';
+      return this.localEmailCredentialsEnabled() ? 'Create account and continue' : 'Continue with Email';
     }
     if (this.selectedMethod() === 'google') {
       return 'Continue with Google';
@@ -88,6 +94,8 @@ export default class SignupComponent {
   readonly stepOneValid = computed(() => {
     if (this.selectedMethod() !== 'email') return true;
     if (!this.emailSignupEnabled()) return false;
+    const localEmailMode = this.localEmailCredentialsEnabled();
+    if (!localEmailMode) return true;
 
     const email = this.email().trim().toLowerCase();
     const password = this.password();
@@ -162,6 +170,12 @@ export default class SignupComponent {
       return;
     }
 
+    const localEmailMode = this.localEmailCredentialsEnabled();
+    if (!localEmailMode) {
+      this.step.set(2);
+      return;
+    }
+
     const email = this.email().trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       this.error.set('Enter a valid email address.');
@@ -202,31 +216,47 @@ export default class SignupComponent {
     const method = this.selectedMethod();
 
     if (method === 'email') {
-      if (!this.emailSignupEnabled()) {
-        this.error.set('Email/password sign-up is not enabled for hosted auth yet. Use Microsoft or Google.');
+      const localEmailMode = this.localEmailCredentialsEnabled();
+      if (localEmailMode) {
+        if (!this.emailSignupEnabled()) {
+          this.error.set('Email sign-up is not enabled for this environment. Use Microsoft or Google.');
+          return;
+        }
+
+        if (this.password() !== this.confirmPassword()) {
+          this.error.set('Passwords do not match.');
+          return;
+        }
+
+        const result = this.auth.createEmailPasswordAccount(
+          this.email(),
+          this.password(),
+          this.fullName(),
+          this.phone()
+        );
+        if (!result.ok) {
+          this.error.set(result.error || 'Unable to create your account.');
+          return;
+        }
+
+        void this.router.navigate(['/register'], {
+          replaceUrl: true,
+          queryParams: { redirect: this.redirectTo(), plan }
+        });
         return;
       }
 
-      if (this.password() !== this.confirmPassword()) {
-        this.error.set('Passwords do not match.');
+      if (this.hostedEmailEnabled()) {
+        const provider = String(environment.auth.hostedEmailProvider || '').trim();
+        if (!provider) {
+          this.error.set('Hosted email sign-in provider is not configured.');
+          return;
+        }
+        this.auth.signIn(provider, registerRedirect);
         return;
       }
 
-      const result = this.auth.createEmailPasswordAccount(
-        this.email(),
-        this.password(),
-        this.fullName(),
-        this.phone()
-      );
-      if (!result.ok) {
-        this.error.set(result.error || 'Unable to create your account.');
-        return;
-      }
-
-      void this.router.navigate(['/register'], {
-        replaceUrl: true,
-        queryParams: { redirect: this.redirectTo(), plan }
-      });
+      this.error.set('Email sign-up is not enabled for hosted auth yet. Use Microsoft or Google.');
       return;
     }
 

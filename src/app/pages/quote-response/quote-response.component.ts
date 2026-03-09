@@ -8,6 +8,14 @@ import { firstValueFrom } from 'rxjs';
 import { QuoteResponseApiService } from '../../services/quote-response-api.service';
 
 type QuoteAction = 'accept' | 'decline' | 'view';
+const LOCAL_PENDING_QUOTE_RESPONSES_KEY = 'pathflow.quoteResponses.pending.v1';
+
+type PendingQuoteResponse = {
+  quoteId: string;
+  stage: 'accepted' | 'declined';
+  tenantId: string;
+  updatedAt: string;
+};
 
 @Component({
   selector: 'app-quote-response',
@@ -75,6 +83,13 @@ export default class QuoteResponseComponent {
     const requestedTenant = String(this.route.snapshot.queryParamMap.get('tenantId') || '').trim().toLowerCase();
     const activeTenant = String(this.tenantContext.tenantId() || '').trim().toLowerCase() || 'main';
     const targetTenant = requestedTenant || activeTenant;
+    const stage = action === 'accept' ? 'accepted' : 'declined';
+    this.persistPendingResponse({
+      quoteId,
+      stage,
+      tenantId: targetTenant,
+      updatedAt: new Date().toISOString()
+    });
 
     try {
       await firstValueFrom(this.quoteResponseApi.capture({
@@ -93,7 +108,7 @@ export default class QuoteResponseComponent {
       }
       this.invoicesData.setStage(
         quoteId,
-        action === 'accept' ? 'accepted' : 'declined',
+        stage,
         `Customer ${action}ed quote from public link.`
       );
       if (targetTenant !== activeTenant) {
@@ -103,6 +118,24 @@ export default class QuoteResponseComponent {
       this.trackingMessage.set(`Quote status updated to ${action === 'accept' ? 'Accepted' : 'Declined'}.`);
     } catch {
       this.trackingMessage.set('We captured your response. If status has not updated yet, please refresh and try again.');
+    }
+  }
+
+  private persistPendingResponse(entry: PendingQuoteResponse): void {
+    try {
+      const raw = localStorage.getItem(LOCAL_PENDING_QUOTE_RESPONSES_KEY);
+      const parsed = raw ? (JSON.parse(raw) as PendingQuoteResponse[]) : [];
+      const source = Array.isArray(parsed) ? parsed : [];
+      const dedupe = `${entry.tenantId}|${entry.quoteId}`.toLowerCase();
+      const next = source.filter(item => {
+        const tenantId = String(item?.tenantId || '').trim().toLowerCase();
+        const quoteId = String(item?.quoteId || '').trim().toLowerCase();
+        return `${tenantId}|${quoteId}` !== dedupe;
+      });
+      next.push(entry);
+      localStorage.setItem(LOCAL_PENDING_QUOTE_RESPONSES_KEY, JSON.stringify(next));
+    } catch {
+      // localStorage may be unavailable; skip local fallback persistence.
     }
   }
 }

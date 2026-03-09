@@ -16,6 +16,17 @@ function asBool(value) {
   return lowered === "true" || lowered === "1" || lowered === "yes";
 }
 
+function asObject(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+    } catch (_) {}
+  }
+  return {};
+}
+
 function json(status, body) {
   return {
     status,
@@ -36,6 +47,29 @@ function readHeader(headers, key) {
   return "";
 }
 
+function readQueryParam(req, key) {
+  const target = asString(key).toLowerCase();
+  if (req && req.query && typeof req.query === "object") {
+    if (req.query[key] != null) return asString(req.query[key]);
+    for (const [name, value] of Object.entries(req.query)) {
+      if (asString(name).toLowerCase() === target) return asString(value);
+    }
+  }
+  const rawUrl = asString(req && req.url);
+  if (!rawUrl || rawUrl.indexOf("?") < 0) return "";
+  try {
+    const parsed = new URL(rawUrl, "http://localhost");
+    const direct = parsed.searchParams.get(key);
+    if (direct != null) return asString(direct);
+    for (const [name, value] of parsed.searchParams.entries()) {
+      if (asString(name).toLowerCase() === target) return asString(value);
+    }
+    return "";
+  } catch {
+    return "";
+  }
+}
+
 function normalizeEmail(value) {
   return asString(value).toLowerCase();
 }
@@ -54,9 +88,72 @@ function escapedFilterValue(value) {
   return asString(value).replace(/'/g, "''");
 }
 
-function hasAuthenticatedPrincipal(req) {
-  const principal = readHeader(req && req.headers, "x-ms-client-principal");
-  return !!principal;
+function parsePrincipal(req) {
+  const encoded = readHeader(req && req.headers, "x-ms-client-principal");
+  if (!encoded) return null;
+  try {
+    const decoded = Buffer.from(encoded, "base64").toString("utf8");
+    const raw = parseJson(decoded, {});
+    const claims = Array.isArray(raw.claims) ? raw.claims : [];
+    const claimEmail =
+      claims.find(item => asString(item && item.typ).toLowerCase() === "emails")?.val ||
+      claims.find(item => asString(item && item.typ).toLowerCase() === "email")?.val ||
+      claims.find(item => asString(item && item.typ).toLowerCase() === "preferred_username")?.val;
+    const claimName = claims.find(item => asString(item && item.typ).toLowerCase() === "name")?.val;
+    const userDetails = asString(raw.userDetails);
+    const email = normalizeEmail(claimEmail || (userDetails.includes("@") ? userDetails : ""));
+    const userId = asString(raw.userId || email);
+    if (!userId && !email) return null;
+    return {
+      userId,
+      email,
+      displayName: asString(claimName || userDetails || email || userId)
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parseFallbackIdentity(req, body) {
+  const source = asObject(body);
+  const queryUserId = readQueryParam(req, "userId") || readQueryParam(req, "userid") || readQueryParam(req, "actorUserId");
+  const queryUserEmail =
+    readQueryParam(req, "userEmail") || readQueryParam(req, "useremail") || readQueryParam(req, "email");
+  const queryUserName =
+    readQueryParam(req, "userName") || readQueryParam(req, "username") || readQueryParam(req, "displayName");
+  const userId = asString(
+    source.actorUserId ||
+      source.userId ||
+      readHeader(req && req.headers, "x-user-id") ||
+      queryUserId
+  );
+  const email = normalizeEmail(
+    source.actorEmail ||
+      source.userEmail ||
+      source.email ||
+      readHeader(req && req.headers, "x-user-email") ||
+      queryUserEmail
+  );
+  const displayName = asString(
+    source.actorDisplayName ||
+      source.userDisplayName ||
+      source.displayName ||
+      readHeader(req && req.headers, "x-user-name") ||
+      queryUserName ||
+      email ||
+      userId
+  );
+  if (!userId && !email) return null;
+  return { userId, email, displayName };
+}
+
+function resolveActor(req, body) {
+  return parsePrincipal(req) || parseFallbackIdentity(req, body);
+}
+
+function isLocalRequest(req) {
+  const host = asString(readHeader(req && req.headers, "x-forwarded-host") || readHeader(req && req.headers, "host")).toLowerCase();
+  return host.includes("localhost") || host.includes("127.0.0.1");
 }
 
 function normalizeAction(value) {
@@ -181,6 +278,7 @@ module.exports = async function (context, req) {
   const method = asString(req && req.method).toUpperCase() || "GET";
   const body = req && req.body && typeof req.body === "object" ? req.body : {};
   const tenantId = resolveTenantId(req, body);
+  const actor = resolveActor(req, body);
 
   if (method === "OPTIONS") {
     context.res = { status: 204 };
@@ -193,12 +291,12 @@ module.exports = async function (context, req) {
     const userClient = await getTableClient(USERS_TABLE);
 
     if (method === "GET") {
-      if (!hasAuthenticatedPrincipal(req)) {
+      if (!actor && !isLocalRequest(req)) {
         context.res = json(401, { ok: false, error: "Authentication required." });
         return;
       }
 
-      const quoteId = asString(req && req.query && req.query.quoteId);
+      const quoteId = asString(readQueryParam(req, "quoteId"));
       if (quoteId) {
         try {
           const item = await client.getEntity(tenantId, quoteId);
@@ -220,7 +318,7 @@ module.exports = async function (context, req) {
         }
       }
 
-      const limitRaw = Number(req && req.query && req.query.limit);
+      const limitRaw = Number(readQueryParam(req, "limit"));
       const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.floor(limitRaw), 500) : 200;
       const safeTenant = asString(tenantId).replace(/'/g, "''");
       const out = [];

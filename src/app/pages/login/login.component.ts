@@ -43,6 +43,9 @@ export default class LoginComponent {
 
   readonly redirectTo = signal('/dashboard');
   readonly googleEnabled = computed(() => environment.auth.providers.includes('google'));
+  readonly hostedEmailEnabled = computed(
+    () => !this.localServerMode && !!environment.auth.hostedEmailEnabled && !!String(environment.auth.hostedEmailProvider || '').trim()
+  );
   readonly devBypassEnabled = environment.auth.devBypass || this.isLocalHost;
   readonly localServerMode = this.isLocalHost && !this.isLikelySwaCli;
   readonly passwordLoginEnabled = computed(() => environment.auth.localPasswordEnabled || this.localServerMode);
@@ -101,6 +104,14 @@ export default class LoginComponent {
       return;
     }
     this.auth.signIn('google', this.redirectTo());
+  }
+
+  signInHostedEmail(): void {
+    this.passwordLoginError.set('');
+    if (!this.hostedEmailEnabled()) return;
+    const provider = String(environment.auth.hostedEmailProvider || '').trim();
+    if (!provider) return;
+    this.auth.signIn(provider, this.redirectTo());
   }
 
   startRegistration(): void {

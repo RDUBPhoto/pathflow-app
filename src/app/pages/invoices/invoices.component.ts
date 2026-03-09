@@ -13,6 +13,7 @@ import {
 import { ToastController } from '@ionic/angular';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
+import { AuthService } from '../../auth/auth.service';
 import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
 import { PageBackButtonComponent } from '../../components/navigation/page-back-button/page-back-button.component';
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
@@ -27,6 +28,8 @@ import {
 } from '../../services/invoices-data.service';
 import { QuoteResponseApiService } from '../../services/quote-response-api.service';
 import { EmailApiService } from '../../services/email-api.service';
+import { NotificationsApiService } from '../../services/notifications-api.service';
+import { TenantContextService } from '../../services/tenant-context.service';
 
 type InvoiceKpi = {
   id: string;
@@ -37,6 +40,13 @@ type InvoiceKpi = {
 };
 type InvoicesTab = 'quotes' | 'invoices';
 const INVOICES_TAB_STORAGE_KEY = 'pathflow.quotesInvoices.activeTab';
+const LOCAL_PENDING_QUOTE_RESPONSES_KEY = 'pathflow.quoteResponses.pending.v1';
+type PendingQuoteResponse = {
+  quoteId: string;
+  stage: 'accepted' | 'declined';
+  tenantId: string;
+  updatedAt: string;
+};
 
 @Component({
   selector: 'app-invoices',
@@ -65,6 +75,9 @@ export default class InvoicesComponent implements OnDestroy {
   private readonly invoicesData = inject(InvoicesDataService);
   private readonly quoteResponseApi = inject(QuoteResponseApiService);
   private readonly emailApi = inject(EmailApiService);
+  private readonly notificationsApi = inject(NotificationsApiService);
+  private readonly auth = inject(AuthService);
+  private readonly tenantContext = inject(TenantContextService);
   private readonly toastController = inject(ToastController);
   private readonly laneDisplayOrder: InvoiceBoardStage[] = ['draft', 'sent', 'accepted', 'declined'];
   private syncTimer: ReturnType<typeof setInterval> | null = null;
@@ -350,25 +363,119 @@ export default class InvoicesComponent implements OnDestroy {
   }
 
   private async syncQuoteResponses(): Promise<void> {
+    const collected: Array<{ quoteId: string; stage: 'accepted' | 'declined'; updatedAt: string }> = [];
     try {
       const response = await firstValueFrom(this.quoteResponseApi.listRecent(250));
       const items = Array.isArray(response?.items) ? response.items : [];
       for (const item of items) {
         const quoteId = String(item?.quoteId || '').trim();
         const stage = String(item?.stage || '').trim().toLowerCase();
+        const updatedAt = String(item?.updatedAt || '').trim() || new Date().toISOString();
         if (!quoteId) continue;
         if (stage !== 'accepted' && stage !== 'declined') continue;
-        const existing = this.invoicesData.getInvoiceById(quoteId);
-        if (!existing || existing.documentType !== 'quote') continue;
-        if (existing.stage === stage) continue;
-        this.invoicesData.setStage(
-          quoteId,
-          stage,
-          `Customer ${stage === 'accepted' ? 'accepted' : 'declined'} quote from public link.`
-        );
+        collected.push({ quoteId, stage, updatedAt });
       }
     } catch {
-      // Silent background sync failure; keeps UI responsive even if endpoint is unavailable.
+      // Keep local fallback sync running even when API is unavailable.
+    }
+
+    const pendingLocal = this.readPendingQuoteResponses();
+    if (pendingLocal.length) {
+      const activeTenant = String(this.tenantContext.tenantId() || '').trim().toLowerCase() || 'main';
+      for (const item of pendingLocal) {
+        const tenantId = String(item?.tenantId || '').trim().toLowerCase();
+        if (tenantId && tenantId !== activeTenant) continue;
+        const quoteId = String(item?.quoteId || '').trim();
+        const stage = String(item?.stage || '').trim().toLowerCase();
+        const updatedAt = String(item?.updatedAt || '').trim() || new Date().toISOString();
+        if (!quoteId) continue;
+        if (stage !== 'accepted' && stage !== 'declined') continue;
+        collected.push({ quoteId, stage, updatedAt });
+      }
+    }
+
+    const deduped = new Map<string, { quoteId: string; stage: 'accepted' | 'declined'; updatedAt: string }>();
+    for (const row of collected) {
+      const key = String(row.quoteId || '').trim().toLowerCase();
+      if (!key) continue;
+      const previous = deduped.get(key);
+      if (!previous || Date.parse(row.updatedAt) >= Date.parse(previous.updatedAt)) {
+        deduped.set(key, row);
+      }
+    }
+
+    const appliedIds: string[] = [];
+    for (const item of deduped.values()) {
+      const existing = this.invoicesData.getInvoiceById(item.quoteId);
+      if (!existing || existing.documentType !== 'quote') continue;
+      if (existing.stage === item.stage) continue;
+      this.invoicesData.setStage(
+        item.quoteId,
+        item.stage,
+        `Customer ${item.stage === 'accepted' ? 'accepted' : 'declined'} quote from public link.`
+      );
+      appliedIds.push(item.quoteId);
+      await this.createLocalQuoteResponseNotification(item.quoteId, item.stage, existing.invoiceNumber, existing.customerName);
+    }
+
+    if (appliedIds.length) {
+      this.removePendingQuoteResponses(appliedIds);
+    }
+  }
+
+  private readPendingQuoteResponses(): PendingQuoteResponse[] {
+    try {
+      const raw = localStorage.getItem(LOCAL_PENDING_QUOTE_RESPONSES_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private removePendingQuoteResponses(quoteIds: string[]): void {
+    try {
+      const removeSet = new Set(quoteIds.map(value => String(value || '').trim().toLowerCase()).filter(Boolean));
+      if (!removeSet.size) return;
+      const current = this.readPendingQuoteResponses();
+      const filtered = current.filter(item => !removeSet.has(String(item?.quoteId || '').trim().toLowerCase()));
+      localStorage.setItem(LOCAL_PENDING_QUOTE_RESPONSES_KEY, JSON.stringify(filtered));
+    } catch {
+      // Ignore localStorage failures.
+    }
+  }
+
+  private async createLocalQuoteResponseNotification(
+    quoteId: string,
+    stage: 'accepted' | 'declined',
+    quoteNumber: string,
+    customerName: string
+  ): Promise<void> {
+    const user = this.auth.user();
+    if (!user) return;
+    try {
+      await firstValueFrom(
+        this.notificationsApi.createMention({
+          targetUserId: user.id || undefined,
+          targetEmail: user.email || undefined,
+          targetDisplayName: user.displayName || undefined,
+          title: `Quote ${quoteNumber || quoteId} ${stage}`,
+          message: `${customerName || 'Customer'} ${stage} quote ${quoteNumber || quoteId}.`,
+          route: `/invoices/${encodeURIComponent(quoteId)}`,
+          entityType: 'quote',
+          entityId: quoteId,
+          metadata: {
+            quoteId,
+            quoteNumber: quoteNumber || quoteId,
+            customerName: customerName || '',
+            action: stage === 'accepted' ? 'accept' : 'decline',
+            source: 'local-fallback-sync'
+          }
+        })
+      );
+    } catch {
+      // Notification should not block stage sync.
     }
   }
 }

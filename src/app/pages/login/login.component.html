@@ -16,7 +16,12 @@
         <h1>Sign in to your workspace</h1>
       </header>
 
-      <section class="form-card">
+      <p class="inline-link-row">
+        Need an account?
+        <button type="button" class="inline-link-btn" (click)="startRegistration()">Register now</button>
+      </p>
+
+      <section class="form-card" *ngIf="passwordLoginEnabled()">
         <div class="form-card-head">
           <h2>Email &amp; Password</h2>
         </div>
@@ -60,6 +65,17 @@
       </section>
 
       <div class="or-divider"><span>or continue with</span></div>
+
+      <ion-button
+        *ngIf="hostedEmailEnabled()"
+        expand="block"
+        size="large"
+        fill="outline"
+        (click)="signInHostedEmail()"
+        [disabled]="auth.loading()">
+        <ion-icon slot="start" name="key-outline"></ion-icon>
+        Continue with Email
+      </ion-button>
 
       <ion-button expand="block" size="large" (click)="signInPrimary()" [disabled]="auth.loading()">
         <ion-icon slot="start" name="shield-checkmark-outline"></ion-icon>

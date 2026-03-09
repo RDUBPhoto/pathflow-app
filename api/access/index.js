@@ -498,6 +498,47 @@ function buildDevUserEntity(principal, tenantIdHint) {
   };
 }
 
+function buildConfiguredSuperAdminEntity(principal, allTenants) {
+  const now = new Date().toISOString();
+  const tenantList = Array.isArray(allTenants) ? allTenants : [];
+  const locationIds = tenantList.map(item => sanitizeTenantId(item && item.id)).filter(Boolean);
+  const defaultLocationId = locationIds[0] || "primary-location";
+  return {
+    partitionKey: USERS_PARTITION,
+    rowKey: normalizeEmail(principal && principal.email),
+    userId: asString((principal && principal.userId) || (principal && principal.email)),
+    email: normalizeEmail(principal && principal.email),
+    displayName: asString((principal && principal.displayName) || (principal && principal.email)),
+    identityProvider: asString((principal && principal.identityProvider) || "unknown"),
+    rolesJson: JSON.stringify(normalizeRoleList(["authenticated", "admin"])),
+    isSuperAdmin: true,
+    allLocations: true,
+    defaultLocationId,
+    locationIdsJson: JSON.stringify(locationIds.length ? locationIds : [defaultLocationId]),
+    status: "active",
+    accessRevoked: false,
+    disabled: false,
+    emailVerified: true,
+    emailVerifiedAt: now,
+    updatedAt: now,
+    createdAt: now
+  };
+}
+
+async function ensureConfiguredSuperAdminUser(userClient, principal, userEntity, allTenants) {
+  if (!principalIsConfiguredSuperAdmin(principal)) return userEntity;
+  const base = buildConfiguredSuperAdminEntity(principal, allTenants);
+  const existing = userEntity && typeof userEntity === "object" ? userEntity : {};
+  await userClient.upsertEntity(
+    {
+      ...base,
+      createdAt: asString(existing.createdAt) || base.createdAt
+    },
+    "Merge"
+  );
+  return getUserEntity(userClient, principal.email);
+}
+
 function normalizeUserStatus(value) {
   const status = asString(value).toLowerCase();
   if (status === "active" || status === "invited" || status === "disabled") return status;
@@ -959,10 +1000,13 @@ module.exports = async function (context, req) {
       const tenantHint = sanitizeTenantId(readHeader(req && req.headers, "x-tenant-id")) ||
         sanitizeTenantId(asString(readQueryParam(req, "tenantId")));
       const storedUserEntity = await getUserEntity(userClient, principal.email);
-      const isDevPrincipal = asString(principal.identityProvider).toLowerCase() === "dev-local";
-      const userEntity = storedUserEntity || (isDevPrincipal ? buildDevUserEntity(principal, tenantHint) : null);
       const allTenants = await listTenants(tenantClient);
-      const canBootstrap = !storedUserEntity;
+      let userEntity = await ensureConfiguredSuperAdminUser(userClient, principal, storedUserEntity, allTenants);
+      const isDevPrincipal = asString(principal.identityProvider).toLowerCase() === "dev-local";
+      if (!userEntity && isDevPrincipal) {
+        userEntity = buildDevUserEntity(principal, tenantHint);
+      }
+      const canBootstrap = !storedUserEntity && !principalIsConfiguredSuperAdmin(principal);
 
       if (scope === "users") {
         if (!userEntity) {
@@ -1012,15 +1056,18 @@ module.exports = async function (context, req) {
     const tenantHint = sanitizeTenantId(readHeader(req && req.headers, "x-tenant-id")) ||
       sanitizeTenantId(asString(body.tenantId));
     const storedUserEntity = await getUserEntity(userClient, principal.email);
+    const allTenants = await listTenants(tenantClient);
+    let userEntity = await ensureConfiguredSuperAdminUser(userClient, principal, storedUserEntity, allTenants);
     const isDevPrincipal = asString(principal.identityProvider).toLowerCase() === "dev-local";
-    let userEntity = storedUserEntity || (isDevPrincipal ? buildDevUserEntity(principal, tenantHint) : null);
+    if (!userEntity && isDevPrincipal) {
+      userEntity = buildDevUserEntity(principal, tenantHint);
+    }
 
     if (op === "invite-user" || op === "remove-user-access" || op === "reset-user-password") {
       if (!userEntity) {
         context.res = json(403, { ok: false, error: "Admin access is required." });
         return;
       }
-      const allTenants = await listTenants(tenantClient);
       const tenantId = sanitizeTenantId(readHeader(req && req.headers, "x-tenant-id")) ||
         sanitizeTenantId(asString(body.tenantId)) ||
         pickDefaultLocation(userEntity, buildUserLocations(userEntity, allTenants));
@@ -1159,7 +1206,6 @@ module.exports = async function (context, req) {
         return;
       }
 
-      const allTenants = await listTenants(tenantClient);
       const userLocations = buildUserLocations(userEntity, allTenants);
       const defaultLocationId = pickDefaultLocation(userEntity, userLocations);
       const targetLocationId = sanitizeTenantId(asString(body.locationId || defaultLocationId || userLocations[0]?.id));
@@ -1237,8 +1283,8 @@ module.exports = async function (context, req) {
         ? normalizedLocationNames
         : [asString(body.locationName || "Primary Location").slice(0, 120) || "Primary Location"];
 
-      const allTenants = await listTenants(tenantClient);
-      const existingTenantIds = new Set(allTenants.map(item => item.id));
+      const tenantSnapshot = await listTenants(tenantClient);
+      const existingTenantIds = new Set(tenantSnapshot.map(item => item.id));
       const createdLocations = [];
 
       const trialStart = new Date();
@@ -1328,8 +1374,8 @@ module.exports = async function (context, req) {
       });
     }
 
-    const allTenants = await listTenants(tenantClient);
-    context.res = json(200, buildMeResponse(principal, userEntity, allTenants, false));
+    const finalTenants = await listTenants(tenantClient);
+    context.res = json(200, buildMeResponse(principal, userEntity, finalTenants, false));
   } catch (err) {
     context.log.error(err);
     context.res = json(500, {

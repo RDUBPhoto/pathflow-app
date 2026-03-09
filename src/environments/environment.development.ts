@@ -7,6 +7,8 @@ export const environment = {
   auth: {
     primaryProvider: 'aad',
     providers: ['aad', 'google'],
+    hostedEmailEnabled: false,
+    hostedEmailProvider: '',
     adminEmails: ['admin.local@yourcompany.dev'],
     devBypass: true,
     localPasswordEnabled: true,

@@ -7,7 +7,7 @@
         <p class="marketing-kicker">Pathflow Platform</p>
         <h2>Create your workspace and start your 7-day trial.</h2>
         <p *ngIf="emailSignupEnabled(); else hostedOnlyCopy">
-          Use Microsoft, Google, or email/password to create an account and launch your shop in minutes.
+          Use Microsoft, Google, or Email to create an account and launch your shop in minutes.
         </p>
         <ng-template #hostedOnlyCopy>
           <p>Use Microsoft or Google to create your account and launch your shop in minutes.</p>
@@ -51,7 +51,7 @@
               [class.active]="selectedMethod() === 'email'"
               (click)="setMethod('email')">
               <ion-icon name="key-outline"></ion-icon>
-              <span>Email & Password</span>
+              <span>{{ localEmailCredentialsEnabled() ? 'Email & Password' : 'Email' }}</span>
             </button>
             <button type="button" class="method-btn" [class.active]="selectedMethod() === 'aad'" (click)="setMethod('aad')">
               <ion-icon name="shield-checkmark-outline"></ion-icon>
@@ -69,7 +69,7 @@
           </div>
         </section>
 
-        <section class="form-card" *ngIf="selectedMethod() === 'email'">
+        <section class="form-card" *ngIf="selectedMethod() === 'email' && localEmailCredentialsEnabled()">
           <div class="form-card-head">
             <h2>Manual Sign-up</h2>
           </div>
@@ -130,12 +130,12 @@
           </ion-item>
         </section>
 
-        <section class="form-card" *ngIf="selectedMethod() !== 'email'">
+        <section class="form-card" *ngIf="selectedMethod() !== 'email' || (selectedMethod() === 'email' && !localEmailCredentialsEnabled())">
           <div class="form-card-head">
             <h2>Provider Sign-up</h2>
           </div>
           <p class="provider-note">
-            You selected <strong>{{ selectedMethod() === 'google' ? 'Google' : 'Microsoft' }}</strong>.
+            You selected <strong>{{ selectedMethod() === 'email' ? 'Email' : (selectedMethod() === 'google' ? 'Google' : 'Microsoft') }}</strong>.
             Next, choose a plan. The provider sign-in prompt opens only after you continue.
           </p>
         </section>
@@ -194,7 +194,7 @@
           <div class="review-row">
             <span>Sign-up method</span>
             <strong>
-              {{ selectedMethod() === 'email' ? 'Email & Password' : (selectedMethod() === 'google' ? 'Google' : 'Microsoft') }}
+              {{ selectedMethod() === 'email' ? (localEmailCredentialsEnabled() ? 'Email & Password' : 'Email') : (selectedMethod() === 'google' ? 'Google' : 'Microsoft') }}
             </strong>
           </div>
           <div class="review-row">

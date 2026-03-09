@@ -1011,11 +1011,13 @@ export default class InvoicesNewComponent {
     const baseBody = String(this.selectedTemplate()?.body || '').trim() || String(this.manualTemplateBody() || '').trim();
 
     const bodySource = baseBody || `<p>Hi {{customer_name}},</p><p>Here is your quote for {{vehicle_summary}}.</p>`;
-    const resolvedBody = this.stripInlineQuoteActionLinks(this.resolveMergeTags(bodySource));
+    const resolvedBody = this.normalizeHtmlHrefAttributes(
+      this.stripInlineQuoteActionLinks(this.resolveMergeTags(bodySource))
+    );
     const signature = this.includeSignature() ? this.resolveMergeTags(this.emailSignature()) : '';
     const terms = this.renderTermsHtml();
     const logo = this.includeLogo() && this.logoUrl()
-      ? `<img src="${this.logoUrl()}" alt="${this.companyName()} logo" style="max-width:180px;height:auto;display:block;margin-bottom:14px;" />`
+      ? `<img src="${this.escapeHtmlAttribute(this.logoUrl())}" alt="${this.escapeHtmlAttribute(this.companyName())} logo" style="max-width:180px;height:auto;display:block;margin-bottom:14px;" />`
       : '';
 
     const customerNoteHtml = noteToCustomer
@@ -1026,8 +1028,8 @@ export default class InvoicesNewComponent {
     const quoteActionsHtml = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:14px 0 8px;width:100%;">
       <tr>
         <td align="center" style="text-align:center;vertical-align:middle;">
-          <a href="${this.quoteActionUrl('accept')}" style="display:inline-block;background:#1d4ed8;border:1px solid #1d4ed8;color:#ffffff !important;text-decoration:none;font-weight:700;font-size:16px;line-height:1;padding:10px 16px;border-radius:6px;margin-right:16px;">Accept Quote</a>
-          <a href="${this.quoteActionUrl('decline')}" style="display:inline-block;color:#0369a1 !important;text-decoration:underline;font-weight:600;font-size:16px;line-height:1;vertical-align:middle;">Decline Quote</a>
+          <a href="${this.escapeHtmlAttribute(this.quoteActionUrl('accept'))}" style="display:inline-block;background:#1d4ed8;border:1px solid #1d4ed8;color:#ffffff !important;text-decoration:none;font-weight:700;font-size:16px;line-height:1;padding:10px 16px;border-radius:6px;margin-right:16px;">Accept Quote</a>
+          <a href="${this.escapeHtmlAttribute(this.quoteActionUrl('decline'))}" style="display:inline-block;color:#0369a1 !important;text-decoration:underline;font-weight:600;font-size:16px;line-height:1;vertical-align:middle;">Decline Quote</a>
         </td>
       </tr>
     </table>`;
@@ -1163,6 +1165,21 @@ export default class InvoicesNewComponent {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
+  }
+
+  private escapeHtmlAttribute(value: string): string {
+    return this.escapeHtml(value);
+  }
+
+  private normalizeHtmlHrefAttributes(value: string): string {
+    const source = String(value || '');
+    if (!source) return '';
+    const encodeHref = (href: string): string =>
+      String(href || '')
+        .replace(/&(?!(?:amp|lt|gt|quot|#39);)/gi, '&amp;');
+    return source
+      .replace(/(href\s*=\s*")([^"]*)(")/gi, (_match, a: string, href: string, c: string) => `${a}${encodeHref(href)}${c}`)
+      .replace(/(href\s*=\s*')([^']*)(')/gi, (_match, a: string, href: string, c: string) => `${a}${encodeHref(href)}${c}`);
   }
 
   private renderTermsHtml(): string {

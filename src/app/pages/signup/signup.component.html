@@ -6,7 +6,12 @@
         <img src="/pathflow-logo.svg" alt="Pathflow" class="marketing-logo" />
         <p class="marketing-kicker">Pathflow Platform</p>
         <h2>Create your workspace and start your 7-day trial.</h2>
-        <p>Use Microsoft, Google, or email/password to create an account and launch your shop in minutes.</p>
+        <p *ngIf="emailSignupEnabled(); else hostedOnlyCopy">
+          Use Microsoft, Google, or email/password to create an account and launch your shop in minutes.
+        </p>
+        <ng-template #hostedOnlyCopy>
+          <p>Use Microsoft or Google to create your account and launch your shop in minutes.</p>
+        </ng-template>
       </div>
     </aside>
 
@@ -39,7 +44,12 @@
           </div>
 
           <div class="method-grid">
-            <button type="button" class="method-btn" [class.active]="selectedMethod() === 'email'" (click)="setMethod('email')">
+            <button
+              *ngIf="emailSignupEnabled()"
+              type="button"
+              class="method-btn"
+              [class.active]="selectedMethod() === 'email'"
+              (click)="setMethod('email')">
               <ion-icon name="key-outline"></ion-icon>
               <span>Email & Password</span>
             </button>

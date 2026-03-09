@@ -112,6 +112,10 @@ export default class SignupComponent {
       this.redirectTo.set(this.normalizeRedirect(params.get('redirect')));
     });
 
+    if (!this.emailSignupEnabled()) {
+      this.selectedMethod.set(this.googleEnabled() ? 'google' : 'aad');
+    }
+
     effect(() => {
       if (!this.auth.initialized()) return;
       if (!this.auth.isAuthenticated()) return;
@@ -129,6 +133,10 @@ export default class SignupComponent {
   setMethod(method: SignupMethod): void {
     this.error.set('');
     this.hint.set('');
+    if (method === 'email' && !this.emailSignupEnabled()) {
+      this.error.set('Email/password sign-up is not available yet. Use Microsoft or Google.');
+      return;
+    }
     if (method === 'google' && !this.googleEnabled()) {
       this.selectedMethod.set('aad');
       return;

@@ -4,6 +4,12 @@ import { customerProfileUnsavedGuard } from './pages/customer-profile/customer-p
 
 export const routes: Routes = [
   {
+    path: '',
+    pathMatch: 'full',
+    loadComponent: () =>
+      import('./pages/corp-home/corp-home.component').then(m => m.default)
+  },
+  {
     path: 'quote-response',
     loadComponent: () =>
       import('./pages/quote-response/quote-response.component').then(m => m.default)
@@ -150,5 +156,5 @@ export const routes: Routes = [
       }
     ]
   },
-  { path: '**', redirectTo: 'dashboard' }
+  { path: '**', redirectTo: '' }
 ];

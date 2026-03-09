@@ -2,7 +2,7 @@
   "auth": {
     "identityProviders": {
       "customOpenIdConnectProviders": {
-        "email": {
+        "pathflowemail": {
           "registration": {
             "clientIdSettingName": "EMAIL_OIDC_CLIENT_ID",
             "clientCredential": {

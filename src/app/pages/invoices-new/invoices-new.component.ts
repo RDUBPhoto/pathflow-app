@@ -517,12 +517,12 @@ export default class InvoicesNewComponent {
       } else if (emailSuccess && attemptedSms && !smsSuccess) {
         this.setStatus(
           `${this.documentLabel()} sent by email. SMS failed${smsFailureReason ? ` (${smsFailureReason})` : ''}.`,
-          'neutral'
+          'error'
         );
       } else if (smsSuccess && attemptedEmail && !emailSuccess) {
         this.setStatus(
           `${this.documentLabel()} sent by SMS. Email failed${emailFailureReason ? ` (${emailFailureReason})` : ''}.`,
-          'neutral'
+          'error'
         );
       } else {
         this.setStatus(`${this.documentLabel()} sent successfully.`, 'success');
@@ -1385,12 +1385,18 @@ export default class InvoicesNewComponent {
     this.lastToastKey = key;
     this.lastToastAt = now;
 
-    const color = tone === 'error' ? 'danger' : tone === 'success' ? 'success' : 'medium';
+    const color = tone === 'error' ? 'danger' : tone === 'success' ? 'success' : 'warning';
     const toast = await this.toastController.create({
       message: value,
       color,
-      duration: 1800,
-      position: 'top'
+      duration: 7000,
+      position: 'top',
+      buttons: [
+        {
+          text: '✕',
+          role: 'cancel'
+        }
+      ]
     });
     await toast.present();
   }

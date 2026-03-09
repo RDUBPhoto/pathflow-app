@@ -1,4 +1,25 @@
 {
+  "auth": {
+    "identityProviders": {
+      "customOpenIdConnectProviders": {
+        "email": {
+          "registration": {
+            "clientIdSettingName": "EMAIL_OIDC_CLIENT_ID",
+            "clientCredential": {
+              "clientSecretSettingName": "EMAIL_OIDC_CLIENT_SECRET"
+            },
+            "openIdConnectConfiguration": {
+              "wellKnownOpenIdConfiguration": "https://pathflowcustomers.ciamlogin.com/88152ab2-c1c2-42ca-be4f-1472aa5f8d08/v2.0/.well-known/openid-configuration"
+            }
+          },
+          "login": {
+            "nameClaimType": "name",
+            "scopes": ["openid", "profile", "email"]
+          }
+        }
+      }
+    }
+  },
   "routes": [
     { "route": "/login", "allowedRoles": ["anonymous"] },
     { "route": "/signup", "allowedRoles": ["anonymous"] },

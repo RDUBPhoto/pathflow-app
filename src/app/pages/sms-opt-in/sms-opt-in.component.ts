@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { finalize } from 'rxjs';
+import { environment } from '../../../environments/environment';
 import {
   IonBadge,
   IonButton,
@@ -85,8 +86,9 @@ export default class SmsOptInComponent {
   readonly result = signal<WidgetLeadResponse | null>(null);
   readonly pageUrl = signal('');
 
-  readonly privacyPolicyUrl = 'https://pathflow.com/privacy';
-  readonly smsTermsUrl = 'https://pathflow.com/terms';
+  readonly privacyPolicyUrl = this.publicPageUrl('/privacy-policy');
+  readonly smsTermsUrl = this.publicPageUrl('/terms-and-conditions');
+  readonly otherOptInUrl = this.publicPageUrl('/sms-opt-in-other');
   readonly consentVersion = 'v1';
   readonly sourceName = 'pathflow-sms-opt-in-page';
 
@@ -175,5 +177,15 @@ export default class SmsOptInComponent {
 
   private isValidVin(value: string): boolean {
     return /^[A-HJ-NPR-Z0-9]{17}$/.test(String(value || '').trim().toUpperCase());
+  }
+
+  private publicPageUrl(path: string): string {
+    const normalizedPath = `/${String(path || '').trim().replace(/^\/+/, '')}`;
+    const configured = String(environment.publicAppUrl || '').trim().replace(/\/+$/, '');
+    if (configured) return `${configured}${normalizedPath}`;
+    if (typeof window !== 'undefined' && window.location?.origin) {
+      return `${window.location.origin.replace(/\/+$/, '')}${normalizedPath}`;
+    }
+    return normalizedPath;
   }
 }

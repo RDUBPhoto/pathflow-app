@@ -42,7 +42,8 @@
         <ion-card-content>
           <div class="branding-grid">
             <div class="logo-preview-wrap">
-              <img class="logo-preview" [src]="logoUrl()" alt="Business logo preview" />
+              <img class="logo-preview" *ngIf="hasCustomLogo()" [src]="logoUrl()" alt="Business logo preview" />
+              <div class="logo-empty" *ngIf="!hasCustomLogo()">No logo uploaded</div>
             </div>
 
             <div class="branding-actions">
@@ -62,8 +63,280 @@
                 Recommended: PNG/SVG, transparent background, max 5MB.
               </div>
               <div class="branding-help success" *ngIf="brandingStatus">{{ brandingStatus }}</div>
+              <div class="branding-help error" *ngIf="brandingError">{{ brandingError }}</div>
             </div>
           </div>
+
+          <div class="settings-subsection">
+            <div class="email-section-title">Business Profile</div>
+            <div class="sms-help">
+              These values power email merge tags like <code>{{ '{{company_phone}}' }}</code> and
+              <code>{{ '{{company_location}}' }}</code>.
+            </div>
+            <div class="sms-form">
+              <ion-item>
+                <ion-label position="stacked">Business Name</ion-label>
+                <ion-input [(ngModel)]="businessProfileName" placeholder="Your Company"></ion-input>
+              </ion-item>
+              <ion-item>
+                <ion-label position="stacked">Business Email</ion-label>
+                <ion-input [(ngModel)]="businessProfileEmail" placeholder="service@yourcompany.com"></ion-input>
+              </ion-item>
+              <ion-item>
+                <ion-label position="stacked">Business Phone</ion-label>
+                <ion-input [(ngModel)]="businessProfilePhone" placeholder="(555) 555-0100"></ion-input>
+              </ion-item>
+              <ion-item>
+                <ion-label position="stacked">Business Address / Location</ion-label>
+                <ion-input
+                  [(ngModel)]="businessProfileAddress"
+                  (ngModelChange)="onBusinessAddressChange($event)"
+                  (ionBlur)="onBusinessAddressBlur()"
+                  placeholder="123 Main St, Anytown, USA">
+                </ion-input>
+              </ion-item>
+              <ion-item>
+                <ion-label position="stacked">Default Tax Rate (%)</ion-label>
+                <ion-input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  [(ngModel)]="businessTaxRate"
+                  placeholder="8.25">
+                </ion-input>
+              </ion-item>
+              <div class="address-lookup-box" *ngIf="businessAddressSearching() || businessAddressSuggestions().length || businessAddressNoMatches()">
+                <div class="address-lookup-state" *ngIf="businessAddressSearching()">Searching addresses...</div>
+                <button
+                  type="button"
+                  class="address-lookup-option"
+                  *ngFor="let item of businessAddressSuggestions()"
+                  (mousedown)="$event.preventDefault()"
+                  (click)="selectBusinessAddressSuggestion(item)">
+                  {{ item.display }}
+                </button>
+                <div class="address-lookup-state" *ngIf="!businessAddressSearching() && businessAddressNoMatches()">
+                  No address matches found.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-subsection">
+            <div class="email-section-title">Labor Rates Catalog</div>
+            <div class="sms-help">
+              Add labor line presets used in Quotes/Invoices (examples: Alignment, Tire disposal fee, Mount &amp; Balance Tires).
+            </div>
+            <div class="labor-rates-list">
+              <div class="labor-rate-row" *ngFor="let rate of laborRates; let i = index">
+                <ion-item>
+                  <ion-label position="stacked">Labor Name</ion-label>
+                  <ion-input [(ngModel)]="rate.name" placeholder="Alignment"></ion-input>
+                </ion-item>
+                <ion-item>
+                  <ion-label position="stacked">Default Price</ion-label>
+                  <ion-input type="number" min="0" step="0.01" [(ngModel)]="rate.price" placeholder="150.00"></ion-input>
+                </ion-item>
+                <ion-item lines="none" class="labor-taxable-item">
+                  <ion-checkbox slot="start" [(ngModel)]="rate.taxable"></ion-checkbox>
+                  <ion-label>Taxable</ion-label>
+                </ion-item>
+                <ion-button fill="clear" color="danger" (click)="removeLaborRate(rate.id)" [disabled]="laborRates.length <= 0">
+                  <ion-icon name="trash-outline"></ion-icon>
+                </ion-button>
+              </div>
+              <div class="sms-actions">
+                <ion-button size="small" fill="outline" (click)="addLaborRate()">
+                  <ion-icon slot="start" name="add-outline"></ion-icon>
+                  Add Labor Rate
+                </ion-button>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-subsection">
+            <div class="email-section-title">Quote/Invoice Template Management</div>
+            <div class="sms-help">
+              Build templates that can auto-prefill parts and labor lines in the Quote/Invoice wizard.
+            </div>
+
+            <div class="sms-actions">
+              <ion-button size="small" fill="outline" (click)="addDocumentTemplate()">
+                <ion-icon slot="start" name="add-outline"></ion-icon>
+                Add Template
+              </ion-button>
+            </div>
+
+            <div class="template-catalog" *ngIf="documentTemplates.length; else noDocumentTemplates">
+              <div class="template-catalog-item" *ngFor="let template of documentTemplates; trackBy: trackDocumentTemplate">
+                <div class="template-catalog-head">
+                  <div class="template-catalog-title">{{ template.name || 'New Template' }}</div>
+                  <ion-button fill="clear" color="danger" (click)="removeDocumentTemplate(template.id)">
+                    <ion-icon name="trash-outline"></ion-icon>
+                  </ion-button>
+                </div>
+
+                <div class="template-catalog-grid">
+                  <ion-item>
+                    <ion-label position="stacked">Template Name</ion-label>
+                    <ion-input [(ngModel)]="template.name" placeholder="Lift kit install quote"></ion-input>
+                  </ion-item>
+                  <ion-item>
+                    <ion-label position="stacked">Applies To</ion-label>
+                    <ion-select [(ngModel)]="template.documentType" interface="popover">
+                      <ion-select-option value="quote">Quotes</ion-select-option>
+                      <ion-select-option value="invoice">Invoices</ion-select-option>
+                      <ion-select-option value="both">Both</ion-select-option>
+                    </ion-select>
+                  </ion-item>
+                </div>
+
+                <ion-item>
+                  <ion-label position="stacked">Default Subject</ion-label>
+                  <ion-input [(ngModel)]="template.subject" [placeholder]="'Quote for {{customer_name}}'"></ion-input>
+                </ion-item>
+
+                <ion-item>
+                  <ion-label position="stacked">Default HTML Body</ion-label>
+                  <ion-textarea
+                    [(ngModel)]="template.body"
+                    auto-grow="true"
+                    rows="5"
+                    [placeholder]="'<p>Hi {{customer_name}},</p><p>Here is your quote for {{vehicle_summary}}.</p>'">
+                  </ion-textarea>
+                </ion-item>
+
+                <div class="template-catalog-preset-head">Prefill Parts</div>
+                <input
+                  class="template-catalog-search"
+                  type="text"
+                  placeholder="Search inventory by name, SKU, vendor"
+                  [value]="templateInventoryQuery"
+                  (input)="setTemplateInventoryQuery($any($event.target).value)" />
+                <div class="template-checkbox-list">
+                  <label class="template-checkbox-item" *ngFor="let item of filteredInventoryForTemplates(); trackBy: trackInventoryItem">
+                    <input
+                      type="checkbox"
+                      [checked]="isPartSelected(template, item.id)"
+                      (change)="toggleTemplatePart(template.id, item.id, $any($event.target).checked)" />
+                    <span>{{ item.name }} <small>({{ item.sku || 'No SKU' }})</small></span>
+                  </label>
+                </div>
+
+                <div class="template-catalog-preset-head">Prefill Labor Rates</div>
+                <div class="template-checkbox-list" *ngIf="laborRates.length; else noLaborRatesInTemplate">
+                  <label class="template-checkbox-item" *ngFor="let rate of laborRates; trackBy: trackLaborRate">
+                    <input
+                      type="checkbox"
+                      [checked]="isLaborSelected(template, rate.id)"
+                      (change)="toggleTemplateLabor(template.id, rate.id, $any($event.target).checked)" />
+                    <span>{{ rate.name }} <small>({{ rate.price | currency:'USD':'symbol':'1.2-2' }})</small></span>
+                  </label>
+                </div>
+                <ng-template #noLaborRatesInTemplate>
+                  <div class="inline-help">Add labor rates above to use labor prefill in templates.</div>
+                </ng-template>
+              </div>
+            </div>
+            <ng-template #noDocumentTemplates>
+              <div class="inline-help">No templates yet. Add one and save Business Profile to persist it.</div>
+            </ng-template>
+          </div>
+
+          <div class="sms-actions">
+            <ion-button size="small" fill="outline" (click)="saveBusinessProfile()">
+              <ion-icon slot="start" name="save-outline"></ion-icon>
+              Save Business Profile
+            </ion-button>
+          </div>
+          <div class="branding-help success" *ngIf="businessProfileStatus">{{ businessProfileStatus }}</div>
+          <div class="branding-help error" *ngIf="businessProfileError">{{ businessProfileError }}</div>
+        </ion-card-content>
+      </ion-card>
+
+      <ion-card class="glass-surface" *ngIf="activeSection() === 'subscription'">
+        <ion-card-header>
+          <ion-card-title>
+            <ion-icon name="card-outline"></ion-icon>
+            Subscription
+          </ion-card-title>
+        </ion-card-header>
+        <ion-card-content>
+          <div class="sms-help">
+            Current status:
+            <strong>{{ auth.billingStatus() || 'trial' }}</strong>
+            <span *ngIf="auth.trialEndsAt()"> · trial ends {{ auth.trialEndsAt() | date:'mediumDate' }}</span>
+          </div>
+
+          <div class="plan-toggle">
+            <button
+              type="button"
+              class="plan-btn"
+              [class.active]="subscriptionPlanCycle === 'monthly'"
+              [disabled]="subscriptionSaving()"
+              (click)="subscriptionPlanCycle = 'monthly'">
+              <span class="plan-btn-title">Monthly</span>
+              <span class="plan-btn-subtitle">$149/month</span>
+            </button>
+            <button
+              type="button"
+              class="plan-btn"
+              [class.active]="subscriptionPlanCycle === 'annual'"
+              [disabled]="subscriptionSaving()"
+              (click)="subscriptionPlanCycle = 'annual'">
+              <span class="plan-btn-title">Annual</span>
+              <span class="plan-btn-subtitle">$1490/year</span>
+            </button>
+          </div>
+
+          <div class="sms-form">
+            <ion-item>
+              <ion-label position="stacked">Cardholder name</ion-label>
+              <ion-input [(ngModel)]="subscriptionCardholderName" placeholder="Robert Warren"></ion-input>
+            </ion-item>
+
+            <ion-item>
+              <ion-label position="stacked">Card number</ion-label>
+              <ion-input
+                [(ngModel)]="subscriptionCardNumber"
+                inputmode="numeric"
+                placeholder="4111111111111111 or 9999999999999999">
+              </ion-input>
+            </ion-item>
+
+            <div class="billing-row">
+              <ion-item>
+                <ion-label position="stacked">Exp month</ion-label>
+                <ion-input [(ngModel)]="subscriptionExpiryMonth" inputmode="numeric" placeholder="MM"></ion-input>
+              </ion-item>
+              <ion-item>
+                <ion-label position="stacked">Exp year</ion-label>
+                <ion-input [(ngModel)]="subscriptionExpiryYear" inputmode="numeric" placeholder="YYYY"></ion-input>
+              </ion-item>
+            </div>
+
+            <div class="billing-row">
+              <ion-item>
+                <ion-label position="stacked">CVC</ion-label>
+                <ion-input [(ngModel)]="subscriptionCvc" inputmode="numeric" placeholder="123"></ion-input>
+              </ion-item>
+              <ion-item>
+                <ion-label position="stacked">Postal code</ion-label>
+                <ion-input [(ngModel)]="subscriptionPostalCode" inputmode="numeric" placeholder="78154"></ion-input>
+              </ion-item>
+            </div>
+          </div>
+
+          <div class="sms-actions">
+            <ion-button (click)="saveSubscription()" [disabled]="subscriptionSaving() || !isSubscriptionFormValid()">
+              <ion-icon slot="start" name="save-outline"></ion-icon>
+              {{ subscriptionSaving() ? 'Saving...' : 'Activate Subscription' }}
+            </ion-button>
+          </div>
+
+          <div class="sms-feedback success" *ngIf="subscriptionStatus">{{ subscriptionStatus }}</div>
+          <div class="sms-feedback error" *ngIf="subscriptionError">{{ subscriptionError }}</div>
         </ion-card-content>
       </ion-card>
 
@@ -104,6 +377,7 @@
             <ion-badge color="primary">{{ userCount() }} users</ion-badge>
             <span *ngIf="statusMessage">{{ statusMessage }}</span>
           </div>
+          <div class="sms-feedback error" *ngIf="usersError">{{ usersError }}</div>
 
           <div class="user-list">
             <div class="user-row" *ngFor="let user of users()">
@@ -113,12 +387,45 @@
               </div>
               <div class="badges">
                 <ion-badge [color]="user.role === 'admin' ? 'warning' : 'medium'">{{ user.role }}</ion-badge>
-                <ion-badge [color]="user.status === 'active' ? 'success' : 'tertiary'">{{ user.status }}</ion-badge>
-                <ion-button size="small" fill="clear" color="danger" (click)="removeUser(user.id)">
+                <ion-badge [color]="user.status === 'active' ? 'success' : (user.status === 'disabled' ? 'danger' : 'tertiary')">
+                  {{ user.status }}
+                </ion-badge>
+                <ion-button size="small" fill="clear" (click)="resetUserPassword(user)">
+                  Reset password
+                </ion-button>
+                <ion-button size="small" fill="clear" color="danger" (click)="removeUser(user)">
                   <ion-icon name="remove-circle-outline"></ion-icon>
                 </ion-button>
               </div>
             </div>
+          </div>
+
+          <div class="sms-help" *ngIf="usersLoading()">Loading users...</div>
+
+          <div class="password-change-card">
+            <div class="customer-import-section-title">Change Your Password</div>
+            <div class="sms-help">
+              Pathflow uses Azure sign-in. We will email you a secure password reset link.
+            </div>
+            <div class="add-user-grid">
+              <ion-item>
+                <ion-label position="stacked">Current password</ion-label>
+                <ion-input type="password" [(ngModel)]="passwordCurrent" placeholder="Current password"></ion-input>
+              </ion-item>
+              <ion-item>
+                <ion-label position="stacked">New password</ion-label>
+                <ion-input type="password" [(ngModel)]="passwordNext" placeholder="New password"></ion-input>
+              </ion-item>
+              <ion-item>
+                <ion-label position="stacked">Confirm new password</ion-label>
+                <ion-input type="password" [(ngModel)]="passwordConfirm" placeholder="Confirm password"></ion-input>
+              </ion-item>
+              <ion-button (click)="saveMyPasswordChange()" [disabled]="passwordSaving() || !canChangePassword()">
+                {{ passwordSaving() ? 'Sending...' : 'Send Password Reset Email' }}
+              </ion-button>
+            </div>
+            <div class="sms-feedback success" *ngIf="passwordStatus">{{ passwordStatus }}</div>
+            <div class="sms-feedback error" *ngIf="passwordError">{{ passwordError }}</div>
           </div>
         </ion-card-content>
       </ion-card>
@@ -654,27 +961,22 @@
         <ion-card-header>
           <ion-card-title>
             <ion-icon name="mail-outline"></ion-icon>
-            Email Messaging + Templates
+            Email Templates
           </ion-card-title>
         </ion-card-header>
         <ion-card-content>
-          <div class="sms-badges">
-            <ion-badge [color]="emailConfig()?.mode === 'sendgrid' ? 'primary' : 'warning'">
-              {{ emailConfig()?.mode === 'sendgrid' ? 'sendgrid mode' : 'mock mode' }}
-            </ion-badge>
-            <ion-badge [color]="emailConfig()?.readyForLive ? 'success' : 'medium'">
-              {{ emailConfig()?.readyForLive ? 'live ready' : 'not live ready' }}
-            </ion-badge>
-          </div>
-
           <div class="sms-help">
-            Mock mode is free and does not send provider email. Switch to SendGrid by setting
-            <code>EMAIL_MODE=sendgrid</code>, <code>SENDGRID_API_KEY</code>, and <code>EMAIL_FROM</code>.
+            Create reusable templates for customer email. These templates are available in Customer Profile and
+            Messages Hub when composing email.
           </div>
 
           <div class="email-grid">
             <div class="email-column">
               <div class="email-section-title">Template Editor</div>
+              <div class="sms-help">
+                Write template body in HTML. This content is used as the email HTML when sending from Customer Profile
+                or Messages Hub.
+              </div>
               <div class="sms-form">
                 <ion-item>
                   <ion-label position="stacked">Template name</ion-label>
@@ -687,18 +989,23 @@
                 </ion-item>
 
                 <ion-item>
-                  <ion-label position="stacked">Body</ion-label>
+                  <ion-label position="stacked">HTML body</ion-label>
                   <ion-textarea
+                    class="email-template-code"
                     [(ngModel)]="emailTemplateBody"
                     [autoGrow]="true"
-                    rows="6"
-                    maxlength="12000"
-                    placeholder="Write template content">
+                    rows="12"
+                    maxlength="30000"
+                    placeholder="<div><img src=&quot;...&quot; alt=&quot;Logo&quot; /><p>Hello customer,</p></div>">
                   </ion-textarea>
                 </ion-item>
               </div>
 
               <div class="sms-actions">
+                <ion-button fill="outline" (click)="insertSavedLogoIntoTemplate()" [disabled]="emailSaving() || !canInsertTemplateLogo()">
+                  <ion-icon slot="start" name="image-outline"></ion-icon>
+                  Insert saved logo
+                </ion-button>
                 <ion-button (click)="saveEmailTemplate()" [disabled]="emailSaving() || !canSaveEmailTemplate()">
                   <ion-icon slot="start" name="save-outline"></ion-icon>
                   {{ emailSaving() ? 'Saving...' : (emailTemplateId ? 'Update template' : 'Create template') }}
@@ -708,22 +1015,51 @@
                 </ion-button>
               </div>
 
-              <div class="email-section-title">Default Signature</div>
+              <div class="email-section-title">Default Company Signature</div>
+              <div class="sms-help">
+                This signature is appended automatically when composing customer email from Customer Profile or Messages Hub.
+              </div>
               <div class="sms-form">
                 <ion-item>
-                  <ion-label position="stacked">Signature</ion-label>
+                  <ion-label position="stacked">Signature (text or HTML)</ion-label>
                   <ion-textarea
+                    class="email-template-code"
                     [(ngModel)]="emailSignatureDraft"
                     [autoGrow]="true"
-                    rows="4"
-                    maxlength="3000"
-                    placeholder="Pathflow Team">
+                    rows="8"
+                    maxlength="12000"
+                    placeholder="Thanks,<br/>Your Company Team<br/>service@yourcompany.com">
                   </ion-textarea>
                 </ion-item>
               </div>
               <div class="sms-actions">
                 <ion-button fill="outline" (click)="saveEmailSignature()" [disabled]="emailSaving()">
+                  <ion-icon slot="start" name="save-outline"></ion-icon>
                   Save signature
+                </ion-button>
+              </div>
+
+              <div class="email-section-title">Default Email Footer Terms (Always Included)</div>
+              <div class="sms-help">
+                This footer is automatically appended to every outbound customer email from Pathflow.
+              </div>
+              <div class="sms-form">
+                <ion-item>
+                    <ion-label position="stacked">Footer terms (text or HTML)</ion-label>
+                  <ion-textarea
+                    class="email-template-code"
+                    [(ngModel)]="quoteTermsDraft"
+                    [autoGrow]="true"
+                    rows="10"
+                    maxlength="20000"
+                    placeholder="Terms, warranty, labor charges, and other quote conditions...">
+                  </ion-textarea>
+                </ion-item>
+              </div>
+              <div class="sms-actions">
+                <ion-button fill="outline" (click)="saveQuoteTerms()" [disabled]="emailSaving()">
+                  <ion-icon slot="start" name="save-outline"></ion-icon>
+                  Save footer terms
                 </ion-button>
               </div>
             </div>
@@ -752,48 +1088,29 @@
                 <div class="sms-help" *ngIf="!emailTemplates().length">No templates yet.</div>
               </div>
 
-              <div class="email-section-title">Inbound Email Simulation</div>
-              <div class="sms-form">
-                <ion-item>
-                  <ion-label position="stacked">From email</ion-label>
-                  <ion-input [(ngModel)]="inboundFrom" placeholder="customer@example.com"></ion-input>
-                </ion-item>
-
-                <ion-item>
-                  <ion-label position="stacked">From name (optional)</ion-label>
-                  <ion-input [(ngModel)]="inboundFromName" placeholder="Jane Customer"></ion-input>
-                </ion-item>
-
-                <ion-item>
-                  <ion-label position="stacked">Subject</ion-label>
-                  <ion-input [(ngModel)]="inboundSubject" placeholder="Need help with my vehicle"></ion-input>
-                </ion-item>
-
-                <ion-item>
-                  <ion-label position="stacked">Message</ion-label>
-                  <ion-textarea
-                    [(ngModel)]="inboundMessage"
-                    [autoGrow]="true"
-                    rows="5"
-                    maxlength="12000"
-                    placeholder="Inbound email content">
-                  </ion-textarea>
-                </ion-item>
+              <div class="email-section-title">HTML Preview</div>
+              <div class="email-template-preview" *ngIf="emailTemplatePreviewHtml(); else emptyTemplatePreview">
+                <div class="email-template-preview-inner" [innerHTML]="emailTemplatePreviewHtml()"></div>
               </div>
+              <ng-template #emptyTemplatePreview>
+                <div class="sms-help">Enter HTML in the template body to preview it here.</div>
+              </ng-template>
 
-              <div class="sms-actions">
-                <ion-button fill="outline" (click)="logInboundEmail()" [disabled]="emailSaving() || !canLogInboundEmail()">
-                  <ion-icon slot="start" name="mail-outline"></ion-icon>
-                  Log inbound email
-                </ion-button>
-                <ion-button fill="outline" (click)="loadEmailAdminData()" [disabled]="emailLoading()">
-                  <ion-icon slot="start" name="refresh-outline"></ion-icon>
-                  {{ emailLoading() ? 'Refreshing...' : 'Refresh status' }}
-                </ion-button>
+              <div class="email-section-title">Signature Preview</div>
+              <div class="email-template-preview" *ngIf="emailSignaturePreviewHtml(); else emptySignaturePreview">
+                <div class="email-template-preview-inner" [innerHTML]="emailSignaturePreviewHtml()"></div>
               </div>
-              <div class="sms-help">
-                Inbound email from a new sender creates a customer and a lead card automatically.
+              <ng-template #emptySignaturePreview>
+                <div class="sms-help">No default signature saved yet.</div>
+              </ng-template>
+
+              <div class="email-section-title">Footer Terms Preview</div>
+              <div class="email-template-preview" *ngIf="quoteTermsPreviewHtml(); else emptyQuoteTermsPreview">
+                <div class="email-template-preview-inner" [innerHTML]="quoteTermsPreviewHtml()"></div>
               </div>
+              <ng-template #emptyQuoteTermsPreview>
+                <div class="sms-help">No default email footer terms saved yet.</div>
+              </ng-template>
             </div>
           </div>
 

@@ -88,6 +88,7 @@ const CUSTOMER_FIELDS = [
   "smsConsentLastKeywordAt",
   "smsConsentUpdatedAt",
   "notes",
+  "notesHistory",
   "createdAt",
   "updatedAt"
 ];
@@ -103,6 +104,84 @@ function toStr(v) { return v == null ? "" : String(v); }
 function pick(b, k) { return toStr(b[k]).trim(); }
 function setIfPresent(target, body, key) { if (Object.prototype.hasOwnProperty.call(body, key)) target[key] = pick(body, key); }
 function escapedFilterValue(value) { return toStr(value).replace(/'/g, "''"); }
+function sanitizeNotesHistoryEntry(input) {
+  if (!input || typeof input !== "object") return null;
+  const text = toStr(input.text).trim();
+  if (!text) return null;
+  return {
+    id: toStr(input.id).trim() || randomUUID(),
+    text,
+    createdAt: toStr(input.createdAt).trim() || new Date().toISOString(),
+    createdBy: toStr(input.createdBy).trim() || "Unknown user",
+    createdById: toStr(input.createdById).trim()
+  };
+}
+
+function parseNotesHistory(raw) {
+  if (Array.isArray(raw)) {
+    return raw
+      .map(item => sanitizeNotesHistoryEntry(item))
+      .filter(Boolean);
+  }
+  const text = toStr(raw).trim();
+  if (!text) return [];
+  try {
+    const parsed = JSON.parse(text);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map(item => sanitizeNotesHistoryEntry(item))
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function normalizeNotesHistoryWithLegacy(rawHistory, legacyNotes, defaults = {}) {
+  const parsed = parseNotesHistory(rawHistory);
+  if (parsed.length) return parsed;
+  const legacy = toStr(legacyNotes).trim();
+  if (!legacy) return [];
+  return [{
+    id: toStr(defaults.id).trim() || randomUUID(),
+    text: legacy,
+    createdAt: toStr(defaults.createdAt).trim() || new Date().toISOString(),
+    createdBy: toStr(defaults.createdBy).trim() || "Legacy note",
+    createdById: toStr(defaults.createdById).trim()
+  }];
+}
+
+function stringifyNotesHistory(rawHistory, legacyNotes, defaults = {}) {
+  const normalized = normalizeNotesHistoryWithLegacy(rawHistory, legacyNotes, defaults);
+  return normalized.length ? JSON.stringify(normalized) : "";
+}
+
+function notesFromHistory(rawHistory, fallbackNotes = "") {
+  const parsed = parseNotesHistory(rawHistory);
+  if (!parsed.length) return toStr(fallbackNotes).trim();
+  return toStr(parsed[parsed.length - 1].text).trim();
+}
+
+function combineNotesHistory(targetHistory, sourceHistory, targetNotes, sourceNotes, defaults = {}) {
+  const combined = [
+    ...normalizeNotesHistoryWithLegacy(targetHistory, targetNotes, defaults),
+    ...normalizeNotesHistoryWithLegacy(sourceHistory, sourceNotes, defaults)
+  ];
+  if (!combined.length) return [];
+  const deduped = new Map();
+  for (const entry of combined) {
+    const key = `${toStr(entry.createdAt)}::${toStr(entry.createdBy)}::${toStr(entry.text)}`;
+    if (!deduped.has(key)) deduped.set(key, entry);
+  }
+  return Array.from(deduped.values()).sort((a, b) => {
+    const ta = Date.parse(toStr(a.createdAt));
+    const tb = Date.parse(toStr(b.createdAt));
+    if (Number.isFinite(ta) && Number.isFinite(tb)) return ta - tb;
+    if (Number.isFinite(ta)) return -1;
+    if (Number.isFinite(tb)) return 1;
+    return toStr(a.id).localeCompare(toStr(b.id));
+  });
+}
+
 function parseJsonRaw(raw) {
   const text = toStr(raw).trim();
   if (!text) return {};
@@ -185,6 +264,9 @@ function duplicatePairKey(leftId, rightId) {
 }
 
 function toCustomerDto(entity) {
+  const parsedHistory = normalizeNotesHistoryWithLegacy(entity.notesHistory, entity.notes, {
+    createdAt: toStr(entity.updatedAt) || toStr(entity.createdAt)
+  });
   return {
     id: toStr(entity.rowKey),
     business: toStr(entity.business),
@@ -259,7 +341,8 @@ function toCustomerDto(entity) {
     smsConsentKeyword: toStr(entity.smsConsentKeyword),
     smsConsentLastKeywordAt: toStr(entity.smsConsentLastKeywordAt),
     smsConsentUpdatedAt: toStr(entity.smsConsentUpdatedAt),
-    notes: toStr(entity.notes),
+    notes: notesFromHistory(parsedHistory, entity.notes),
+    notesHistory: parsedHistory,
     createdAt: toStr(entity.createdAt),
     updatedAt: toStr(entity.updatedAt)
   };
@@ -590,7 +673,7 @@ function buildMergePatch(targetEntity, sourceEntity) {
   };
 
   for (const field of CUSTOMER_FIELDS) {
-    if (field === "createdAt" || field === "updatedAt" || field === "notes") continue;
+    if (field === "createdAt" || field === "updatedAt" || field === "notes" || field === "notesHistory") continue;
     const targetValue = toStr(targetEntity[field]).trim();
     const sourceValue = toStr(sourceEntity[field]).trim();
     if (!targetValue && sourceValue) patch[field] = sourceValue;
@@ -610,6 +693,17 @@ function buildMergePatch(targetEntity, sourceEntity) {
 
   const mergedNotes = combineNotes(targetEntity.notes, sourceEntity.notes);
   if (toStr(mergedNotes).trim() !== toStr(targetEntity.notes).trim()) patch.notes = mergedNotes;
+  const mergedNotesHistory = combineNotesHistory(
+    targetEntity.notesHistory,
+    sourceEntity.notesHistory,
+    targetEntity.notes,
+    sourceEntity.notes,
+    { createdAt: now, createdBy: "Merge" }
+  );
+  const nextNotesHistory = mergedNotesHistory.length ? JSON.stringify(mergedNotesHistory) : "";
+  if (toStr(nextNotesHistory).trim() !== toStr(targetEntity.notesHistory).trim()) {
+    patch.notesHistory = nextNotesHistory;
+  }
 
   const finalFirst = toStr(patch.firstName != null ? patch.firstName : targetEntity.firstName).trim();
   const finalLast = toStr(patch.lastName != null ? patch.lastName : targetEntity.lastName).trim();
@@ -894,6 +988,10 @@ module.exports = async function (context, req) {
                 tags: pick(source, "tags"),
                 contactTags: pick(source, "contactTags"),
                 notes: pick(source, "notes"),
+                notesHistory: stringifyNotesHistory(source.notesHistory, source.notes, {
+                  createdAt: now,
+                  createdBy: "Import"
+                }),
                 createdAt: pick(source, "createdAt") || now,
                 updatedAt: now
               };
@@ -953,6 +1051,21 @@ module.exports = async function (context, req) {
             if (mergedNotes && mergedNotes !== toStr(existing.notes).trim()) {
               patch.notes = mergedNotes;
             }
+            const mergedNotesHistory = combineNotesHistory(
+              existing.notesHistory,
+              source.notesHistory,
+              existing.notes,
+              source.notes,
+              { createdAt: patch.updatedAt, createdBy: "Import" }
+            );
+            const notesHistoryValue = mergedNotesHistory.length ? JSON.stringify(mergedNotesHistory) : "";
+            const existingNotesHistory = stringifyNotesHistory(existing.notesHistory, existing.notes, {
+              createdAt: toStr(existing.updatedAt) || toStr(existing.createdAt),
+              createdBy: "Import"
+            });
+            if (notesHistoryValue && notesHistoryValue !== existingNotesHistory) {
+              patch.notesHistory = notesHistoryValue;
+            }
 
             const keys = Object.keys(patch);
             if (keys.length <= 3) {
@@ -991,6 +1104,7 @@ module.exports = async function (context, req) {
       if (!id) {
         const rowKey = randomUUID();
         const createdAt = toStr(b.createdAt) || new Date().toISOString();
+        const notes = pick(b, "notes");
         const entity = {
           partitionKey: PARTITION,
           rowKey,
@@ -1066,7 +1180,12 @@ module.exports = async function (context, req) {
           smsConsentKeyword: pick(b, "smsConsentKeyword"),
           smsConsentLastKeywordAt: pick(b, "smsConsentLastKeywordAt"),
           smsConsentUpdatedAt: pick(b, "smsConsentUpdatedAt"),
-          notes: pick(b, "notes"),
+          notes,
+          notesHistory: stringifyNotesHistory(b.notesHistory, notes, {
+            id: `legacy-${rowKey}`,
+            createdAt,
+            createdBy: pick(b, "creator") || "System"
+          }),
           createdAt,
           updatedAt: createdAt
         };
@@ -1150,6 +1269,16 @@ module.exports = async function (context, req) {
         setIfPresent(patch, b, "smsConsentLastKeywordAt");
         setIfPresent(patch, b, "smsConsentUpdatedAt");
         setIfPresent(patch, b, "notes");
+        if (Object.prototype.hasOwnProperty.call(b, "notesHistory")) {
+          patch.notesHistory = stringifyNotesHistory(
+            b.notesHistory,
+            patch.notes,
+            {
+              createdAt: new Date().toISOString(),
+              createdBy: pick(b, "creator") || "System"
+            }
+          );
+        }
         setIfPresent(patch, b, "createdAt");
         patch.updatedAt = new Date().toISOString();
 

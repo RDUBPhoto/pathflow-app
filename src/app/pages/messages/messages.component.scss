@@ -57,9 +57,41 @@
   overflow: hidden;
 }
 
+.threads-head {
+  display: grid;
+  gap: 8px;
+}
+
 .threads-title {
   font-size: 14px;
   font-weight: 700;
+}
+
+.channel-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+
+.channel-btn {
+  border: 1px solid var(--app-border-subtle);
+  background: var(--app-control-bg);
+  color: var(--app-text-muted);
+  border-radius: 10px;
+  padding: 8px 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.channel-btn.active {
+  background: var(--app-nav-active-bg);
+  border-color: var(--app-nav-active-border);
+  color: var(--app-nav-active-text);
 }
 
 .search-item {
@@ -219,7 +251,7 @@
   font-weight: 700;
 }
 
-.chat-phone {
+.chat-contact {
   font-size: 12px;
   color: var(--app-text-muted);
 }
@@ -302,11 +334,22 @@
   font-size: 14px;
 }
 
+.email-bubble .email-subject {
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
 .chat-compose {
   padding: 10px 12px 12px;
   border-top: 1px solid var(--app-border-subtle);
   background: color-mix(in srgb, var(--app-surface-bg) 88%, transparent);
   display: grid;
+  gap: 8px;
+}
+
+.compose-email-actions {
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 

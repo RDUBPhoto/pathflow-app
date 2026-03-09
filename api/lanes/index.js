@@ -6,9 +6,11 @@ const PARTITION = "main";
 
 const CORE_LANES = [
   { stageKey: "lead", name: "Leads", sort: 100 },
-  { stageKey: "scheduled", name: "Scheduled", sort: 200 },
-  { stageKey: "inprogress", name: "Work In-Progress", sort: 300 },
-  { stageKey: "completed", name: "Completed", sort: 400 }
+  { stageKey: "quote", name: "Quotes", sort: 200 },
+  { stageKey: "invoiced", name: "Invoices", sort: 300 },
+  { stageKey: "scheduled", name: "Scheduled", sort: 400 },
+  { stageKey: "inprogress", name: "In-Progress", sort: 500 },
+  { stageKey: "completed", name: "Completed", sort: 600 }
 ];
 
 function pick(v, d = "") { return typeof v === "string" ? v : (v == null ? d : String(v)); }
@@ -23,8 +25,10 @@ function inferCoreStageKeyFromName(name) {
   const n = pick(name).trim().toLowerCase();
   if (!n) return "custom";
   if (/^leads?$/.test(n)) return "lead";
+  if (/^quotes?$/.test(n) || /^estimates?$/.test(n)) return "quote";
   if (/^scheduled$/.test(n)) return "scheduled";
   if (/^work in[- ]?progress$/.test(n) || /^in[- ]?progress$/.test(n)) return "inprogress";
+  if (/^invoiced$/.test(n) || /^invoices$/.test(n) || /^invoice$/.test(n)) return "invoiced";
   if (/^completed$/.test(n)) return "completed";
   return "custom";
 }
@@ -81,6 +85,8 @@ async function ensureCoreLanes(client, lanes) {
     }
 
     const needsPatch =
+      pick(existing.name).trim() !== core.name ||
+      num(existing.sort) !== core.sort ||
       pick(existing.stageKey).trim().toLowerCase() !== core.stageKey ||
       !asBool(existing.isSystem);
     if (needsPatch) {
@@ -88,11 +94,15 @@ async function ensureCoreLanes(client, lanes) {
         {
           partitionKey: PARTITION,
           rowKey: existing.rowKey,
+          name: core.name,
+          sort: core.sort,
           stageKey: core.stageKey,
           isSystem: true
         },
         "Merge"
       );
+      existing.name = core.name;
+      existing.sort = core.sort;
       existing.stageKey = core.stageKey;
       existing.isSystem = true;
     }
@@ -133,7 +143,7 @@ module.exports = async function (context, req) {
       await ensureCoreLanes(client, entities);
       const out = entities
         .map(laneFromEntity)
-        .filter(lane => !!lane.name);
+        .filter(lane => !!lane.name && isCoreStage(lane.stageKey));
       out.sort((a, b) => a.sort - b.sort || a.name.localeCompare(b.name));
       context.res = { status: 200, headers: { "content-type": "application/json" }, body: out };
       return;
@@ -151,22 +161,11 @@ module.exports = async function (context, req) {
       }
 
       if (!rid) {
-        let max = 0;
-        const entities = await listLaneEntities(client);
-        for (const entity of entities) max = Math.max(max, num(entity.sort));
-        const rowKey = randomUUID();
-        await client.upsertEntity(
-          {
-            partitionKey: PARTITION,
-            rowKey,
-            name,
-            sort: max + 10,
-            stageKey: "custom",
-            isSystem: false
-          },
-          "Merge"
-        );
-        context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true, id: rowKey } };
+        context.res = {
+          status: 400,
+          headers: { "content-type": "application/json" },
+          body: { error: "Workflow lanes are locked and cannot be added." }
+        };
         return;
       }
 
@@ -176,41 +175,20 @@ module.exports = async function (context, req) {
         return;
       }
 
-      const isProtected = isProtectedLaneEntity(existing);
-      if (hasName && name === "") {
-        if (isProtected) {
-          context.res = { status: 400, headers: { "content-type": "application/json" }, body: { error: "Core workflow lanes cannot be deleted." } };
-          return;
-        }
-        await client.deleteEntity(PARTITION, rid);
-        context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true } };
-        return;
-      }
-
-      if (hasName && name && isProtected) {
-        context.res = { status: 400, headers: { "content-type": "application/json" }, body: { error: "Core workflow lanes cannot be renamed." } };
-        return;
-      }
-
-      const patch = { partitionKey: PARTITION, rowKey: rid };
-      if (hasName && name) patch.name = name;
-      await client.upsertEntity(patch, "Merge");
-      context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true, id: rid } };
+      context.res = {
+        status: 400,
+        headers: { "content-type": "application/json" },
+        body: { error: "Workflow lanes are locked and cannot be modified." }
+      };
       return;
     }
 
     if (method === "DELETE" && id) {
-      const existing = await getLaneById(client, id);
-      if (!existing) {
-        context.res = { status: 404, headers: { "content-type": "application/json" }, body: { error: "Lane not found" } };
-        return;
-      }
-      if (isProtectedLaneEntity(existing)) {
-        context.res = { status: 400, headers: { "content-type": "application/json" }, body: { error: "Core workflow lanes cannot be deleted." } };
-        return;
-      }
-      await client.deleteEntity(PARTITION, id);
-      context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true } };
+      context.res = {
+        status: 400,
+        headers: { "content-type": "application/json" },
+        body: { error: "Workflow lanes are locked and cannot be deleted." }
+      };
       return;
     }
 

@@ -1,44 +1,3 @@
-<ion-modal [isOpen]="settingsOpen()" cssClass="side-panel" (didDismiss)="settingsOpen.set(false)">
-  <ng-template>
-    <ion-header>
-      <ion-toolbar>
-        <ion-title>Board Settings</ion-title>
-        <ion-buttons slot="end">
-          <ion-button (click)="settingsOpen.set(false)">Close</ion-button>
-        </ion-buttons>
-      </ion-toolbar>
-    </ion-header>
-    <ion-content class="glass-bg no-vscroll" [scrollY]="false">
-      <ion-list>
-        <ion-item>
-          <ion-label position="stacked">Add New lane</ion-label>
-          <ion-input [ngModel]="newLane()" (ngModelChange)="newLane.set($event)"></ion-input>
-        </ion-item>
-        <div style="margin-top:8px;">
-          <ion-button (click)="addLane()">Add</ion-button>
-        </div>
-      </ion-list>
-
-      <ion-list>
-        <ion-item lines="full">
-          <ion-label>Lane colors</ion-label>
-        </ion-item>
-        <ion-item *ngFor="let l of lanes()">
-          <ion-label class="ion-text-wrap">
-            <div style="font-weight:600">{{ l.name }}</div>
-          </ion-label>
-          <ion-select interface="popover" [value]="laneColor(l) || ''" (ionChange)="setLaneColor(l, $event.detail.value)">
-            <ion-select-option value="">None</ion-select-option>
-            <ion-select-option *ngFor="let c of palette" [value]="c.hex">
-              <span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:1px solid rgba(0,0,0,.2);margin-right:8px;vertical-align:middle;" [style.background]="c.hex"></span>{{ c.label }}
-            </ion-select-option>
-          </ion-select>
-        </ion-item>
-      </ion-list>
-    </ion-content>
-  </ng-template>
-</ion-modal>
-
 <ion-header class="glass-header">
   <ion-toolbar>
     <ion-title>Dashboard</ion-title>
@@ -56,49 +15,33 @@
             style="margin-left:8px; transition: opacity .35s linear;">
         {{ status() }}
       </span>
-      <ion-button id="dashboard-settings-guide-target" (click)="openSettings()">
-        <ion-icon slot="start" name="settings-outline"></ion-icon>
-        Dashboard Settings
-      </ion-button>
       <app-user-menu id="dashboard-user-menu-guide-target"></app-user-menu>
     </ion-buttons>
   </ion-toolbar>
 </ion-header>
 
 <ion-content id="board-content" class="ion-padding glass-bg">
-  <div class="board" cdkDropListGroup>
-    <div
-      class="lanes"
-      cdkDropList
-      [cdkDropListData]="lanes()"
-      [cdkDropListOrientation]="isMobileLayout() ? 'vertical' : 'horizontal'"
-      (cdkDropListDropped)="onLanesDrop($event)">
+  <div class="board">
+    <div class="lanes">
 
-      <div
-        class="lane"
-        cdkDrag
-        [cdkDragDisabled]="isMobileLayout()"
-        *ngFor="let lane of lanes(); trackBy: trackLane"
-        [style.--lane-color]="laneColor(lane)">
-        <ng-template cdkDragPreview>
-          <div class="lane lane-preview"></div>
-        </ng-template>
-        <ng-template cdkDragPlaceholder>
-          <div class="lane lane-slot"><span>Drop here</span></div>
-        </ng-template>
-
+      <div class="lane" *ngFor="let lane of lanes(); trackBy: trackLane" [style.--lane-color]="laneColor(lane)">
         <div class="lane-header">
-          <ion-icon name="reorder-two-outline" cdkDragHandle class="drag-handle"></ion-icon>
           <div class="lane-title">
             {{ lane.name }}
             <span class="lane-count" *ngIf="laneItemCount(lane.id) > 0">({{ laneItemCount(lane.id) }})</span>
           </div>
-          <ion-button size="small" fill="clear" (click)="openSearch(lane.id)">
-            <ion-icon name="add-outline"></ion-icon>
-          </ion-button>
-          <ion-button class="lane-menu-btn" fill="clear" size="small" (click)="openLaneMenu($event, lane)">
-            <ion-icon name="ellipsis-vertical"></ion-icon>
-          </ion-button>
+          <div style="display:flex;align-items:center;">
+            <ion-button size="small" fill="clear" (click)="openSearch(lane.id)">
+              <ion-icon name="add-outline"></ion-icon>
+            </ion-button>
+            <ion-button
+              class="lane-settings-btn"
+              size="small"
+              fill="clear"
+              (click)="openLaneMenu($event, lane)">
+              <ion-icon name="ellipsis-vertical"></ion-icon>
+            </ion-button>
+          </div>
         </div>
 
         <div
@@ -111,7 +54,7 @@
           <div
             class="card"
             *ngFor="let it of getLaneCards(lane.id); trackBy: trackItem"
-            [class.has-activity]="hasUnreadActivity(it)"
+            [class.has-activity]="hasUnreadActivity(it) || hasUnreadLeadNotice(it, lane)"
             [cdkDragDisabled]="isMobileLayout()"
             cdkDrag>
             <div class="card-body">
@@ -121,7 +64,7 @@
                   type="button"
                   class="activity-link"
                   *ngIf="hasUnreadSms(it)"
-                  (click)="openCustomerActivity(it, 'sms', $event)">
+                  (click)="openCustomerActivity(it, lane, 'sms', $event)">
                   New SMS received
                 </button>
                 <span class="activity-separator" *ngIf="hasUnreadSms(it) && hasUnreadEmail(it)">•</span>
@@ -129,9 +72,13 @@
                   type="button"
                   class="activity-link"
                   *ngIf="hasUnreadEmail(it)"
-                  (click)="openCustomerActivity(it, 'email', $event)">
+                  (click)="openCustomerActivity(it, lane, 'email', $event)">
                   New Email received
                 </button>
+              </div>
+              <div class="card-activity-reason" *ngIf="!hasUnreadActivity(it) && hasUnreadLeadNotice(it, lane)">
+                <span class="card-activity-dot activity-inline-dot" aria-hidden="true"></span>
+                <span>New lead</span>
               </div>
               <div class="card-head">
                 <ion-icon name="reorder-two-outline" cdkDragHandle class="card-drag-handle"></ion-icon>
@@ -141,7 +88,7 @@
                   [class.disabled]="!it.customerId"
                   [disabled]="!it.customerId"
                   [attr.title]="unreadActivityTitle(it)"
-                  (click)="openCustomerProfileFromCard(it, $event)">
+                  (click)="openCustomerProfileFromCard(it, lane, $event)">
                   <span class="card-name-text">{{ customerName(it) }}</span>
                   <ion-icon
                     *ngIf="isCheckedIn(it)"
@@ -157,6 +104,14 @@
                 </div>
               </div>
               <div class="card-line"><span>Vehicle: {{ vehicleOf(it) || '—' }}</span></div>
+              <div class="card-line muted" *ngIf="hasLinkedDocument(it, lane)">
+                <button
+                  type="button"
+                  class="doc-link"
+                  (click)="openLinkedDocument(it, lane, $event)">
+                  {{ linkedDocumentLabel(it, lane) }}
+                </button>
+              </div>
               <div class="card-line vehicle-color-line">
                 <span>Vehicle color:</span>
                 <span class="color-wrap" *ngIf="colorOf(it)" aria-label="vehicle color">
@@ -216,6 +171,32 @@
   </div>
 
   <ion-popover
+    [isOpen]="laneMenuOpen()"
+    [event]="laneMenuEvent()"
+    (didDismiss)="closeLaneMenu()">
+    <ng-template>
+      <ion-content class="ion-padding">
+        <div style="font-weight:700; margin-bottom:10px;">
+          {{ laneMenuLane()?.name || 'Lane' }} Color
+        </div>
+        <ion-list lines="none">
+          <ion-item button detail="false" (click)="setLaneColorFromMenu('')">
+            <ion-label>None</ion-label>
+          </ion-item>
+          <ion-item button detail="false" *ngFor="let c of palette" (click)="setLaneColorFromMenu(c.hex)">
+            <ion-label>
+              <span style="display:inline-flex;align-items:center;gap:8px;">
+                <span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:1px solid rgba(0,0,0,.2);" [style.background]="c.hex"></span>
+                <span>{{ c.label }}</span>
+              </span>
+            </ion-label>
+          </ion-item>
+        </ion-list>
+      </ion-content>
+    </ng-template>
+  </ion-popover>
+
+  <ion-popover
     [isOpen]="cardMenuOpen()"
     [event]="cardMenuEvent()"
     (didDismiss)="closeCardMenu()">
@@ -255,56 +236,6 @@
     </ng-template>
   </ion-modal>
 
-  <ion-popover
-    [isOpen]="laneMenuOpen()"
-    [event]="laneMenuEvent()"
-    (didDismiss)="closeLaneMenu()">
-    <ng-template>
-      <ion-content class="ion-padding">
-        <ion-list lines="full">
-          <ion-item button (click)="startRename()" [disabled]="isProtectedLaneById(laneMenuLaneId())">
-            <ion-label>Rename</ion-label>
-          </ion-item>
-          <ion-item button (click)="handleDeleteFromMenu()" [disabled]="isProtectedLaneById(laneMenuLaneId())">
-            <ion-label color="danger">Delete</ion-label>
-          </ion-item>
-          <ion-item *ngIf="isProtectedLaneById(laneMenuLaneId())" lines="none">
-            <ion-label color="medium">Core lane is locked</ion-label>
-          </ion-item>
-        </ion-list>
-      </ion-content>
-    </ng-template>
-  </ion-popover>
-
-  <ion-modal [isOpen]="renameOpen()" (didDismiss)="renameOpen.set(false)">
-    <ng-template>
-      <ion-header>
-        <ion-toolbar>
-          <ion-title>Rename lane</ion-title>
-          <ion-buttons slot="end">
-            <ion-button (click)="renameOpen.set(false)">Close</ion-button>
-          </ion-buttons>
-        </ion-toolbar>
-      </ion-header>
-      <ion-content class="ion-padding modal-form-content">
-        <ion-item>
-          <ion-label position="stacked">Name</ion-label>
-          <ion-input [ngModel]="renameValue()" (ngModelChange)="renameValue.set($event)"></ion-input>
-        </ion-item>
-      </ion-content>
-      <ion-footer class="modal-form-footer">
-        <ion-toolbar>
-          <div class="modal-footer-row">
-            <div class="modal-footer-right">
-              <ion-button fill="outline" (click)="renameOpen.set(false)">Cancel</ion-button>
-              <ion-button (click)="saveRename()" [disabled]="!canSaveRename()">Save</ion-button>
-            </div>
-          </div>
-        </ion-toolbar>
-      </ion-footer>
-    </ng-template>
-  </ion-modal>
-
   <ng-container *ngIf="onboardingActive()">
     <div class="onboarding-overlay" *ngIf="onboardingRect() as rect">
       <div class="onboarding-spotlight"
@@ -335,32 +266,6 @@
       </section>
     </div>
   </ng-container>
-
-  <ion-modal [isOpen]="deleteOpen()" (didDismiss)="cancelDelete()">
-    <ng-template>
-      <ion-header>
-        <ion-toolbar>
-          <ion-title>Delete lane</ion-title>
-          <ion-buttons slot="end">
-            <ion-button (click)="cancelDelete()">Close</ion-button>
-          </ion-buttons>
-        </ion-toolbar>
-      </ion-header>
-      <ion-content class="ion-padding">
-        <div style="margin-bottom:12px;">
-          Delete “{{ deleteTargetName() }}”?
-        </div>
-        <ion-item lines="none">
-          <ion-label color="medium">Cards in lane</ion-label>
-          <ion-label slot="end">{{ deleteTargetCount() }}</ion-label>
-        </ion-item>
-        <div style="margin-top:16px; display:flex; gap:8px; justify-content:flex-end;">
-          <ion-button fill="outline" (click)="cancelDelete()">Cancel</ion-button>
-          <ion-button color="danger" [disabled]="deleteTargetCount() > 0" (click)="confirmDelete()">Delete</ion-button>
-        </div>
-      </ion-content>
-    </ng-template>
-  </ion-modal>
 
   <ion-modal [isOpen]="searchOpen()" (didDismiss)="closeSearch()">
     <ng-template>

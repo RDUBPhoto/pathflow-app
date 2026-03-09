@@ -27,6 +27,7 @@ import { AuthService } from '../../../auth/auth.service';
 import { AppNotification, NotificationsApiService } from '../../../services/notifications-api.service';
 import { ThemeService } from '../../../services/theme.service';
 import { forkJoin } from 'rxjs';
+import { environment } from '../../../../environments/environment';
 
 @Component({
   selector: 'app-user-menu',
@@ -61,6 +62,7 @@ export class UserMenuComponent implements OnInit, OnDestroy {
   readonly notificationsLoading = signal(false);
   readonly notificationsError = signal('');
   readonly notificationItems = signal<AppNotification[]>([]);
+  readonly demoToolsEnabled = !!environment.features?.demoTools;
   readonly notificationsTotal = signal(0);
   readonly unreadNotifications = signal(0);
   readonly showAllNotifications = signal(false);
@@ -218,6 +220,7 @@ export class UserMenuComponent implements OnInit, OnDestroy {
   }
 
   seedDemoNotifications(event: Event): void {
+    if (!this.demoToolsEnabled) return;
     event.preventDefault();
     event.stopPropagation();
 

@@ -54,6 +54,9 @@ export default class LoginComponent {
 
   readonly localAuthHint = signal('');
   readonly passwordLoginError = signal('');
+  readonly passwordResetStatus = signal('');
+  readonly passwordResetError = signal('');
+  readonly passwordResetSending = signal(false);
   localLoginEmail = '';
   localLoginPassword = '';
 
@@ -127,6 +130,8 @@ export default class LoginComponent {
   signInWithEmailPassword(): void {
     this.localAuthHint.set('');
     this.passwordLoginError.set('');
+    this.passwordResetStatus.set('');
+    this.passwordResetError.set('');
 
     const result = this.auth.signInWithEmailPassword(this.localLoginEmail, this.localLoginPassword);
     if (!result.ok) {
@@ -143,6 +148,29 @@ export default class LoginComponent {
 
       this.passwordLoginError.set(result.error || 'Email/Password is not correct. Do you need to create an account?');
       return;
+    }
+  }
+
+  async requestPasswordReset(): Promise<void> {
+    this.localAuthHint.set('');
+    this.passwordLoginError.set('');
+    this.passwordResetStatus.set('');
+    this.passwordResetError.set('');
+    const email = this.localLoginEmail.trim().toLowerCase();
+    if (!email) {
+      this.passwordResetError.set('Enter your email first, then click Forgot password.');
+      return;
+    }
+    this.passwordResetSending.set(true);
+    try {
+      const result = await this.auth.requestPasswordReset(email);
+      if (!result.ok) {
+        this.passwordResetError.set(result.error || 'Could not send reset email.');
+        return;
+      }
+      this.passwordResetStatus.set(result.message || 'If that account exists, a reset email has been sent.');
+    } finally {
+      this.passwordResetSending.set(false);
     }
   }
 

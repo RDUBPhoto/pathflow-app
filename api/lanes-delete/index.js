@@ -12,13 +12,17 @@ function inferCoreStageKeyFromName(name) {
   const n = pick(name).trim().toLowerCase();
   if (!n) return "custom";
   if (/^leads?$/.test(n)) return "lead";
+  if (/^quotes?$/.test(n) || /^estimates?$/.test(n)) return "quote";
   if (/^scheduled$/.test(n)) return "scheduled";
   if (/^work in[- ]?progress$/.test(n) || /^in[- ]?progress$/.test(n)) return "inprogress";
+  if (/^invoiced$/.test(n) || /^invoices$/.test(n) || /^invoice$/.test(n)) return "invoiced";
   if (/^completed$/.test(n)) return "completed";
   return "custom";
 }
 function isCoreStage(stageKey) {
-  return ["lead", "scheduled", "inprogress", "completed"].includes(String(stageKey || "").trim().toLowerCase());
+  return ["lead", "quote", "invoiced", "scheduled", "inprogress", "completed"].includes(
+    String(stageKey || "").trim().toLowerCase()
+  );
 }
 function isProtectedLaneEntity(entity) {
   const stageKey = pick(entity && entity.stageKey).trim().toLowerCase() || inferCoreStageKeyFromName(entity && entity.name);
@@ -40,27 +44,11 @@ module.exports = async function (context, req) {
     const id = pick(b.id).trim();
     if (!id) { context.res = { status: 400, headers: { "content-type": "application/json" }, body: { error: "id required" } }; return; }
 
-    let existing = null;
-    try {
-      existing = await client.getEntity(PARTITION, id);
-    } catch (_) {
-      existing = null;
-    }
-    if (!existing) {
-      context.res = { status: 404, headers: { "content-type": "application/json" }, body: { error: "Lane not found" } };
-      return;
-    }
-    if (isProtectedLaneEntity(existing)) {
-      context.res = {
-        status: 400,
-        headers: { "content-type": "application/json" },
-        body: { error: "Core workflow lanes cannot be deleted." }
-      };
-      return;
-    }
-
-    await client.deleteEntity(PARTITION, id);
-    context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true } };
+    context.res = {
+      status: 400,
+      headers: { "content-type": "application/json" },
+      body: { error: "Workflow lanes are locked and cannot be deleted." }
+    };
   } catch (err) {
     context.log.error(err);
     context.res = { status: 500, headers: { "content-type": "application/json" }, body: { error: "Server error", detail: String(err && err.message || err) } };

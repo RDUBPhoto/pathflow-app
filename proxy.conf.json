@@ -1,6 +1,6 @@
 {
   "/api": {
-    "target": "https://happy-desert-01944f00f.1.azurestaticapps.net",
+    "target": "https://wonderful-glacier-0f45f5110.6.azurestaticapps.net",
     "secure": true,
     "changeOrigin": true,
     "logLevel": "debug"

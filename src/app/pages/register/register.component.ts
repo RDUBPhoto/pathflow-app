@@ -1,4 +1,4 @@
-import { Component, computed, effect, inject, signal } from '@angular/core';
+import { Component, OnDestroy, computed, effect, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
@@ -10,8 +10,11 @@ import {
   IonSpinner
 } from '@ionic/angular/standalone';
 import { ActivatedRoute, Router } from '@angular/router';
+import { Subscription, finalize, firstValueFrom } from 'rxjs';
 import { AuthService } from '../../auth/auth.service';
 import { TenantContextService } from '../../services/tenant-context.service';
+import { BusinessProfileService } from '../../services/business-profile.service';
+import { AddressLookupService, AddressSuggestion } from '../../services/address-lookup.service';
 
 @Component({
   selector: 'app-register',
@@ -29,15 +32,24 @@ import { TenantContextService } from '../../services/tenant-context.service';
   templateUrl: './register.component.html',
   styleUrls: ['./register.component.scss']
 })
-export default class RegisterComponent {
+export default class RegisterComponent implements OnDestroy {
   readonly auth = inject(AuthService);
   private readonly tenantContext = inject(TenantContextService);
+  private readonly businessProfile = inject(BusinessProfileService);
+  private readonly addressLookup = inject(AddressLookupService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
 
   readonly saving = signal(false);
   readonly error = signal('');
   readonly locationName = signal('Pathflow HQ');
+  readonly businessName = signal('');
+  readonly businessEmail = signal('');
+  readonly businessPhone = signal('');
+  readonly businessAddress = signal('');
+  readonly businessAddressSuggestions = signal<AddressSuggestion[]>([]);
+  readonly businessAddressSearching = signal(false);
+  readonly businessAddressNoMatches = signal(false);
   readonly hasMultipleLocations = signal<'single' | 'multiple'>('single');
   readonly extraLocationNames = signal<string[]>([]);
   readonly selectedPlan = signal<'trial' | 'monthly' | 'annual'>('trial');
@@ -51,6 +63,8 @@ export default class RegisterComponent {
   readonly redirectTo = signal('/dashboard');
   readonly monthlyPrice = signal(149);
   readonly annualPrice = signal(1490);
+  private businessAddressLookupSub: Subscription | null = null;
+  private businessAddressSearchTimer: ReturnType<typeof setTimeout> | null = null;
 
   readonly isBillingUpdateMode = computed(() => this.auth.isAccessLocked() || this.billingMode());
   readonly showTrialOption = computed(() => !this.isBillingUpdateMode());
@@ -125,6 +139,7 @@ export default class RegisterComponent {
     !this.saving() &&
     (this.isBillingUpdateMode() || this.auth.canBootstrapRegistration()) &&
     (this.isBillingUpdateMode() || this.registrationLocationsValid()) &&
+    (this.isBillingUpdateMode() || this.registrationBusinessValid()) &&
     (!this.requiresBilling() || this.billingValid())
   );
   readonly registrationLocationsValid = computed(() => {
@@ -144,6 +159,15 @@ export default class RegisterComponent {
       return base ? [base] : [];
     }
     return [base, ...extras].filter(Boolean);
+  });
+  readonly registrationBusinessValid = computed(() => {
+    if (this.isBillingUpdateMode()) return true;
+    if (this.businessName().trim().length < 2) return false;
+    const email = this.businessEmail().trim();
+    if (!email || !this.isValidEmail(email)) return false;
+    if (this.businessPhone().trim().length < 7) return false;
+    if (this.businessAddress().trim().length < 6) return false;
+    return true;
   });
 
   readonly submitLabel = computed(() => {
@@ -172,11 +196,16 @@ export default class RegisterComponent {
         if (this.isBillingUpdateMode() && queryPlan === 'trial') return;
         this.selectedPlan.set(queryPlan as 'trial' | 'monthly' | 'annual');
       }
+      const userEmail = String(this.auth.user()?.email || '').trim();
+      if (userEmail && !this.businessEmail().trim()) {
+        this.businessEmail.set(userEmail);
+      }
     });
 
     effect(() => {
       if (!this.auth.initialized()) return;
       if (!this.auth.isAuthenticated()) return;
+      if (this.billingMode()) return;
       if (this.auth.needsRegistration() || this.auth.isAccessLocked()) return;
       void this.router.navigateByUrl(this.redirectTo(), { replaceUrl: true });
     });
@@ -189,6 +218,9 @@ export default class RegisterComponent {
       const location = this.auth.locations().find(item => item.id === defaultLocationId) || this.auth.locations()[0];
       if (location?.name) {
         this.locationName.set(location.name);
+        if (!this.businessName().trim()) {
+          this.businessName.set(location.name);
+        }
       }
     });
   }
@@ -218,8 +250,29 @@ export default class RegisterComponent {
       this.tenantContext.setTenantOverride(defaultLocation);
     }
 
+    if (!this.isBillingUpdateMode()) {
+      try {
+        await firstValueFrom(this.businessProfile.save({
+          companyName: this.businessName().trim() || this.locationName().trim(),
+          companyEmail: this.businessEmail().trim() || this.auth.user()?.email || '',
+          companyPhone: this.businessPhone().trim(),
+          companyAddress: this.businessAddress().trim()
+        }));
+      } catch {
+        // Non-blocking: registration already succeeded.
+      }
+    }
+
     this.saving.set(false);
     await this.router.navigateByUrl(this.redirectTo(), { replaceUrl: true });
+  }
+
+  ngOnDestroy(): void {
+    this.businessAddressLookupSub?.unsubscribe();
+    if (this.businessAddressSearchTimer) {
+      clearTimeout(this.businessAddressSearchTimer);
+      this.businessAddressSearchTimer = null;
+    }
   }
 
   useDifferentAccount(): void {
@@ -255,6 +308,27 @@ export default class RegisterComponent {
     if (index < 0 || index >= current.length) return;
     current[index] = value ?? '';
     this.extraLocationNames.set(current);
+  }
+
+  onBusinessAddressChange(value: string | null | undefined): void {
+    this.businessAddress.set(String(value || ''));
+    this.businessAddressNoMatches.set(false);
+    this.queueBusinessAddressLookup(this.businessAddress());
+  }
+
+  onBusinessAddressBlur(): void {
+    const normalized = this.businessAddress().trim().toLowerCase();
+    if (normalized) {
+      const exact = this.businessAddressSuggestions().find(item => item.display.trim().toLowerCase() === normalized);
+      if (exact) this.selectBusinessAddressSuggestion(exact);
+    }
+    setTimeout(() => this.businessAddressSuggestions.set([]), 120);
+  }
+
+  selectBusinessAddressSuggestion(item: AddressSuggestion): void {
+    this.businessAddress.set(item.display);
+    this.businessAddressSuggestions.set([]);
+    this.businessAddressNoMatches.set(false);
   }
 
   private normalizeRedirect(path: string | null): string {
@@ -293,5 +367,43 @@ export default class RegisterComponent {
     const parsed = new Date(String(value || '').trim());
     if (Number.isNaN(parsed.getTime())) return '';
     return parsed.toLocaleDateString();
+  }
+
+  private isValidEmail(value: string): boolean {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+  }
+
+  private queueBusinessAddressLookup(raw: string): void {
+    if (this.businessAddressSearchTimer) {
+      clearTimeout(this.businessAddressSearchTimer);
+      this.businessAddressSearchTimer = null;
+    }
+    this.businessAddressLookupSub?.unsubscribe();
+    this.businessAddressSearching.set(false);
+
+    const query = String(raw || '').trim();
+    if (query.length < 4) {
+      this.businessAddressSuggestions.set([]);
+      this.businessAddressNoMatches.set(false);
+      return;
+    }
+    this.businessAddressSearchTimer = setTimeout(() => this.lookupBusinessAddressSuggestions(query), 320);
+  }
+
+  private lookupBusinessAddressSuggestions(query: string): void {
+    this.businessAddressSearching.set(true);
+    this.businessAddressNoMatches.set(false);
+    this.businessAddressLookupSub = this.addressLookup.search(query, 6, 'us')
+      .pipe(finalize(() => this.businessAddressSearching.set(false)))
+      .subscribe({
+        next: suggestions => {
+          this.businessAddressSuggestions.set(suggestions);
+          this.businessAddressNoMatches.set(query.length >= 4 && !suggestions.length);
+        },
+        error: () => {
+          this.businessAddressSuggestions.set([]);
+          this.businessAddressNoMatches.set(true);
+        }
+      });
   }
 }

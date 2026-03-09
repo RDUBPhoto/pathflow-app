@@ -130,6 +130,11 @@ module.exports = async function (context, req) {
           title: pick(e.title),
           laneId: pick(e.laneId),
           customerId: pick(e.customerId),
+          vin: pick(e.vin),
+          vehicleYear: pick(e.vehicleYear),
+          vehicleMake: pick(e.vehicleMake),
+          vehicleModel: pick(e.vehicleModel),
+          vehicleTrim: pick(e.vehicleTrim),
           sort: num(e.sort),
           createdAt,
           updatedAt: pick(e.updatedAt),
@@ -167,6 +172,11 @@ module.exports = async function (context, req) {
       const title = pick(b.title).trim();
       const laneId = pick(b.laneId).trim();
       const customerId = pick(b.customerId).trim();
+      const vin = Object.prototype.hasOwnProperty.call(b, "vin") ? pick(b.vin).trim() : null;
+      const vehicleYear = Object.prototype.hasOwnProperty.call(b, "vehicleYear") ? pick(b.vehicleYear).trim() : null;
+      const vehicleMake = Object.prototype.hasOwnProperty.call(b, "vehicleMake") ? pick(b.vehicleMake).trim() : null;
+      const vehicleModel = Object.prototype.hasOwnProperty.call(b, "vehicleModel") ? pick(b.vehicleModel).trim() : null;
+      const vehicleTrim = Object.prototype.hasOwnProperty.call(b, "vehicleTrim") ? pick(b.vehicleTrim).trim() : null;
       const checkedInAt = Object.prototype.hasOwnProperty.call(b, "checkedInAt") ? pick(b.checkedInAt).trim() : null;
       const completedAt = Object.prototype.hasOwnProperty.call(b, "completedAt") ? pick(b.completedAt).trim() : null;
       const calendarOverrideAt = Object.prototype.hasOwnProperty.call(b, "calendarOverrideAt") ? pick(b.calendarOverrideAt).trim() : null;
@@ -194,6 +204,11 @@ module.exports = async function (context, req) {
           title,
           laneId,
           customerId,
+          vin: "",
+          vehicleYear: "",
+          vehicleMake: "",
+          vehicleModel: "",
+          vehicleTrim: "",
           sort: max + 10,
           createdAt: now,
           updatedAt: now,
@@ -215,6 +230,11 @@ module.exports = async function (context, req) {
         if (title) patch.title = title;
         if (laneId) patch.laneId = laneId;
         if (customerId) patch.customerId = customerId;
+        if (vin !== null) patch.vin = vin;
+        if (vehicleYear !== null) patch.vehicleYear = vehicleYear;
+        if (vehicleMake !== null) patch.vehicleMake = vehicleMake;
+        if (vehicleModel !== null) patch.vehicleModel = vehicleModel;
+        if (vehicleTrim !== null) patch.vehicleTrim = vehicleTrim;
         if (checkedInAt !== null) patch.checkedInAt = checkedInAt;
         if (completedAt !== null) patch.completedAt = completedAt;
         if (calendarOverrideAt !== null) patch.calendarOverrideAt = calendarOverrideAt;

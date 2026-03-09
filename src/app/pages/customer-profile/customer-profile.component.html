@@ -29,6 +29,15 @@
     <div class="hero-actions-wrap">
       <div class="hero-actions">
         <ion-button fill="outline" (click)="goBack()">Back to Customers</ion-button>
+        <ion-button
+          *ngIf="canDeleteCustomer()"
+          fill="outline"
+          color="danger"
+          (click)="openDeleteCustomerModal()"
+          [disabled]="saving() || loading()">
+          <ion-icon name="trash-outline" slot="start"></ion-icon>
+          Delete Customer
+        </ion-button>
         <ion-button (click)="saveCustomer()" [disabled]="saving() || loading() || !canSaveCustomer()">
           <ion-spinner *ngIf="saving()" name="crescent" slot="start"></ion-spinner>
           <ion-icon *ngIf="!saving()" name="save-outline" slot="start"></ion-icon>
@@ -180,6 +189,45 @@
             <div class="address-validation-hint" *ngIf="address.trim() && !addressValidated() && !addressSearching()">
               Select a suggested address to validate.
             </div>
+          </div>
+        </div>
+
+        <div class="notes-block">
+          <div class="panel-title notes-title">
+            <ion-icon name="document-text-outline"></ion-icon>
+            Service Notes
+          </div>
+
+          <ion-item>
+            <ion-label position="stacked">Add Note</ion-label>
+            <ion-textarea
+              [(ngModel)]="noteDraft"
+              [autoGrow]="true"
+              rows="3"
+              maxlength="6000"
+              placeholder="Add a note used for quoting and job details...">
+            </ion-textarea>
+          </ion-item>
+
+          <div class="notes-add-action">
+            <ion-button size="small" fill="outline" (click)="addNoteEntry()" [disabled]="!canAddNote()">
+              <ion-icon slot="start" name="add-outline"></ion-icon>
+              Add Note
+            </ion-button>
+          </div>
+
+          <div class="notes-history-empty" *ngIf="!hasNotesHistory()">
+            No notes yet.
+          </div>
+
+          <div class="notes-history-list" *ngIf="hasNotesHistory()">
+            <article class="note-history-item" *ngFor="let note of sortedNotesHistory(); trackBy: trackNote">
+              <div class="note-history-meta">
+                <strong>{{ noteCreatedByLabel(note) }}</strong>
+                <span>{{ noteDateLabel(note.createdAt) }}</span>
+              </div>
+              <div class="note-history-text">{{ note.text }}</div>
+            </article>
           </div>
         </div>
       </section>
@@ -368,6 +416,7 @@
     <section
       class="right-column glass-surface"
       [class.sms-active]="activeTab() === 'sms'"
+      [class.email-active]="activeTab() === 'email'"
       *ngIf="!isMobileLayout() || mobileTab() !== 'profile'">
       <div class="right-header">
         <div class="right-header-title" style="display:flex;align-items:center;gap:8px;min-width:0;">
@@ -397,16 +446,12 @@
         </div>
       </div>
 
-      <div class="right-content" [class.sms-active]="activeTab() === 'sms'">
+      <div
+        class="right-content"
+        [class.sms-active]="activeTab() === 'sms'"
+        [class.email-active]="activeTab() === 'email'">
         <section class="right-panel" *ngIf="activeTab() === 'vehicle'">
           <ng-container *ngTemplateOutlet="vehicleDetailsTemplate"></ng-container>
-        </section>
-
-        <section class="right-panel" *ngIf="activeTab() === 'notes'">
-          <ion-item>
-            <ion-label position="stacked">Service Notes</ion-label>
-            <ion-textarea [(ngModel)]="notes" [autoGrow]="true" rows="16"></ion-textarea>
-          </ion-item>
         </section>
 
         <section class="right-panel schedule-panel" *ngIf="activeTab() === 'schedule'">
@@ -685,8 +730,8 @@
               <ion-item>
                 <ion-label position="stacked">Message</ion-label>
                 <ion-textarea
+                  class="email-message-input"
                   [(ngModel)]="emailMessage"
-                  [autoGrow]="true"
                   rows="8"
                   maxlength="12000"
                   placeholder="Write your email...">
@@ -710,3 +755,27 @@
   </section>
 
 </ion-content>
+
+<ion-modal [isOpen]="deleteModalOpen()" (didDismiss)="cancelDeleteCustomerModal()">
+  <ng-template>
+    <ion-header>
+      <ion-toolbar>
+        <ion-title>Delete Customer</ion-title>
+        <ion-buttons slot="end">
+          <ion-button (click)="cancelDeleteCustomerModal()">Close</ion-button>
+        </ion-buttons>
+      </ion-toolbar>
+    </ion-header>
+    <ion-content class="ion-padding">
+      <p>
+        Delete <strong>{{ displayName() }}</strong>? This cannot be undone.
+      </p>
+      <div style="display:flex;justify-content:flex-end;gap:8px;">
+        <ion-button fill="outline" (click)="cancelDeleteCustomerModal()">Cancel</ion-button>
+        <ion-button color="danger" (click)="confirmDeleteCustomerFromModal()">
+          Delete
+        </ion-button>
+      </div>
+    </ion-content>
+  </ng-template>
+</ion-modal>

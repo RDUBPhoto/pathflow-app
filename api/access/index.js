@@ -47,6 +47,20 @@ function readHeader(headers, key) {
   return "";
 }
 
+function requestHost(req) {
+  const forwardedHost = readHeader(req && req.headers, "x-forwarded-host");
+  if (forwardedHost) return asString(forwardedHost).split(",")[0].trim().toLowerCase();
+  const host = readHeader(req && req.headers, "host");
+  return asString(host).split(",")[0].trim().toLowerCase();
+}
+
+function isLocalRequest(req) {
+  const host = requestHost(req);
+  if (!host) return false;
+  const hostname = host.split(":")[0];
+  return hostname === "localhost" || hostname === "127.0.0.1";
+}
+
 function readQueryParam(req, key) {
   if (req && req.query && req.query[key] != null) return asString(req.query[key]);
   const rawUrl = asString(req && req.url);
@@ -349,6 +363,32 @@ function parsePrincipal(req) {
   }
 }
 
+function parseDevPrincipal(req) {
+  if (!isLocalRequest(req)) return null;
+  const email = normalizeEmail(readHeader(req && req.headers, "x-dev-user-email"));
+  if (!email) return null;
+  const displayName = asString(readHeader(req && req.headers, "x-dev-user-name")) || email;
+  const userId = asString(readHeader(req && req.headers, "x-dev-user-id")) || email;
+  const rolesHeader = asString(readHeader(req && req.headers, "x-dev-user-roles"));
+  const roles = normalizeRoleList(
+    rolesHeader
+      .split(",")
+      .map(item => asString(item).toLowerCase())
+      .filter(Boolean)
+  );
+  return {
+    userId,
+    email,
+    displayName,
+    identityProvider: "dev-local",
+    userRoles: roles
+  };
+}
+
+function resolvePrincipal(req) {
+  return parsePrincipal(req) || parseDevPrincipal(req);
+}
+
 async function getTableClient(connectionString, tableName) {
   const client = TableClient.fromConnectionString(connectionString, tableName);
   try {
@@ -409,6 +449,61 @@ function parseUserRoles(userEntity) {
   return normalizeRoleList(Array.isArray(parsed) ? parsed : []);
 }
 
+function userIsRevoked(userEntity) {
+  if (!userEntity || typeof userEntity !== "object") return false;
+  if (asBool(userEntity.accessRevoked) || asBool(userEntity.disabled)) return true;
+  const status = asString(userEntity.status).toLowerCase();
+  return status === "disabled" || status === "revoked";
+}
+
+function userHasAdminRole(userEntity) {
+  return parseUserRoles(userEntity).includes("admin");
+}
+
+function userCanManageTenant(userEntity, tenantId) {
+  const normalizedTenantId = sanitizeTenantId(tenantId);
+  if (!normalizedTenantId) return false;
+  if (asBool(userEntity && userEntity.isSuperAdmin)) return true;
+  if (!userHasAdminRole(userEntity)) return false;
+  if (asBool(userEntity && userEntity.allLocations)) return true;
+  const locationIds = parseUserLocationIds(userEntity);
+  if (!locationIds.length) return true;
+  return locationIds.includes(normalizedTenantId);
+}
+
+function userCanBeSeenInTenant(userEntity, tenantId) {
+  const normalizedTenantId = sanitizeTenantId(tenantId);
+  if (!normalizedTenantId) return false;
+  if (asBool(userEntity && userEntity.allLocations)) return true;
+  const locationIds = parseUserLocationIds(userEntity);
+  if (!locationIds.length) return false;
+  return locationIds.includes(normalizedTenantId);
+}
+
+function buildDevUserEntity(principal, tenantIdHint) {
+  const safeTenant = sanitizeTenantId(asString(tenantIdHint)) || "primary-location";
+  const roles = normalizeRoleList(principal && principal.userRoles);
+  const isAdmin = roles.includes("admin");
+  return {
+    email: normalizeEmail(principal && principal.email),
+    displayName: asString(principal && principal.displayName) || normalizeEmail(principal && principal.email),
+    isSuperAdmin: isAdmin,
+    allLocations: isAdmin,
+    rolesJson: JSON.stringify(isAdmin ? ["authenticated", "admin"] : ["authenticated"]),
+    locationIdsJson: JSON.stringify([safeTenant]),
+    defaultLocationId: safeTenant,
+    emailVerified: true,
+    status: "active",
+    createdAt: new Date().toISOString()
+  };
+}
+
+function normalizeUserStatus(value) {
+  const status = asString(value).toLowerCase();
+  if (status === "active" || status === "invited" || status === "disabled") return status;
+  return "active";
+}
+
 function buildUserLocations(userEntity, tenants) {
   const tenantList = Array.isArray(tenants) ? tenants : [];
   const allLocations = asBool(userEntity && userEntity.allLocations) || asBool(userEntity && userEntity.isSuperAdmin);
@@ -453,11 +548,21 @@ function pickBillingTenant(userEntity, allTenants, defaultLocationId, locations)
   return tenantList[0] || null;
 }
 
-function buildBillingProfileFromTenant(tenant) {
-  const billingStatus = normalizeBillingStatus(tenant && tenant.billingStatus);
-  const trialStartsAt = asString(tenant && tenant.trialStartsAt);
-  const trialEndsAt = asString(tenant && tenant.trialEndsAt);
+function buildBillingProfileFromTenant(tenant, userEntity) {
+  const billingStatus = normalizeBillingStatus(
+    (tenant && tenant.billingStatus) || (userEntity && userEntity.billingStatus)
+  );
+  let trialStartsAt = asString(tenant && tenant.trialStartsAt) || asString(userEntity && userEntity.trialStartsAt);
+  let trialEndsAt = asString(tenant && tenant.trialEndsAt) || asString(userEntity && userEntity.trialEndsAt);
   const planCycle = normalizePlanCycle(tenant && tenant.planCycle);
+
+  if (!trialEndsAt && billingStatus === "trial") {
+    const createdAtMs = Date.parse(asString(userEntity && userEntity.createdAt));
+    if (Number.isFinite(createdAtMs)) {
+      if (!trialStartsAt) trialStartsAt = new Date(createdAtMs).toISOString();
+      trialEndsAt = new Date(createdAtMs + (7 * 24 * 60 * 60 * 1000)).toISOString();
+    }
+  }
 
   const trialEndsMs = Date.parse(trialEndsAt);
   const trialExpired = Number.isFinite(trialEndsMs) ? Date.now() > trialEndsMs : false;
@@ -526,8 +631,12 @@ function buildMeResponse(principal, userEntity, allTenants, canBootstrap) {
   const locations = buildUserLocations(userEntity, allTenants);
   const defaultLocationId = pickDefaultLocation(userEntity, locations);
   const billingTenant = pickBillingTenant(userEntity, allTenants, defaultLocationId, locations);
-  const billingProfile = buildBillingProfileFromTenant(billingTenant);
+  const billingProfile = buildBillingProfileFromTenant(billingTenant, userEntity);
   const isSuperAdmin = asBool(userEntity.isSuperAdmin) || principalIsConfiguredSuperAdmin(principal);
+  const accessRevoked = userIsRevoked(userEntity);
+  const accessLockReason = accessRevoked
+    ? "Your account access has been removed. Contact your workspace admin."
+    : billingProfile.accessLockReason;
 
   return {
     ok: true,
@@ -543,8 +652,8 @@ function buildMeResponse(principal, userEntity, allTenants, canBootstrap) {
       billingStatus: billingProfile.billingStatus,
       trialStartsAt: billingProfile.trialStartsAt,
       trialEndsAt: billingProfile.trialEndsAt,
-      accessLocked: billingProfile.accessLocked,
-      accessLockReason: billingProfile.accessLockReason,
+      accessLocked: accessRevoked || billingProfile.accessLocked,
+      accessLockReason,
       planCycle: billingProfile.planCycle
     },
     locations: allTenants,
@@ -637,6 +746,62 @@ async function sendWelcomeEmail(context, payload) {
     text,
     html: htmlMarkup
   });
+}
+
+function buildPasswordResetUrl(req) {
+  const explicit = asString(process.env.PASSWORD_RESET_URL);
+  if (explicit) return explicit;
+  return "https://passwordreset.microsoftonline.com/";
+}
+
+async function sendPasswordResetEmail(context, req, payload) {
+  const email = normalizeEmail(payload && payload.email);
+  if (!email) return false;
+  const resetUrl = buildPasswordResetUrl(req);
+  const display = asString(payload && payload.displayName || email);
+  const firstName = display.split(/\s+/).filter(Boolean)[0] || "there";
+  const workspaceName = asString(payload && payload.workspaceName || "your Pathflow workspace");
+  const subject = `Pathflow password reset for ${workspaceName}`;
+  const text = [
+    `Hi ${firstName},`,
+    "",
+    `A password reset was requested for your ${workspaceName} account.`,
+    `Reset your password here: ${resetUrl}`,
+    "",
+    "If you did not request this, you can ignore this email."
+  ].join("\n");
+  const htmlMarkup = [
+    `<p>Hi ${firstName},</p>`,
+    `<p>A password reset was requested for your <strong>${workspaceName}</strong> account.</p>`,
+    `<p><a href="${resetUrl}">Reset password</a></p>`,
+    `<p>If you did not request this, you can ignore this email.</p>`
+  ].join("");
+  return sendTransactionalEmail(context, {
+    to: email,
+    subject,
+    text,
+    html: htmlMarkup
+  });
+}
+
+async function listWorkspaceUsers(userClient, tenantId) {
+  const out = [];
+  const filter = `PartitionKey eq '${escapedFilterValue(USERS_PARTITION)}'`;
+  const iter = userClient.listEntities({ queryOptions: { filter } });
+  for await (const entity of iter) {
+    if (!userCanBeSeenInTenant(entity, tenantId)) continue;
+    const email = normalizeEmail(entity.email || entity.rowKey);
+    if (!email) continue;
+    out.push({
+      id: email,
+      name: asString(entity.displayName || email),
+      email,
+      role: parseUserRoles(entity).includes("admin") ? "admin" : "user",
+      status: userIsRevoked(entity) ? "disabled" : normalizeUserStatus(entity.status)
+    });
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name) || a.email.localeCompare(b.email));
+  return out;
 }
 
 async function handleVerifyEmailRequest(context, req, clients) {
@@ -747,7 +912,40 @@ module.exports = async function (context, req) {
       return;
     }
 
-    const principal = parsePrincipal(req);
+    if (method === "POST") {
+      const anonymousBody = asObject(req && req.body);
+      const anonymousOp = asString(anonymousBody.op).toLowerCase();
+      if (anonymousOp === "request-password-reset") {
+        const userClient = await getTableClient(connectionString, USERS_TABLE);
+        const tenantClient = await getTableClient(connectionString, TENANTS_TABLE);
+        const targetEmail = normalizeEmail(anonymousBody.email);
+        const targetTenantId = sanitizeTenantId(asString(anonymousBody.tenantId));
+        if (targetEmail) {
+          const targetUser = await getUserEntity(userClient, targetEmail);
+          if (targetUser) {
+            let workspaceName = "your Pathflow workspace";
+            if (targetTenantId) {
+              try {
+                const tenant = await tenantClient.getEntity(TENANTS_PARTITION, targetTenantId);
+                workspaceName = asString(tenant.name || workspaceName);
+              } catch {}
+            }
+            await sendPasswordResetEmail(context, req, {
+              email: targetEmail,
+              displayName: asString(targetUser.displayName || targetEmail),
+              workspaceName
+            });
+          }
+        }
+        context.res = json(200, {
+          ok: true,
+          message: "If that account exists, a password reset email has been sent."
+        });
+        return;
+      }
+    }
+
+    const principal = resolvePrincipal(req);
     if (!principal) {
       context.res = json(401, { ok: false, error: "Not authenticated." });
       return;
@@ -757,9 +955,35 @@ module.exports = async function (context, req) {
     const tenantClient = await getTableClient(connectionString, TENANTS_TABLE);
 
     if (method === "GET") {
-      const userEntity = await getUserEntity(userClient, principal.email);
+      const scope = asString(readQueryParam(req, "scope")).toLowerCase();
+      const tenantHint = sanitizeTenantId(readHeader(req && req.headers, "x-tenant-id")) ||
+        sanitizeTenantId(asString(readQueryParam(req, "tenantId")));
+      const storedUserEntity = await getUserEntity(userClient, principal.email);
+      const isDevPrincipal = asString(principal.identityProvider).toLowerCase() === "dev-local";
+      const userEntity = storedUserEntity || (isDevPrincipal ? buildDevUserEntity(principal, tenantHint) : null);
       const allTenants = await listTenants(tenantClient);
-      const canBootstrap = !userEntity;
+      const canBootstrap = !storedUserEntity;
+
+      if (scope === "users") {
+        if (!userEntity) {
+          context.res = json(403, { ok: false, error: "Admin access is required." });
+          return;
+        }
+        const tenantId = sanitizeTenantId(readHeader(req && req.headers, "x-tenant-id")) ||
+          sanitizeTenantId(asString(readQueryParam(req, "tenantId"))) ||
+          pickDefaultLocation(userEntity, buildUserLocations(userEntity, allTenants));
+        if (!tenantId) {
+          context.res = json(400, { ok: false, error: "A tenant id is required." });
+          return;
+        }
+        if (!userCanManageTenant(userEntity, tenantId)) {
+          context.res = json(403, { ok: false, error: "You do not have access to manage users for this location." });
+          return;
+        }
+        const users = await listWorkspaceUsers(userClient, tenantId);
+        context.res = json(200, { ok: true, items: users, tenantId });
+        return;
+      }
 
       context.res = json(200, buildMeResponse(principal, userEntity, allTenants, canBootstrap));
       return;
@@ -772,12 +996,154 @@ module.exports = async function (context, req) {
 
     const body = asObject(req && req.body);
     const op = asString(body.op).toLowerCase();
-    if (op !== "bootstrap" && op !== "update-billing") {
+    const supportedOps = new Set([
+      "bootstrap",
+      "update-billing",
+      "invite-user",
+      "remove-user-access",
+      "reset-user-password",
+      "change-my-password"
+    ]);
+    if (!supportedOps.has(op)) {
       context.res = json(400, { ok: false, error: "Unsupported operation." });
       return;
     }
 
-    let userEntity = await getUserEntity(userClient, principal.email);
+    const tenantHint = sanitizeTenantId(readHeader(req && req.headers, "x-tenant-id")) ||
+      sanitizeTenantId(asString(body.tenantId));
+    const storedUserEntity = await getUserEntity(userClient, principal.email);
+    const isDevPrincipal = asString(principal.identityProvider).toLowerCase() === "dev-local";
+    let userEntity = storedUserEntity || (isDevPrincipal ? buildDevUserEntity(principal, tenantHint) : null);
+
+    if (op === "invite-user" || op === "remove-user-access" || op === "reset-user-password") {
+      if (!userEntity) {
+        context.res = json(403, { ok: false, error: "Admin access is required." });
+        return;
+      }
+      const allTenants = await listTenants(tenantClient);
+      const tenantId = sanitizeTenantId(readHeader(req && req.headers, "x-tenant-id")) ||
+        sanitizeTenantId(asString(body.tenantId)) ||
+        pickDefaultLocation(userEntity, buildUserLocations(userEntity, allTenants));
+      if (!tenantId) {
+        context.res = json(400, { ok: false, error: "A tenant id is required." });
+        return;
+      }
+      if (!userCanManageTenant(userEntity, tenantId)) {
+        context.res = json(403, { ok: false, error: "You do not have access to manage users for this location." });
+        return;
+      }
+
+      const targetEmail = normalizeEmail(body.email);
+      if (!targetEmail) {
+        context.res = json(400, { ok: false, error: "User email is required." });
+        return;
+      }
+      if (targetEmail === normalizeEmail(principal.email) && op === "remove-user-access") {
+        context.res = json(400, { ok: false, error: "You cannot remove your own access." });
+        return;
+      }
+
+      const now = new Date().toISOString();
+      if (op === "invite-user") {
+        const targetName = asString(body.name || body.displayName || targetEmail).slice(0, 120) || targetEmail;
+        const requestedRole = asString(body.role).toLowerCase() === "admin" ? "admin" : "user";
+        const targetUser = await getUserEntity(userClient, targetEmail);
+        const existingLocations = parseUserLocationIds(targetUser);
+        const mergedLocationIds = Array.from(new Set([...existingLocations, tenantId]));
+        const nextRoles = normalizeRoleList(
+          requestedRole === "admin"
+            ? ["authenticated", "admin"]
+            : parseUserRoles(targetUser).includes("admin")
+              ? ["authenticated", "admin"]
+              : ["authenticated"]
+        );
+        await userClient.upsertEntity(
+          {
+            partitionKey: USERS_PARTITION,
+            rowKey: targetEmail,
+            userId: asString((targetUser && targetUser.userId) || targetEmail),
+            email: targetEmail,
+            displayName: targetName,
+            rolesJson: JSON.stringify(nextRoles),
+            allLocations: false,
+            locationIdsJson: JSON.stringify(mergedLocationIds.length ? mergedLocationIds : [tenantId]),
+            defaultLocationId: asString((targetUser && targetUser.defaultLocationId) || tenantId),
+            status: "invited",
+            accessRevoked: false,
+            disabled: false,
+            updatedAt: now,
+            createdAt: asString(targetUser && targetUser.createdAt) || now
+          },
+          "Merge"
+        );
+        await sendTransactionalEmail(context, {
+          to: targetEmail,
+          subject: "You were invited to Pathflow",
+          text: `You were invited to Pathflow for ${tenantId}. Sign in to access your workspace.`,
+          html: `<p>You were invited to Pathflow for <strong>${tenantId}</strong>.</p><p>Sign in to access your workspace.</p>`
+        });
+        const users = await listWorkspaceUsers(userClient, tenantId);
+        context.res = json(200, { ok: true, items: users, tenantId });
+        return;
+      }
+
+      if (op === "remove-user-access") {
+        const targetUser = await getUserEntity(userClient, targetEmail);
+        if (!targetUser) {
+          context.res = json(404, { ok: false, error: "User not found." });
+          return;
+        }
+        await userClient.upsertEntity(
+          {
+            partitionKey: USERS_PARTITION,
+            rowKey: targetEmail,
+            status: "disabled",
+            accessRevoked: true,
+            disabled: true,
+            updatedAt: now
+          },
+          "Merge"
+        );
+        const users = await listWorkspaceUsers(userClient, tenantId);
+        context.res = json(200, { ok: true, items: users, tenantId });
+        return;
+      }
+
+      if (op === "reset-user-password") {
+        const targetUser = await getUserEntity(userClient, targetEmail);
+        if (targetUser) {
+          await sendPasswordResetEmail(context, req, {
+            email: targetEmail,
+            displayName: asString(targetUser.displayName || targetEmail),
+            workspaceName: tenantId
+          });
+        }
+        context.res = json(200, {
+          ok: true,
+          message: "If that account exists, a password reset email has been sent."
+        });
+        return;
+      }
+    }
+
+    if (op === "change-my-password") {
+      const newPassword = asString(body.newPassword);
+      if (newPassword.length < 8) {
+        context.res = json(400, { ok: false, error: "New password must be at least 8 characters." });
+        return;
+      }
+      await sendPasswordResetEmail(context, req, {
+        email: principal.email,
+        displayName: principal.displayName || principal.email,
+        workspaceName: "Pathflow"
+      });
+      context.res = json(200, {
+        ok: true,
+        message: "Password reset email sent. Follow the link to complete your password change."
+      });
+      return;
+    }
+
     if (op === "update-billing") {
       if (!userEntity) {
         context.res = json(403, {
@@ -830,6 +1196,16 @@ module.exports = async function (context, req) {
         "Merge"
       );
 
+      await userClient.upsertEntity(
+        {
+          partitionKey: USERS_PARTITION,
+          rowKey: normalizeEmail(userEntity.email || principal.email),
+          billingStatus: normalizeBillingStatus(billing.mode),
+          updatedAt: now
+        },
+        "Merge"
+      );
+
       userEntity = await getUserEntity(userClient, principal.email);
       const refreshedTenants = await listTenants(tenantClient);
       context.res = json(200, buildMeResponse(principal, userEntity, refreshedTenants, false));
@@ -859,7 +1235,7 @@ module.exports = async function (context, req) {
         .filter(Boolean);
       const locationNames = normalizedLocationNames.length
         ? normalizedLocationNames
-        : [asString(body.locationName || "Exodus 4x4").slice(0, 120) || "Exodus 4x4"];
+        : [asString(body.locationName || "Primary Location").slice(0, 120) || "Primary Location"];
 
       const allTenants = await listTenants(tenantClient);
       const existingTenantIds = new Set(allTenants.map(item => item.id));
@@ -872,8 +1248,8 @@ module.exports = async function (context, req) {
       const billingStatus = billing ? normalizeBillingStatus(billing.mode) : "trial";
 
       for (const locationNameRaw of locationNames) {
-        const locationName = asString(locationNameRaw).slice(0, 120) || "Exodus 4x4";
-        const requestedLocationId = sanitizeTenantId(asString(locationName || "exodus-4x4"));
+        const locationName = asString(locationNameRaw).slice(0, 120) || "Primary Location";
+        const requestedLocationId = sanitizeTenantId(asString(locationName || "primary-location"));
         const locationId = ensureUniqueTenantId(requestedLocationId, existingTenantIds);
         if (!locationId) {
           context.res = json(400, { ok: false, error: "Invalid location id." });
@@ -902,7 +1278,7 @@ module.exports = async function (context, req) {
       }
 
       const defaultLocationId = createdLocations[0]?.id || "";
-      const defaultLocationName = createdLocations[0]?.name || "Exodus 4x4";
+      const defaultLocationName = createdLocations[0]?.name || "Primary Location";
       const locationIds = createdLocations.map(item => item.id).filter(Boolean);
       if (!defaultLocationId || !locationIds.length) {
         context.res = json(400, { ok: false, error: "At least one valid location is required." });
@@ -923,6 +1299,9 @@ module.exports = async function (context, req) {
           allLocations: false,
           defaultLocationId,
           locationIdsJson: JSON.stringify(locationIds),
+          billingStatus,
+          trialStartsAt: now,
+          trialEndsAt,
           emailVerified: false,
           emailVerifiedAt: "",
           updatedAt: now,

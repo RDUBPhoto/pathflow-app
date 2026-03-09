@@ -70,6 +70,26 @@
   text-decoration: none;
 }
 
+.brand-upload-link {
+  min-width: 0;
+  flex: 1 1 auto;
+  min-height: 44px;
+  border: 0;
+  background: transparent;
+  color: var(--ion-color-primary, #2563eb);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  letter-spacing: 0.01em;
+  text-align: left;
+  cursor: pointer;
+}
+
+.brand-upload-link:hover {
+  color: var(--ion-color-primary-shade, #1d4ed8);
+}
+
 .brand-logo {
   display: block;
   width: auto;

@@ -1,4 +1,4 @@
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, computed, effect, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
@@ -41,9 +41,10 @@ import {
   trashOutline,
   saveOutline,
   codeSlashOutline,
-  copyOutline
+  copyOutline,
+  cardOutline
 } from 'ionicons/icons';
-import { finalize, firstValueFrom, forkJoin } from 'rxjs';
+import { Subscription, catchError, finalize, firstValueFrom, forkJoin, of } from 'rxjs';
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
 import { PageBackButtonComponent } from '../../components/navigation/page-back-button/page-back-button.component';
 import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
@@ -54,26 +55,23 @@ import {
   EmailApiService,
   EmailConfigResponse,
   EmailTemplate,
-  EmailTemplatesResponse
+  EmailTemplatesResponse,
+  EmailSenderConfig
 } from '../../services/email-api.service';
-import { InventoryApiService, InventoryConnector } from '../../services/inventory-api.service';
+import { InventoryApiService, InventoryConnector, InventoryItem } from '../../services/inventory-api.service';
 import { AppSettingsApiService } from '../../services/app-settings-api.service';
+import { BusinessProfileService } from '../../services/business-profile.service';
+import { AddressLookupService, AddressSuggestion } from '../../services/address-lookup.service';
 import { TenantContextService } from '../../services/tenant-context.service';
+import { AuthService } from '../../auth/auth.service';
 import { environment } from '../../../environments/environment';
+import { AccessAdminApiService, WorkspaceUser } from '../../services/access-admin-api.service';
 import {
   CustomerImportResponse,
   CustomerImportRow,
   CustomersApi
 } from '../../services/customers-api.service';
 import * as XLSX from 'xlsx';
-
-interface AdminUser {
-  id: string;
-  name: string;
-  email: string;
-  role: 'admin' | 'user';
-  status: 'active' | 'invited';
-}
 
 interface AppIntegration {
   key: string;
@@ -92,29 +90,50 @@ type ScheduleSettings = {
   federalYear: number;
   federalInitialized: boolean;
 };
+type LaborRate = {
+  id: string;
+  name: string;
+  price: number;
+  taxable: boolean;
+};
 
-const ADMIN_USERS_SETTING_KEY = 'admin.users';
+type DocumentTemplateType = 'quote' | 'invoice' | 'both';
+type DocumentTemplate = {
+  id: string;
+  name: string;
+  documentType: DocumentTemplateType;
+  subject: string;
+  body: string;
+  partItemIds: string[];
+  laborRateIds: string[];
+};
+
 const ADMIN_INTEGRATIONS_SETTING_KEY = 'admin.integrations';
 const SCHEDULE_SETTINGS_KEY = 'schedule.settings';
-const DEFAULT_ADMIN_USERS: AdminUser[] = [
+const EMAIL_FOOTER_TERMS_SETTING_KEY = 'email.footer.terms.html';
+const LEGACY_QUOTE_TERMS_SETTING_KEY = 'quote.terms.html';
+const BUSINESS_TAX_RATE_SETTING_KEY = 'business.tax.rate';
+const BUSINESS_LABOR_RATES_SETTING_KEY = 'business.labor.rates';
+const BUSINESS_DOCUMENT_TEMPLATES_SETTING_KEY = 'business.document.templates';
+const DEFAULT_ADMIN_USERS: WorkspaceUser[] = [
   {
     id: 'u-1',
     name: 'Shop Owner',
-    email: 'owner@exodus4x4.com',
+    email: 'owner@yourcompany.com',
     role: 'admin',
     status: 'active'
   },
   {
     id: 'u-2',
     name: 'Service Advisor',
-    email: 'advisor@exodus4x4.com',
+    email: 'advisor@yourcompany.com',
     role: 'user',
     status: 'active'
   },
   {
     id: 'u-3',
     name: 'Operations Lead',
-    email: 'ops@exodus4x4.com',
+    email: 'ops@yourcompany.com',
     role: 'user',
     status: 'invited'
   }
@@ -148,6 +167,7 @@ const DEFAULT_INTEGRATIONS: AppIntegration[] = [
 
 type AdminSectionKey =
   | 'branding'
+  | 'subscription'
   | 'users'
   | 'customerImport'
   | 'schedule'
@@ -338,19 +358,23 @@ const CUSTOMER_IMPORT_HEADER_MAP: Record<string, keyof CustomerImportRow> = {
   templateUrl: './admin-settings.component.html',
   styleUrls: ['./admin-settings.component.scss']
 })
-export default class AdminSettingsComponent implements OnInit {
+export default class AdminSettingsComponent implements OnInit, OnDestroy {
   readonly branding = inject(BrandSettingsService);
+  readonly auth = inject(AuthService);
   private readonly http = inject(HttpClient);
   private readonly brandingApi = inject(BrandingApi);
   private readonly smsApi = inject(SmsApiService);
   private readonly emailApi = inject(EmailApiService);
   private readonly inventoryApi = inject(InventoryApiService);
   private readonly settingsApi = inject(AppSettingsApiService);
+  private readonly businessProfile = inject(BusinessProfileService);
+  private readonly addressLookup = inject(AddressLookupService);
   private readonly tenantContext = inject(TenantContextService);
   private readonly route = inject(ActivatedRoute);
   private readonly customersApi = inject(CustomersApi);
+  private readonly accessAdminApi = inject(AccessAdminApiService);
 
-  readonly users = signal<AdminUser[]>(this.cloneDefaultUsers());
+  readonly users = signal<WorkspaceUser[]>(this.cloneDefaultUsers());
   readonly integrations = signal<AppIntegration[]>(this.cloneDefaultIntegrations());
   readonly supplierConnectors = signal<InventoryConnector[]>([]);
   readonly supplierLoading = signal(false);
@@ -359,9 +383,15 @@ export default class AdminSettingsComponent implements OnInit {
   readonly sections: AdminSection[] = [
     {
       key: 'branding',
-      label: 'Branding',
-      description: 'Business logo and visual identity',
+      label: 'Business Profile',
+      description: 'Business logo, address, phone, etc.',
       icon: 'image-outline'
+    },
+    {
+      key: 'subscription',
+      label: 'Subscription',
+      description: 'Billing, trial, and plan activation',
+      icon: 'card-outline'
     },
     {
       key: 'users',
@@ -395,8 +425,8 @@ export default class AdminSettingsComponent implements OnInit {
     },
     {
       key: 'email',
-      label: 'Email + Templates',
-      description: 'Templates, signatures, and inbound email',
+      label: 'Email Templates',
+      description: 'Reusable templates for customer email',
       icon: 'mail-outline'
     },
     {
@@ -409,7 +439,7 @@ export default class AdminSettingsComponent implements OnInit {
 
   readonly userCount = computed(() => this.users().length);
   readonly logoUrl = computed(() => this.branding.logoUrl());
-  readonly hasCustomLogo = computed(() => this.logoUrl() !== this.branding.defaultLogoUrl);
+  readonly hasCustomLogo = computed(() => this.branding.hasCustomLogo());
   readonly widgetTenantId = computed(() => this.tenantContext.tenantId());
   readonly openHourOptions = Array.from({ length: 24 }, (_, hour) => ({
     value: hour,
@@ -427,7 +457,42 @@ export default class AdminSettingsComponent implements OnInit {
   newUserEmail = '';
   newUserRole: 'admin' | 'user' = 'user';
   statusMessage = '';
+  usersError = '';
+  readonly usersLoading = signal(false);
+  passwordStatus = '';
+  passwordError = '';
+  passwordCurrent = '';
+  passwordNext = '';
+  passwordConfirm = '';
+  readonly passwordSaving = signal(false);
   brandingStatus = '';
+  brandingError = '';
+  businessProfileStatus = '';
+  businessProfileError = '';
+  businessProfileName = '';
+  businessProfileEmail = '';
+  businessProfilePhone = '';
+  businessProfileAddress = '';
+  businessTaxRate = 0;
+  laborRates: LaborRate[] = [];
+  documentTemplates: DocumentTemplate[] = [];
+  templateInventoryQuery = '';
+  readonly inventoryItems = signal<InventoryItem[]>([]);
+  businessAddressSuggestions = signal<AddressSuggestion[]>([]);
+  businessAddressSearching = signal(false);
+  businessAddressNoMatches = signal(false);
+  private businessAddressLookupSub: Subscription | null = null;
+  private businessAddressSearchTimer: ReturnType<typeof setTimeout> | null = null;
+  subscriptionStatus = '';
+  subscriptionError = '';
+  readonly subscriptionSaving = signal(false);
+  subscriptionCardholderName = '';
+  subscriptionCardNumber = '';
+  subscriptionExpiryMonth = '';
+  subscriptionExpiryYear = '';
+  subscriptionCvc = '';
+  subscriptionPostalCode = '';
+  subscriptionPlanCycle: 'monthly' | 'annual' = 'monthly';
   smsTo = '';
   smsMessage = 'Pathflow test: your service update notifications are connected.';
   smsStatus = '';
@@ -440,6 +505,7 @@ export default class AdminSettingsComponent implements OnInit {
   smsSenderLabel = '';
   smsSenderVerification = 'pending';
   readonly emailConfig = signal<EmailConfigResponse | null>(null);
+  readonly emailSender = signal<EmailSenderConfig | null>(null);
   readonly emailTemplates = signal<EmailTemplate[]>([]);
   readonly emailLoading = signal(false);
   readonly emailSaving = signal(false);
@@ -450,6 +516,10 @@ export default class AdminSettingsComponent implements OnInit {
   emailTemplateSubject = '';
   emailTemplateBody = '';
   emailSignatureDraft = '';
+  quoteTermsDraft = '';
+  emailSenderFrom = '';
+  emailSenderName = '';
+  emailSenderReplyTo = '';
   inboundFrom = '';
   inboundFromName = '';
   inboundSubject = '';
@@ -498,6 +568,14 @@ export default class AdminSettingsComponent implements OnInit {
   customerImportStatus = '';
   customerImportError = '';
 
+  private readonly businessProfileSync = effect(() => {
+    const profile = this.businessProfile.profile();
+    this.businessProfileName = String(profile.companyName || '').trim();
+    this.businessProfileEmail = String(profile.companyEmail || '').trim();
+    this.businessProfilePhone = String(profile.companyPhone || '').trim();
+    this.businessProfileAddress = String(profile.companyAddress || '').trim();
+  });
+
   constructor() {
     addIcons({
       'shield-checkmark-outline': shieldCheckmarkOutline,
@@ -514,7 +592,8 @@ export default class AdminSettingsComponent implements OnInit {
       'trash-outline': trashOutline,
       'save-outline': saveOutline,
       'code-slash-outline': codeSlashOutline,
-      'copy-outline': copyOutline
+      'copy-outline': copyOutline,
+      'card-outline': cardOutline
     });
 
     this.widgetApiUrl = this.resolveWidgetApiEndpoint(this.widgetApiUrl);
@@ -527,9 +606,215 @@ export default class AdminSettingsComponent implements OnInit {
       this.activeSection.set(matchingSection.key);
     }
     this.loadPersistedAdminSettings();
+    this.loadSubscriptionState();
     this.loadSmsConfig();
     this.loadEmailAdminData();
     this.loadSupplierConnections();
+    this.loadWorkspaceUsers();
+    this.loadQuoteTerms();
+    this.loadBusinessTaxRate();
+    this.loadLaborRates();
+    this.loadInventoryItems();
+    this.loadDocumentTemplates();
+  }
+
+  ngOnDestroy(): void {
+    this.businessAddressLookupSub?.unsubscribe();
+    if (this.businessAddressSearchTimer) {
+      clearTimeout(this.businessAddressSearchTimer);
+      this.businessAddressSearchTimer = null;
+    }
+  }
+
+  saveBusinessProfile(): void {
+    this.businessProfileStatus = '';
+    this.businessProfileError = '';
+    const normalizedTaxRate = this.normalizeTaxRate(this.businessTaxRate);
+    forkJoin({
+      profile: this.businessProfile.save({
+        companyName: this.businessProfileName,
+        companyEmail: this.businessProfileEmail,
+        companyPhone: this.businessProfilePhone,
+        companyAddress: this.businessProfileAddress
+      }),
+      taxRate: this.settingsApi.setValue<number>(BUSINESS_TAX_RATE_SETTING_KEY, normalizedTaxRate),
+      laborRates: this.settingsApi.setValue<LaborRate[]>(
+        BUSINESS_LABOR_RATES_SETTING_KEY,
+        this.laborRates
+          .map(rate => ({
+            id: String(rate.id || '').trim() || `labor-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+            name: String(rate.name || '').trim(),
+            price: this.roundCurrency(Math.max(0, Number(rate.price) || 0)),
+            taxable: !!rate.taxable
+          }))
+          .filter(rate => !!rate.name)
+      ),
+      documentTemplates: this.settingsApi.setValue<DocumentTemplate[]>(
+        BUSINESS_DOCUMENT_TEMPLATES_SETTING_KEY,
+        this.normalizeDocumentTemplates(this.documentTemplates)
+      )
+    }).subscribe({
+      next: () => {
+        this.businessTaxRate = normalizedTaxRate;
+        this.businessProfileStatus = 'Business profile saved.';
+        this.businessProfileError = '';
+      },
+      error: err => {
+        this.businessProfileStatus = '';
+        this.businessProfileError = this.extractApiError(err, 'Could not save business profile.');
+      }
+    });
+  }
+
+  addLaborRate(): void {
+    this.laborRates = [
+      ...this.laborRates,
+      {
+        id: `labor-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        name: '',
+        price: 0,
+        taxable: false
+      }
+    ];
+  }
+
+  removeLaborRate(id: string): void {
+    const key = String(id || '').trim();
+    if (!key) return;
+    this.laborRates = this.laborRates.filter(rate => rate.id !== key);
+    this.documentTemplates = this.documentTemplates.map(template => ({
+      ...template,
+      laborRateIds: template.laborRateIds.filter(rateId => rateId !== key)
+    }));
+  }
+
+  setTemplateInventoryQuery(value: string | null | undefined): void {
+    this.templateInventoryQuery = String(value || '');
+  }
+
+  filteredInventoryForTemplates(): InventoryItem[] {
+    const query = this.templateInventoryQuery.trim().toLowerCase();
+    const items = this.inventoryItems();
+    if (!query) return items.slice(0, 60);
+    return items
+      .filter(item => [item.name, item.sku, item.vendor, item.category].join(' ').toLowerCase().includes(query))
+      .slice(0, 60);
+  }
+
+  addDocumentTemplate(): void {
+    this.documentTemplates = [
+      ...this.documentTemplates,
+      {
+        id: `tmpl-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        name: '',
+        documentType: 'quote',
+        subject: 'Quote for {{customer_name}}',
+        body: '<p>Hi {{customer_name}},</p><p>Here is your quote for {{vehicle_summary}}.</p>',
+        partItemIds: [],
+        laborRateIds: []
+      }
+    ];
+  }
+
+  removeDocumentTemplate(id: string): void {
+    const key = String(id || '').trim();
+    if (!key) return;
+    this.documentTemplates = this.documentTemplates.filter(template => template.id !== key);
+  }
+
+  toggleTemplatePart(templateId: string, partId: string, checked: boolean): void {
+    this.documentTemplates = this.documentTemplates.map(template => {
+      if (template.id !== templateId) return template;
+      const next = new Set(template.partItemIds);
+      if (checked) next.add(partId);
+      else next.delete(partId);
+      return { ...template, partItemIds: Array.from(next) };
+    });
+  }
+
+  toggleTemplateLabor(templateId: string, laborRateId: string, checked: boolean): void {
+    this.documentTemplates = this.documentTemplates.map(template => {
+      if (template.id !== templateId) return template;
+      const next = new Set(template.laborRateIds);
+      if (checked) next.add(laborRateId);
+      else next.delete(laborRateId);
+      return { ...template, laborRateIds: Array.from(next) };
+    });
+  }
+
+  isPartSelected(template: DocumentTemplate, partId: string): boolean {
+    return template.partItemIds.includes(String(partId || '').trim());
+  }
+
+  isLaborSelected(template: DocumentTemplate, laborRateId: string): boolean {
+    return template.laborRateIds.includes(String(laborRateId || '').trim());
+  }
+
+  trackDocumentTemplate(_index: number, template: DocumentTemplate): string {
+    return template.id;
+  }
+
+  trackInventoryItem(_index: number, item: InventoryItem): string {
+    return String(item.id || '').trim() || String(item.sku || '').trim() || item.name;
+  }
+
+  trackLaborRate(_index: number, rate: LaborRate): string {
+    return String(rate.id || '').trim() || rate.name;
+  }
+
+  onBusinessAddressChange(value: string | null | undefined): void {
+    this.businessProfileAddress = String(value || '');
+    this.businessAddressNoMatches.set(false);
+    this.queueBusinessAddressLookup(this.businessProfileAddress);
+  }
+
+  onBusinessAddressBlur(): void {
+    const normalized = this.businessProfileAddress.trim().toLowerCase();
+    if (normalized) {
+      const exact = this.businessAddressSuggestions().find(item => item.display.trim().toLowerCase() === normalized);
+      if (exact) this.selectBusinessAddressSuggestion(exact);
+    }
+    setTimeout(() => this.businessAddressSuggestions.set([]), 120);
+  }
+
+  selectBusinessAddressSuggestion(item: AddressSuggestion): void {
+    this.businessProfileAddress = item.display;
+    this.businessAddressSuggestions.set([]);
+    this.businessAddressNoMatches.set(false);
+  }
+
+  private queueBusinessAddressLookup(raw: string): void {
+    if (this.businessAddressSearchTimer) {
+      clearTimeout(this.businessAddressSearchTimer);
+      this.businessAddressSearchTimer = null;
+    }
+    this.businessAddressLookupSub?.unsubscribe();
+    this.businessAddressSearching.set(false);
+
+    const query = String(raw || '').trim();
+    if (query.length < 4) {
+      this.businessAddressSuggestions.set([]);
+      this.businessAddressNoMatches.set(false);
+      return;
+    }
+    this.businessAddressSearchTimer = setTimeout(() => this.lookupBusinessAddressSuggestions(query), 320);
+  }
+
+  private lookupBusinessAddressSuggestions(query: string): void {
+    this.businessAddressSearching.set(true);
+    this.businessAddressNoMatches.set(false);
+    this.businessAddressLookupSub = this.addressLookup.search(query, 6, 'us')
+      .pipe(finalize(() => this.businessAddressSearching.set(false)))
+      .subscribe({
+        next: suggestions => {
+          this.businessAddressSuggestions.set(suggestions);
+          this.businessAddressNoMatches.set(query.length >= 4 && !suggestions.length);
+        },
+        error: () => {
+          this.businessAddressSuggestions.set([]);
+          this.businessAddressNoMatches.set(true);
+        }
+      });
   }
 
   addUser(): void {
@@ -539,36 +824,191 @@ export default class AdminSettingsComponent implements OnInit {
       this.statusMessage = 'Name and email are required.';
       return;
     }
-
-    if (this.users().some(u => u.email.toLowerCase() === email)) {
-      this.statusMessage = 'That email already exists in the list.';
-      return;
-    }
-
-    const user: AdminUser = {
-      id: `u-${Date.now()}`,
-      name,
-      email,
-      role: this.newUserRole,
-      status: 'invited'
-    };
-
-    this.users.update(list => [...list, user]);
-    this.newUserName = '';
-    this.newUserEmail = '';
-    this.newUserRole = 'user';
-    this.persistUsers();
-    this.statusMessage = `Invite queued for ${email}.`;
+    this.usersError = '';
+    this.accessAdminApi
+      .inviteUser({
+        name,
+        email,
+        role: this.newUserRole,
+        tenantId: this.tenantContext.tenantId()
+      })
+      .subscribe({
+        next: res => {
+          this.users.set(Array.isArray(res.items) ? res.items : []);
+          this.newUserName = '';
+          this.newUserEmail = '';
+          this.newUserRole = 'user';
+          this.statusMessage = `Invite sent to ${email}.`;
+        },
+        error: err => {
+          this.usersError = this.extractApiError(err, 'Could not invite user.');
+        }
+      });
   }
 
-  removeUser(id: string): void {
-    this.users.update(list => list.filter(u => u.id !== id));
-    this.persistUsers();
-    this.statusMessage = 'User removed.';
+  removeUser(user: WorkspaceUser): void {
+    this.usersError = '';
+    this.accessAdminApi
+      .removeUserAccess({
+        email: user.email,
+        tenantId: this.tenantContext.tenantId()
+      })
+      .subscribe({
+        next: res => {
+          this.users.set(Array.isArray(res.items) ? res.items : []);
+          this.statusMessage = `${user.email} access removed.`;
+        },
+        error: err => {
+          this.usersError = this.extractApiError(err, 'Could not remove user access.');
+        }
+      });
+  }
+
+  resetUserPassword(user: WorkspaceUser): void {
+    this.usersError = '';
+    this.accessAdminApi
+      .resetUserPassword({
+        email: user.email,
+        tenantId: this.tenantContext.tenantId()
+      })
+      .subscribe({
+        next: res => {
+          this.statusMessage = res.message || `Password reset email sent to ${user.email}.`;
+        },
+        error: err => {
+          this.usersError = this.extractApiError(err, 'Could not send password reset email.');
+        }
+      });
+  }
+
+  canChangePassword(): boolean {
+    return this.passwordNext.trim().length >= 8 &&
+      this.passwordConfirm.trim().length >= 8 &&
+      this.passwordNext.trim() === this.passwordConfirm.trim();
+  }
+
+  saveMyPasswordChange(): void {
+    this.passwordStatus = '';
+    this.passwordError = '';
+    if (!this.canChangePassword()) {
+      this.passwordError = 'Passwords must match and be at least 8 characters.';
+      return;
+    }
+    this.passwordSaving.set(true);
+    this.accessAdminApi
+      .changeMyPassword({ newPassword: this.passwordNext.trim() })
+      .pipe(finalize(() => this.passwordSaving.set(false)))
+      .subscribe({
+        next: res => {
+          this.passwordCurrent = '';
+          this.passwordNext = '';
+          this.passwordConfirm = '';
+          this.passwordStatus = res.message || 'Password reset email sent.';
+        },
+        error: err => {
+          this.passwordError = this.extractApiError(err, 'Could not start password change flow.');
+        }
+      });
   }
 
   setActiveSection(section: AdminSectionKey): void {
     this.activeSection.set(section);
+    if (section === 'subscription') {
+      this.loadSubscriptionState();
+    }
+    if (section === 'users') {
+      this.loadWorkspaceUsers();
+    }
+  }
+
+  private loadWorkspaceUsers(): void {
+    this.usersLoading.set(true);
+    this.usersError = '';
+    this.accessAdminApi
+      .listUsers(this.tenantContext.tenantId())
+      .pipe(finalize(() => this.usersLoading.set(false)))
+      .subscribe({
+        next: res => {
+          this.users.set(Array.isArray(res.items) ? res.items : []);
+        },
+        error: err => {
+          this.usersError = this.extractApiError(err, 'Could not load workspace users.');
+          this.users.set(this.cloneDefaultUsers());
+        }
+      });
+  }
+
+  isSubscriptionFormValid(): boolean {
+    const cardholder = this.subscriptionCardholderName.trim();
+    const cardNumber = this.digitsOnly(this.subscriptionCardNumber);
+    const monthDigits = this.digitsOnly(this.subscriptionExpiryMonth);
+    const yearDigits = this.digitsOnly(this.subscriptionExpiryYear);
+    const cvcDigits = this.digitsOnly(this.subscriptionCvc);
+    const postalDigits = this.digitsOnly(this.subscriptionPostalCode);
+
+    if (/^9{5,}$/.test(cardNumber)) return true;
+
+    if (cardholder.length < 2) return false;
+    if (cardNumber.length < 13 || cardNumber.length > 19) return false;
+    if (monthDigits.length < 1 || monthDigits.length > 2) return false;
+    if (yearDigits.length < 2 || yearDigits.length > 4) return false;
+    if (cvcDigits.length < 3 || cvcDigits.length > 4) return false;
+    if (postalDigits.length < 5) return false;
+
+    const month = Number(monthDigits);
+    if (!Number.isFinite(month) || month < 1 || month > 12) return false;
+
+    const currentYear = new Date().getFullYear();
+    const currentMonth = new Date().getMonth() + 1;
+    const parsedYear = yearDigits.length === 2 ? Number(`20${yearDigits}`) : Number(yearDigits);
+    if (!Number.isFinite(parsedYear) || parsedYear < currentYear || parsedYear > currentYear + 25) return false;
+    if (parsedYear === currentYear && month < currentMonth) return false;
+
+    return true;
+  }
+
+  async saveSubscription(): Promise<void> {
+    if (!this.isSubscriptionFormValid()) {
+      this.subscriptionError = 'Enter valid billing details.';
+      this.subscriptionStatus = '';
+      return;
+    }
+
+    this.subscriptionSaving.set(true);
+    this.subscriptionStatus = '';
+    this.subscriptionError = '';
+    try {
+      const response = await this.auth.updateBilling(
+        {
+          cardholderName: this.subscriptionCardholderName.trim(),
+          cardNumber: this.digitsOnly(this.subscriptionCardNumber),
+          expiryMonth: this.digitsOnly(this.subscriptionExpiryMonth),
+          expiryYear: this.digitsOnly(this.subscriptionExpiryYear),
+          cvc: this.digitsOnly(this.subscriptionCvc),
+          postalCode: this.digitsOnly(this.subscriptionPostalCode),
+          sandboxBypass: /^9{5,}$/.test(this.digitsOnly(this.subscriptionCardNumber))
+        },
+        this.subscriptionPlanCycle
+      );
+      if (!response.ok) {
+        this.subscriptionError = response.error || 'Could not update subscription.';
+        return;
+      }
+      this.subscriptionStatus = 'Subscription updated and workspace activated.';
+      this.loadSubscriptionState();
+    } finally {
+      this.subscriptionSaving.set(false);
+    }
+  }
+
+  private loadSubscriptionState(): void {
+    this.subscriptionPlanCycle = this.auth.planCycle() === 'annual' ? 'annual' : 'monthly';
+    this.subscriptionStatus = '';
+    this.subscriptionError = '';
+  }
+
+  private digitsOnly(value: unknown): string {
+    return String(value ?? '').replace(/\D+/g, '');
   }
 
   async onCustomerImportFileSelected(event: Event): Promise<void> {
@@ -872,24 +1312,28 @@ export default class AdminSettingsComponent implements OnInit {
   }
 
   onLogoFileSelected(event: Event): void {
+    this.brandingError = '';
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
-      this.brandingStatus = 'Please select a valid image file.';
+      this.brandingStatus = '';
+      this.brandingError = 'Please select a valid image file.';
       input.value = '';
       return;
     }
 
     const maxBytes = 5 * 1024 * 1024;
     if (file.size > maxBytes) {
-      this.brandingStatus = 'Logo must be 5MB or smaller.';
+      this.brandingStatus = '';
+      this.brandingError = 'Logo must be 5MB or smaller.';
       input.value = '';
       return;
     }
 
     this.brandingStatus = 'Uploading logo...';
+    this.brandingError = '';
     void this.uploadLogoViaApi(file, input);
   }
 
@@ -901,8 +1345,10 @@ export default class AdminSettingsComponent implements OnInit {
       );
       this.branding.setLogoUrl(result.url);
       this.brandingStatus = 'Business logo updated.';
+      this.brandingError = '';
     } catch {
-      this.brandingStatus = 'Logo upload failed. Try again.';
+      this.brandingStatus = '';
+      this.brandingError = 'Logo upload failed. Try again.';
     } finally {
       input.value = '';
     }
@@ -918,8 +1364,27 @@ export default class AdminSettingsComponent implements OnInit {
   }
 
   resetBusinessLogo(): void {
-    this.branding.resetLogo();
-    this.brandingStatus = 'Business logo reset to default.';
+    this.brandingError = '';
+    const currentUrl = (this.logoUrl() || '').trim();
+    const defaultUrl = (this.branding.defaultLogoUrl || '').trim();
+    if (!currentUrl || currentUrl === defaultUrl) {
+      this.branding.resetLogo();
+      this.brandingStatus = 'Business logo reset to default.';
+      return;
+    }
+
+    this.brandingStatus = 'Removing uploaded logo...';
+    this.brandingApi.deleteLogo(currentUrl).subscribe({
+      next: () => {
+        this.branding.resetLogo();
+        this.brandingStatus = 'Business logo removed. You can upload a new logo now.';
+        this.brandingError = '';
+      },
+      error: () => {
+        this.brandingStatus = '';
+        this.brandingError = 'Could not remove logo file. Please try again.';
+      }
+    });
   }
 
   loadSmsConfig(): void {
@@ -1037,9 +1502,11 @@ export default class AdminSettingsComponent implements OnInit {
     const lastName = this.widgetTestLastName.trim();
     const email = this.widgetTestEmail.trim();
     const phone = this.widgetTestPhone.trim();
+    const phoneE164 = this.normalizeWidgetPhone(phone);
     const vin = this.widgetTestVin.trim().toUpperCase();
     if (!firstName || !lastName) return false;
     if (!email && !phone) return false;
+    if (phone && !phoneE164) return false;
     if (!this.isValidVin(vin)) return false;
     if (phone && !this.widgetTestSmsOptIn) return false;
     return true;
@@ -1076,7 +1543,8 @@ export default class AdminSettingsComponent implements OnInit {
     const lastName = this.widgetTestLastName.trim();
     const name = `${firstName} ${lastName}`.trim();
     const email = this.widgetTestEmail.trim();
-    const phone = this.widgetTestPhone.trim();
+    const phoneRaw = this.widgetTestPhone.trim();
+    const phone = this.normalizeWidgetPhone(phoneRaw);
     const vin = this.widgetTestVin.trim().toUpperCase();
     const message = this.widgetTestMessage.trim();
     const smsOptIn = !!this.widgetTestSmsOptIn;
@@ -1090,8 +1558,12 @@ export default class AdminSettingsComponent implements OnInit {
       this.widgetError = 'First and last name are required.';
       return;
     }
-    if (!email && !phone) {
+    if (!email && !phoneRaw) {
       this.widgetError = 'At least email or phone is required.';
+      return;
+    }
+    if (phoneRaw && !phone) {
+      this.widgetError = 'Phone must be valid E.164 format (example: +15551234567) or a 10-digit US number.';
       return;
     }
     if (!vin) {
@@ -1164,24 +1636,85 @@ export default class AdminSettingsComponent implements OnInit {
     this.emailError = '';
     forkJoin({
       config: this.emailApi.getConfig(),
+      sender: this.emailApi.getSenderConfig().pipe(catchError(() => of(null))),
       templates: this.emailApi.listTemplates()
     })
       .pipe(finalize(() => this.emailLoading.set(false)))
       .subscribe({
-        next: ({ config, templates }) => {
+        next: ({ config, sender, templates }) => {
           this.emailConfig.set(config);
+          this.emailSender.set(sender?.sender || null);
+          this.emailSenderFrom = (sender?.sender?.fromEmail || config?.fromEmail || '').trim();
+          this.emailSenderName = (sender?.sender?.fromName || '').trim();
+          this.emailSenderReplyTo = (sender?.sender?.replyTo || '').trim();
           this.applyEmailConnectionToIntegration(config);
           this.applyEmailTemplatesResponse(templates, true);
-          if (config.mode === 'mock') {
-            this.emailStatus = 'Email is in mock mode (free local testing, no provider send).';
-            return;
-          }
-          this.emailStatus = config.readyForLive
-            ? `SendGrid is ready to send from ${config.fromEmail ?? '(configured sender)'}.`
-            : 'SendGrid mode is enabled but not fully configured yet.';
+          this.emailStatus = '';
         },
         error: err => {
           this.emailError = this.extractApiError(err, 'Could not load Email configuration.');
+        }
+      });
+  }
+
+  canSaveEmailSender(): boolean {
+    return this.isValidEmail(this.emailSenderFrom.trim());
+  }
+
+  saveEmailSender(): void {
+    const fromEmail = this.emailSenderFrom.trim();
+    const fromName = this.emailSenderName.trim();
+    const replyTo = this.emailSenderReplyTo.trim();
+    if (!this.isValidEmail(fromEmail)) {
+      this.emailError = 'Sender email must be a valid address.';
+      return;
+    }
+    if (replyTo && !this.isValidEmail(replyTo)) {
+      this.emailError = 'Reply-to must be a valid email address.';
+      return;
+    }
+
+    this.emailSaving.set(true);
+    this.emailError = '';
+    this.emailStatus = '';
+    this.emailApi.setSenderConfig({
+      fromEmail,
+      fromName: fromName || undefined,
+      replyTo: replyTo || undefined
+    })
+      .pipe(finalize(() => this.emailSaving.set(false)))
+      .subscribe({
+        next: res => {
+          const sender = res?.sender || null;
+          this.emailSender.set(sender);
+          this.emailSenderFrom = (sender?.fromEmail || '').trim();
+          this.emailSenderName = (sender?.fromName || '').trim();
+          this.emailSenderReplyTo = (sender?.replyTo || '').trim();
+          this.emailStatus = 'Email sender saved.';
+        },
+        error: err => {
+          this.emailError = this.extractApiError(err, 'Could not save email sender.');
+        }
+      });
+  }
+
+  resetEmailSender(): void {
+    this.emailSaving.set(true);
+    this.emailError = '';
+    this.emailStatus = '';
+    this.emailApi.clearSenderConfig()
+      .pipe(finalize(() => this.emailSaving.set(false)))
+      .subscribe({
+        next: res => {
+          const sender = res?.sender || null;
+          this.emailSender.set(sender);
+          this.emailSenderFrom = (sender?.fromEmail || '').trim();
+          this.emailSenderName = (sender?.fromName || '').trim();
+          this.emailSenderReplyTo = (sender?.replyTo || '').trim();
+          this.emailStatus = 'Email sender reset to environment default.';
+        },
+        error: err => {
+          this.emailError = this.extractApiError(err, 'Could not reset email sender.');
         }
       });
   }
@@ -1204,6 +1737,37 @@ export default class AdminSettingsComponent implements OnInit {
 
   canSaveEmailTemplate(): boolean {
     return !!this.emailTemplateName.trim() && !!this.emailTemplateSubject.trim() && !!this.emailTemplateBody.trim();
+  }
+
+  canInsertTemplateLogo(): boolean {
+    const logo = String(this.logoUrl() || '').trim();
+    return this.hasCustomLogo() && !!logo;
+  }
+
+  insertSavedLogoIntoTemplate(): void {
+    const logo = this.toEmailAssetUrl(String(this.logoUrl() || '').trim());
+    if (!this.canInsertTemplateLogo() || !logo) {
+      this.emailError = 'Upload a business logo first in Branding before inserting it into a template.';
+      return;
+    }
+    this.emailError = '';
+    const imgTag = `<img src="${logo}" alt="Company logo" style="max-width:220px;height:auto;display:block;" />`;
+    const current = String(this.emailTemplateBody || '').trim();
+    this.emailTemplateBody = current ? `${current}\n\n${imgTag}` : imgTag;
+  }
+
+  emailTemplatePreviewHtml(): string {
+    const html = String(this.emailTemplateBody || '').trim();
+    if (!html) return '';
+    return this.resolveEmailMergeTags(html, this.previewMergeTagValues());
+  }
+
+  emailSignaturePreviewHtml(): string {
+    const signature = String(this.emailSignatureDraft || '').trim();
+    if (!signature) return '';
+    const resolved = this.resolveEmailMergeTags(signature, this.previewMergeTagValues());
+    if (/<[^>]+>/.test(resolved)) return resolved;
+    return this.escapeHtml(resolved).replace(/\n/g, '<br/>');
   }
 
   saveEmailTemplate(): void {
@@ -1287,6 +1851,30 @@ export default class AdminSettingsComponent implements OnInit {
         },
         error: err => {
           this.emailError = this.extractApiError(err, 'Could not save signature.');
+        }
+      });
+  }
+
+  quoteTermsPreviewHtml(): string {
+    const terms = String(this.quoteTermsDraft || '').trim();
+    if (!terms) return '';
+    if (/<[^>]+>/.test(terms)) return this.resolveEmailMergeTags(terms, this.previewMergeTagValues());
+    return this.escapeHtml(terms).replace(/\n/g, '<br/>');
+  }
+
+  saveQuoteTerms(): void {
+    this.emailSaving.set(true);
+    this.emailError = '';
+    this.emailStatus = '';
+    this.settingsApi
+      .setValue<string>(EMAIL_FOOTER_TERMS_SETTING_KEY, this.quoteTermsDraft.trim())
+      .pipe(finalize(() => this.emailSaving.set(false)))
+      .subscribe({
+        next: () => {
+          this.emailStatus = 'Default email footer terms saved.';
+        },
+        error: err => {
+          this.emailError = this.extractApiError(err, 'Could not save email footer terms.');
         }
       });
   }
@@ -1588,6 +2176,15 @@ export default class AdminSettingsComponent implements OnInit {
     return /^[A-HJ-NPR-Z0-9]{17}$/.test(String(value || '').trim().toUpperCase());
   }
 
+  private normalizeWidgetPhone(value: string): string {
+    const digits = String(value || '').replace(/\D+/g, '');
+    if (!digits) return '';
+    if (digits.length === 10) return `+1${digits}`;
+    if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+    if (digits.length >= 8 && digits.length <= 15) return `+${digits}`;
+    return '';
+  }
+
   addScheduleBay(): void {
     const id = `bay-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     this.scheduleBays = [
@@ -1649,7 +2246,7 @@ export default class AdminSettingsComponent implements OnInit {
     });
   }
 
-  private cloneDefaultUsers(): AdminUser[] {
+  private cloneDefaultUsers(): WorkspaceUser[] {
     return DEFAULT_ADMIN_USERS.map(item => ({ ...item }));
   }
 
@@ -1659,11 +2256,9 @@ export default class AdminSettingsComponent implements OnInit {
 
   private loadPersistedAdminSettings(): void {
     forkJoin({
-      users: this.settingsApi.getValue<AdminUser[]>(ADMIN_USERS_SETTING_KEY),
       integrations: this.settingsApi.getValue<AppIntegration[]>(ADMIN_INTEGRATIONS_SETTING_KEY),
       schedule: this.settingsApi.getValue<ScheduleSettings>(SCHEDULE_SETTINGS_KEY)
-    }).subscribe(({ users, integrations, schedule }) => {
-      this.users.set(this.normalizeUsers(users));
+    }).subscribe(({ integrations, schedule }) => {
       this.integrations.set(this.normalizeIntegrations(integrations));
       this.applyScheduleSettings(this.normalizeScheduleSettings(schedule));
       this.adminSettingsLoaded = true;
@@ -1743,23 +2338,6 @@ export default class AdminSettingsComponent implements OnInit {
     return `${hour12}:00 ${suffix}`;
   }
 
-  private normalizeUsers(value: unknown): AdminUser[] {
-    if (!Array.isArray(value)) return this.cloneDefaultUsers();
-    const out: AdminUser[] = [];
-    for (const row of value) {
-      const source = row && typeof row === 'object' ? (row as Partial<AdminUser>) : null;
-      if (!source) continue;
-      const id = String(source.id || `u-${Date.now()}-${Math.floor(Math.random() * 1000)}`).trim();
-      const name = String(source.name || '').trim();
-      const email = String(source.email || '').trim().toLowerCase();
-      if (!id || !name || !email) continue;
-      const role: AdminUser['role'] = source.role === 'admin' ? 'admin' : 'user';
-      const status: AdminUser['status'] = source.status === 'active' ? 'active' : 'invited';
-      out.push({ id, name, email, role, status });
-    }
-    return out.length ? out : this.cloneDefaultUsers();
-  }
-
   private normalizeIntegrations(value: unknown): AppIntegration[] {
     const defaults = this.cloneDefaultIntegrations();
     if (!Array.isArray(value)) return defaults;
@@ -1778,11 +2356,6 @@ export default class AdminSettingsComponent implements OnInit {
       });
     }
     return Array.from(byKey.values());
-  }
-
-  private persistUsers(): void {
-    if (!this.adminSettingsLoaded) return;
-    this.settingsApi.setValue(ADMIN_USERS_SETTING_KEY, this.users()).subscribe({ error: () => {} });
   }
 
   private persistIntegrations(): void {
@@ -1806,6 +2379,179 @@ export default class AdminSettingsComponent implements OnInit {
     if (syncSignatureDraft) {
       this.emailSignatureDraft = typeof response.signature === 'string' ? response.signature : '';
     }
+  }
+
+  private previewMergeTagValues(): Record<string, string> {
+    const companyName = this.activeCompanyName();
+    const logoUrl = this.toEmailAssetUrl(String(this.logoUrl() || '').trim());
+    const profile = this.businessProfile.profile();
+    return {
+      company_name: companyName,
+      company_logo_url: logoUrl,
+      company_email: profile.companyEmail || 'service@yourcompany.com',
+      company_phone: profile.companyPhone || '(555) 555-0100',
+      company_address: profile.companyAddress || '123 Main St, Anytown, USA',
+      company_location: profile.companyAddress || '123 Main St, Anytown, USA',
+      customer_name: 'Jamie Customer',
+      customer_email: 'jamie.customer@example.com',
+      customer_phone: '(555) 410-8822',
+      lead_message: 'I need a quote for suspension and alignment.',
+      quote_terms: String(this.quoteTermsDraft || '').trim()
+    };
+  }
+
+  private loadQuoteTerms(): void {
+    this.settingsApi.getValue<string>(EMAIL_FOOTER_TERMS_SETTING_KEY).subscribe({
+      next: value => {
+        const primary = String(value || '').trim();
+        if (primary) {
+          this.quoteTermsDraft = primary;
+          return;
+        }
+        this.settingsApi.getValue<string>(LEGACY_QUOTE_TERMS_SETTING_KEY).subscribe({
+          next: legacy => {
+            this.quoteTermsDraft = String(legacy || '').trim();
+          },
+          error: () => {
+            this.quoteTermsDraft = '';
+          }
+        });
+      },
+      error: () => {
+        this.quoteTermsDraft = '';
+      }
+    });
+  }
+
+  private loadBusinessTaxRate(): void {
+    this.settingsApi.getValue<number | string>(BUSINESS_TAX_RATE_SETTING_KEY).subscribe({
+      next: value => {
+        this.businessTaxRate = this.normalizeTaxRate(value);
+      },
+      error: () => {
+        this.businessTaxRate = 0;
+      }
+    });
+  }
+
+  private loadLaborRates(): void {
+    this.settingsApi.getValue<LaborRate[]>(BUSINESS_LABOR_RATES_SETTING_KEY)
+      .subscribe({
+        next: value => {
+          const rows = Array.isArray(value) ? value : [];
+          this.laborRates = rows
+            .map((item, index) => ({
+              id: String(item?.id || '').trim() || `labor-${Date.now()}-${index}`,
+              name: String(item?.name || '').trim(),
+              price: this.roundCurrency(Math.max(0, Number(item?.price) || 0)),
+              taxable: !!item?.taxable
+            }))
+            .filter(item => !!item.name);
+        },
+        error: () => {
+          this.laborRates = [];
+        }
+      });
+  }
+
+  private loadInventoryItems(): void {
+    this.inventoryApi.listItems().subscribe({
+      next: res => {
+        this.inventoryItems.set(Array.isArray(res?.items) ? res.items : []);
+      },
+      error: () => {
+        this.inventoryItems.set([]);
+      }
+    });
+  }
+
+  private loadDocumentTemplates(): void {
+    this.settingsApi.getValue<DocumentTemplate[]>(BUSINESS_DOCUMENT_TEMPLATES_SETTING_KEY)
+      .subscribe({
+        next: value => {
+          this.documentTemplates = this.normalizeDocumentTemplates(Array.isArray(value) ? value : []);
+        },
+        error: () => {
+          this.documentTemplates = [];
+        }
+      });
+  }
+
+  private normalizeDocumentTemplates(value: unknown): DocumentTemplate[] {
+    const source = Array.isArray(value) ? value : [];
+    return source
+      .map((item, index) => {
+        const row = item && typeof item === 'object' ? (item as Partial<DocumentTemplate>) : null;
+        if (!row) return null;
+        const id = String(row.id || '').trim() || `tmpl-${Date.now()}-${index}`;
+        const name = String(row.name || '').trim();
+        const documentTypeRaw = String(row.documentType || '').trim().toLowerCase();
+        const documentType: DocumentTemplateType =
+          documentTypeRaw === 'invoice'
+            ? 'invoice'
+            : documentTypeRaw === 'both'
+              ? 'both'
+              : 'quote';
+        const subject = String(row.subject || '').trim() || 'Quote for {{customer_name}}';
+        const body = String(row.body || '').trim() || '<p>Hi {{customer_name}},</p><p>Here is your quote for {{vehicle_summary}}.</p>';
+        const partItemIds = Array.isArray(row.partItemIds)
+          ? row.partItemIds.map(idValue => String(idValue || '').trim()).filter(Boolean)
+          : [];
+        const laborRateIds = Array.isArray(row.laborRateIds)
+          ? row.laborRateIds.map(idValue => String(idValue || '').trim()).filter(Boolean)
+          : [];
+
+        if (!name) return null;
+        return { id, name, documentType, subject, body, partItemIds, laborRateIds };
+      })
+      .filter((item): item is DocumentTemplate => !!item);
+  }
+
+  private normalizeTaxRate(value: unknown): number {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 0;
+    if (numeric < 0) return 0;
+    if (numeric > 100) return 100;
+    return Math.round((numeric + Number.EPSILON) * 100) / 100;
+  }
+
+  private roundCurrency(value: number): number {
+    return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+  }
+
+  private activeCompanyName(): string {
+    const profileName = String(this.businessProfile.profile().companyName || '').trim();
+    if (profileName) return profileName;
+    const tenantId = String(this.tenantContext.tenantId() || '').trim();
+    const locations = this.auth.locations();
+    const selected = tenantId
+      ? locations.find(location => String(location.id || '').trim() === tenantId)
+      : null;
+    const fallback = selected?.name || locations[0]?.name || '';
+    return String(fallback || 'Your Company').trim();
+  }
+
+  private resolveEmailMergeTags(template: string, values: Record<string, string>): string {
+    const source = String(template || '');
+    if (!source) return '';
+    return source.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_full, rawKey: string) => {
+      const key = String(rawKey || '').toLowerCase();
+      if (!key) return '';
+      return String(values[key] ?? '').trim();
+    });
+  }
+
+  private toEmailAssetUrl(value: string): string {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (/^https?:\/\//i.test(raw)) return raw;
+    if (!raw.startsWith('/')) return raw;
+    const publicBase = String(environment.publicAppUrl || '').trim().replace(/\/+$/, '');
+    if (publicBase) return `${publicBase}${raw}`;
+    if (typeof window !== 'undefined' && window.location?.origin) {
+      return `${window.location.origin.replace(/\/+$/, '')}${raw}`;
+    }
+    return raw;
   }
 
   private isValidEmail(value: string): boolean {

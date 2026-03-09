@@ -13,8 +13,8 @@ import {
 const DEV_AUTH_STORAGE_KEY = 'exodus.dev.auth.user';
 const AUTH_PROFILE_STORAGE_KEY = 'exodus.auth.profile';
 const LOCAL_PASSWORD_ACCOUNTS_KEY = 'pathflow.local.password.accounts';
-const DEFAULT_LOCATION_ID = 'exodus-4x4';
-const DEFAULT_LOCATION_NAME = 'Exodus 4x4';
+const DEFAULT_LOCATION_ID = 'primary-location';
+const DEFAULT_LOCATION_NAME = 'Primary Location';
 
 interface DevAuthRecord {
   role: 'admin' | 'user';
@@ -162,7 +162,7 @@ export class AuthService {
   }
 
   signInDev(role: 'admin' | 'user', email?: string): void {
-    const fallbackEmail = role === 'admin' ? 'admin.local@exodus4x4.dev' : 'user.local@exodus4x4.dev';
+    const fallbackEmail = role === 'admin' ? 'admin.local@yourcompany.dev' : 'user.local@yourcompany.dev';
     const record: DevAuthRecord = {
       role,
       email: (email || fallbackEmail).trim().toLowerCase()
@@ -400,6 +400,35 @@ export class AuthService {
       return { ok: true };
     } catch {
       return { ok: false, error: 'Unable to update billing right now.' };
+    }
+  }
+
+  async requestPasswordReset(emailInput: string, tenantId = ''): Promise<{ ok: boolean; error?: string; message?: string }> {
+    const email = String(emailInput || '').trim().toLowerCase();
+    if (!email) {
+      return { ok: false, error: 'Email is required.' };
+    }
+    try {
+      const response = await fetch('/api/access', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          op: 'request-password-reset',
+          email,
+          tenantId: String(tenantId || '').trim()
+        })
+      });
+      const payload = await response.json() as { ok?: boolean; error?: string; message?: string };
+      if (!response.ok || !payload?.ok) {
+        return { ok: false, error: String(payload?.error || 'Unable to start reset flow right now.') };
+      }
+      return { ok: true, message: String(payload.message || 'If that account exists, a reset email has been sent.') };
+    } catch {
+      return { ok: false, error: 'Unable to start reset flow right now.' };
     }
   }
 

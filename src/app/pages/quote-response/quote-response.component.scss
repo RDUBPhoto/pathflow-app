@@ -1,0 +1,78 @@
+:host {
+  display: block;
+}
+
+.quote-response-content {
+  --background: radial-gradient(circle at 20% 20%, #10233f 0%, #071525 52%, #040b16 100%);
+}
+
+.quote-response-wrap {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.quote-response-card {
+  width: min(680px, 100%);
+  padding: 28px;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(10, 20, 35, 0.92);
+  color: #e2e8f0;
+  box-shadow: 0 12px 32px rgba(2, 6, 23, 0.45);
+}
+
+.status-pill {
+  display: inline-block;
+  margin: 0 0 12px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgba(148, 163, 184, 0.2);
+  color: #cbd5e1;
+}
+
+.status-pill.accepted {
+  background: rgba(34, 197, 94, 0.18);
+  color: #86efac;
+}
+
+.status-pill.declined {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fcd34d;
+}
+
+h1 {
+  margin: 0 0 6px;
+  font-size: 32px;
+  line-height: 1.2;
+}
+
+.vehicle {
+  margin: 0 0 18px;
+  color: #94a3b8;
+  font-size: 17px;
+}
+
+.message {
+  margin: 0 0 18px;
+  font-size: 18px;
+  line-height: 1.5;
+  color: #e2e8f0;
+}
+
+.tracking {
+  margin: 0 0 12px;
+  color: #93c5fd;
+  font-size: 14px;
+}
+
+.business {
+  margin: 0;
+  color: #cbd5e1;
+  font-size: 14px;
+}

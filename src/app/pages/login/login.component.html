@@ -47,11 +47,16 @@
         <ion-button expand="block" (click)="signInWithEmailPassword()" [disabled]="auth.loading()">
           Sign in with Email
         </ion-button>
+        <button type="button" class="inline-link-btn" (click)="requestPasswordReset()" [disabled]="passwordResetSending()">
+          {{ passwordResetSending() ? 'Sending reset email...' : 'Forgot password?' }}
+        </button>
 
         <p class="auth-hint error" *ngIf="passwordLoginError()">
           {{ passwordLoginError() }}
           <button type="button" class="inline-register-link" (click)="startRegistration()">Create account</button>
         </p>
+        <p class="auth-hint" *ngIf="passwordResetStatus()">{{ passwordResetStatus() }}</p>
+        <p class="auth-hint error" *ngIf="passwordResetError()">{{ passwordResetError() }}</p>
       </section>
 
       <div class="or-divider"><span>or continue with</span></div>

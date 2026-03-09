@@ -1,0 +1,14 @@
+<ion-content class="quote-response-content">
+  <div class="quote-response-wrap">
+    <section class="quote-response-card">
+      <p class="status-pill" [class.accepted]="action() === 'accept'" [class.declined]="action() === 'decline'">
+        {{ title() }}
+      </p>
+      <h1>{{ quoteNumber() }}</h1>
+      <p class="vehicle">{{ vehicle() }}</p>
+      <p class="message">{{ message() }}</p>
+      <p class="tracking" *ngIf="trackingMessage()">{{ trackingMessage() }}</p>
+      <p class="business">Business: {{ businessName() }}</p>
+    </section>
+  </div>
+</ion-content>

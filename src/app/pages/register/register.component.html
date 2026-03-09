@@ -51,6 +51,61 @@
           <h2>Workspace Details</h2>
         </div>
 
+        <ion-item>
+          <ion-label position="stacked">Business name</ion-label>
+          <ion-input
+            [disabled]="saving() || !auth.canBootstrapRegistration()"
+            [value]="businessName()"
+            (ionInput)="businessName.set($any($event.detail).value ?? '')"
+            placeholder="Exodus 4x4">
+          </ion-input>
+        </ion-item>
+
+        <ion-item>
+          <ion-label position="stacked">Business email</ion-label>
+          <ion-input
+            [disabled]="saving() || !auth.canBootstrapRegistration()"
+            [value]="businessEmail()"
+            (ionInput)="businessEmail.set($any($event.detail).value ?? '')"
+            placeholder="service@yourcompany.com">
+          </ion-input>
+        </ion-item>
+
+        <ion-item>
+          <ion-label position="stacked">Business phone</ion-label>
+          <ion-input
+            [disabled]="saving() || !auth.canBootstrapRegistration()"
+            [value]="businessPhone()"
+            (ionInput)="businessPhone.set($any($event.detail).value ?? '')"
+            placeholder="(555) 555-0100">
+          </ion-input>
+        </ion-item>
+
+        <ion-item>
+          <ion-label position="stacked">Business address</ion-label>
+          <ion-input
+            [disabled]="saving() || !auth.canBootstrapRegistration()"
+            [value]="businessAddress()"
+            (ionInput)="onBusinessAddressChange($any($event.detail).value ?? '')"
+            (ionBlur)="onBusinessAddressBlur()"
+            placeholder="123 Main St, Anytown, USA">
+          </ion-input>
+        </ion-item>
+        <div class="address-lookup-box" *ngIf="businessAddressSearching() || businessAddressSuggestions().length || businessAddressNoMatches()">
+          <div class="address-lookup-state" *ngIf="businessAddressSearching()">Searching addresses...</div>
+          <button
+            type="button"
+            class="address-lookup-option"
+            *ngFor="let item of businessAddressSuggestions()"
+            (mousedown)="$event.preventDefault()"
+            (click)="selectBusinessAddressSuggestion(item)">
+            {{ item.display }}
+          </button>
+          <div class="address-lookup-state" *ngIf="!businessAddressSearching() && businessAddressNoMatches()">
+            No address matches found.
+          </div>
+        </div>
+
         <div class="location-mode-row">
           <label class="location-mode-option">
             <input
@@ -234,6 +289,10 @@
 
       <p class="auth-hint warning" *ngIf="!requiresBilling() && !auth.canBootstrapRegistration()">
         This account is not allowed to bootstrap a new workspace. Ask an admin to invite or provision you.
+      </p>
+
+      <p class="auth-hint warning" *ngIf="!requiresBilling() && !registrationBusinessValid()">
+        Enter business name, email, phone, and address to continue.
       </p>
 
       <p class="auth-hint warning" *ngIf="requiresBilling() && !billingValid()">

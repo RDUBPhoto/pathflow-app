@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 
 const root = process.cwd();
@@ -8,6 +9,25 @@ const shouldSeedDemo =
   process.argv.includes('--seed-demo') ||
   process.env.PATHFLOW_SEED_DEMO === '1' ||
   String(process.env.PATHFLOW_SEED_DEMO || '').toLowerCase() === 'true';
+
+function readLocalSettingsValues() {
+  try {
+    const raw = fs.readFileSync(path.join(root, 'api', 'local.settings.json'), 'utf8');
+    const json = JSON.parse(raw);
+    const values = json && typeof json === 'object' ? (json.Values || {}) : {};
+    return values && typeof values === 'object' ? values : {};
+  } catch {
+    return {};
+  }
+}
+
+function isPlaceholderKey(value) {
+  const key = String(value || '').trim();
+  if (!key) return true;
+  if (key === 'REPLACE_WITH_DEV_SENDGRID_KEY') return true;
+  if (key.startsWith('YOUR_')) return true;
+  return false;
+}
 
 function run(cmd, args, opts = {}) {
   const p = spawn(cmd, args, { stdio: 'inherit', shell: process.platform === 'win32', ...opts });
@@ -33,6 +53,20 @@ function shutdown(code = 0) {
 process.on('SIGINT', () => shutdown(0));
 process.on('SIGTERM', () => shutdown(0));
 
+const localValues = readLocalSettingsValues();
+const localEmailMode = String(localValues.EMAIL_MODE || '').trim().toLowerCase();
+const localEmailFrom = String(localValues.EMAIL_FROM || '').trim();
+const localSendgridKey = String(localValues.SENDGRID_API_KEY || '').trim();
+if (localEmailMode === 'sendgrid') {
+  if (isPlaceholderKey(localSendgridKey)) {
+    console.warn('[dev-local] EMAIL_MODE=sendgrid but SENDGRID_API_KEY is missing/placeholder in api/local.settings.json');
+    console.warn('[dev-local] Local email sends will not go live until SENDGRID_API_KEY is set.');
+  }
+  if (!localEmailFrom) {
+    console.warn('[dev-local] EMAIL_MODE=sendgrid but EMAIL_FROM is empty in api/local.settings.json');
+  }
+}
+
 run('azurite', ['--location', '.azurite', '--debug', '.azurite/debug.log']);
 run('func', ['start'], { cwd: path.join(root, 'api') });
 
@@ -50,6 +84,40 @@ async function waitForPing(timeoutMs = 60000) {
     await sleep(500);
   }
   return false;
+}
+
+async function waitForFrontendApiProxy(timeoutMs = 90000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const res = await fetch('http://localhost:4200/api/ping');
+      if (res.ok) return true;
+    } catch {}
+    await sleep(800);
+  }
+  return false;
+}
+
+async function logEmailRuntimeStatus() {
+  try {
+    const res = await fetch('http://localhost:7071/api/email');
+    if (!res.ok) {
+      console.warn(`[dev-local] Could not read /api/email status (${res.status})`);
+      return;
+    }
+    const body = await res.json().catch(() => null);
+    if (!body || typeof body !== 'object') {
+      console.warn('[dev-local] /api/email returned a non-JSON status payload');
+      return;
+    }
+    const mode = String(body.mode || 'unknown');
+    const ready = !!body.readyForLive;
+    const fromEmail = String(body.fromEmail || '');
+    const provider = String(body.provider || '');
+    console.log(`[dev-local] Email runtime: mode=${mode} provider=${provider} readyForLive=${ready} from=${fromEmail || '(empty)'}`);
+  } catch {
+    console.warn('[dev-local] Could not read /api/email runtime status');
+  }
 }
 
 async function seedIfEmpty() {
@@ -202,6 +270,7 @@ async function seedIfEmpty() {
 (async () => {
   const ok = await waitForPing();
   if (ok) {
+    await logEmailRuntimeStatus();
     if (shouldSeedDemo) {
       try { await seedIfEmpty(); } catch (e) { console.error('[dev-local] seed error', e?.message || e); }
     } else {
@@ -210,5 +279,13 @@ async function seedIfEmpty() {
   } else {
     console.error('[dev-local] API did not start in time');
   }
-  run('ng', ['serve', '--proxy-config', 'proxy.conf.local.json']);
+  run('ng', ['serve', '--proxy-config', 'proxy.conf.local.json', '--port', '4200', '--host', 'localhost']);
+
+  const proxyOk = await waitForFrontendApiProxy();
+  if (proxyOk) {
+    console.log('[dev-local] Frontend proxy ready: http://localhost:4200/api -> http://localhost:7071/api');
+  } else {
+    console.error('[dev-local] Frontend started but /api proxy check failed at http://localhost:4200/api/ping');
+    console.error('[dev-local] If you see /api 404s, stop all dev servers and run `npm start` again from this folder.');
+  }
 })();

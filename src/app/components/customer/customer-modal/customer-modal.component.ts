@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, OnInit, OnChanges, SimpleChanges, signal, computed } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnInit, OnChanges, OnDestroy, SimpleChanges, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
@@ -7,6 +7,8 @@ import {
 } from '@ionic/angular/standalone';
 import { HttpClient } from '@angular/common/http';
 import { CustomersApi, Customer } from '../../../services/customers-api.service';
+import { AddressLookupService, AddressSuggestion } from '../../../services/address-lookup.service';
+import { Subscription, finalize } from 'rxjs';
 
 type ColorOpt = { label: string; hex: string };
 type Mode = 'add' | 'edit';
@@ -41,7 +43,7 @@ type UICustomer = Customer & {
   templateUrl: './customer-modal.component.html',
   styleUrls: ['./customer-modal.component.scss']
 })
-export default class CustomerModalComponent implements OnInit, OnChanges {
+export default class CustomerModalComponent implements OnInit, OnChanges, OnDestroy {
   @Input() isOpen: boolean = false;
   @Input() mode: Mode = 'add';
   @Input() customerId: string | null = null;
@@ -67,6 +69,11 @@ export default class CustomerModalComponent implements OnInit, OnChanges {
   email = signal<string>('');
   address = signal<string>('');
   notes = signal<string>('');
+  addressSuggestions = signal<AddressSuggestion[]>([]);
+  addressSearching = signal(false);
+  addressNoMatches = signal(false);
+  private addressLookupSub: Subscription | null = null;
+  private addressSearchTimer: ReturnType<typeof setTimeout> | null = null;
 
   vin = signal<string>('');
   vinStatus = signal<string>('');
@@ -129,7 +136,11 @@ export default class CustomerModalComponent implements OnInit, OnChanges {
   );
   hasVinDetails = computed(() => Object.values(this.vinDecoded()).some(v => !!v));
 
-  constructor(private api: CustomersApi, private http: HttpClient) {}
+  constructor(
+    private api: CustomersApi,
+    private http: HttpClient,
+    private addressLookup: AddressLookupService
+  ) {}
 
   ngOnInit() {
     this.loadAllCustomers();
@@ -155,6 +166,14 @@ export default class CustomerModalComponent implements OnInit, OnChanges {
     }
   }
 
+  ngOnDestroy(): void {
+    this.addressLookupSub?.unsubscribe();
+    if (this.addressSearchTimer) {
+      clearTimeout(this.addressSearchTimer);
+      this.addressSearchTimer = null;
+    }
+  }
+
   close() { this.closed.emit(); }
 
   onFirstChange(v: string) { this.firstName.set(v ?? ''); this.recomputeDupMatches(); }
@@ -174,6 +193,24 @@ export default class CustomerModalComponent implements OnInit, OnChanges {
     this.recomputeDupMatches();
   }
   onEmailChange(v: string) { this.email.set(v ?? ''); this.recomputeDupMatches(); }
+  onAddressChange(v: string) {
+    this.address.set(v ?? '');
+    this.addressNoMatches.set(false);
+    this.queueAddressLookup(this.address());
+  }
+  onAddressBlur() {
+    const normalized = this.address().trim().toLowerCase();
+    if (normalized) {
+      const exact = this.addressSuggestions().find(item => item.display.trim().toLowerCase() === normalized);
+      if (exact) this.selectAddressSuggestion(exact);
+    }
+    setTimeout(() => this.addressSuggestions.set([]), 120);
+  }
+  selectAddressSuggestion(item: AddressSuggestion) {
+    this.address.set(item.display);
+    this.addressSuggestions.set([]);
+    this.addressNoMatches.set(false);
+  }
   onVinChange(v: string) { this.vin.set((v || '').toUpperCase().replace(/[^A-Z0-9]/g, '')); }
 
   lookupVIN() {
@@ -332,6 +369,9 @@ export default class CustomerModalComponent implements OnInit, OnChanges {
     this.email.set('');
     this.address.set('');
     this.notes.set('');
+    this.addressSuggestions.set([]);
+    this.addressSearching.set(false);
+    this.addressNoMatches.set(false);
     this.vin.set('');
     this.vinStatus.set('');
     this.vinDecoded.set({});
@@ -377,6 +417,9 @@ export default class CustomerModalComponent implements OnInit, OnChanges {
     this.notes.set((c as any)['notes'] || '');
     this.vinDecoded.set({});
     this.vinStatus.set('');
+    this.addressSuggestions.set([]);
+    this.addressSearching.set(false);
+    this.addressNoMatches.set(false);
     this.showErrors.set(false);
     this.markFormPristine();
   }
@@ -456,5 +499,39 @@ export default class CustomerModalComponent implements OnInit, OnChanges {
 
   private patchFormFromCustomer(c: Customer): void {
     this.fillFormFromCustomer(c as any);
+  }
+
+  private queueAddressLookup(raw: string): void {
+    if (this.addressSearchTimer) {
+      clearTimeout(this.addressSearchTimer);
+      this.addressSearchTimer = null;
+    }
+    this.addressLookupSub?.unsubscribe();
+    this.addressSearching.set(false);
+
+    const query = String(raw || '').trim();
+    if (query.length < 4) {
+      this.addressSuggestions.set([]);
+      this.addressNoMatches.set(false);
+      return;
+    }
+    this.addressSearchTimer = setTimeout(() => this.lookupAddressSuggestions(query), 320);
+  }
+
+  private lookupAddressSuggestions(query: string): void {
+    this.addressSearching.set(true);
+    this.addressNoMatches.set(false);
+    this.addressLookupSub = this.addressLookup.search(query, 6, 'us')
+      .pipe(finalize(() => this.addressSearching.set(false)))
+      .subscribe({
+        next: suggestions => {
+          this.addressSuggestions.set(suggestions);
+          this.addressNoMatches.set(query.length >= 4 && !suggestions.length);
+        },
+        error: () => {
+          this.addressSuggestions.set([]);
+          this.addressNoMatches.set(true);
+        }
+      });
   }
 }

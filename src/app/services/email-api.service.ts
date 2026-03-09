@@ -35,6 +35,18 @@ export type EmailConfigResponse = {
   readyForLive: boolean;
 };
 
+export type EmailSenderConfig = {
+  fromEmail: string;
+  fromName: string;
+  replyTo: string;
+  source: 'tenant' | 'environment' | 'none';
+};
+
+export type EmailSenderConfigResponse = {
+  ok: boolean;
+  sender: EmailSenderConfig;
+};
+
 export type EmailSendResponse = {
   ok: boolean;
   mode: EmailMode;
@@ -111,6 +123,27 @@ export class EmailApiService {
 
   getConfig(): Observable<EmailConfigResponse> {
     return this.http.get<EmailConfigResponse>('/api/email');
+  }
+
+  getSenderConfig(): Observable<EmailSenderConfigResponse> {
+    return this.http.get<EmailSenderConfigResponse>('/api/email?scope=sender');
+  }
+
+  setSenderConfig(payload: {
+    fromEmail: string;
+    fromName?: string;
+    replyTo?: string;
+  }): Observable<EmailSenderConfigResponse> {
+    return this.http.post<EmailSenderConfigResponse>('/api/email', {
+      op: 'setSenderConfig',
+      ...payload
+    });
+  }
+
+  clearSenderConfig(): Observable<EmailSenderConfigResponse> {
+    return this.http.post<EmailSenderConfigResponse>('/api/email', {
+      op: 'clearSenderConfig'
+    });
   }
 
   listInbox(): Observable<EmailInboxResponse> {

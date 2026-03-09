@@ -247,6 +247,7 @@
   color: var(--ion-color-danger, #d14343);
 }
 
+.inline-link-btn,
 .inline-register-link {
   appearance: none;
   border: 0;
@@ -260,6 +261,12 @@
   cursor: pointer;
 }
 
+.inline-link-btn {
+  margin-top: 8px;
+}
+
+.inline-link-btn:hover,
+.inline-link-btn:focus-visible,
 .inline-register-link:hover,
 .inline-register-link:focus-visible {
   color: #d8e8ff;

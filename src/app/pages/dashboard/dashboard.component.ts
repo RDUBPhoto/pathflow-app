@@ -4,11 +4,12 @@ import { Router } from '@angular/router';
 import {
   IonHeader, IonToolbar, IonTitle, IonContent, IonButtons, IonButton,
   IonItem, IonLabel, IonInput, IonSpinner, IonIcon, IonModal,
-  IonList, IonPopover, IonSelect, IonSelectOption, IonFooter
+  IonList, IonPopover
 } from '@ionic/angular/standalone';
+import { ToastController } from '@ionic/angular';
 import { FormsModule } from '@angular/forms';
 import {
-  CdkDropList, CdkDropListGroup, CdkDrag, CdkDragDrop,
+  CdkDropList, CdkDrag, CdkDragDrop,
   moveItemInArray, transferArrayItem
 } from '@angular/cdk/drag-drop';
 import { LanesApi, Lane } from '../../services/lanes-api.service';
@@ -17,13 +18,13 @@ import { CustomersApi, Customer } from '../../services/customers-api.service';
 import { ScheduleApi, ScheduleItem } from '../../services/schedule-api.service';
 import { SmsApiService } from '../../services/sms-api.service';
 import { EmailApiService } from '../../services/email-api.service';
+import { InvoiceDetail, InvoicesDataService } from '../../services/invoices-data.service';
 import CustomerModalComponent from '../../components/customer/customer-modal/customer-modal.component';
 import ScheduleModalComponent from '../../components/schedule/schedule-modal/schedule-modal.component';
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
 import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
 import { addIcons } from 'ionicons';
 import {
-  settingsOutline,
   ellipsisVertical,
   addOutline,
   reorderTwoOutline,
@@ -37,6 +38,7 @@ type ColorOpt = { label: string; hex: string };
 type OnboardingStep = { selector: string; title: string; body: string };
 const LANE_COLORS_SETTING_KEY = 'dashboard.laneColors';
 const DASHBOARD_ONBOARDING_KEY = 'dashboard.onboarding.v1.completed';
+const DASHBOARD_SEEN_LEADS_KEY = 'dashboard.leads.seen.v1';
 
 @Component({
   selector: 'app-dashboard',
@@ -45,8 +47,8 @@ const DASHBOARD_ONBOARDING_KEY = 'dashboard.onboarding.v1.completed';
     CommonModule, FormsModule,
     IonHeader, IonToolbar, IonTitle, IonContent, IonButtons, IonButton,
     IonItem, IonLabel, IonInput, IonSpinner, IonIcon, IonModal,
-    IonList, IonPopover, IonSelect, IonSelectOption, IonFooter,
-    CdkDropList, CdkDropListGroup, CdkDrag,
+    IonList, IonPopover,
+    CdkDropList, CdkDrag,
     CustomerModalComponent,
     ScheduleModalComponent,
     UserMenuComponent,
@@ -92,13 +94,13 @@ export default class DashboardComponent implements OnDestroy {
   customerModalMode = signal<'add' | 'edit'>('add');
   laneToLinkAfterSave = signal<string | null>(null);
   apiStatus = signal<'unknown' | 'up' | 'down'>('unknown');
-  settingsOpen = signal(false);
   scheduleModalOpen = signal(false);
   scheduleModalCustomerId = signal<string | null>(null);
   unreadActivityByCustomer = signal<Record<string, number>>({});
   unreadEmailByCustomer = signal<Record<string, number>>({});
   unreadSmsIdsByCustomer = signal<Record<string, string[]>>({});
   unreadEmailIdsByCustomer = signal<Record<string, string[]>>({});
+  readonly invoiceDetails = computed(() => this.invoicesData.invoiceDetails());
   isMobileLayout = signal(false);
   onboardingActive = signal(false);
   onboardingStepIndex = signal(0);
@@ -135,9 +137,9 @@ export default class DashboardComponent implements OnDestroy {
       body: 'Use this top-right menu for account actions and Admin Settings.'
     },
     {
-      selector: '#dashboard-settings-guide-target',
-      title: 'Dashboard Settings',
-      body: 'Configure lanes and board behavior here before you start moving customers through workflow.'
+      selector: '.lane-settings-btn',
+      title: 'Lane Colors',
+      body: 'Use the lane 3-dot menu to set each lane color.'
     },
     {
       selector: '#workspace-nav-guide-target',
@@ -178,12 +180,13 @@ export default class DashboardComponent implements OnDestroy {
     private scheduleApi: ScheduleApi,
     private smsApi: SmsApiService,
     private emailApi: EmailApiService,
+    private invoicesData: InvoicesDataService,
     private http: HttpClient,
     private userSettings: UserScopedSettingsService,
-    private router: Router
+    private router: Router,
+    private toastController: ToastController
   ) {
     addIcons({
-      'settings-outline': settingsOutline,
       'ellipsis-vertical': ellipsisVertical,
       'add-outline': addOutline,
       'reorder-two-outline': reorderTwoOutline,
@@ -194,6 +197,7 @@ export default class DashboardComponent implements OnDestroy {
     effect(() => {
       this.userSettings.scope();
       this.loadLaneColors();
+      this.loadSeenLeads();
     });
     this.loadAll();
     this.checkApi();
@@ -211,10 +215,24 @@ export default class DashboardComponent implements OnDestroy {
     });
 
     effect(() => {
+      const value = this.seenLeadIds();
+      if (!this.seenLeadsLoaded || !this.seenLeadsInitialized) return;
+      if (this.seenLeadsPersistTimer) clearTimeout(this.seenLeadsPersistTimer);
+      this.seenLeadsPersistTimer = setTimeout(() => {
+        const ids = Object.keys(value).filter(Boolean);
+        this.userSettings.setValue(DASHBOARD_SEEN_LEADS_KEY, {
+          initialized: true,
+          ids
+        }).subscribe({ error: () => {} });
+      }, 120);
+    });
+
+    effect(() => {
       const msg = this.status();
       if (this.statusTimer) { clearTimeout(this.statusTimer); this.statusTimer = null; }
       if (this.statusFadeTimer) { clearTimeout(this.statusFadeTimer); this.statusFadeTimer = null; }
       if (msg) {
+        void this.presentStatusToast(msg);
         this.statusFading.set(false);
         this.statusFadeTimer = setTimeout(() => this.statusFading.set(true), 2600);
         this.statusTimer = setTimeout(() => {
@@ -231,11 +249,37 @@ export default class DashboardComponent implements OnDestroy {
   private laneColorPersistTimer: any = null;
   private laneColorsLoadToken = 0;
   private laneColorsLoaded = false;
+  private seenLeadsPersistTimer: any = null;
+  private seenLeadsLoadToken = 0;
+  private seenLeadsLoaded = false;
+  private seenLeadsInitialized = false;
+  private lastToastMessage = '';
+  private lastToastAt = 0;
+  seenLeadIds = signal<Record<string, true>>({});
+
+  private async presentStatusToast(message: string): Promise<void> {
+    const value = String(message || '').trim();
+    if (!value) return;
+    const now = Date.now();
+    if (this.lastToastMessage === value && now - this.lastToastAt < 1200) return;
+    this.lastToastMessage = value;
+    this.lastToastAt = now;
+    const lowered = value.toLowerCase();
+    const color = /(error|failed|missing|cannot|invalid|not|required)/.test(lowered) ? 'danger' : 'success';
+    const toast = await this.toastController.create({
+      message: value,
+      color,
+      duration: 1700,
+      position: 'top'
+    });
+    await toast.present();
+  }
 
   ngOnDestroy() {
     if (this.apiCheckTimer) { clearInterval(this.apiCheckTimer); this.apiCheckTimer = null; }
     if (this.unreadActivityTimer) { clearInterval(this.unreadActivityTimer); this.unreadActivityTimer = null; }
     if (this.laneColorPersistTimer) { clearTimeout(this.laneColorPersistTimer); this.laneColorPersistTimer = null; }
+    if (this.seenLeadsPersistTimer) { clearTimeout(this.seenLeadsPersistTimer); this.seenLeadsPersistTimer = null; }
   }
 
   ionViewWillEnter() {
@@ -396,19 +440,16 @@ export default class DashboardComponent implements OnDestroy {
     });
   }
 
-  openSettings() {
-    this.settingsOpen.set(true);
-  }
-
   laneStageKey(lane: Lane | null | undefined): string {
     const explicit = (lane?.stageKey || '').trim().toLowerCase();
-    if (explicit === 'quote') return 'lead';
     if (explicit) return explicit;
     const name = (lane?.name || '').trim().toLowerCase();
     if (!name) return 'custom';
-    if (/lead|quote|estimate/.test(name)) return 'lead';
+    if (/quote|estimate/.test(name)) return 'quote';
+    if (/lead/.test(name)) return 'lead';
     if (/sched|appointment|calendar/.test(name)) return 'scheduled';
     if (/in[- ]?progress|work in progress|progress/.test(name)) return 'inprogress';
+    if (/invoice|invoiced|paid/.test(name)) return 'invoiced';
     if (/complete|completed|done|pickup|ready/.test(name)) return 'completed';
     return 'custom';
   }
@@ -417,7 +458,12 @@ export default class DashboardComponent implements OnDestroy {
     if (!lane) return false;
     if (lane.protected) return true;
     const stageKey = this.laneStageKey(lane);
-    return stageKey === 'lead' || stageKey === 'scheduled' || stageKey === 'inprogress' || stageKey === 'completed';
+    return stageKey === 'lead'
+      || stageKey === 'quote'
+      || stageKey === 'invoiced'
+      || stageKey === 'scheduled'
+      || stageKey === 'inprogress'
+      || stageKey === 'completed';
   }
 
   isProtectedLaneById(laneId: string | null): boolean {
@@ -450,13 +496,23 @@ export default class DashboardComponent implements OnDestroy {
     return stage === 'scheduled' || stage === 'inprogress' || stage === 'completed';
   }
 
+  private isQuoteLaneById(laneId: string): boolean {
+    const lane = this.lanes().find(item => item.id === laneId) || null;
+    return this.laneStageKey(lane) === 'quote';
+  }
+
   private inProgressLaneId(): string | null {
     const lane = this.lanes().find(item => this.isInProgressLane(item));
     return lane?.id || null;
   }
 
   private workflowLaneStage(stageKey: string): boolean {
-    return stageKey === 'lead' || stageKey === 'scheduled' || stageKey === 'inprogress' || stageKey === 'completed';
+    return stageKey === 'lead'
+      || stageKey === 'quote'
+      || stageKey === 'invoiced'
+      || stageKey === 'scheduled'
+      || stageKey === 'inprogress'
+      || stageKey === 'completed';
   }
 
   private isWorkflowStatusLane(lane: Lane | null | undefined): boolean {
@@ -724,6 +780,19 @@ export default class DashboardComponent implements OnDestroy {
 
   closeLaneMenu() {
     this.laneMenuOpen.set(false);
+  }
+
+  laneMenuLane(): Lane | null {
+    const laneId = this.laneMenuLaneId();
+    if (!laneId) return null;
+    return this.lanes().find(item => item.id === laneId) || null;
+  }
+
+  setLaneColorFromMenu(color: string): void {
+    const lane = this.laneMenuLane();
+    if (!lane) return;
+    this.setLaneColor(lane, String(color || '').trim());
+    this.closeLaneMenu();
   }
 
   openDelete(lane: Lane) {
@@ -1007,6 +1076,55 @@ export default class DashboardComponent implements OnDestroy {
     });
   }
 
+  loadSeenLeads() {
+    this.seenLeadsLoaded = false;
+    this.seenLeadsInitialized = false;
+    const token = ++this.seenLeadsLoadToken;
+    this.userSettings.getValue<{ initialized?: boolean; ids?: string[] }>(DASHBOARD_SEEN_LEADS_KEY).subscribe(value => {
+      if (token !== this.seenLeadsLoadToken) return;
+      const normalized = this.normalizeSeenLeads(value);
+      this.seenLeadIds.set(normalized.ids);
+      this.seenLeadsInitialized = normalized.initialized;
+      this.seenLeadsLoaded = true;
+      this.maybeInitializeSeenLeads(this.items());
+    });
+  }
+
+  private normalizeSeenLeads(value: unknown): { initialized: boolean; ids: Record<string, true> } {
+    const out: Record<string, true> = {};
+    if (!value || typeof value !== 'object') {
+      return { initialized: false, ids: out };
+    }
+    const source = value as { initialized?: unknown; ids?: unknown };
+    const ids = Array.isArray(source.ids) ? source.ids : [];
+    for (const raw of ids) {
+      const id = String(raw || '').trim();
+      if (!id) continue;
+      out[id] = true;
+    }
+    return {
+      initialized: source.initialized === true,
+      ids: out
+    };
+  }
+
+  private maybeInitializeSeenLeads(map: Record<string, WorkItem[]>): void {
+    if (!this.seenLeadsLoaded || this.seenLeadsInitialized) return;
+    const leadLaneIds = this.lanes()
+      .filter(lane => this.laneStageKey(lane) === 'lead')
+      .map(lane => lane.id);
+    const next: Record<string, true> = {};
+    for (const laneId of leadLaneIds) {
+      for (const item of map[laneId] || []) {
+        const id = String(item.id || '').trim();
+        if (!id) continue;
+        next[id] = true;
+      }
+    }
+    this.seenLeadIds.set(next);
+    this.seenLeadsInitialized = true;
+  }
+
   private normalizeLaneColors(value: unknown): Record<string, string> {
     if (!value || typeof value !== 'object') return {};
     const input = value as Record<string, unknown>;
@@ -1028,7 +1146,7 @@ export default class DashboardComponent implements OnDestroy {
 
   private laneColorStableKey(lane: Lane): string {
     const explicitStage = String(lane.stageKey || '').trim().toLowerCase();
-    if (explicitStage) return `stage:${explicitStage === 'quote' ? 'lead' : explicitStage}`;
+    if (explicitStage) return `stage:${explicitStage}`;
     const inferredStage = this.laneStageKey(lane);
     if (inferredStage && inferredStage !== 'custom') return `stage:${inferredStage}`;
     const normalizedName = this.normalizeLaneName(lane.name);
@@ -1100,6 +1218,7 @@ export default class DashboardComponent implements OnDestroy {
                     }
                     for (const id of Object.keys(map)) map[id].sort((a,b) => (a.sort ?? 0) - (b.sort ?? 0));
                     this.items.set(map);
+    this.maybeInitializeSeenLeads(map);
                     this.pruneExpiredCompletedFromBoard();
                     this.syncScheduledLane();
                     this.loading.set(false);
@@ -1125,6 +1244,7 @@ export default class DashboardComponent implements OnDestroy {
                     }
                     for (const id of Object.keys(map)) map[id].sort((a,b) => (a.sort ?? 0) - (b.sort ?? 0));
                     this.items.set(map);
+    this.maybeInitializeSeenLeads(map);
                     this.pruneExpiredCompletedFromBoard();
                     this.loading.set(false);
                   },
@@ -1165,8 +1285,60 @@ export default class DashboardComponent implements OnDestroy {
     return name || 'No customer';
   }
 
+  linkedDocumentLabel(it: WorkItem, lane: Lane): string {
+    const doc = this.linkedDocumentForCard(it, lane);
+    if (!doc) return '';
+    return `${doc.documentType === 'invoice' ? 'Invoice' : 'Quote'}: ${doc.invoiceNumber}`;
+  }
+
+  hasLinkedDocument(it: WorkItem, lane: Lane): boolean {
+    return !!this.linkedDocumentForCard(it, lane);
+  }
+
+  openLinkedDocument(it: WorkItem, lane: Lane, event?: Event): void {
+    event?.preventDefault();
+    event?.stopPropagation();
+    const doc = this.linkedDocumentForCard(it, lane);
+    if (!doc) return;
+    this.router.navigate(['/invoices', doc.id]);
+  }
+
+  private linkedDocumentForCard(it: WorkItem, lane: Lane): InvoiceDetail | null {
+    const stage = this.laneStageKey(lane);
+    if (stage !== 'quote' && stage !== 'invoiced') return null;
+    const customerId = String(it.customerId || '').trim();
+    const customer = this.customersMap()[customerId] || null;
+    const email = String(customer?.email || '').trim().toLowerCase();
+    const name = this.customerName(it).trim().toLowerCase();
+
+    const matched = this.invoiceDetails()
+      .filter(doc => {
+        const docCustomerId = String(doc.customerId || '').trim();
+        if (customerId && docCustomerId && docCustomerId === customerId) return true;
+        const docEmail = String(doc.customerEmail || '').trim().toLowerCase();
+        if (email && docEmail && docEmail === email) return true;
+        const docName = String(doc.customerName || '').trim().toLowerCase();
+        return !!name && !!docName && docName === name;
+      })
+      .sort((a, b) => this.asMillis(b.updatedAt || b.createdAt || '') - this.asMillis(a.updatedAt || a.createdAt || ''));
+
+    if (!matched.length) return null;
+    if (stage === 'invoiced') {
+      return matched.find(doc => doc.documentType === 'invoice') || null;
+    }
+    return matched.find(doc => doc.documentType === 'quote') || null;
+  }
+
   hasUnreadActivity(it: WorkItem): boolean {
     return this.unreadSmsCount(it) > 0 || this.unreadEmailCount(it) > 0;
+  }
+
+  hasUnreadLeadNotice(it: WorkItem, lane: Lane): boolean {
+    if (!this.isLeadLane(lane)) return false;
+    if (!this.seenLeadsLoaded || !this.seenLeadsInitialized) return false;
+    const id = String(it.id || '').trim();
+    if (!id) return false;
+    return !this.seenLeadIds()[id];
   }
 
   unreadSmsCount(it: WorkItem): number {
@@ -1202,17 +1374,19 @@ export default class DashboardComponent implements OnDestroy {
     return parts.join(' • ');
   }
 
-  openCustomerProfileFromCard(it: WorkItem, event?: Event): void {
+  openCustomerProfileFromCard(it: WorkItem, lane?: Lane, event?: Event): void {
     event?.stopPropagation();
     event?.preventDefault();
+    this.markLeadSeen(it, lane);
     const customerId = (it.customerId || '').trim();
     if (!customerId) return;
     this.router.navigate(['/customers', customerId]);
   }
 
-  openCustomerActivity(it: WorkItem, activity: 'sms' | 'email', event?: Event): void {
+  openCustomerActivity(it: WorkItem, lane: Lane, activity: 'sms' | 'email', event?: Event): void {
     event?.stopPropagation();
     event?.preventDefault();
+    this.markLeadSeen(it, lane);
     const customerId = (it.customerId || '').trim();
     if (!customerId) return;
     if (activity === 'sms') {
@@ -1268,6 +1442,30 @@ export default class DashboardComponent implements OnDestroy {
     return this.laneStageKey(lane) === 'lead';
   }
 
+  private markLeadSeen(it: WorkItem, lane?: Lane): void {
+    if (!lane || !this.isLeadLane(lane)) return;
+    if (!this.seenLeadsLoaded || !this.seenLeadsInitialized) return;
+    const itemId = String(it.id || '').trim();
+    if (!itemId) return;
+    const current = this.seenLeadIds();
+    if (current[itemId]) return;
+    const next: Record<string, true> = {
+      ...current,
+      [itemId]: true
+    };
+    this.seenLeadIds.set(next);
+    this.persistSeenLeadsNow(next);
+  }
+
+  private persistSeenLeadsNow(idsMap?: Record<string, true>): void {
+    const source = idsMap || this.seenLeadIds();
+    const ids = Object.keys(source).filter(Boolean);
+    this.userSettings.setValue(DASHBOARD_SEEN_LEADS_KEY, {
+      initialized: true,
+      ids
+    }).subscribe({ error: () => {} });
+  }
+
   leadReceivedLabel(it: WorkItem): string {
     const fallback = this.customersMap()[it.customerId ?? '']?.createdAt || '';
     const raw = (it.createdAt || fallback || '').trim();
@@ -1286,6 +1484,12 @@ export default class DashboardComponent implements OnDestroy {
       .map((s: string) => s.toString().trim())
       .filter(Boolean);
     if (parts.length) return parts.join(' ');
+
+    const itemParts = [it.vehicleYear, it.vehicleMake, it.vehicleModel]
+      .filter(Boolean)
+      .map((s: string | undefined) => String(s || '').trim())
+      .filter(Boolean);
+    if (itemParts.length) return itemParts.join(' ');
 
     const m = (it.title || '').match(/\(([^)]+)\)/);
     return m?.[1] ?? '';
@@ -1470,6 +1674,7 @@ export default class DashboardComponent implements OnDestroy {
 
     if (movedToScheduled.length || movedOutOfScheduled.length) {
       this.items.set(map);
+    this.maybeInitializeSeenLeads(map);
       for (const it of movedToScheduled) {
         this.itemsApi.update({ id: it.id, laneId: scheduledId }).subscribe();
       }
@@ -1561,6 +1766,12 @@ export default class DashboardComponent implements OnDestroy {
   }
 
   openSearch(laneId: string) {
+    if (this.isQuoteLaneById(laneId)) {
+      this.router.navigate(['/invoices/new'], {
+        queryParams: { type: 'quote' }
+      });
+      return;
+    }
     this.searchLaneId.set(laneId);
     this.searchTerm.set('');
     this.searchOpen.set(true);
@@ -1589,6 +1800,11 @@ export default class DashboardComponent implements OnDestroy {
   addExistingToLane(c: Customer) {
     const laneId = this.searchLaneId();
     if (!laneId) return;
+    if (this.isQuoteLaneById(laneId)) {
+      this.closeSearch();
+      this.openQuoteBuilderForCustomer(c.id);
+      return;
+    }
     const isCompletedLane = this.isCompletedLaneById(laneId);
     const hasCalendar = this.hasCalendarEvent(c.id);
     if (this.isScheduleRequiredLaneById(laneId) && !hasCalendar && !isCompletedLane) {
@@ -1736,11 +1952,17 @@ export default class DashboardComponent implements OnDestroy {
     if (sourceId === targetId) {
       map[targetId] = [...map[targetId]].sort((a, b) => this.compareCreatedDesc(a, b));
       this.items.set(map);
+    this.maybeInitializeSeenLeads(map);
       return;
     } else {
       const moved = map[sourceId][event.previousIndex];
-      const toCompleted = this.isCompletedLaneById(targetLaneId);
       const movedCustomerId = (moved?.customerId || '').trim();
+      const launchQuoteAfterMove = this.isQuoteLaneById(targetLaneId);
+      if (launchQuoteAfterMove && !movedCustomerId) {
+        this.status.set('Select a customer before creating a quote.');
+        return;
+      }
+      const toCompleted = this.isCompletedLaneById(targetLaneId);
       if (movedCustomerId && this.isScheduleRequiredLaneById(targetLaneId) && !this.hasCalendarEvent(movedCustomerId)) {
         if (!toCompleted) {
           this.status.set('Calendar event required before moving to this lane.');
@@ -1757,6 +1979,7 @@ export default class DashboardComponent implements OnDestroy {
 
       transferArrayItem(map[sourceId], map[targetId], event.previousIndex, event.currentIndex);
       this.items.set(map);
+    this.maybeInitializeSeenLeads(map);
       const updated = map[targetId][event.currentIndex];
       const fromInProgress = this.isInProgressLaneById(sourceId);
       const toInProgress = this.isInProgressLaneById(targetLaneId);
@@ -1823,8 +2046,13 @@ export default class DashboardComponent implements OnDestroy {
           map[targetId] = [...map[targetId]].sort((a, b) => this.compareCreatedDesc(a, b));
           map[sourceId] = [...map[sourceId]].sort((a, b) => this.compareCreatedDesc(a, b));
           this.items.set(map);
+    this.maybeInitializeSeenLeads(map);
           if (needsCalendarOverride) {
             this.status.set('Moved to Completed. Click "No appointment required" to confirm override.');
+          }
+          if (launchQuoteAfterMove && movedCustomerId) {
+            this.openQuoteBuilderForCustomer(movedCustomerId);
+            this.status.set('Opening quote builder');
           }
           if (scheduledId && targetLaneId === scheduledId && updated.customerId) {
             this.openScheduleModal(updated.customerId);
@@ -1841,4 +2069,21 @@ export default class DashboardComponent implements OnDestroy {
 
   trackLane(_i: number, l: Lane) { return l.id; }
   trackItem(_i: number, it: WorkItem) { return it.id; }
+
+  private openQuoteBuilderForCustomer(customerId: string): void {
+    const id = String(customerId || '').trim();
+    if (!id) return;
+    const customer = this.customersMap()[id];
+    const queryParams: Record<string, string> = {
+      type: 'quote',
+      customerId: id
+    };
+    if (customer) {
+      queryParams['customerName'] = customer.name || '';
+      queryParams['customerEmail'] = customer.email || '';
+      queryParams['customerPhone'] = customer.phone || '';
+      queryParams['customerVehicle'] = this.customerVehicleBasic(customer);
+    }
+    this.router.navigate(['/invoices/new'], { queryParams });
+  }
 }

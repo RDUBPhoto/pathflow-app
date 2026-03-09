@@ -1,10 +1,14 @@
-import { Injectable, computed, signal } from '@angular/core';
+import { Injectable, computed, effect, inject, signal } from '@angular/core';
+import { TenantContextService } from './tenant-context.service';
 
 export type InvoiceStage = 'draft' | 'sent' | 'accepted' | 'declined' | 'expired';
+export type InvoiceBoardStage = Exclude<InvoiceStage, 'expired'>;
+export type InvoiceDocumentType = 'quote' | 'invoice';
 export type InvoiceLineType = 'part' | 'labor';
 
 export type InvoiceCard = {
   id: string;
+  documentType: InvoiceDocumentType;
   customerId?: string;
   customerName: string;
   customerEmail?: string;
@@ -14,10 +18,11 @@ export type InvoiceCard = {
   vehicle: string;
   template: string;
   stage: InvoiceStage;
+  isExpired: boolean;
 };
 
 export type InvoiceLane = {
-  id: InvoiceStage;
+  id: InvoiceBoardStage;
   title: string;
   color: string;
 };
@@ -43,6 +48,7 @@ export type InvoiceTimelineEntry = {
 
 export type InvoiceDetail = {
   id: string;
+  documentType: InvoiceDocumentType;
   invoiceNumber: string;
   stage: InvoiceStage;
   template: string;
@@ -93,6 +99,7 @@ type InvoiceCustomerLookup = {
 };
 
 export type InvoiceDraftPayload = {
+  documentType?: InvoiceDocumentType | null;
   customerId?: string | null;
   customerName?: string | null;
   customerEmail?: string | null;
@@ -131,14 +138,14 @@ export const INVOICE_LANES: InvoiceLane[] = [
   { id: 'draft', title: 'Draft', color: '#ef4444' },
   { id: 'sent', title: 'Sent', color: '#14b8a6' },
   { id: 'accepted', title: 'Accepted', color: '#22c55e' },
-  { id: 'declined', title: 'Declined', color: '#f59e0b' },
-  { id: 'expired', title: 'Expired', color: '#64748b' }
+  { id: 'declined', title: 'Declined', color: '#f59e0b' }
 ];
 
 const MOCK_INVOICES: InvoiceDetail[] = [
   {
     id: 'inv-430501',
-    invoiceNumber: 'INV-430501',
+    documentType: 'quote',
+    invoiceNumber: 'QTE-430501',
     stage: 'draft',
     template: 'Parts Invoice',
     customerId: '9f5337ab-3ca6-4f79-b3c6-cf7f9c7372fd',
@@ -147,17 +154,17 @@ const MOCK_INVOICES: InvoiceDetail[] = [
     customerPhone: '(513) 678-9899',
     customerAddress: '3724 Forsyth Park, Schertz, TX 78154',
     vehicle: '2020 LINCOLN Navigator',
-    businessName: 'Exodus 4x4',
-    businessEmail: 'service@exodus4x4.com',
+    businessName: 'Your Company',
+    businessEmail: 'service@yourcompany.com',
     businessPhone: '(555) 555-0100',
     businessAddress: 'San Antonio, TX',
-    businessLogoUrl: '/exodus-logo.png',
+    businessLogoUrl: '',
     description: 'Initial estimate for parts + labor',
     flags: '',
     jobType: 'General Repair',
     referralSource: 'Website',
     staffNote: 'Awaiting customer approval',
-    customerNote: 'Thank you for choosing Exodus 4x4.',
+    customerNote: 'Thank you for choosing us.',
     issueDate: '2026-02-20',
     dueDate: '2026-02-27',
     paymentDate: '',
@@ -206,7 +213,8 @@ const MOCK_INVOICES: InvoiceDetail[] = [
   },
   {
     id: 'inv-430502',
-    invoiceNumber: 'INV-430502',
+    documentType: 'quote',
+    invoiceNumber: 'QTE-430502',
     stage: 'draft',
     template: 'Labor only',
     customerId: 'f88e7547-d3e3-4722-a73e-f7f0adf95c8b',
@@ -215,11 +223,11 @@ const MOCK_INVOICES: InvoiceDetail[] = [
     customerPhone: '(555) 991-1223',
     customerAddress: '',
     vehicle: '2021 Ford Bronco',
-    businessName: 'Exodus 4x4',
-    businessEmail: 'service@exodus4x4.com',
+    businessName: 'Your Company',
+    businessEmail: 'service@yourcompany.com',
     businessPhone: '(555) 555-0100',
     businessAddress: 'San Antonio, TX',
-    businessLogoUrl: '/exodus-logo.png',
+    businessLogoUrl: '',
     description: 'Labor-only estimate',
     flags: '',
     jobType: 'Labor',
@@ -262,7 +270,8 @@ const MOCK_INVOICES: InvoiceDetail[] = [
   },
   {
     id: 'inv-430478',
-    invoiceNumber: 'INV-430478',
+    documentType: 'quote',
+    invoiceNumber: 'QTE-430478',
     stage: 'accepted',
     template: 'Alignment',
     customerName: 'Jordan Miles',
@@ -270,11 +279,11 @@ const MOCK_INVOICES: InvoiceDetail[] = [
     customerPhone: '(555) 201-8841',
     customerAddress: '',
     vehicle: '2019 Jeep Wrangler',
-    businessName: 'Exodus 4x4',
-    businessEmail: 'service@exodus4x4.com',
+    businessName: 'Your Company',
+    businessEmail: 'service@yourcompany.com',
     businessPhone: '(555) 555-0100',
     businessAddress: 'San Antonio, TX',
-    businessLogoUrl: '/exodus-logo.png',
+    businessLogoUrl: '',
     description: 'Alignment service',
     flags: '',
     jobType: 'Alignment',
@@ -317,6 +326,7 @@ const MOCK_INVOICES: InvoiceDetail[] = [
   },
   {
     id: 'inv-430477',
+    documentType: 'invoice',
     invoiceNumber: 'INV-430477',
     stage: 'sent',
     template: 'Parts Only',
@@ -325,11 +335,11 @@ const MOCK_INVOICES: InvoiceDetail[] = [
     customerPhone: '(555) 303-4422',
     customerAddress: '',
     vehicle: '2017 Toyota 4Runner',
-    businessName: 'Exodus 4x4',
-    businessEmail: 'service@exodus4x4.com',
+    businessName: 'Your Company',
+    businessEmail: 'service@yourcompany.com',
     businessPhone: '(555) 555-0100',
     businessAddress: 'San Antonio, TX',
-    businessLogoUrl: '/exodus-logo.png',
+    businessLogoUrl: '',
     description: 'Parts invoice',
     flags: '',
     jobType: 'Parts',
@@ -372,6 +382,7 @@ const MOCK_INVOICES: InvoiceDetail[] = [
   },
   {
     id: 'inv-430476',
+    documentType: 'invoice',
     invoiceNumber: 'INV-430476',
     stage: 'accepted',
     template: 'Parts Invoice',
@@ -380,11 +391,11 @@ const MOCK_INVOICES: InvoiceDetail[] = [
     customerPhone: '(555) 884-2100',
     customerAddress: '',
     vehicle: '2022 Gladiator Rubicon',
-    businessName: 'Exodus 4x4',
-    businessEmail: 'service@exodus4x4.com',
+    businessName: 'Your Company',
+    businessEmail: 'service@yourcompany.com',
     businessPhone: '(555) 555-0100',
     businessAddress: 'San Antonio, TX',
-    businessLogoUrl: '/exodus-logo.png',
+    businessLogoUrl: '',
     description: 'Completed invoice',
     flags: '',
     jobType: 'Service',
@@ -444,7 +455,8 @@ const MOCK_INVOICES: InvoiceDetail[] = [
   },
   {
     id: 'inv-430454',
-    invoiceNumber: 'INV-430454',
+    documentType: 'quote',
+    invoiceNumber: 'QTE-430454',
     stage: 'declined',
     template: 'Credit Memo',
     customerName: 'Morgan Lee',
@@ -452,11 +464,11 @@ const MOCK_INVOICES: InvoiceDetail[] = [
     customerPhone: '(555) 771-9001',
     customerAddress: '',
     vehicle: '2020 Tacoma TRD',
-    businessName: 'Exodus 4x4',
-    businessEmail: 'service@exodus4x4.com',
+    businessName: 'Your Company',
+    businessEmail: 'service@yourcompany.com',
     businessPhone: '(555) 555-0100',
     businessAddress: 'San Antonio, TX',
-    businessLogoUrl: '/exodus-logo.png',
+    businessLogoUrl: '',
     description: 'Cancelled invoice',
     flags: '',
     jobType: 'Credit',
@@ -499,25 +511,47 @@ const MOCK_INVOICES: InvoiceDetail[] = [
   }
 ];
 
+const INVOICES_STORAGE_KEY_PREFIX = 'pathflow.invoices.v1';
+
 @Injectable({ providedIn: 'root' })
 export class InvoicesDataService {
-  private readonly state = signal<InvoiceDetail[]>(MOCK_INVOICES.map(item => this.cloneInvoice(item)));
+  private readonly tenantContext = inject(TenantContextService);
+  private readonly state = signal<InvoiceDetail[]>([]);
 
   readonly invoiceDetails = computed(() => this.state().map(item => this.cloneInvoice(item)));
   readonly invoices = computed(() => this.state().map(item => this.toCard(item)));
 
-  previewNextInvoiceNumber(): string {
-    return `INV-${this.nextInvoiceSequence()}`;
+  constructor() {
+    effect(
+      () => {
+        const tenantId = this.storageTenantId();
+        const loaded = this.loadFromStorage(tenantId);
+        this.state.set(loaded);
+      },
+      { allowSignalWrites: true }
+    );
+  }
+
+  previewNextInvoiceNumber(documentType: InvoiceDocumentType = 'invoice'): string {
+    return this.previewNextDocumentNumber(documentType);
+  }
+
+  previewNextDocumentNumber(documentType: InvoiceDocumentType = 'invoice'): string {
+    const prefix = documentType === 'quote' ? 'QTE' : 'INV';
+    return `${prefix}-${this.nextInvoiceSequence()}`;
   }
 
   createDraftInvoice(payload: InvoiceDraftPayload = {}): InvoiceDetail {
     const sequence = this.nextInvoiceSequence();
     const nowIso = new Date().toISOString();
     const today = this.formatIsoDate(new Date());
+    const documentType: InvoiceDocumentType = payload.documentType === 'quote' ? 'quote' : 'invoice';
+    const numberPrefix = documentType === 'quote' ? 'QTE' : 'INV';
 
     const invoice = this.normalizeInvoice({
       id: `inv-${sequence}`,
-      invoiceNumber: `INV-${sequence}`,
+      documentType,
+      invoiceNumber: `${numberPrefix}-${sequence}`,
       stage: payload.stage || 'draft',
       template: this.safeText(payload.template) || 'Other',
 
@@ -566,7 +600,7 @@ export class InvoicesDataService {
       ]
     });
 
-    this.state.update(current => [invoice, ...current]);
+    this.updateState(current => [invoice, ...current]);
     return this.cloneInvoice(invoice);
   }
 
@@ -585,13 +619,13 @@ export class InvoicesDataService {
     const incoming = this.cloneInvoice(invoice);
     const nowIso = new Date().toISOString();
 
-    this.state.update(current => {
+    this.updateState(current => {
       const index = current.findIndex(item => item.id === incoming.id);
       if (index === -1) {
         const created = this.normalizeInvoice({
           ...incoming,
           id: incoming.id || `inv-${this.nextInvoiceSequence()}`,
-          invoiceNumber: incoming.invoiceNumber || this.previewNextInvoiceNumber(),
+          invoiceNumber: incoming.invoiceNumber || this.previewNextDocumentNumber(incoming.documentType),
           createdAt: incoming.createdAt || nowIso,
           updatedAt: nowIso
         });
@@ -633,7 +667,7 @@ export class InvoicesDataService {
     const nowIso = new Date().toISOString();
     let updated: InvoiceDetail | null = null;
 
-    this.state.update(current => {
+    this.updateState(current => {
       const index = current.findIndex(item => item.id === key);
       if (index === -1) return current;
 
@@ -680,6 +714,70 @@ export class InvoicesDataService {
     });
   }
 
+  invoicesByType(documentType: InvoiceDocumentType): InvoiceCard[] {
+    return this.invoices().filter(invoice => invoice.documentType === documentType);
+  }
+
+  createInvoiceFromQuote(quoteId: string): InvoiceDetail | null {
+    const quote = this.getInvoiceById(quoteId);
+    if (!quote || quote.documentType !== 'quote' || quote.stage !== 'accepted') return null;
+
+    return this.createDraftInvoice({
+      documentType: 'invoice',
+      customerId: quote.customerId,
+      customerName: quote.customerName,
+      customerEmail: quote.customerEmail,
+      customerPhone: quote.customerPhone,
+      customerAddress: quote.customerAddress,
+      vehicle: quote.vehicle,
+      businessName: quote.businessName,
+      businessEmail: quote.businessEmail,
+      businessPhone: quote.businessPhone,
+      businessAddress: quote.businessAddress,
+      businessLogoUrl: quote.businessLogoUrl,
+      template: quote.template,
+      description: quote.description,
+      flags: quote.flags,
+      jobType: quote.jobType,
+      referralSource: quote.referralSource,
+      staffNote: quote.staffNote,
+      customerNote: quote.customerNote,
+      lineItems: quote.lineItems.map(item => ({ ...item })),
+      includePaymentLink: true
+    });
+  }
+
+  deleteDraftQuote(id: string): boolean {
+    const key = String(id || '').trim();
+    if (!key) return false;
+
+    let removed = false;
+    this.updateState(current => {
+      const next = current.filter(item => {
+        const isMatch = item.id === key;
+        const isDraftQuote = item.documentType === 'quote' && item.stage === 'draft';
+        if (isMatch && isDraftQuote) {
+          removed = true;
+          return false;
+        }
+        return true;
+      });
+      return next;
+    });
+
+    return removed;
+  }
+
+  isExpiredQuote(invoice: Pick<InvoiceDetail, 'documentType' | 'stage' | 'updatedAt' | 'issueDate'>): boolean {
+    if (invoice.documentType !== 'quote') return false;
+    if (invoice.stage !== 'declined') return false;
+    const basis = String(invoice.updatedAt || invoice.issueDate || '').trim();
+    const basisMs = Date.parse(basis);
+    if (!Number.isFinite(basisMs)) return false;
+    const ageMs = Date.now() - basisMs;
+    return ageMs >= 30 * 24 * 60 * 60 * 1000;
+  }
+
   private safeText(value: unknown): string {
     return String(value || '').trim();
   }
@@ -691,6 +789,7 @@ export class InvoicesDataService {
   private toCard(invoice: InvoiceDetail): InvoiceCard {
     return {
       id: invoice.id,
+      documentType: invoice.documentType,
       customerId: this.safeText(invoice.customerId) || undefined,
       customerName: invoice.customerName,
       customerEmail: this.safeText(invoice.customerEmail) || undefined,
@@ -699,7 +798,8 @@ export class InvoicesDataService {
       total: this.roundCurrency(invoice.total),
       vehicle: this.safeText(invoice.vehicle) || 'Vehicle TBD',
       template: this.safeText(invoice.template) || 'Other',
-      stage: invoice.stage
+      stage: invoice.stage,
+      isExpired: this.isExpiredQuote(invoice)
     };
   }
 
@@ -711,6 +811,7 @@ export class InvoicesDataService {
 
     return {
       ...invoice,
+      documentType: invoice.documentType === 'quote' ? 'quote' : 'invoice',
       customerId: this.safeText(invoice.customerId),
       customerName: this.safeText(invoice.customerName) || 'Customer',
       customerEmail: this.safeText(invoice.customerEmail),
@@ -808,6 +909,59 @@ export class InvoicesDataService {
       lineItems: invoice.lineItems.map(line => ({ ...line })),
       timeline: invoice.timeline.map(entry => ({ ...entry }))
     };
+  }
+
+  private updateState(mutator: (current: InvoiceDetail[]) => InvoiceDetail[]): void {
+    this.state.update(current => mutator(current));
+    this.persistToStorage();
+  }
+
+  private storageTenantId(): string {
+    return String(this.tenantContext.tenantId() || 'main').trim().toLowerCase() || 'main';
+  }
+
+  private storageKey(tenantId: string): string {
+    return `${INVOICES_STORAGE_KEY_PREFIX}.${tenantId}`;
+  }
+
+  private loadFromStorage(tenantId: string): InvoiceDetail[] {
+    const key = this.storageKey(tenantId);
+    const fallbackKeys = [
+      key,
+      this.storageKey('primary-location'),
+      this.storageKey('main'),
+      INVOICES_STORAGE_KEY_PREFIX
+    ];
+    try {
+      let raw = '';
+      for (const candidate of fallbackKeys) {
+        const value = localStorage.getItem(candidate);
+        if (!value) continue;
+        raw = value;
+        if (candidate !== key) {
+          try { localStorage.setItem(key, value); } catch {}
+        }
+        break;
+      }
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .map(item => this.normalizeInvoice(item as InvoiceDetail))
+        .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+        .map(item => this.cloneInvoice(item));
+    } catch {
+      return [];
+    }
+  }
+
+  private persistToStorage(): void {
+    const key = this.storageKey(this.storageTenantId());
+    try {
+      localStorage.setItem(key, JSON.stringify(this.state()));
+    } catch {
+      // Ignore when storage is unavailable.
+    }
   }
 
   private nextInvoiceSequence(): number {

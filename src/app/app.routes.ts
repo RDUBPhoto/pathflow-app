@@ -4,6 +4,38 @@ import { customerProfileUnsavedGuard } from './pages/customer-profile/customer-p
 
 export const routes: Routes = [
   {
+    path: 'quote-response',
+    loadComponent: () =>
+      import('./pages/quote-response/quote-response.component').then(m => m.default)
+  },
+  {
+    path: 'quote-accepted',
+    data: { action: 'accept' },
+    loadComponent: () =>
+      import('./pages/quote-response/quote-response.component').then(m => m.default)
+  },
+  {
+    path: 'quote-declined',
+    data: { action: 'decline' },
+    loadComponent: () =>
+      import('./pages/quote-response/quote-response.component').then(m => m.default)
+  },
+  {
+    path: 'sms-opt-in-other',
+    loadComponent: () =>
+      import('./pages/sms-opt-in-other/sms-opt-in-other.component').then(m => m.default)
+  },
+  {
+    path: 'privacy-policy',
+    loadComponent: () =>
+      import('./pages/privacy-policy/privacy-policy.component').then(m => m.default)
+  },
+  {
+    path: 'terms-and-conditions',
+    loadComponent: () =>
+      import('./pages/terms-and-conditions/terms-and-conditions.component').then(m => m.default)
+  },
+  {
     path: 'login',
     loadComponent: () =>
       import('./pages/login/login.component').then(m => m.default)

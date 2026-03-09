@@ -72,6 +72,39 @@ function normalizeVin(value) {
   return isValidVin(cleaned) ? cleaned : "";
 }
 
+function normalizeVehicleText(value) {
+  const raw = asString(value);
+  if (!raw) return "";
+  const lower = raw.toLowerCase();
+  if (lower === "not applicable" || lower === "n/a" || lower === "null" || lower === "undefined") return "";
+  return raw;
+}
+
+async function decodeVinDetails(vin) {
+  const cleanVin = normalizeVin(vin);
+  if (!cleanVin) {
+    return { vehicleYear: "", vehicleMake: "", vehicleModel: "", vehicleTrim: "" };
+  }
+  const url = `https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValuesExtended/${encodeURIComponent(cleanVin)}?format=json`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return { vehicleYear: "", vehicleMake: "", vehicleModel: "", vehicleTrim: "" };
+    const payload = await res.json();
+    const row = payload && Array.isArray(payload.Results) ? payload.Results[0] : null;
+    if (!row || typeof row !== "object") {
+      return { vehicleYear: "", vehicleMake: "", vehicleModel: "", vehicleTrim: "" };
+    }
+    return {
+      vehicleYear: normalizeVehicleText(row.ModelYear),
+      vehicleMake: normalizeVehicleText(row.Make),
+      vehicleModel: normalizeVehicleText(row.Model),
+      vehicleTrim: normalizeVehicleText(row.Trim)
+    };
+  } catch (_) {
+    return { vehicleYear: "", vehicleMake: "", vehicleModel: "", vehicleTrim: "" };
+  }
+}
+
 function smsMode() {
   return asString(process.env.SMS_MODE).toLowerCase() === "azure" ? "azure" : "mock";
 }
@@ -436,6 +469,10 @@ async function createCustomer(customersClient, inbound, tenantId) {
     email: asString(inbound.email),
     phone: asString(inbound.phone),
     vin: asString(inbound.vin),
+    vehicleYear: asString(inbound.vehicleYear),
+    vehicleMake: asString(inbound.vehicleMake),
+    vehicleModel: asString(inbound.vehicleModel),
+    vehicleTrim: asString(inbound.vehicleTrim),
     creator: AUTO_CREATED_CREATOR,
     notes: mergeNotes("", inbound.message, inbound.sourceName),
     leadSource: "web",
@@ -453,7 +490,11 @@ async function createCustomer(customersClient, inbound, tenantId) {
     lastName: names.lastName,
     email: asString(inbound.email),
     phone: asString(inbound.phone),
-    vin: asString(inbound.vin)
+    vin: asString(inbound.vin),
+    vehicleYear: asString(inbound.vehicleYear),
+    vehicleMake: asString(inbound.vehicleMake),
+    vehicleModel: asString(inbound.vehicleModel),
+    vehicleTrim: asString(inbound.vehicleTrim)
   };
 }
 
@@ -474,6 +515,10 @@ async function updateCustomerFromInbound(customersClient, customer, inbound, ten
   if (!asString(customer.email) && asString(inbound.email)) patch.email = asString(inbound.email);
   if (!asString(customer.phone) && asString(inbound.phone)) patch.phone = asString(inbound.phone);
   if (!asString(customer.vin) && asString(inbound.vin)) patch.vin = asString(inbound.vin);
+  if (!asString(customer.vehicleYear) && asString(inbound.vehicleYear)) patch.vehicleYear = asString(inbound.vehicleYear);
+  if (!asString(customer.vehicleMake) && asString(inbound.vehicleMake)) patch.vehicleMake = asString(inbound.vehicleMake);
+  if (!asString(customer.vehicleModel) && asString(inbound.vehicleModel)) patch.vehicleModel = asString(inbound.vehicleModel);
+  if (!asString(customer.vehicleTrim) && asString(inbound.vehicleTrim)) patch.vehicleTrim = asString(inbound.vehicleTrim);
   if (!asString(customer.creator)) patch.creator = AUTO_CREATED_CREATOR;
 
   const nextNotes = mergeNotes(customer.notes, inbound.message, inbound.sourceName);
@@ -543,9 +588,12 @@ function intakeSourceName(body) {
   return asString(body.source || body.site || body.website || body.origin || "website-widget");
 }
 
-function buildLeadTitle(customer, vin) {
+function buildLeadTitle(customer, inbound) {
   const base = asString(customer && customer.name) || asString(customer && customer.email) || asString(customer && customer.phone) || "New Lead";
-  const suffix = asString(vin) ? `VIN ${asString(vin)}` : "Web Lead";
+  const vehicle = [asString(inbound && inbound.vehicleYear), asString(inbound && inbound.vehicleMake), asString(inbound && inbound.vehicleModel)]
+    .filter(Boolean)
+    .join(" ");
+  const suffix = vehicle || (asString(inbound && inbound.vin) ? `VIN ${asString(inbound && inbound.vin)}` : "Web Lead");
   return `${base} — ${suffix}`.slice(0, 240);
 }
 
@@ -559,7 +607,7 @@ async function createLead(workItemsClient, laneId, inbound, customer, tenantId) 
       partitionKey: tenantId,
       rowKey: id,
       laneId,
-      title: buildLeadTitle(customer, inbound.vin),
+      title: buildLeadTitle(customer, inbound),
       customerId: customer.id,
       customerName: customer.name,
       sort,
@@ -571,6 +619,10 @@ async function createLead(workItemsClient, laneId, inbound, customer, tenantId) 
       contactEmail: customer.email || "",
       contactPhone: customer.phone || "",
       vin: asString(inbound.vin),
+      vehicleYear: asString(inbound.vehicleYear),
+      vehicleMake: asString(inbound.vehicleMake),
+      vehicleModel: asString(inbound.vehicleModel),
+      vehicleTrim: asString(inbound.vehicleTrim),
       message: asString(inbound.message),
       createdAt: now,
       updatedAt: now
@@ -588,7 +640,7 @@ async function touchLead(workItemsClient, id, inbound, tenantId, laneId, custome
       partitionKey: tenantId,
       rowKey: id,
       updatedAt: new Date().toISOString(),
-      title: buildLeadTitle(customer, inbound.vin),
+      title: buildLeadTitle(customer, inbound),
       customerId: asString(customer && customer.id),
       customerName: asString(customer && customer.name),
       source: "web",
@@ -599,6 +651,10 @@ async function touchLead(workItemsClient, id, inbound, tenantId, laneId, custome
       contactEmail: asString(customer && customer.email),
       contactPhone: asString(customer && customer.phone),
       vin: asString(inbound.vin),
+      vehicleYear: asString(inbound.vehicleYear),
+      vehicleMake: asString(inbound.vehicleMake),
+      vehicleModel: asString(inbound.vehicleModel),
+      vehicleTrim: asString(inbound.vehicleTrim),
       message: asString(inbound.message),
       ...(Number.isFinite(Number(nextSort)) ? { sort: Number(nextSort) } : {})
     },
@@ -829,6 +885,12 @@ module.exports = async function (context, req) {
     context.res = json(req, 400, { error: "Phone must be valid when SMS opt-in is checked (E.164 or US 10-digit)." });
     return;
   }
+
+  const vinDetails = await decodeVinDetails(inbound.vin);
+  inbound.vehicleYear = vinDetails.vehicleYear;
+  inbound.vehicleMake = vinDetails.vehicleMake;
+  inbound.vehicleModel = vinDetails.vehicleModel;
+  inbound.vehicleTrim = vinDetails.vehicleTrim;
 
   try {
     const customersClient = await getTableClient(CUSTOMERS_TABLE);

@@ -56,9 +56,28 @@
 
           <ion-item class="full" style="grid-column: 1 / -1;">
             <ion-label position="stacked">Address *</ion-label>
-            <ion-textarea autoGrow="true" [ngModel]="address()" (ngModelChange)="address.set($event)"></ion-textarea>
+            <ion-textarea
+              autoGrow="true"
+              [ngModel]="address()"
+              (ngModelChange)="onAddressChange($event)"
+              (ionBlur)="onAddressBlur()">
+            </ion-textarea>
             <ion-note slot="helper" color="danger" *ngIf="showErrors() && !addressValid()">Enter an address</ion-note>
           </ion-item>
+          <div class="full address-lookup-box" *ngIf="addressSearching() || addressSuggestions().length || addressNoMatches()">
+            <div class="address-lookup-state" *ngIf="addressSearching()">Searching addresses...</div>
+            <button
+              type="button"
+              class="address-lookup-option"
+              *ngFor="let item of addressSuggestions()"
+              (mousedown)="$event.preventDefault()"
+              (click)="selectAddressSuggestion(item)">
+              {{ item.display }}
+            </button>
+            <div class="address-lookup-state" *ngIf="!addressSearching() && addressNoMatches()">
+              No address matches found.
+            </div>
+          </div>
         </div>
 
         <div style="font-weight:700; margin-top:18px;">Vehicle Details</div>

@@ -1,13 +1,24 @@
 const { TableClient } = require("@azure/data-tables");
+const { BlobServiceClient } = require("@azure/storage-blob");
 const { randomUUID } = require("crypto");
+const { resolveTenantId } = require("../_shared/tenant");
 
 const EMAIL_TABLE = "emailmessages";
 const EMAIL_TEMPLATE_TABLE = "emailtemplates";
 const CUSTOMERS_TABLE = "customers";
 const LANES_TABLE = "lanes";
 const WORKITEMS_TABLE = "workitems";
+const NOTIFICATIONS_TABLE = "notifications";
+const USERS_TABLE = "useraccess";
+const APP_SETTINGS_TABLE = "appsettings";
+const BRANDING_CONTAINER = "branding";
 const PARTITION = "main";
+const USERS_PARTITION = "v1";
 const SIGNATURE_ROW = "__signature__";
+const SENDER_ROW = "__sender__";
+const EMAIL_FOOTER_TERMS_KEY = "email.footer.terms.html";
+const LEGACY_QUOTE_TERMS_KEY = "quote.terms.html";
+const FOOTER_TERMS_MARKER = 'data-pathflow-footer-terms="1"';
 const AUTO_CREATED_CREATOR = "Auto-Created Lead";
 
 function asString(value) {
@@ -152,6 +163,42 @@ function isEmailAddress(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(asString(value));
 }
 
+function escapeHtml(value) {
+  return asString(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function parseSettingValue(valueJson) {
+  const raw = asString(valueJson);
+  if (!raw) return "";
+  try {
+    const parsed = JSON.parse(raw);
+    return asString(parsed);
+  } catch {
+    return raw;
+  }
+}
+
+function looksLikeHtml(value) {
+  return /<[^>]+>/.test(asString(value));
+}
+
+function stripHtml(value) {
+  return asString(value)
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|h[1-6]|tr)>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
 function splitDisplayName(rawName, fallbackEmail) {
   const clean = asString(rawName)
     .replace(/^"+|"+$/g, "")
@@ -194,14 +241,78 @@ function splitDisplayName(rawName, fallbackEmail) {
 
 function getEmailMode() {
   const mode = asString(process.env.EMAIL_MODE).toLowerCase();
-  if (mode === "sendgrid") return "sendgrid";
-  return "mock";
+  if (mode === "mock") return "mock";
+  return "sendgrid";
 }
 
-function getConfigStatus() {
+function getDefaultSender() {
+  const fromEmail = asString(process.env.EMAIL_FROM || process.env.FROM_EMAIL);
+  return {
+    fromEmail,
+    fromName: "",
+    replyTo: "",
+    source: fromEmail ? "environment" : "none"
+  };
+}
+
+async function getSenderConfig(templateClient) {
+  const fallback = getDefaultSender();
+  let row = null;
+  try {
+    row = await templateClient.getEntity(PARTITION, SENDER_ROW);
+  } catch (_) {
+    row = null;
+  }
+
+  const fromEmail = normalizeEmail(row && row.fromEmail);
+  const fromName = asString(row && row.fromName);
+  const replyTo = normalizeEmail(row && row.replyTo);
+  if (fromEmail) {
+    return {
+      fromEmail,
+      fromName,
+      replyTo,
+      source: "tenant"
+    };
+  }
+  return fallback;
+}
+
+async function setSenderConfig(templateClient, payload) {
+  const fromEmail = normalizeEmail(payload && payload.fromEmail);
+  const fromName = asString(payload && payload.fromName);
+  const replyTo = normalizeEmail(payload && payload.replyTo);
+  if (!isEmailAddress(fromEmail)) {
+    throw new Error("fromEmail must be a valid email address.");
+  }
+  if (replyTo && !isEmailAddress(replyTo)) {
+    throw new Error("replyTo must be a valid email address.");
+  }
+
+  await templateClient.upsertEntity(
+    {
+      partitionKey: PARTITION,
+      rowKey: SENDER_ROW,
+      fromEmail,
+      fromName,
+      replyTo,
+      updatedAt: new Date().toISOString()
+    },
+    "Merge"
+  );
+}
+
+async function clearSenderConfig(templateClient) {
+  try {
+    await templateClient.deleteEntity(PARTITION, SENDER_ROW);
+  } catch (_) {}
+}
+
+async function getConfigStatus(templateClient) {
   const mode = getEmailMode();
   const hasApiKey = !!asString(process.env.SENDGRID_API_KEY);
-  const fromEmail = asString(process.env.EMAIL_FROM || process.env.FROM_EMAIL);
+  const sender = await getSenderConfig(templateClient);
+  const fromEmail = asString(sender.fromEmail);
   const hasFromEmail = !!fromEmail;
   const readyForLive = mode === "sendgrid" && hasApiKey && hasFromEmail;
   return {
@@ -212,6 +323,9 @@ function getConfigStatus() {
       fromEmail: hasFromEmail
     },
     fromEmail: fromEmail || null,
+    fromName: asString(sender.fromName) || null,
+    replyTo: asString(sender.replyTo) || null,
+    senderSource: sender.source,
     readyForLive
   };
 }
@@ -316,6 +430,62 @@ async function getTableClient(tableName) {
   return client;
 }
 
+async function getAppSettingValue(settingsClient, tenantId, key) {
+  try {
+    const entity = await settingsClient.getEntity(asString(tenantId), asString(key));
+    return parseSettingValue(entity && entity.valueJson);
+  } catch (_) {
+    return "";
+  }
+}
+
+async function getEmailFooterTerms(settingsClient, tenantId) {
+  const primary = await getAppSettingValue(settingsClient, tenantId, EMAIL_FOOTER_TERMS_KEY);
+  if (primary) return primary;
+  const legacy = await getAppSettingValue(settingsClient, tenantId, LEGACY_QUOTE_TERMS_KEY);
+  return legacy;
+}
+
+function appendGlobalFooter(message, html, footerTerms) {
+  const termsRaw = asString(footerTerms);
+  if (!termsRaw) {
+    return {
+      message: asString(message),
+      html: asString(html)
+    };
+  }
+
+  const existingHtml = asString(html);
+  if (existingHtml.includes(FOOTER_TERMS_MARKER)) {
+    // Already composed upstream (quote/invoice preview body contains footer terms).
+    return {
+      message: asString(message),
+      html: existingHtml
+    };
+  }
+
+  const termsHtml = looksLikeHtml(termsRaw)
+    ? termsRaw
+    : escapeHtml(termsRaw).replace(/\n/g, "<br/>");
+  const termsText = looksLikeHtml(termsRaw) ? stripHtml(termsRaw) : termsRaw;
+
+  const nextMessage = [asString(message), "", "Terms:", termsText]
+    .filter(section => section !== "")
+    .join("\n");
+
+  let nextHtml = existingHtml;
+  if (nextHtml) {
+    nextHtml = `${nextHtml}<hr style="margin-top:20px;border:none;border-top:1px solid #d5d9e2;" /><div style="margin-top:12px;"><strong>Terms:</strong><br/>${termsHtml}</div>`;
+  } else {
+    nextHtml = `<div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;"><p>${escapeHtml(asString(message)).replace(/\n/g, "<br/>")}</p><hr style="margin-top:20px;border:none;border-top:1px solid #d5d9e2;" /><div style="margin-top:12px;"><strong>Terms:</strong><br/>${termsHtml}</div></div>`;
+  }
+
+  return {
+    message: nextMessage,
+    html: nextHtml
+  };
+}
+
 async function listAllMessages(client) {
   const out = [];
   const iter = client.listEntities({ queryOptions: { filter: `PartitionKey eq '${PARTITION}'` } });
@@ -380,6 +550,9 @@ async function listTemplates(templateClient) {
   for await (const entity of iter) {
     const rowKey = asString(entity.rowKey);
     if (!rowKey) continue;
+    if (rowKey === SENDER_ROW) {
+      continue;
+    }
     if (rowKey === SIGNATURE_ROW) {
       signature = asString(entity.body);
       continue;
@@ -565,12 +738,32 @@ async function createLeadWorkItem(workItemsClient, laneId, customer, subject) {
   return id;
 }
 
-async function sendViaSendgrid(to, subject, message) {
+async function sendViaSendgrid(to, subject, message, sender, html) {
   const key = asString(process.env.SENDGRID_API_KEY);
-  const from = asString(process.env.EMAIL_FROM || process.env.FROM_EMAIL);
+  const from = normalizeEmail(sender && sender.fromEmail);
   if (!key || !from) {
     throw new Error("EMAIL_MODE is sendgrid but SENDGRID_API_KEY or EMAIL_FROM is missing.");
   }
+
+  const fromName = asString(sender && sender.fromName);
+  const replyTo = normalizeEmail(sender && sender.replyTo);
+  const content = [{ type: "text/plain", value: asString(message) }];
+  let htmlValue = asString(html);
+  let attachments = [];
+  if (htmlValue) {
+    const prepared = await buildInlineBrandingAttachments(htmlValue);
+    htmlValue = prepared.html;
+    attachments = prepared.attachments;
+    content.push({ type: "text/html", value: htmlValue });
+  }
+  const payload = {
+    personalizations: [{ to: [{ email: to }] }],
+    from: fromName ? { email: from, name: fromName } : { email: from },
+    subject,
+    content
+  };
+  if (attachments.length) payload.attachments = attachments;
+  if (replyTo) payload.reply_to = { email: replyTo };
 
   const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
     method: "POST",
@@ -578,12 +771,7 @@ async function sendViaSendgrid(to, subject, message) {
       Authorization: `Bearer ${key}`,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({
-      personalizations: [{ to: [{ email: to }] }],
-      from: { email: from },
-      subject,
-      content: [{ type: "text/plain", value: message }]
-    })
+    body: JSON.stringify(payload)
   });
 
   if (!response.ok) {
@@ -597,9 +785,172 @@ async function sendViaSendgrid(to, subject, message) {
   };
 }
 
+function inferContentTypeFromBlobName(blobName) {
+  const lower = asString(blobName).toLowerCase();
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".gif")) return "image/gif";
+  if (lower.endsWith(".svg")) return "image/svg+xml";
+  if (lower.endsWith(".webp")) return "image/webp";
+  return "application/octet-stream";
+}
+
+function parseBlobNamesFromHtml(html) {
+  const source = asString(html);
+  if (!source) return [];
+  const names = new Set();
+  const attrRegex = /(src|href)\s*=\s*(["'])([^"']+)\2/gi;
+  let match;
+  while ((match = attrRegex.exec(source))) {
+    const raw = asString(match[3]);
+    const blobName = extractBlobNameFromBrandingUrl(raw);
+    if (!blobName) continue;
+    names.add(blobName);
+  }
+  return Array.from(names);
+}
+
+function extractBlobNameFromBrandingUrl(rawValue) {
+  const raw = asString(rawValue).replace(/&amp;/g, "&").trim();
+  if (!raw || raw.indexOf("/api/brandingUpload") < 0) return "";
+  try {
+    const parsed = new URL(raw, "https://local");
+    const blob = asString(parsed.searchParams.get("blob"));
+    if (!blob) return "";
+    return decodeURIComponent(blob).replace(/^\/+/, "");
+  } catch (_) {
+    return "";
+  }
+}
+
+function replaceBlobUrlsWithCid(html, blobNameToCid) {
+  let out = asString(html);
+  if (!out) return out;
+  return out.replace(/(src|href)\s*=\s*(["'])([^"']+)\2/gi, (full, attr, quote, url) => {
+    const blobName = extractBlobNameFromBrandingUrl(url);
+    if (!blobName) return full;
+    const cid = asString(blobNameToCid.get(blobName));
+    if (!cid) return full;
+    return `${attr}=${quote}cid:${cid}${quote}`;
+  });
+}
+
+async function buildInlineBrandingAttachments(html) {
+  const source = asString(html);
+  if (!source) return { html: source, attachments: [] };
+  const blobNames = parseBlobNamesFromHtml(source);
+  if (!blobNames.length) return { html: source, attachments: [] };
+
+  const conn = asString(process.env.STORAGE_CONNECTION_STRING);
+  if (!conn) return { html: source, attachments: [] };
+
+  const service = BlobServiceClient.fromConnectionString(conn);
+  const container = service.getContainerClient(BRANDING_CONTAINER);
+  const attachments = [];
+  const nameToCid = new Map();
+
+  for (const blobName of blobNames) {
+    try {
+      const blob = container.getBlobClient(blobName);
+      const exists = await blob.exists();
+      if (!exists) continue;
+      const download = await blob.download();
+      const chunks = [];
+      for await (const chunk of download.readableStreamBody) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      const contentBuffer = Buffer.concat(chunks);
+      if (!contentBuffer.length) continue;
+      const cid = `branding-${randomUUID()}`;
+      attachments.push({
+        content: contentBuffer.toString("base64"),
+        filename: blobName.split("/").pop() || `logo-${attachments.length + 1}.bin`,
+        type: asString(download.contentType) || inferContentTypeFromBlobName(blobName),
+        disposition: "inline",
+        content_id: cid
+      });
+      nameToCid.set(blobName, cid);
+    } catch (_) {}
+  }
+
+  if (!attachments.length) return { html: source, attachments: [] };
+  return {
+    html: replaceBlobUrlsWithCid(source, nameToCid),
+    attachments
+  };
+}
+
+async function listActiveWorkspaceUsers(userClient) {
+  const out = [];
+  const iter = userClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${USERS_PARTITION}'` } });
+  for await (const entity of iter) {
+    const email = normalizeEmail(entity.email || entity.rowKey);
+    if (!email) continue;
+    if (asBool(entity.accessRevoked) || asBool(entity.disabled)) continue;
+    const tenants = (() => {
+      try {
+        return JSON.parse(asString(entity.tenants || "[]"));
+      } catch {
+        return [];
+      }
+    })();
+    const tenantList = Array.isArray(tenants) ? tenants.map(value => asString(value)) : [];
+    if (tenantList.length && !tenantList.includes(PARTITION)) continue;
+    out.push({
+      userId: asString(entity.userId || email),
+      email,
+      displayName: asString(entity.displayName || email)
+    });
+  }
+  return out;
+}
+
+async function createInboundEmailNotifications(notificationClient, userClient, inbound) {
+  const users = await listActiveWorkspaceUsers(userClient);
+  if (!users.length) return 0;
+  const now = new Date().toISOString();
+  let created = 0;
+  for (const user of users) {
+    const rowKey = randomUUID();
+    await notificationClient.upsertEntity(
+      {
+        partitionKey: PARTITION,
+        rowKey,
+        type: "inboundEmail",
+        title: "New Email Received",
+        message: asString(inbound.customerName)
+          ? `${asString(inbound.customerName)} sent a new email.`
+          : "A customer sent a new email.",
+        route: "/messages?channel=email",
+        entityType: "email",
+        entityId: asString(inbound.id),
+        metadataJson: JSON.stringify({
+          channel: "email",
+          customerId: asString(inbound.customerId),
+          from: asString(inbound.from),
+          subject: asString(inbound.subject)
+        }),
+        targetUserId: user.userId,
+        targetEmail: user.email,
+        targetDisplayName: user.displayName,
+        actorUserId: "",
+        actorEmail: asString(inbound.from),
+        actorDisplayName: asString(inbound.customerName || inbound.from),
+        read: false,
+        readAt: "",
+        createdAt: now
+      },
+      "Merge"
+    );
+    created += 1;
+  }
+  return created;
+}
+
 module.exports = async function (context, req) {
   const method = asString(req.method || "GET").toUpperCase();
   const body = parseRequestBody(req);
+  const tenantId = resolveTenantId(req, body);
   if (method === "OPTIONS") {
     context.res = { status: 204 };
     return;
@@ -608,16 +959,26 @@ module.exports = async function (context, req) {
   try {
     if (method === "GET") {
       const scope = readQueryParam(req, "scope").toLowerCase();
+      const templateClient = await getTableClient(EMAIL_TEMPLATE_TABLE);
       if (!scope) {
+        const config = await getConfigStatus(templateClient);
         context.res = json(200, {
           ok: true,
-          ...getConfigStatus()
+          ...config
+        });
+        return;
+      }
+
+      if (scope === "sender") {
+        const sender = await getSenderConfig(templateClient);
+        context.res = json(200, {
+          ok: true,
+          sender
         });
         return;
       }
 
       if (scope === "templates") {
-        const templateClient = await getTableClient(EMAIL_TEMPLATE_TABLE);
         const data = await listTemplates(templateClient);
         context.res = json(200, {
           ok: true,
@@ -661,7 +1022,7 @@ module.exports = async function (context, req) {
         return;
       }
 
-      context.res = json(400, { error: "Unknown scope. Use `inbox`, `customer`, `threads`, or `templates`." });
+      context.res = json(400, { error: "Unknown scope. Use `inbox`, `customer`, `threads`, `templates`, or `sender`." });
       return;
     }
 
@@ -759,6 +1120,28 @@ module.exports = async function (context, req) {
       return;
     }
 
+    if (op === "setsenderconfig" || op === "set-sender-config") {
+      const templateClient = await getTableClient(EMAIL_TEMPLATE_TABLE);
+      await setSenderConfig(templateClient, body);
+      const sender = await getSenderConfig(templateClient);
+      context.res = json(200, {
+        ok: true,
+        sender
+      });
+      return;
+    }
+
+    if (op === "clearsenderconfig" || op === "clear-sender-config") {
+      const templateClient = await getTableClient(EMAIL_TEMPLATE_TABLE);
+      await clearSenderConfig(templateClient);
+      const sender = await getSenderConfig(templateClient);
+      context.res = json(200, {
+        ok: true,
+        sender
+      });
+      return;
+    }
+
     const requestedCustomerId = asString(body.customerId);
     const requestedCustomerName = asString(body.customerName);
     const requestSubject = asString(body.subject);
@@ -812,14 +1195,16 @@ module.exports = async function (context, req) {
         }
       }
 
-      const config = getConfigStatus();
+      const templateClient = await getTableClient(EMAIL_TEMPLATE_TABLE);
+      const sender = await getSenderConfig(templateClient);
+      const config = await getConfigStatus(templateClient);
       const messageClient = await getTableClient(EMAIL_TABLE);
       const saved = await saveEmailMessage(messageClient, {
         customerId: resolvedCustomerId,
         customerName: resolvedCustomerName,
         direction: "inbound",
         from: requestFrom,
-        to: requestTo || config.fromEmail || "",
+        to: requestTo || sender.fromEmail || config.fromEmail || "",
         subject: requestSubject || "New email inquiry",
         message: requestMessage || "",
         html: requestHtml,
@@ -829,6 +1214,18 @@ module.exports = async function (context, req) {
         provider: "inbound",
         providerMessageId: asString(body.providerMessageId || body.messageId)
       });
+
+      try {
+        const notificationClient = await getTableClient(NOTIFICATIONS_TABLE);
+        const userClient = await getTableClient(USERS_TABLE);
+        await createInboundEmailNotifications(notificationClient, userClient, {
+          id: saved.id,
+          customerId: resolvedCustomerId,
+          customerName: resolvedCustomerName,
+          from: requestFrom,
+          subject: requestSubject
+        });
+      } catch (_) {}
 
       context.res = json(200, {
         ok: true,
@@ -852,7 +1249,12 @@ module.exports = async function (context, req) {
       return;
     }
 
-    const config = getConfigStatus();
+    const templateClient = await getTableClient(EMAIL_TEMPLATE_TABLE);
+    const sender = await getSenderConfig(templateClient);
+    const config = await getConfigStatus(templateClient);
+    const appSettingsClient = await getTableClient(APP_SETTINGS_TABLE);
+    const footerTerms = await getEmailFooterTerms(appSettingsClient, tenantId);
+    const composed = appendGlobalFooter(requestMessage, requestHtml, footerTerms);
     let simulated = true;
     let provider = config.provider;
     let providerMessageId = "";
@@ -864,7 +1266,7 @@ module.exports = async function (context, req) {
         });
         return;
       }
-      const sendResult = await sendViaSendgrid(requestTo, requestSubject, requestMessage);
+      const sendResult = await sendViaSendgrid(requestTo, requestSubject, composed.message, sender, composed.html);
       simulated = false;
       provider = sendResult.provider;
       providerMessageId = sendResult.providerMessageId;
@@ -879,11 +1281,11 @@ module.exports = async function (context, req) {
       customerId: requestedCustomerId,
       customerName: requestedCustomerName,
       direction: "outbound",
-      from: config.fromEmail || "",
+      from: sender.fromEmail || config.fromEmail || "",
       to: requestTo,
       subject: requestSubject,
-      message: requestMessage,
-      html: requestHtml,
+      message: composed.message,
+      html: composed.html,
       read: true,
       readAt: new Date().toISOString(),
       simulated,

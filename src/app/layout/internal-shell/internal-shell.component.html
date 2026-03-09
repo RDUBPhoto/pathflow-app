@@ -10,11 +10,26 @@
           aria-label="Toggle navigation">
           <ion-icon [name]="collapsed() ? 'chevron-forward-outline' : 'chevron-back-outline'"></ion-icon>
         </ion-button>
-        <a class="brand-home" routerLink="/dashboard" title="Go to dashboard" aria-label="Go to dashboard">
-          <div class="brand-logo-wrap">
-            <img class="brand-logo" [src]="branding.logoUrl()" alt="Business logo" />
-          </div>
-        </a>
+        <ng-container *ngIf="branding.hasCustomLogo(); else uploadLogoSlot">
+          <a
+            class="brand-home"
+            routerLink="/dashboard"
+            title="Go to dashboard"
+            aria-label="Go to dashboard">
+            <div class="brand-logo-wrap">
+              <img class="brand-logo" [src]="branding.logoUrl()" alt="Business logo" />
+            </div>
+          </a>
+        </ng-container>
+        <ng-template #uploadLogoSlot>
+          <button
+            type="button"
+            class="brand-upload-link"
+            *ngIf="showUploadLogoCta() && !collapsed()"
+            (click)="openBrandingSettings()">
+            Upload your logo
+          </button>
+        </ng-template>
       </div>
 
       <div class="section-label">Workspace</div>
@@ -32,6 +47,17 @@
         </a>
 
         <a
+        class="nav-link"
+        routerLink="/invoices"
+        routerLinkActive="active"
+        title="Invoices and Quotes">
+        <span class="icon-wrap">
+          <ion-icon name="receipt-outline"></ion-icon>
+        </span>
+        <span class="nav-label">Quotes & Invoices</span>
+      </a>
+
+        <a
           class="nav-link"
           routerLink="/schedule"
           routerLinkActive="active"
@@ -40,17 +66,6 @@
             <ion-icon name="calendar-clear-outline"></ion-icon>
           </span>
           <span class="nav-label">Calendar</span>
-        </a>
-
-        <a
-          class="nav-link"
-          routerLink="/customers"
-          routerLinkActive="active"
-          title="Customers">
-          <span class="icon-wrap">
-            <ion-icon name="people-outline"></ion-icon>
-          </span>
-          <span class="nav-label">Customers</span>
         </a>
 
         <a
@@ -66,13 +81,13 @@
 
         <a
           class="nav-link"
-          routerLink="/invoices"
+          routerLink="/customers"
           routerLinkActive="active"
-          title="Invoices">
+          title="Customers">
           <span class="icon-wrap">
-            <ion-icon name="receipt-outline"></ion-icon>
+            <ion-icon name="people-outline"></ion-icon>
           </span>
-          <span class="nav-label">Invoices</span>
+          <span class="nav-label">Customers</span>
         </a>
       </nav>
     </div>
@@ -96,21 +111,21 @@
       [class.has-unread]="unreadMessages().length > 0"
       [class.mobile-open]="isMobile()"
       (click)="handleMessagesPanelClick($event)">
-      <ng-container *ngIf="isMobile(); else desktopSmsHub">
-        <div class="mobile-sms-summary" aria-label="Open SMS Hub">
+      <ng-container *ngIf="isMobile(); else desktopMessagesHub">
+        <div class="mobile-sms-summary" aria-label="Open Messages Hub">
           <ion-icon name="chatbubble-ellipses-outline"></ion-icon>
-          <span class="mobile-sms-label">SMS</span>
+          <span class="mobile-sms-label">Messages</span>
           <span class="mobile-sms-count" [class.active]="unreadMessages().length > 0">
             {{ unreadMessages().length > 99 ? '99+' : unreadMessages().length }}
           </span>
         </div>
       </ng-container>
 
-      <ng-template #desktopSmsHub>
+      <ng-template #desktopMessagesHub>
         <div class="messages-head">
           <div class="messages-title">
             <ion-icon name="chatbubble-ellipses-outline"></ion-icon>
-            <span>SMS Hub</span>
+            <span>Messages Hub</span>
             <span class="messages-alert-slot" *ngIf="unreadMessages().length > 0" aria-hidden="true">
               <span class="messages-alert-dot"></span>
             </span>
@@ -124,10 +139,10 @@
           </button>
         </div>
 
-        <div class="messages-empty" *ngIf="smsLoading() && !messageThreads().length">Loading SMS...</div>
-        <div class="messages-empty" *ngIf="!smsLoading() && smsError() && !messageThreads().length">{{ smsError() }}</div>
-        <div class="messages-empty" *ngIf="!smsLoading() && !smsError() && !messageThreads().length">
-          No new SMS messages.
+        <div class="messages-empty" *ngIf="inboxLoading() && !messageThreads().length">Loading messages...</div>
+        <div class="messages-empty" *ngIf="!inboxLoading() && inboxError() && !messageThreads().length">{{ inboxError() }}</div>
+        <div class="messages-empty" *ngIf="!inboxLoading() && !inboxError() && !messageThreads().length">
+          No new messages.
         </div>
 
         <div class="messages-list" *ngIf="messageThreads().length">

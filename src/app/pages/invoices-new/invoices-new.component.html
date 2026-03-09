@@ -3,7 +3,7 @@
     <ion-buttons slot="start">
       <app-page-back-button></app-page-back-button>
     </ion-buttons>
-    <ion-title>New Invoice</ion-title>
+    <ion-title>New {{ documentLabel() }} Wizard</ion-title>
     <app-company-switcher></app-company-switcher>
     <ion-buttons slot="end" class="ion-margin-end">
       <app-user-menu></app-user-menu>
@@ -12,141 +12,266 @@
 </ion-header>
 
 <ion-content class="glass-bg invoices-new-content ion-padding">
-  <div class="new-stack">
-    <section class="template-intro glass-surface">
-      <h2>Start from a template</h2>
-      <p>Select a customer, pick a template, and create a draft invoice in one step.</p>
-    </section>
+  <div class="wizard-layout">
+    <section class="wizard-left glass-surface">
+      <header class="wizard-head">
+        <h2>{{ documentLabel() }} Builder</h2>
+        <div class="draft-badge" [class.saved]="!!draftId()">{{ draftBadge() }}</div>
+      </header>
 
-    <section class="customer-panel glass-surface">
-      <div class="customer-head">
-        <h3>Customer</h3>
-        <p>Search and select who this invoice belongs to.</p>
-      </div>
+      <nav class="step-nav">
+        <button
+          type="button"
+          class="step-chip"
+          *ngFor="let step of stepItems; trackBy: trackStep"
+          [class.active]="wizardStep() === step.id"
+          [class.done]="wizardStep() > step.id"
+          (click)="setWizardStep(step.id)">
+          <span class="step-index">{{ step.id }}</span>
+          <span>{{ step.title }}</span>
+        </button>
+      </nav>
 
-      <div class="prefill-note" *ngIf="fromCustomerProfile()">
-        Prefilled from Customer Profile.
-      </div>
+      <section class="step-body" *ngIf="wizardStep() === 1">
+        <h3>Step 1: Add customer to {{ documentLabelLower() }}</h3>
+        <p class="step-help">Search or choose from your 5 most recent leads.</p>
 
-      <div class="customer-selected" *ngIf="hasSelectedCustomer()">
-        <div class="selected-main">
-          <div class="selected-name">{{ selectedCustomerName() }}</div>
-          <div class="selected-meta">
-            <span>{{ selectedCustomerEmail() }}</span>
-            <span>{{ selectedCustomerPhone() }}</span>
-            <span>{{ selectedCustomerVehicle() }}</span>
+        <label class="field-label" for="customer-search">Search customers</label>
+        <input
+          id="customer-search"
+          class="field-input"
+          type="text"
+          placeholder="Name, email, phone, vehicle"
+          [value]="customerQuery()"
+          (input)="setCustomerQuery($any($event.target).value)" />
+
+        <div class="section-subhead" *ngIf="!customerQuery().trim() && !recentLeadsLoading()">Recent Leads</div>
+        <div class="recent-leads-loading" *ngIf="!customerQuery().trim() && recentLeadsLoading()">
+          <ion-spinner name="crescent"></ion-spinner>
+          <span>Loading recent leads...</span>
+        </div>
+        <div class="customer-list">
+          <button
+            type="button"
+            class="customer-option"
+            *ngFor="let customer of filteredCustomers(); trackBy: trackCustomer"
+            [class.selected]="isSelectedCustomer(customer)"
+            (click)="selectCustomer(customer)">
+            <div class="customer-name">{{ customerDisplayName(customer) }}</div>
+            <div class="customer-detail">{{ customer.email || customer.secondaryEmail || 'No email' }}</div>
+            <div class="customer-detail">{{ customer.phone || customer.mobile || 'No phone' }}</div>
+            <div class="customer-detail">{{ customerVehicleSummary(customer) || 'Vehicle not set' }}</div>
+          </button>
+        </div>
+      </section>
+
+      <section class="step-body" *ngIf="wizardStep() === 2">
+        <h3>Step 2: Template</h3>
+        <p class="step-help">Select a template or leave blank for manual quote/invoice building. Add parts/labor from inventory below.</p>
+
+        <label class="field-label" for="document-template-select">Template (optional)</label>
+        <select
+          id="document-template-select"
+          class="field-input"
+          [value]="selectedTemplateId()"
+          (change)="onTemplateSelectionChange($any($event.target).value)">
+          <option value="">{{ documentType() === 'invoice' ? 'Manual invoice (no template)' : 'Manual quote (no template)' }}</option>
+          <option *ngFor="let template of availableDocumentTemplates()" [value]="template.id">
+            {{ template.name }}
+          </option>
+        </select>
+        <div class="inline-help" *ngIf="!availableDocumentTemplates().length">
+          No saved templates yet. Add them in Admin → Business Branding → Quote/Invoice Template Management.
+        </div>
+
+        <div class="manual-grid">
+          <label class="field-label">Subject</label>
+          <input class="field-input" [value]="manualTemplateSubject()" (input)="manualTemplateSubject.set($any($event.target).value)" />
+          <label class="field-label">HTML body</label>
+          <textarea class="field-textarea" rows="8" [value]="manualTemplateBody()" (input)="manualTemplateBody.set($any($event.target).value)"></textarea>
+          <label class="channel-toggle">
+            <input
+              type="checkbox"
+              [checked]="saveManualAsTemplate()"
+              [disabled]="!!selectedTemplate()"
+              (change)="saveManualAsTemplate.set($any($event.target).checked)" />
+            Save this manual {{ documentLabelLower() }} as a template for later
+          </label>
+          <div class="inline-help" *ngIf="selectedTemplate()">Template selected. Leave dropdown blank to save as a new manual template.</div>
+          <div *ngIf="saveManualAsTemplate() && !selectedTemplate()">
+            <label class="field-label">Template name</label>
+            <input class="field-input" [value]="manualTemplateName()" (input)="manualTemplateName.set($any($event.target).value)" />
           </div>
         </div>
-        <button type="button" class="clear-selected" (click)="clearSelectedCustomer()">Change</button>
-      </div>
 
-      <label class="customer-search-label" for="customer-search">Search customers</label>
-      <input
-        id="customer-search"
-        class="customer-search"
-        type="text"
-        placeholder="Name, email, phone, vehicle"
-        [value]="customerQuery()"
-        (input)="setCustomerQuery($any($event.target).value)" />
-
-      <div class="customer-loading" *ngIf="customersLoading()">Loading customers...</div>
-      <div class="customer-error" *ngIf="!customersLoading() && customersError()">{{ customersError() }}</div>
-
-      <div class="customer-list" *ngIf="!customersLoading() && filteredCustomers().length">
-        <button
-          type="button"
-          class="customer-option"
-          *ngFor="let customer of filteredCustomers(); trackBy: trackCustomer"
-          [class.selected]="isSelectedCustomer(customer)"
-          (click)="selectCustomer(customer)">
-          <span class="customer-name">{{ customerDisplayName(customer) }}</span>
-          <span class="customer-detail">{{ customer.email || 'No email' }}</span>
-          <span class="customer-detail">{{ customer.phone || 'No phone' }}</span>
-          <span class="customer-detail">{{ customerVehicleSummary(customer) || 'Vehicle not set' }}</span>
-        </button>
-      </div>
-
-      <div class="customer-empty" *ngIf="!customersLoading() && !filteredCustomers().length">
-        No customers match your search.
-      </div>
-    </section>
-
-    <section class="mention-panel glass-surface">
-      <div class="mention-head">
-        <h3>Mention Teammates</h3>
-        <p>Tag users who should review or approve the new invoice.</p>
-      </div>
-
-      <label class="mention-search-label" for="mention-search">Search users</label>
-      <input
-        id="mention-search"
-        class="mention-search"
-        type="text"
-        placeholder="Search by name or email"
-        [value]="mentionQuery()"
-        (input)="setMentionQuery($any($event.target).value)" />
-
-      <div class="mentions-loading" *ngIf="mentionsLoading()">Loading users...</div>
-      <div class="mentions-error" *ngIf="!mentionsLoading() && mentionsError()">{{ mentionsError() }}</div>
-
-      <div class="mention-selected" *ngIf="selectedMentions().length">
-        <button
-          type="button"
-          class="mention-chip"
-          *ngFor="let user of selectedMentions(); trackBy: trackMentionUser"
-          (click)="removeMention(user)">
-          <span>{{ user.displayName }}</span>
-          <span class="chip-remove">×</span>
-        </button>
-      </div>
-
-      <div class="mention-list" *ngIf="!mentionsLoading() && filteredMentionUsers().length">
-        <button
-          type="button"
-          class="mention-option"
-          *ngFor="let user of filteredMentionUsers(); trackBy: trackMentionUser"
-          [class.selected]="isMentioned(user)"
-          (click)="toggleMentionUser(user)">
-          <span class="mention-name">{{ user.displayName }}</span>
-          <span class="mention-email">{{ user.email }}</span>
-        </button>
-      </div>
-
-      <div class="mentions-empty" *ngIf="!mentionsLoading() && !filteredMentionUsers().length">
-        No users match your search.
-      </div>
-    </section>
-
-    <section class="template-grid">
-      <article class="template-card glass-surface" *ngFor="let template of templates; trackBy: trackTemplate">
-        <div class="template-head">
-          <h3>{{ template.name }}</h3>
-          <p>{{ template.description }}</p>
+        <div class="toggle-row">
+          <label><input type="checkbox" [checked]="includeLogo()" (change)="includeLogo.set($any($event.target).checked)" /> Include logo</label>
+          <label><input type="checkbox" [checked]="includeSignature()" (change)="includeSignature.set($any($event.target).checked)" /> Include signature</label>
         </div>
-        <ul class="template-list">
-          <li *ngFor="let item of template.includes">{{ item }}</li>
-        </ul>
-        <ion-button size="small" [disabled]="!hasSelectedCustomer() || creatingInvoice()" (click)="selectTemplate(template)">
-          {{ creatingInvoice() ? 'Creating...' : 'Use template' }}
+
+        <div class="line-builder">
+          <div class="line-builder-head">
+            <h4>Quote Items</h4>
+            <div class="inline-help">Tax rate: {{ businessTaxRate() }}%</div>
+          </div>
+
+          <label class="field-label" for="inventory-search">Add part from inventory</label>
+          <input
+            id="inventory-search"
+            class="field-input"
+            type="text"
+            placeholder="Search inventory by name, SKU, vendor"
+            [value]="inventoryQuery()"
+            (input)="setInventoryQuery($any($event.target).value)" />
+
+          <div class="inventory-picker" *ngIf="filteredInventoryItems().length">
+            <button
+              type="button"
+              class="inventory-option"
+              *ngFor="let item of filteredInventoryItems(); trackBy: trackInventory"
+              (click)="addInventoryPart(item)">
+              <div class="inventory-name">{{ item.name }}</div>
+              <div class="inventory-meta">{{ item.sku || 'No SKU' }} · {{ item.vendor || 'No vendor' }} · {{ item.unitCost | currency:'USD':'symbol':'1.2-2' }}</div>
+            </button>
+          </div>
+
+          <label class="field-label">Add labor from saved rates</label>
+          <div class="labor-picker" *ngIf="laborRates().length; else noLaborRates">
+            <button
+              type="button"
+              class="labor-option"
+              *ngFor="let rate of laborRates()"
+              (click)="addSavedLaborRate(rate)">
+              <div class="labor-name">{{ rate.name }}</div>
+              <div class="labor-meta">
+                {{ rate.price | currency:'USD':'symbol':'1.2-2' }}
+                <span *ngIf="rate.taxable"> · Taxable</span>
+                <span *ngIf="!rate.taxable"> · Non-taxable</span>
+              </div>
+            </button>
+          </div>
+          <ng-template #noLaborRates>
+            <div class="inline-help">No saved labor rates yet. Add them in Admin → Business Profile.</div>
+          </ng-template>
+
+          <ion-button size="small" fill="outline" (click)="addManualLabor()">+ Add Labor Line</ion-button>
+
+          <div class="line-item-table" *ngIf="quoteLineItems().length; else noLineItems">
+            <div class="line-item-row line-item-header">
+              <span>Description</span>
+              <span>Price</span>
+              <span>Qty</span>
+              <span>Tax %</span>
+              <span>Total</span>
+              <span></span>
+            </div>
+            <div class="line-item-row" *ngFor="let line of quoteLineItems(); trackBy: trackLineItem">
+              <span>
+                <input class="line-field" [value]="line.description" (input)="updateQuoteLineItem(line.id, 'description', $any($event.target).value)" />
+              </span>
+              <span>
+                <input class="line-field" type="number" min="0" step="0.01" [value]="line.unitPrice" (input)="updateQuoteLineItem(line.id, 'unitPrice', $any($event.target).value)" />
+              </span>
+              <span>
+                <input class="line-field" type="number" min="0" step="1" [value]="line.quantity" (input)="updateQuoteLineItem(line.id, 'quantity', $any($event.target).value)" />
+              </span>
+              <span>
+                <input class="line-field" type="number" min="0" step="0.01" [value]="line.taxRate" (input)="updateQuoteLineItem(line.id, 'taxRate', $any($event.target).value)" />
+              </span>
+              <span class="line-total">{{ line.lineTotal | currency:'USD':'symbol':'1.2-2' }}</span>
+              <span>
+                <button type="button" class="line-remove" (click)="removeQuoteLineItem(line.id)">Remove</button>
+              </span>
+            </div>
+            <div class="line-summary">
+              <div>Subtotal: {{ quoteSubtotal() | currency:'USD':'symbol':'1.2-2' }}</div>
+              <div>Tax: {{ quoteTaxTotal() | currency:'USD':'symbol':'1.2-2' }}</div>
+              <div><strong>Total: {{ quoteGrandTotal() | currency:'USD':'symbol':'1.2-2' }}</strong></div>
+            </div>
+          </div>
+          <ng-template #noLineItems>
+            <div class="inline-help">No quote items yet. Select parts from inventory or add labor lines.</div>
+          </ng-template>
+        </div>
+      </section>
+
+      <section class="step-body" *ngIf="wizardStep() === 3">
+        <h3>Step 3: Delivery channels</h3>
+        <p class="step-help">Choose where this {{ documentLabelLower() }} should be sent.</p>
+
+        <div class="channel-card">
+          <label class="channel-toggle"><input type="checkbox" [checked]="sendEmail()" (change)="sendEmail.set($any($event.target).checked)" /> Email</label>
+          <div class="channel-options" *ngIf="sendEmail()">
+            <label *ngFor="let target of availableEmailTargets()">
+              <input
+                type="checkbox"
+                [checked]="selectedEmailTargets().includes(target)"
+                (change)="toggleEmailTarget(target, $any($event.target).checked)" />
+              {{ target }}
+            </label>
+            <div class="inline-help" *ngIf="!availableEmailTargets().length">No email found for this customer.</div>
+          </div>
+        </div>
+
+        <div class="channel-card">
+          <label class="channel-toggle"><input type="checkbox" [checked]="sendSms()" (change)="sendSms.set($any($event.target).checked)" /> SMS</label>
+          <div class="channel-options" *ngIf="sendSms()">
+            <label *ngFor="let target of availablePhoneTargets()">
+              <input
+                type="checkbox"
+                [checked]="selectedPhoneTargets().includes(target)"
+                (change)="togglePhoneTarget(target, $any($event.target).checked)" />
+              {{ target }}
+            </label>
+            <div class="inline-help" *ngIf="!availablePhoneTargets().length">No phone found for this customer.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="step-body" *ngIf="wizardStep() === 4">
+        <h3>Step 4: Notes</h3>
+        <p class="step-help">Staff notes stay internal. Customer notes are visible in the quote.</p>
+
+        <label class="field-label">Notes for staff (internal only)</label>
+        <textarea class="field-textarea" rows="5" [value]="staffNote()" (input)="staffNote.set($any($event.target).value)"></textarea>
+
+        <label class="field-label">Notes to customer</label>
+        <textarea class="field-textarea" rows="5" [value]="customerNote()" (input)="customerNote.set($any($event.target).value)"></textarea>
+      </section>
+
+      <section class="step-body" *ngIf="wizardStep() === 5">
+        <h3>Step 5: Review and send</h3>
+        <p class="step-help">This will send rendered HTML email and/or SMS with action links.</p>
+
+        <div class="review-grid">
+          <div><strong>Customer:</strong> {{ selectedCustomerName() }}</div>
+          <div><strong>Template:</strong> {{ templateDisplayName() }}</div>
+          <div><strong>Email:</strong> {{ sendEmail() ? (selectedEmailTargets().join(', ') || 'No target selected') : 'Off' }}</div>
+          <div><strong>SMS:</strong> {{ sendSms() ? (selectedPhoneTargets().join(', ') || 'No target selected') : 'Off' }}</div>
+        </div>
+
+        <ion-button size="small" (click)="sendQuote()" [disabled]="sending()">
+          {{ sending() ? 'Sending...' : ('Send ' + documentLabel()) }}
         </ion-button>
-      </article>
+      </section>
+
+      <footer class="wizard-actions">
+        <ion-button fill="outline" size="small" (click)="previousStep()" [disabled]="wizardStep() === 1">Back</ion-button>
+        <ion-button size="small" (click)="continueStep()" [disabled]="wizardStep() === 5 || !canContinue()">Continue</ion-button>
+      </footer>
+
+      <section class="status-row" *ngIf="status()">
+        <div class="feedback-row" [class.success]="statusTone() === 'success'" [class.error]="statusTone() === 'error'">
+          {{ status() }}
+        </div>
+      </section>
     </section>
 
-    <section class="template-feedback" *ngIf="status()">
-      <div
-        class="feedback-row"
-        [class.success]="statusTone() === 'success'"
-        [class.error]="statusTone() === 'error'">
-        {{ status() }}
-      </div>
-    </section>
-
-    <section class="template-hint glass-surface">
-      <h4>Template management (next)</h4>
-      <p>
-        This screen is intentionally set up so we can add tenant-level custom templates without changing
-        the flow users already have.
-      </p>
-    </section>
+    <aside class="wizard-preview glass-surface">
+      <header class="preview-head">
+        <h3>{{ documentLabel() }} Preview</h3>
+      </header>
+      <div class="preview-body" [innerHTML]="previewHtml()"></div>
+    </aside>
   </div>
 </ion-content>

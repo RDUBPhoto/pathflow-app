@@ -77,6 +77,13 @@ export type Customer = {
   smsConsentLastKeywordAt?: string;
   smsConsentUpdatedAt?: string;
   notes?: string;
+  notesHistory?: Array<{
+    id?: string;
+    text?: string;
+    createdAt?: string;
+    createdBy?: string;
+    createdById?: string;
+  }>;
   createdAt?: string;
   updatedAt?: string;
 };

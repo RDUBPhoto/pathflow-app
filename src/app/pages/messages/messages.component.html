@@ -3,7 +3,7 @@
     <ion-buttons slot="start">
       <app-page-back-button></app-page-back-button>
     </ion-buttons>
-    <ion-title>Messages</ion-title>
+    <ion-title>Messages Hub</ion-title>
     <app-company-switcher></app-company-switcher>
     <div class="toolbar-actions" slot="end">
       <app-user-menu></app-user-menu>
@@ -19,13 +19,34 @@
 
   <section class="messages-layout">
     <aside class="threads-pane glass-surface">
-      <div class="threads-title">SMS Conversations</div>
+      <div class="threads-head">
+        <div class="threads-title">Conversations</div>
+        <div class="channel-toggle" role="tablist" aria-label="Message channel">
+          <button
+            type="button"
+            class="channel-btn"
+            [class.active]="activeChannel() === 'sms'"
+            (click)="setChannel('sms')">
+            <ion-icon name="chatbubble-ellipses-outline"></ion-icon>
+            SMS
+          </button>
+          <button
+            type="button"
+            class="channel-btn"
+            [class.active]="activeChannel() === 'email'"
+            (click)="setChannel('email')">
+            <ion-icon name="mail-outline"></ion-icon>
+            Email
+          </button>
+        </div>
+      </div>
+
       <ion-item class="search-item">
         <ion-icon name="search-outline" slot="start"></ion-icon>
         <ion-input
           [ngModel]="searchTerm()"
           (ngModelChange)="searchTerm.set($event)"
-          placeholder="Search customer or message">
+          placeholder="Search customer, contact, or message">
         </ion-input>
       </ion-item>
 
@@ -33,27 +54,30 @@
         <ion-spinner name="crescent"></ion-spinner>
       </div>
 
-      <div class="threads-empty" *ngIf="!loadingThreads() && !filteredThreadViews().length">
-        No conversations yet.
+      <div class="threads-empty" *ngIf="!loadingThreads() && !filteredThreads().length">
+        No {{ activeChannel() === 'sms' ? 'SMS' : 'email' }} conversations yet.
       </div>
 
-      <div class="threads-list" *ngIf="filteredThreadViews().length">
+      <div class="threads-list" *ngIf="filteredThreads().length">
         <button
           type="button"
           class="thread-row"
-          *ngFor="let thread of filteredThreadViews(); trackBy: trackThread"
-          [class.active]="selectedThreadKey() === thread.key"
+          *ngFor="let thread of filteredThreads(); trackBy: trackThread"
+          [class.active]="selectedThreadId() === thread.id"
           (click)="selectThread(thread)">
           <div class="thread-avatar" [style.--avatar-color]="thread.color">{{ thread.initials }}</div>
           <div class="thread-meta">
             <div class="thread-name">{{ thread.displayName }}</div>
-            <div class="thread-preview">{{ thread.latestMessage }}</div>
+            <div class="thread-preview">
+              <strong *ngIf="thread.channel === 'email' && thread.latestEmailSubject">{{ thread.latestEmailSubject }}:</strong>
+              {{ thread.latestPreview }}
+            </div>
           </div>
           <div class="thread-trailing">
             <div class="thread-time">{{ relativeTimeLabel(thread.latestAt) }}</div>
             <div
               class="thread-status"
-              *ngIf="thread.latestDirection === 'outbound'"
+              *ngIf="thread.channel === 'sms' && thread.latestDirection === 'outbound'"
               [ngClass]="threadDeliveryClass(thread)">
               {{ threadDeliveryLabel(thread) }}
             </div>
@@ -69,55 +93,112 @@
           <div class="thread-avatar" [style.--avatar-color]="thread.color">{{ thread.initials }}</div>
           <div class="chat-user-copy">
             <div class="chat-name">{{ thread.displayName }}</div>
-            <div class="chat-phone">{{ thread.displayPhone || thread.customerPhone || 'No phone on file' }}</div>
+            <div class="chat-contact">{{ thread.displayContact || (thread.channel === 'sms' ? 'No phone on file' : 'No email on file') }}</div>
           </div>
         </div>
       </div>
 
       <div class="chat-thread" #messageScroll>
         <div class="messages-loading" *ngIf="loadingMessages()">Loading conversation...</div>
-        <div class="messages-empty" *ngIf="!loadingMessages() && !messages().length">No messages yet.</div>
 
-        <div
-          class="chat-row"
-          *ngFor="let message of messages(); trackBy: trackMessage"
-          [class.outbound]="message.direction === 'outbound'"
-          [class.inbound]="message.direction === 'inbound'">
-          <div class="chat-bubble">
-            <div class="chat-meta">
-              <span>{{ message.direction === 'inbound' ? thread.displayName : 'You' }}</span>
-              <span
-                class="chat-delivery"
-                *ngIf="message.direction === 'outbound'"
-                [ngClass]="messageDeliveryClass(message)"
-                [attr.title]="messageDeliveryTitle(message)">
-                {{ messageDeliveryLabel(message) }}
-              </span>
-              <span>{{ smsDateLabel(message.createdAt) }}</span>
+        <ng-container *ngIf="!loadingMessages() && thread.channel === 'sms'">
+          <div class="messages-empty" *ngIf="!selectedSmsMessages().length">No messages yet.</div>
+
+          <div
+            class="chat-row"
+            *ngFor="let message of selectedSmsMessages(); trackBy: trackSmsMessage"
+            [class.outbound]="message.direction === 'outbound'"
+            [class.inbound]="message.direction === 'inbound'">
+            <div class="chat-bubble">
+              <div class="chat-meta">
+                <span>{{ message.direction === 'inbound' ? thread.displayName : 'You' }}</span>
+                <span
+                  class="chat-delivery"
+                  *ngIf="message.direction === 'outbound'"
+                  [ngClass]="messageDeliveryClass(message)"
+                  [attr.title]="messageDeliveryTitle(message)">
+                  {{ messageDeliveryLabel(message) }}
+                </span>
+                <span>{{ dateLabel(message.createdAt) }}</span>
+              </div>
+              <div class="chat-message">{{ message.message }}</div>
             </div>
-            <div class="chat-message">{{ message.message }}</div>
           </div>
-        </div>
+        </ng-container>
+
+        <ng-container *ngIf="!loadingMessages() && thread.channel === 'email'">
+          <div class="messages-empty" *ngIf="!selectedEmailMessages().length">No emails yet.</div>
+
+          <div
+            class="chat-row"
+            *ngFor="let message of selectedEmailMessages(); trackBy: trackEmailMessage"
+            [class.outbound]="message.direction === 'outbound'"
+            [class.inbound]="message.direction === 'inbound'">
+            <div class="chat-bubble email-bubble">
+              <div class="chat-meta">
+                <span>{{ message.direction === 'inbound' ? (message.from || thread.displayName) : 'You' }}</span>
+                <span>{{ dateLabel(message.createdAt) }}</span>
+              </div>
+              <div class="email-subject">{{ message.subject || '(no subject)' }}</div>
+              <div class="chat-message">{{ message.message }}</div>
+            </div>
+          </div>
+        </ng-container>
       </div>
 
       <div class="chat-compose">
+        <ng-container *ngIf="thread.channel === 'email'">
+          <div class="compose-email-actions">
+            <ion-button size="small" fill="outline" (click)="prepareReplyEmail()">
+              <ion-icon name="arrow-undo-outline" slot="start"></ion-icon>
+              Reply
+            </ion-button>
+            <ion-button size="small" fill="outline" (click)="prepareForwardEmail()">
+              <ion-icon name="arrow-redo-outline" slot="start"></ion-icon>
+              Forward
+            </ion-button>
+          </div>
+
+          <ion-item class="compose-item">
+            <ion-label position="stacked">To</ion-label>
+            <ion-input [(ngModel)]="outgoingEmailTo" placeholder="customer@example.com"></ion-input>
+          </ion-item>
+
+          <ion-item class="compose-item" *ngIf="emailTemplates().length">
+            <ion-label position="stacked">Template</ion-label>
+            <ion-select
+              interface="popover"
+              [value]="selectedEmailTemplateId"
+              (ionChange)="applyEmailTemplate($event.detail.value)">
+              <ion-select-option value="">None</ion-select-option>
+              <ion-select-option *ngFor="let template of emailTemplates()" [value]="template.id">
+                {{ template.name }}
+              </ion-select-option>
+            </ion-select>
+          </ion-item>
+
+          <ion-item class="compose-item">
+            <ion-label position="stacked">Subject</ion-label>
+            <ion-input [(ngModel)]="outgoingEmailSubject" placeholder="Email subject"></ion-input>
+          </ion-item>
+        </ng-container>
+
         <ion-item class="compose-item">
-          <ion-label position="stacked">Message</ion-label>
+          <ion-label position="stacked">{{ thread.channel === 'sms' ? 'Message' : 'Body' }}</ion-label>
           <ion-textarea
             [(ngModel)]="outgoingMessage"
             [autoGrow]="true"
-            rows="2"
-            maxlength="1000"
-            placeholder="Type a message..."
+            [rows]="thread.channel === 'sms' ? 2 : 6"
+            maxlength="12000"
+            [placeholder]="thread.channel === 'sms' ? 'Type a message...' : 'Write your email...'"
             (keydown)="onComposerKeydown($event)">
           </ion-textarea>
         </ion-item>
+
         <div class="compose-actions">
-          <ion-button
-            (click)="sendMessage()"
-            [disabled]="sending() || !outgoingMessage.trim()">
+          <ion-button (click)="sendMessage()" [disabled]="!canSendMessage()">
             <ion-icon name="paper-plane-outline" slot="start"></ion-icon>
-            {{ sending() ? 'Sending...' : 'Send SMS' }}
+            {{ sending() ? 'Sending...' : (thread.channel === 'sms' ? 'Send SMS' : 'Send Email') }}
           </ion-button>
         </div>
       </div>
@@ -129,5 +210,4 @@
       <div>Select a conversation from the left.</div>
     </section>
   </ng-template>
-
 </ion-content>

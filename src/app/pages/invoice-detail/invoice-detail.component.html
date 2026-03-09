@@ -3,7 +3,7 @@
     <ion-buttons slot="start">
       <app-page-back-button></app-page-back-button>
     </ion-buttons>
-    <ion-title>Invoice Detail</ion-title>
+    <ion-title>{{ documentTypeLabel() }} Detail</ion-title>
     <app-company-switcher></app-company-switcher>
     <ion-buttons slot="end" class="ion-margin-end">
       <app-user-menu></app-user-menu>
@@ -15,24 +15,24 @@
   <div class="invoice-detail-stack">
     <ng-container *ngIf="!loading(); else loadingState">
       <section class="glass-surface state-card" *ngIf="error(); else detailState">
-        <h2>Invoice Unavailable</h2>
+        <h2>{{ documentTypeLabel() }} Unavailable</h2>
         <p>{{ error() }}</p>
-        <ion-button size="small" (click)="openInvoiceList()">Back To Invoices</ion-button>
+        <ion-button size="small" (click)="openInvoiceList()">Back To {{ invoice()?.documentType === 'quote' ? 'Quotes' : 'Invoices' }}</ion-button>
       </section>
     </ng-container>
   </div>
 
   <ng-template #loadingState>
     <section class="glass-surface state-card">
-      <h2>Loading Invoice...</h2>
-      <p>Please wait while we pull invoice details.</p>
+      <h2>Loading {{ documentTypeLabel() }}...</h2>
+      <p>Please wait while we pull details.</p>
     </section>
   </ng-template>
 
   <ng-template #detailState>
     <section class="glass-surface invoice-header-card" *ngIf="invoice() as detail">
       <div class="invoice-head-main">
-        <div class="invoice-eyebrow">Invoice</div>
+        <div class="invoice-eyebrow">{{ documentTypeLabel() }}</div>
         <h2>{{ detail.invoiceNumber }}</h2>
         <div class="invoice-meta">
           <span>{{ detail.customerName }}</span>
@@ -49,9 +49,18 @@
             </option>
           </select>
         </label>
-        <ion-button size="small" fill="outline" (click)="openInvoiceList()">Back To Invoices</ion-button>
+        <ion-button size="small" fill="outline" (click)="openInvoiceList()">
+          Back To {{ detail.documentType === 'quote' ? 'Quotes' : 'Invoices' }}
+        </ion-button>
+        <ion-button
+          size="small"
+          fill="outline"
+          *ngIf="detail.documentType === 'quote' && detail.stage === 'accepted'"
+          (click)="createInvoiceFromQuote()">
+          Build Invoice
+        </ion-button>
         <ion-button size="small" (click)="save()" [disabled]="!canSave()">
-          {{ saving() ? 'Saving...' : 'Save Invoice' }}
+          {{ saving() ? 'Saving...' : ('Save ' + documentTypeLabel()) }}
         </ion-button>
       </div>
     </section>
@@ -96,12 +105,27 @@
               [value]="detail.vehicle"
               (input)="updateField('vehicle', $any($event.target).value)" />
           </label>
-          <label class="field full">
+          <label class="field full address-autocomplete">
             <span>Customer Address</span>
             <input
               type="text"
               [value]="detail.customerAddress"
-              (input)="updateField('customerAddress', $any($event.target).value)" />
+              (input)="onCustomerAddressInput($any($event.target).value)"
+              (blur)="onCustomerAddressBlur()" />
+            <div class="address-lookup-box" *ngIf="customerAddressSearching() || customerAddressSuggestions().length || customerAddressNoMatches()">
+              <div class="address-lookup-state" *ngIf="customerAddressSearching()">Searching addresses...</div>
+              <button
+                type="button"
+                class="address-lookup-option"
+                *ngFor="let item of customerAddressSuggestions()"
+                (mousedown)="$event.preventDefault()"
+                (click)="selectCustomerAddressSuggestion(item)">
+                {{ item.display }}
+              </button>
+              <div class="address-lookup-state" *ngIf="!customerAddressSearching() && customerAddressNoMatches()">
+                No address matches found.
+              </div>
+            </div>
           </label>
           <label class="field">
             <span>Template</span>
@@ -200,12 +224,27 @@
               [value]="detail.businessLogoUrl"
               (input)="updateField('businessLogoUrl', $any($event.target).value)" />
           </label>
-          <label class="field full">
+          <label class="field full address-autocomplete">
             <span>Business Address</span>
             <input
               type="text"
               [value]="detail.businessAddress"
-              (input)="updateField('businessAddress', $any($event.target).value)" />
+              (input)="onBusinessAddressInput($any($event.target).value)"
+              (blur)="onBusinessAddressBlur()" />
+            <div class="address-lookup-box" *ngIf="businessAddressSearching() || businessAddressSuggestions().length || businessAddressNoMatches()">
+              <div class="address-lookup-state" *ngIf="businessAddressSearching()">Searching addresses...</div>
+              <button
+                type="button"
+                class="address-lookup-option"
+                *ngFor="let item of businessAddressSuggestions()"
+                (mousedown)="$event.preventDefault()"
+                (click)="selectBusinessAddressSuggestion(item)">
+                {{ item.display }}
+              </button>
+              <div class="address-lookup-state" *ngIf="!businessAddressSearching() && businessAddressNoMatches()">
+                No address matches found.
+              </div>
+            </div>
           </label>
           <label class="field full">
             <span>Staff Note</span>

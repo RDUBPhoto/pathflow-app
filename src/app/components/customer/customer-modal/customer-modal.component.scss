@@ -8,3 +8,38 @@
 ion-content {
   flex: 1 1 auto;
 }
+
+.address-lookup-box {
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 10px;
+  background: var(--app-surface-bg);
+  max-height: 220px;
+  overflow-y: auto;
+  margin-top: -8px;
+}
+
+.address-lookup-option {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--app-border-subtle);
+  background: transparent;
+  color: var(--app-text);
+  text-align: left;
+  padding: 9px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.address-lookup-option:last-child {
+  border-bottom: 0;
+}
+
+.address-lookup-option:hover {
+  background: var(--app-control-bg-hover);
+}
+
+.address-lookup-state {
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--app-text-muted);
+}

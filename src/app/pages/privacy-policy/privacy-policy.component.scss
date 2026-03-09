@@ -1,0 +1,36 @@
+:host {
+  display: block;
+}
+
+.legal-content {
+  --background: #f8fafc;
+}
+
+.legal-wrap {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+
+.legal-card {
+  background: #ffffff;
+  border: 1px solid #dbe2ea;
+  border-radius: 12px;
+  padding: 24px;
+  color: #0f172a;
+  line-height: 1.6;
+}
+
+h1 {
+  margin: 0 0 12px;
+  font-size: 30px;
+}
+
+h2 {
+  margin: 18px 0 8px;
+  font-size: 20px;
+}
+
+p {
+  margin: 0 0 10px;
+}

@@ -3,7 +3,7 @@
     <ion-buttons slot="start">
       <app-page-back-button></app-page-back-button>
     </ion-buttons>
-    <ion-title>Invoices</ion-title>
+    <ion-title>Quotes &amp; Invoices</ion-title>
     <app-company-switcher></app-company-switcher>
     <ion-buttons slot="end" class="ion-margin-end">
       <app-user-menu></app-user-menu>
@@ -29,21 +29,38 @@
       </article>
     </section>
 
-    <section class="invoices-search glass-surface">
-      <label class="search-label" for="invoice-search">Search invoices</label>
-      <div class="search-field">
-        <input
-          id="invoice-search"
-          type="text"
-          placeholder="Customer, invoice #, vehicle, template, amount"
-          [value]="searchQuery()"
-          (input)="setSearchQuery($any($event.target).value)" />
-        <button type="button" class="search-clear" *ngIf="searchQuery()" (click)="clearSearch()">Clear</button>
-      </div>
-    </section>
+    <section class="tabbed-panel glass-surface">
+      <header class="tabbed-panel-head">
+        <ion-segment
+          class="invoices-segment"
+          [value]="activeTab()"
+          (ionChange)="onTabChanged($any($event.detail).value)">
+          <ion-segment-button value="quotes">
+            <span>Quotes</span>
+          </ion-segment-button>
+          <ion-segment-button value="invoices">
+            <span>Invoices</span>
+          </ion-segment-button>
+        </ion-segment>
+      </header>
 
-    <section class="invoice-board-wrap">
-      <div class="invoice-board">
+      <section class="invoices-search tabbed-search">
+        <label class="search-label" for="invoice-search">
+          Search {{ activeTab() === 'quotes' ? 'quotes' : 'invoices' }}
+        </label>
+        <div class="search-field">
+          <input
+            id="invoice-search"
+            type="text"
+            placeholder="Customer, doc #, vehicle, template, amount"
+            [value]="searchQuery()"
+            (input)="setSearchQuery($any($event.target).value)" />
+          <button type="button" class="search-clear" *ngIf="searchQuery()" (click)="clearSearch()">Clear</button>
+        </div>
+      </section>
+
+      <div class="invoice-board-wrap" (click)="closeOpenMenu()">
+        <div class="invoice-board">
         <article
           class="invoice-lane glass-surface"
           *ngFor="let lane of lanes; trackBy: trackLane"
@@ -69,21 +86,60 @@
               [routerLink]="['/invoices', invoice.id]"
               [attr.aria-label]="'Open invoice ' + invoice.invoiceNumber + ' for ' + invoice.customerName">
               <div class="invoice-card-top">
-                <div class="invoice-customer">{{ invoice.customerName }}</div>
+                <div class="invoice-card-headline">
+                  <div class="invoice-customer">{{ invoice.customerName }}</div>
+                  <div
+                    class="invoice-card-menu-wrap"
+                    *ngIf="activeTab() === 'quotes' && lane.id === 'draft'"
+                    (click)="$event.preventDefault(); $event.stopPropagation()">
+                    <button
+                      type="button"
+                      class="invoice-card-menu-trigger"
+                      aria-label="Open draft actions"
+                      (click)="toggleCardMenu(invoice, $event)">
+                      ⋯
+                    </button>
+                    <div class="invoice-card-menu" *ngIf="openMenuId() === invoice.id">
+                      <button
+                        type="button"
+                        class="invoice-card-menu-item danger"
+                        (click)="requestDeleteDraft(invoice, $event)">
+                        Delete Draft
+                      </button>
+                    </div>
+                  </div>
+                </div>
                 <div class="invoice-number">{{ invoice.invoiceNumber }}</div>
               </div>
-              <div class="invoice-line muted">Invoiced: {{ invoice.invoicedAt }}</div>
+              <div class="invoice-line muted">Updated: {{ invoice.invoicedAt }}</div>
               <div class="invoice-line">Vehicle: {{ invoice.vehicle }}</div>
               <div class="invoice-line total">Total: {{ invoice.total | currency:'USD':'symbol':'1.2-2' }}</div>
               <div class="invoice-template">{{ invoice.template }}</div>
             </a>
 
             <div class="lane-empty" *ngIf="!laneCards()[lane.id].length">
-              No invoices in this stage.
+              No {{ activeTab() === 'quotes' ? 'quotes' : 'invoices' }} in this stage.
             </div>
           </div>
         </article>
+        </div>
       </div>
     </section>
   </div>
+
+  <div class="quote-delete-modal-backdrop" *ngIf="deleteDialogOpen()" (click)="cancelDeleteDraft()"></div>
+  <section class="quote-delete-modal glass-surface" *ngIf="deleteDialogOpen()" role="dialog" aria-modal="true">
+    <h3>Delete Draft Quote</h3>
+    <p>
+      Delete
+      <strong>{{ deleteCandidate()?.invoiceNumber || 'this draft quote' }}</strong>
+      for
+      <strong>{{ deleteCandidate()?.customerName || 'this customer' }}</strong>?
+    </p>
+    <p class="quote-delete-modal-error" *ngIf="deleteError()">{{ deleteError() }}</p>
+    <div class="quote-delete-modal-actions">
+      <ion-button fill="outline" size="small" (click)="cancelDeleteDraft()">Cancel</ion-button>
+      <ion-button color="danger" size="small" (click)="confirmDeleteDraft()">Delete</ion-button>
+    </div>
+  </section>
 </ion-content>

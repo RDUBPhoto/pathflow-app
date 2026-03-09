@@ -13,6 +13,7 @@ import {
   IonInput,
   IonItem,
   IonLabel,
+  IonModal,
   IonSelect,
   IonSelectOption,
   IonSpinner,
@@ -42,12 +43,17 @@ import { EmailApiService, EmailMessage, EmailTemplate } from '../../services/ema
 import { AppSettingsApiService } from '../../services/app-settings-api.service';
 import { ScheduleApi, ScheduleItem } from '../../services/schedule-api.service';
 import { InvoiceCard, InvoicesDataService } from '../../services/invoices-data.service';
+import { AuthService } from '../../auth/auth.service';
+import { TenantContextService } from '../../services/tenant-context.service';
+import { BrandSettingsService } from '../../services/brand-settings.service';
+import { BusinessProfileService } from '../../services/business-profile.service';
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
 import { PageBackButtonComponent } from '../../components/navigation/page-back-button/page-back-button.component';
 import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
 import { formatLocalDateTime, toLocalDateTimeInput, toLocalDateTimeStorage } from '../../utils/datetime-local';
+import { environment } from '../../../environments/environment';
 
-type CustomerTab = 'vehicle' | 'notes' | 'schedule' | 'invoices' | 'sms' | 'email';
+type CustomerTab = 'vehicle' | 'schedule' | 'invoices' | 'sms' | 'email';
 type CustomerMobileTab = 'profile' | CustomerTab;
 type EmailView = 'list' | 'detail' | 'compose';
 type TabActivityDismissState = Record<CustomerTab, boolean>;
@@ -98,6 +104,13 @@ type DuplicateSavePrompt = {
   candidate: DuplicateCandidate;
   payload: Omit<Customer, 'id'> & { id?: string };
 };
+type CustomerNoteHistoryEntry = {
+  id: string;
+  text: string;
+  createdAt: string;
+  createdBy: string;
+  createdById?: string;
+};
 
 @Component({
   selector: 'app-customer-profile',
@@ -114,6 +127,7 @@ type DuplicateSavePrompt = {
     IonIcon,
     IonItem,
     IonLabel,
+    IonModal,
     IonInput,
     IonSelect,
     IonSelectOption,
@@ -139,6 +153,10 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   private readonly scheduleApi = inject(ScheduleApi);
   private readonly appSettingsApi = inject(AppSettingsApiService);
   private readonly invoicesData = inject(InvoicesDataService);
+  private readonly auth = inject(AuthService);
+  private readonly tenantContext = inject(TenantContextService);
+  private readonly branding = inject(BrandSettingsService);
+  private readonly businessProfile = inject(BusinessProfileService);
 
   private routeSub: Subscription | null = null;
   private querySub: Subscription | null = null;
@@ -147,6 +165,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   private addressSearchTimer: ReturnType<typeof setTimeout> | null = null;
   private initialCustomerSnapshot = '';
   private smsThreadCache: SmsThreadCache = {};
+  private ignoredDuplicatePairs = new Set<string>();
 
   readonly customerId = signal<string | null>(null);
   readonly loading = signal(false);
@@ -157,6 +176,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   readonly duplicateLoading = signal(false);
   readonly duplicateSavePrompt = signal<DuplicateSavePrompt | null>(null);
   readonly validationAttempted = signal(false);
+  readonly deleteModalOpen = signal(false);
   readonly activeTab = signal<CustomerTab>('vehicle');
   readonly isMobileLayout = signal(false);
   readonly mobileTab = signal<CustomerMobileTab>('profile');
@@ -168,6 +188,8 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   secondaryEmail = '';
   address = '';
   notes = '';
+  notesHistory: CustomerNoteHistoryEntry[] = [];
+  noteDraft = '';
   customerCreatedAt = '';
 
   vin = '';
@@ -221,7 +243,6 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   readonly selectedEmailId = signal<string | null>(null);
   readonly dismissedTabActivity = signal<TabActivityDismissState>({
     vehicle: false,
-    notes: false,
     schedule: false,
     invoices: false,
     sms: false,
@@ -274,7 +295,6 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
 
   readonly tabs: Array<{ key: CustomerTab; label: string; icon: string }> = [
     { key: 'vehicle', label: 'Vehicle', icon: 'car-outline' },
-    { key: 'notes', label: 'Notes', icon: 'document-text-outline' },
     { key: 'schedule', label: 'Scheduled', icon: 'calendar-outline' },
     { key: 'invoices', label: 'Invoices', icon: 'cash-outline' },
     { key: 'sms', label: 'SMS History', icon: 'chatbubble-ellipses-outline' },
@@ -283,7 +303,6 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   readonly mobileTabs: Array<{ key: CustomerMobileTab; label: string; icon: string }> = [
     { key: 'profile', label: 'Profile', icon: 'person-outline' },
     { key: 'vehicle', label: 'Vehicle', icon: 'car-outline' },
-    { key: 'notes', label: 'Notes', icon: 'document-text-outline' },
     { key: 'schedule', label: 'Scheduled', icon: 'calendar-outline' },
     { key: 'invoices', label: 'Invoices', icon: 'cash-outline' },
     { key: 'sms', label: 'SMS', icon: 'chatbubble-ellipses-outline' },
@@ -512,7 +531,8 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
       frontRimSize: this.frontRimSize.trim(),
       rearRimSize: this.rearRimSize.trim(),
       vehicleColor: this.vehicleColor.trim(),
-      notes: this.notes.trim()
+      notes: this.notes.trim(),
+      notesHistory: this.notesHistoryPayload()
     };
 
     if (!payload.id) {
@@ -548,6 +568,46 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
 
   goBack(): void {
     this.router.navigate(['/customers']);
+  }
+
+  canDeleteCustomer(): boolean {
+    return this.auth.isAdmin() && !!this.customerId();
+  }
+
+  openDeleteCustomerModal(): void {
+    const customerId = String(this.customerId() || '').trim();
+    if (!customerId) {
+      this.error.set('Save this customer first before deleting.');
+      return;
+    }
+    if (!this.auth.isAdmin()) {
+      this.error.set('Only admins can delete customers.');
+      return;
+    }
+    this.deleteModalOpen.set(true);
+  }
+
+  cancelDeleteCustomerModal(): void {
+    this.deleteModalOpen.set(false);
+  }
+
+  async confirmDeleteCustomerFromModal(): Promise<void> {
+    const customerId = String(this.customerId() || '').trim();
+    if (!customerId) return;
+    this.deleteModalOpen.set(false);
+
+    this.saving.set(true);
+    this.status.set('');
+    this.error.set('');
+    try {
+      await firstValueFrom(this.customersApi.delete(customerId));
+      this.status.set('Customer deleted.');
+      await this.router.navigate(['/customers'], { replaceUrl: true });
+    } catch (err) {
+      this.error.set(this.extractError(err, 'Could not delete customer.'));
+    } finally {
+      this.saving.set(false);
+    }
   }
 
   openCreateInvoice(): void {
@@ -1250,8 +1310,9 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     if (!this.selectedTemplateId) return;
     const template = this.emailTemplates().find(item => item.id === this.selectedTemplateId);
     if (!template) return;
-    this.emailSubject = template.subject;
-    this.emailMessage = this.composeWithSignature(template.body);
+    const merge = this.emailMergeTagValues();
+    this.emailSubject = this.resolveEmailMergeTags(template.subject, merge);
+    this.emailMessage = this.composeWithSignature(this.resolveEmailMergeTags(template.body, merge));
   }
 
   canSubmitEmail(): boolean {
@@ -1268,9 +1329,12 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
       return;
     }
 
-    const to = this.emailTo.trim();
-    const subject = this.emailSubject.trim();
-    const message = this.emailMessage.trim();
+    const mergeValues = this.emailMergeTagValues();
+    const to = this.resolveEmailMergeTags(this.emailTo.trim(), mergeValues);
+    const subject = this.resolveEmailMergeTags(this.emailSubject.trim(), mergeValues);
+    const message = this.resolveEmailMergeTags(this.emailMessage.trim(), mergeValues);
+    const html = this.looksLikeHtmlContent(message) ? this.normalizeEmailHtmlAssets(message) : '';
+    const textMessage = html ? this.htmlToPlainText(message) : message;
 
     if (!this.isValidEmailAddress(to)) {
       this.emailError.set('Enter a valid recipient email.');
@@ -1280,7 +1344,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
       this.emailError.set('Email subject is required.');
       return;
     }
-    if (!message) {
+    if (!textMessage) {
       this.emailError.set('Email message cannot be empty.');
       return;
     }
@@ -1294,7 +1358,8 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
         customerName: this.displayName(),
         to,
         subject,
-        message
+        message: textMessage,
+        html: html || undefined
       })
       .pipe(finalize(() => this.emailSending.set(false)))
       .subscribe({
@@ -1307,8 +1372,8 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
             from: null,
             to,
             subject,
-            message,
-            html: null,
+            message: textMessage,
+            html: html || null,
             createdAt: res.createdAt || new Date().toISOString(),
             read: true,
             readAt: new Date().toISOString(),
@@ -1439,6 +1504,60 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
 
   canSubmitSms(): boolean {
     return !!this.customerId() && !!this.outgoingMessage.trim();
+  }
+
+  hasNotesHistory(): boolean {
+    return this.notesHistory.length > 0;
+  }
+
+  sortedNotesHistory(): CustomerNoteHistoryEntry[] {
+    return [...this.notesHistory].sort((a, b) => {
+      const aTime = Date.parse(a.createdAt || '');
+      const bTime = Date.parse(b.createdAt || '');
+      if (Number.isFinite(aTime) && Number.isFinite(bTime)) return bTime - aTime;
+      if (Number.isFinite(aTime)) return -1;
+      if (Number.isFinite(bTime)) return 1;
+      return String(b.id || '').localeCompare(String(a.id || ''));
+    });
+  }
+
+  canAddNote(): boolean {
+    return !!this.noteDraft.trim();
+  }
+
+  addNoteEntry(): void {
+    const text = this.noteDraft.trim();
+    if (!text) return;
+    const createdAt = new Date().toISOString();
+    const author = this.currentNoteAuthor();
+    const authorId = this.currentNoteAuthorId();
+    const note: CustomerNoteHistoryEntry = {
+      id: this.localNoteId(),
+      text,
+      createdAt,
+      createdBy: author,
+      createdById: authorId || undefined
+    };
+    this.notesHistory = [...this.notesHistory, note];
+    this.noteDraft = '';
+    this.notes = text;
+    this.status.set('Note added. Click Save Customer to persist.');
+    this.error.set('');
+  }
+
+  noteCreatedByLabel(note: CustomerNoteHistoryEntry): string {
+    const value = String(note?.createdBy || '').trim();
+    return value || 'Unknown user';
+  }
+
+  noteDateLabel(value: string): string {
+    const parsed = Date.parse(String(value || '').trim());
+    if (!Number.isFinite(parsed)) return 'Date unknown';
+    return new Date(parsed).toLocaleString();
+  }
+
+  trackNote(_index: number, note: CustomerNoteHistoryEntry): string {
+    return note.id;
   }
 
   tabHasActivity(tab: CustomerTab): boolean {
@@ -1576,6 +1695,11 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     this.emailError.set('');
     this.address = customer.address || '';
     this.notes = customer.notes || '';
+    this.notesHistory = this.normalizeNotesHistory(customer.notesHistory, customer.notes, customer);
+    if (this.notesHistory.length) {
+      this.notes = this.notesHistory[this.notesHistory.length - 1].text;
+    }
+    this.noteDraft = '';
     this.customerCreatedAt = customer.createdAt || '';
     this.vin = (customer.vin || '').toUpperCase();
     this.vehicleMake = customer.vehicleMake || '';
@@ -1633,6 +1757,8 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     this.selectedEmailId.set(null);
     this.address = '';
     this.notes = '';
+    this.notesHistory = [];
+    this.noteDraft = '';
     this.customerCreatedAt = '';
     this.vin = '';
     this.vinStatus = '';
@@ -1721,6 +1847,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     this.error.set('');
     try {
       await firstValueFrom(this.customersApi.markNotDuplicate(currentId, candidateId));
+      this.rememberIgnoredDuplicatePair(currentId, candidateId);
       this.duplicateSavePrompt.set(null);
       this.duplicateMatches.set(this.duplicateMatches().filter(item => String(item?.id || '').trim() !== candidateId));
       this.status.set('Duplicate ignored. This pair will not be flagged again.');
@@ -1738,7 +1865,16 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     this.status.set('');
     this.error.set('');
     try {
-      await this.persistCustomer(pending.payload);
+      const savedId = await this.persistCustomer(pending.payload);
+      const candidateId = String(pending?.candidate?.id || '').trim();
+      if (savedId && candidateId && savedId !== candidateId) {
+        try {
+          await firstValueFrom(this.customersApi.markNotDuplicate(savedId, candidateId));
+          this.rememberIgnoredDuplicatePair(savedId, candidateId);
+        } catch {
+          // Save succeeded; ignore persistence can fail without blocking.
+        }
+      }
     } catch (err) {
       this.error.set(this.extractError(err, 'Could not save customer.'));
     } finally {
@@ -1916,7 +2052,6 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   private resetTabActivityDismissals(activeTab?: CustomerTab): void {
     const next: TabActivityDismissState = {
       vehicle: false,
-      notes: false,
       schedule: false,
       invoices: false,
       sms: false,
@@ -1941,6 +2076,10 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
 
   private localScheduleId(): string {
     return `local-schedule-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  private localNoteId(): string {
+    return `note-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }
 
   private scrollSmsToBottom(): void {
@@ -2068,18 +2207,20 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     excludeId?: string
   ): Promise<DuplicateCandidate | null> {
     try {
+      const excluded = String(excludeId || payload.id || '').trim();
       const res = await firstValueFrom(this.customersApi.findDuplicates({
         ...payload,
-        excludeId: excludeId || payload.id
+        excludeId: excluded
       }));
-      const items = Array.isArray(res?.items) ? res.items : [];
+      const items = (Array.isArray(res?.items) ? res.items : [])
+        .filter(item => !this.isDuplicatePairIgnored(excluded, String(item?.id || '').trim()));
       return items.find(item => this.duplicateConfidence(item) >= 55) || null;
     } catch {
       return null;
     }
   }
 
-  private async persistCustomer(payload: Omit<Customer, 'id'> & { id?: string }): Promise<void> {
+  private async persistCustomer(payload: Omit<Customer, 'id'> & { id?: string }): Promise<string> {
     this.saving.set(true);
     const res = await firstValueFrom(this.customersApi.upsert(payload));
     this.status.set('Customer saved.');
@@ -2093,9 +2234,10 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
         queryParams: { tab: this.activeTab() }
       });
       this.captureInitialSnapshot();
-      return;
+      return savedId;
     }
     this.captureInitialSnapshot();
+    return savedId;
   }
 
   private loadDuplicateMatchesForCurrent(): void {
@@ -2124,6 +2266,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     ).subscribe({
       next: res => {
         const items = (Array.isArray(res?.items) ? res.items : [])
+          .filter(item => !this.isDuplicatePairIgnored(currentId, String(item?.id || '').trim()))
           .filter(item => this.duplicateConfidence(item) >= 55);
         this.duplicateMatches.set(items);
       },
@@ -2175,6 +2318,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     this.saving.set(true);
     try {
       await firstValueFrom(this.customersApi.markNotDuplicate(currentId, otherId));
+      this.rememberIgnoredDuplicatePair(currentId, otherId);
       this.duplicateMatches.set(this.duplicateMatches().filter(item => String(item?.id || '').trim() !== otherId));
       this.status.set('Duplicate match ignored. It will not be flagged again.');
     } catch (err) {
@@ -2182,6 +2326,25 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     } finally {
       this.saving.set(false);
     }
+  }
+
+  private duplicatePairKey(leftId: string, rightId: string): string {
+    const a = String(leftId || '').trim();
+    const b = String(rightId || '').trim();
+    if (!a || !b || a === b) return '';
+    return a < b ? `${a}::${b}` : `${b}::${a}`;
+  }
+
+  private rememberIgnoredDuplicatePair(leftId: string, rightId: string): void {
+    const key = this.duplicatePairKey(leftId, rightId);
+    if (!key) return;
+    this.ignoredDuplicatePairs.add(key);
+  }
+
+  private isDuplicatePairIgnored(leftId: string, rightId: string): boolean {
+    const key = this.duplicatePairKey(leftId, rightId);
+    if (!key) return false;
+    return this.ignoredDuplicatePairs.has(key);
   }
 
   private applyStoredFitmentToDetails(details: Record<string, string>): void {
@@ -2305,13 +2468,14 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   }
 
   private isTab(value: string): value is CustomerTab {
-    return value === 'vehicle' || value === 'notes' || value === 'schedule' || value === 'sms' || value === 'invoices' || value === 'email';
+    return value === 'vehicle' || value === 'schedule' || value === 'sms' || value === 'invoices' || value === 'email';
   }
 
   private normalizeTab(value: string): CustomerTab | null {
     if (this.isTab(value)) return value;
     if (value === 'email-history') return 'email';
     if (value === 'scheduled') return 'schedule';
+    if (value === 'notes') return 'vehicle';
     if (value === 'profile') return 'vehicle';
     return null;
   }
@@ -2320,8 +2484,113 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     const base = String(body || '').trim();
     const signature = this.emailSignature().trim();
     if (!signature) return base;
+
+    if (this.looksLikeHtmlContent(base)) {
+      return this.appendHtmlSignature(base, signature);
+    }
     if (!base) return `--\n${signature}`;
     return `${base}\n\n--\n${signature}`;
+  }
+
+  private emailMergeTagValues(): Record<string, string> {
+    const companyName = this.activeCompanyName();
+    const logoUrl = this.toEmailAssetUrl(String(this.branding.logoUrl() || '').trim());
+    const profile = this.businessProfile.profile();
+    return {
+      company_name: companyName,
+      company_logo_url: logoUrl,
+      company_email: profile.companyEmail || '',
+      company_phone: profile.companyPhone || '',
+      company_address: profile.companyAddress || '',
+      company_location: profile.companyAddress || '',
+      customer_name: this.displayName(),
+      customer_email: this.email.trim() || this.secondaryEmail.trim(),
+      customer_phone: this.phone.trim(),
+      lead_message: this.notes.trim()
+    };
+  }
+
+  private activeCompanyName(): string {
+    const profileName = String(this.businessProfile.profile().companyName || '').trim();
+    if (profileName) return profileName;
+    const tenantId = String(this.tenantContext.tenantId() || '').trim();
+    const locations = this.auth.locations();
+    const selected = tenantId
+      ? locations.find(location => String(location.id || '').trim() === tenantId)
+      : null;
+    const fallback = selected?.name || locations[0]?.name || '';
+    return String(fallback || 'Your Company').trim();
+  }
+
+  private resolveEmailMergeTags(template: string, values: Record<string, string>): string {
+    const source = String(template || '');
+    if (!source) return '';
+    return source.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_full, rawKey: string) => {
+      const key = String(rawKey || '').toLowerCase();
+      if (!key) return '';
+      return String(values[key] ?? '').trim();
+    });
+  }
+
+  private toEmailAssetUrl(value: string): string {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (/^https?:\/\//i.test(raw)) return raw;
+    if (!raw.startsWith('/')) return raw;
+    const publicBase = String(environment.publicAppUrl || '').trim().replace(/\/+$/, '');
+    if (publicBase) return `${publicBase}${raw}`;
+    if (typeof window !== 'undefined' && window.location?.origin) {
+      return `${window.location.origin.replace(/\/+$/, '')}${raw}`;
+    }
+    return raw;
+  }
+
+  private looksLikeHtmlContent(value: string): boolean {
+    return /<[^>]+>/.test(String(value || '').trim());
+  }
+
+  private htmlToPlainText(html: string): string {
+    return String(html || '')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;/gi, "'")
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private normalizeEmailHtmlAssets(html: string): string {
+    const source = String(html || '');
+    if (!source) return '';
+    return source.replace(
+      /(src|href)\s*=\s*(["'])(\/[^"']*)\2/gi,
+      (_full, attr: string, quote: string, rawPath: string) => `${attr}=${quote}${this.toEmailAssetUrl(rawPath)}${quote}`
+    );
+  }
+
+  private appendHtmlSignature(baseHtml: string, signature: string): string {
+    const normalizedBase = String(baseHtml || '').trim();
+    const normalizedSignature = String(signature || '').trim();
+    if (!normalizedSignature) return normalizedBase;
+    const signatureHtml = this.looksLikeHtmlContent(normalizedSignature)
+      ? normalizedSignature
+      : this.escapeHtml(normalizedSignature).replace(/\n/g, '<br/>');
+    if (!normalizedBase) return signatureHtml;
+    return `${normalizedBase}<br/><br/>${signatureHtml}`;
+  }
+
+  private escapeHtml(value: string): string {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   private isValidEmailAddress(value: string): boolean {
@@ -2356,6 +2625,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
       secondaryEmail: this.secondaryEmail.trim(),
       address: this.address.trim(),
       notes: this.notes.trim(),
+      notesHistory: this.notesHistoryPayload(),
       vin: this.vin.trim(),
       vehicleMake: this.vehicleMake.trim(),
       vehicleModel: this.vehicleModel.trim(),
@@ -2380,6 +2650,74 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
       rearRimSize: this.rearRimSize.trim(),
       vehicleColor: this.vehicleColor.trim()
     });
+  }
+
+  private notesHistoryPayload(): Array<{ id: string; text: string; createdAt: string; createdBy: string; createdById: string }> {
+    return this.notesHistory
+      .map(note => ({
+        id: String(note?.id || '').trim() || this.localNoteId(),
+        text: String(note?.text || '').trim(),
+        createdAt: String(note?.createdAt || '').trim(),
+        createdBy: String(note?.createdBy || '').trim(),
+        createdById: String(note?.createdById || '').trim()
+      }))
+      .filter(note => !!note.text)
+      .map(note => ({
+        ...note,
+        createdAt: note.createdAt || new Date().toISOString(),
+        createdBy: note.createdBy || 'Unknown user',
+        createdById: note.createdById || ''
+      }));
+  }
+
+  private normalizeNotesHistory(
+    raw: unknown,
+    legacyNotes: string | undefined,
+    customer?: Customer | null
+  ): CustomerNoteHistoryEntry[] {
+    const source = Array.isArray(raw) ? raw : [];
+    const out: CustomerNoteHistoryEntry[] = [];
+
+    for (const item of source) {
+      if (!item || typeof item !== 'object') continue;
+      const record = item as Record<string, unknown>;
+      const text = String(record['text'] || '').trim();
+      if (!text) continue;
+      const createdAtRaw = String(record['createdAt'] || '').trim();
+      const createdBy = String(record['createdBy'] || '').trim() || 'Unknown user';
+      out.push({
+        id: String(record['id'] || '').trim() || this.localNoteId(),
+        text,
+        createdAt: createdAtRaw || String(customer?.updatedAt || customer?.createdAt || ''),
+        createdBy,
+        createdById: String(record['createdById'] || '').trim() || undefined
+      });
+    }
+
+    const legacy = String(legacyNotes || '').trim();
+    if (!out.length && legacy) {
+      out.push({
+        id: `legacy-${String(customer?.id || 'note')}`,
+        text: legacy,
+        createdAt: String(customer?.updatedAt || customer?.createdAt || ''),
+        createdBy: 'Legacy note'
+      });
+    }
+
+    return out;
+  }
+
+  private currentNoteAuthor(): string {
+    const user = this.auth.user();
+    const displayName = String(user?.displayName || '').trim();
+    if (displayName) return displayName;
+    const email = String(user?.email || '').trim();
+    if (email) return email;
+    return 'Unknown user';
+  }
+
+  private currentNoteAuthorId(): string {
+    return String(this.auth.user()?.id || '').trim();
   }
 
   private captureInitialSnapshot(): void {

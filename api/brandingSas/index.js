@@ -52,7 +52,7 @@ module.exports = async function (context, req) {
 
     const service = BlobServiceClient.fromConnectionString(conn);
     const container = service.getContainerClient(CONTAINER);
-    try { await container.createIfNotExists({ access: "blob" }); } catch (_) {}
+    await container.createIfNotExists();
 
     const { accountName, accountKey } = parseConnString(conn);
     const cred = new StorageSharedKeyCredential(accountName, accountKey);

@@ -39,6 +39,10 @@ function asBool(value) {
   return value === true || value === "true" || value === 1 || value === "1";
 }
 
+function demoSeedingEnabled() {
+  return asBool(process.env.REPORTS_DEMO_ENABLED);
+}
+
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
@@ -1341,6 +1345,10 @@ module.exports = async function (context, req) {
     if (method === "POST") {
       if (scope !== "seed-demo") {
         context.res = json(405, { error: "Method not allowed" });
+        return;
+      }
+      if (!demoSeedingEnabled()) {
+        context.res = json(403, { error: "Demo seeding is disabled." });
         return;
       }
 

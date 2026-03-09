@@ -40,6 +40,7 @@ import {
   ReportsSeedDemoResponse,
   ReportsSalesTrendRow
 } from '../../services/reports-api.service';
+import { environment } from '../../../environments/environment';
 
 @Component({
   selector: 'app-reports',
@@ -88,6 +89,7 @@ export default class ReportsComponent implements OnInit {
   readonly data = signal<ReportsResponse | null>(null);
   readonly powerBi = signal<PowerBiConfigResponse['powerBi'] | null>(null);
   readonly seeding = signal(false);
+  readonly demoToolsEnabled = !!environment.features?.demoTools;
   readonly trendPage = signal(1);
   readonly productionForecastPage = signal(1);
   readonly cashflowForecastPage = signal(1);
@@ -166,6 +168,7 @@ export default class ReportsComponent implements OnInit {
   }
 
   seedDemoData(): void {
+    if (!this.demoToolsEnabled) return;
     if (this.seeding()) return;
     this.seeding.set(true);
     this.error.set('');

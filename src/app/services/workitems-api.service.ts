@@ -7,6 +7,11 @@ export type WorkItem = {
   title: string;
   laneId: string;
   customerId?: string;
+  vin?: string;
+  vehicleYear?: string;
+  vehicleMake?: string;
+  vehicleModel?: string;
+  vehicleTrim?: string;
   sort?: number;
   createdAt?: string;
   updatedAt?: string;

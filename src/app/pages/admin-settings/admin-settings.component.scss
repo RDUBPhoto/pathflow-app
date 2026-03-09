@@ -130,6 +130,12 @@ ion-card-title {
   object-fit: contain;
 }
 
+.logo-empty {
+  font-size: 12px;
+  color: var(--app-text-muted);
+  letter-spacing: 0.01em;
+}
+
 .branding-actions {
   display: flex;
   align-items: center;
@@ -145,6 +151,10 @@ ion-card-title {
 
 .branding-help.success {
   color: var(--ion-color-success, #22c55e);
+}
+
+.branding-help.error {
+  color: var(--ion-color-danger, #ef4444);
 }
 
 .sms-badges {
@@ -167,6 +177,212 @@ ion-card-title {
 .sms-form {
   margin-top: 12px;
   display: grid;
+  gap: 10px;
+  position: relative;
+}
+
+.settings-subsection {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--app-surface-2) 82%, transparent);
+}
+
+.settings-subsection .email-section-title {
+  margin-top: 0;
+}
+
+.settings-subsection .sms-help {
+  margin-top: 8px;
+}
+
+.settings-subsection .sms-form {
+  margin-top: 10px;
+}
+
+.labor-rates-list {
+  margin-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.labor-rate-row {
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 10px;
+  padding: 8px;
+  background: var(--app-control-bg);
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.labor-taxable-item {
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 10px;
+  min-height: 54px;
+}
+
+.template-catalog {
+  margin-top: 10px;
+  display: grid;
+  gap: 12px;
+}
+
+.template-catalog-item {
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 10px;
+  padding: 10px;
+  background: var(--app-control-bg);
+  display: grid;
+  gap: 10px;
+}
+
+.template-catalog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.template-catalog-title {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.template-catalog-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.template-catalog-preset-head {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--app-text-muted);
+}
+
+.template-catalog-search {
+  width: 100%;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 10px;
+  background: rgba(10, 17, 30, 0.45);
+  color: var(--app-text);
+  padding: 9px 10px;
+  font-size: 13px;
+}
+
+.template-checkbox-list {
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 10px;
+  max-height: 168px;
+  overflow: auto;
+  background: rgba(13, 20, 34, 0.52);
+}
+
+.template-checkbox-item {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--app-border-subtle);
+  font-size: 12px;
+}
+
+.template-checkbox-item:last-child {
+  border-bottom: 0;
+}
+
+.template-checkbox-item small {
+  color: var(--app-text-muted);
+}
+
+.inline-help {
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.address-lookup-box {
+  margin-top: -2px;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 10px;
+  background: var(--app-surface-bg);
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.address-lookup-option {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--app-border-subtle);
+  background: transparent;
+  color: var(--app-text);
+  text-align: left;
+  padding: 9px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.address-lookup-option:last-child {
+  border-bottom: 0;
+}
+
+.address-lookup-option:hover {
+  background: var(--app-control-bg-hover);
+}
+
+.address-lookup-state {
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.plan-toggle {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.plan-btn {
+  appearance: none;
+  border: 1px solid var(--app-border-subtle);
+  background: rgba(30, 43, 64, 0.58);
+  color: #cbd5e1;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+}
+
+.plan-btn-title {
+  font-size: 12px;
+  line-height: 1.15;
+}
+
+.plan-btn-subtitle {
+  font-size: 11px;
+  line-height: 1.2;
+  font-weight: 600;
+  opacity: 0.9;
+}
+
+.plan-btn.active {
+  border-color: rgba(78, 142, 255, 0.9);
+  background: rgba(29, 107, 255, 0.2);
+  color: #dbe8ff;
+}
+
+.billing-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -563,6 +779,28 @@ ion-card-title {
   color: var(--app-text-muted);
 }
 
+.email-template-code {
+  --padding-top: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.email-template-preview {
+  margin-top: 8px;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 10px;
+  background: var(--app-control-bg);
+  max-height: 420px;
+  overflow: auto;
+}
+
+.email-template-preview-inner {
+  padding: 12px;
+  font-size: 13px;
+  color: var(--app-text);
+}
+
 .add-user-grid {
   display: grid;
   gap: 10px;
@@ -634,6 +872,12 @@ ion-card-title {
   gap: 8px;
 }
 
+.password-change-card {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--app-border-subtle);
+}
+
 @media (max-width: 740px) {
   .toolbar-actions {
     flex-wrap: wrap;
@@ -658,6 +902,19 @@ ion-card-title {
   }
 
   .customer-import-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .plan-toggle,
+  .billing-row {
+    grid-template-columns: 1fr;
+  }
+
+  .labor-rate-row {
+    grid-template-columns: 1fr;
+  }
+
+  .template-catalog-grid {
     grid-template-columns: 1fr;
   }
 

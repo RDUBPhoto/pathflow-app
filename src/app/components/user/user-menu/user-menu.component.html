@@ -164,6 +164,7 @@
           <button
             type="button"
             class="header-link"
+            *ngIf="demoToolsEnabled"
             [disabled]="seedingNotifications()"
             (click)="seedDemoNotifications($event)">
             {{ seedingNotifications() ? 'Adding…' : 'Add samples' }}
@@ -184,8 +185,11 @@
 
         <div class="notifications-empty" *ngIf="!notificationsLoading() && !notificationsError() && !visibleNotifications().length">
           <div class="notifications-empty-title">No notifications yet</div>
-          <div class="notifications-empty-text">
+          <div class="notifications-empty-text" *ngIf="demoToolsEnabled">
             Use <strong>Add samples</strong> above to generate test notifications.
+          </div>
+          <div class="notifications-empty-text" *ngIf="!demoToolsEnabled">
+            Notifications will appear here as activity happens.
           </div>
         </div>
 

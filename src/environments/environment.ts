@@ -1,12 +1,15 @@
 export const environment = {
   apiBase: '',
   publicAppUrl: 'https://wonderful-glacier-0f45f5110.6.azurestaticapps.net',
+  features: {
+    demoTools: false
+  },
   auth: {
     primaryProvider: 'aad',
     providers: ['aad', 'google'],
     adminEmails: [] as string[],
     devBypass: false,
-    localPasswordEnabled: true,
+    localPasswordEnabled: false,
     localUsers: [] as Array<{
       email: string;
       password: string;

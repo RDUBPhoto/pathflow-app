@@ -17,6 +17,7 @@ import {
 import { BrandSettingsService } from '../../services/brand-settings.service';
 import { ShellFooterComponent } from '../../components/layout/shell-footer/shell-footer.component';
 import { SmsApiService, SmsMessage } from '../../services/sms-api.service';
+import { EmailApiService, EmailMessage } from '../../services/email-api.service';
 import { UserScopedSettingsService } from '../../services/user-scoped-settings.service';
 import { AuthService } from '../../auth/auth.service';
 import { environment } from '../../../environments/environment';
@@ -25,6 +26,7 @@ const NAV_COLLAPSED_SETTING_KEY = 'ui.navCollapsed';
 
 type MessageThread = {
   key: string;
+  channel: 'sms' | 'email';
   customerId: string | null;
   name: string;
   initials: string;
@@ -33,6 +35,16 @@ type MessageThread = {
   color: string;
   latestAt: string;
   messageIds: string[];
+};
+
+type UnifiedInboxMessage = {
+  id: string;
+  channel: 'sms' | 'email';
+  customerId: string | null;
+  customerName: string | null;
+  from: string | null;
+  message: string;
+  createdAt: string;
 };
 
 @Component({
@@ -58,14 +70,15 @@ export class InternalShellComponent implements OnInit, OnDestroy {
     && ['localhost', '127.0.0.1'].includes(window.location.hostname);
   readonly branding = inject(BrandSettingsService);
   private readonly smsApi = inject(SmsApiService);
+  private readonly emailApi = inject(EmailApiService);
   private readonly userSettings = inject(UserScopedSettingsService);
   readonly auth = inject(AuthService);
   private readonly router = inject(Router);
   readonly collapsed = signal(false);
   readonly isMobile = signal(false);
-  readonly smsLoading = signal(false);
-  readonly smsError = signal('');
-  readonly unreadMessages = signal<SmsMessage[]>([]);
+  readonly inboxLoading = signal(false);
+  readonly inboxError = signal('');
+  readonly unreadMessages = signal<UnifiedInboxMessage[]>([]);
   readonly messageThreads = computed(() => this.buildThreads(this.unreadMessages()));
   readonly visibleMessageThreads = computed(() => this.messageThreads().slice(0, this.hubThreadLimit));
   readonly hasMoreMessageThreads = computed(() => this.messageThreads().length > this.hubThreadLimit);
@@ -95,6 +108,12 @@ export class InternalShellComponent implements OnInit, OnDestroy {
     if (days === 1) return '1 day left';
     return `${days} days left`;
   });
+  readonly showUploadLogoCta = computed(() => {
+    if (!this.auth.isAuthenticated()) return false;
+    if (!this.auth.isAdmin()) return false;
+    if (!this.branding.loaded()) return false;
+    return !this.branding.hasCustomLogo();
+  });
   private hasLoadedInbox = false;
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
   private navLoadToken = 0;
@@ -120,8 +139,8 @@ export class InternalShellComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.updateMobileState();
-    this.refreshSmsInbox(false);
-    this.refreshTimer = setInterval(() => this.refreshSmsInbox(true), 5000);
+    this.refreshInbox(false);
+    this.refreshTimer = setInterval(() => this.refreshInbox(true), 5000);
   }
 
   ngOnDestroy(): void {
@@ -148,25 +167,55 @@ export class InternalShellComponent implements OnInit, OnDestroy {
     this.openMessagesScreen();
   }
 
-  private refreshSmsInbox(background: boolean): void {
+  private refreshInbox(background: boolean): void {
     this.nowMs.set(Date.now());
     if (!background && !this.hasLoadedInbox) {
-      this.smsLoading.set(true);
-      this.smsError.set('');
+      this.inboxLoading.set(true);
+      this.inboxError.set('');
     }
     this.smsApi.listInbox().subscribe({
-      next: res => {
-        this.unreadMessages.set(Array.isArray(res.items) ? res.items : []);
-        this.smsError.set('');
-        this.smsLoading.set(false);
-        this.hasLoadedInbox = true;
+      next: smsRes => {
+        this.emailApi.listInbox().subscribe({
+          next: emailRes => {
+            const smsItems = (Array.isArray(smsRes.items) ? smsRes.items : []).map(item => this.toUnifiedSms(item));
+            const emailItems = (Array.isArray(emailRes.items) ? emailRes.items : []).map(item => this.toUnifiedEmail(item));
+            const merged = [...smsItems, ...emailItems]
+              .sort((a, b) => Date.parse(b.createdAt || '') - Date.parse(a.createdAt || ''));
+            this.unreadMessages.set(merged);
+            this.inboxError.set('');
+            this.inboxLoading.set(false);
+            this.hasLoadedInbox = true;
+          },
+          error: () => {
+            const smsItems = (Array.isArray(smsRes.items) ? smsRes.items : []).map(item => this.toUnifiedSms(item));
+            this.unreadMessages.set(smsItems);
+            if (!background || !this.unreadMessages().length) {
+              this.inboxError.set('Email inbox unavailable.');
+            }
+            this.inboxLoading.set(false);
+            this.hasLoadedInbox = true;
+          }
+        });
       },
       error: () => {
-        if (!background || !this.unreadMessages().length) {
-          this.smsError.set('SMS inbox unavailable.');
-        }
-        this.smsLoading.set(false);
-        this.hasLoadedInbox = true;
+        this.emailApi.listInbox().subscribe({
+          next: emailRes => {
+            const emailItems = (Array.isArray(emailRes.items) ? emailRes.items : []).map(item => this.toUnifiedEmail(item));
+            this.unreadMessages.set(emailItems);
+            if (!background || !this.unreadMessages().length) {
+              this.inboxError.set('SMS inbox unavailable.');
+            }
+            this.inboxLoading.set(false);
+            this.hasLoadedInbox = true;
+          },
+          error: () => {
+            if (!background || !this.unreadMessages().length) {
+              this.inboxError.set('Messages inbox unavailable.');
+            }
+            this.inboxLoading.set(false);
+            this.hasLoadedInbox = true;
+          }
+        });
       }
     });
   }
@@ -174,20 +223,28 @@ export class InternalShellComponent implements OnInit, OnDestroy {
   openThread(thread: MessageThread): void {
     if (!thread.messageIds.length) return;
     const targetIds = new Set(thread.messageIds);
-    this.unreadMessages.update(list => list.filter(item => !targetIds.has(item.id)));
+    this.unreadMessages.update(list => list.filter(item => !(item.channel === thread.channel && targetIds.has(item.id))));
 
-    this.smsApi.markReadBatch(thread.messageIds).subscribe({
-      error: () => this.refreshSmsInbox(true)
-    });
+    if (thread.channel === 'sms') {
+      this.smsApi.markReadBatch(thread.messageIds).subscribe({
+        error: () => this.refreshInbox(true)
+      });
+    } else {
+      this.emailApi.markReadBatch(thread.messageIds).subscribe({
+        error: () => this.refreshInbox(true)
+      });
+    }
 
     if (this.isMobile()) {
-      this.openMessagesScreen();
+      this.openMessagesScreen(thread.channel);
       return;
     }
 
     if (thread.customerId) {
-      this.router.navigate(['/customers', thread.customerId], { queryParams: { tab: 'sms' } });
+      this.router.navigate(['/customers', thread.customerId], { queryParams: { tab: thread.channel } });
+      return;
     }
+    this.openMessagesScreen(thread.channel);
   }
 
   relativeTimeLabel(iso: string): string {
@@ -206,14 +263,26 @@ export class InternalShellComponent implements OnInit, OnDestroy {
     return thread.key;
   }
 
-  openMessagesScreen(): void {
+  openMessagesScreen(channel?: 'sms' | 'email'): void {
+    if (channel) {
+      this.router.navigate(['/messages'], { queryParams: { channel } });
+      return;
+    }
     this.router.navigate(['/messages']);
   }
 
   openBilling(): void {
+    if (this.auth.isAdmin()) {
+      this.router.navigate(['/admin-settings'], { queryParams: { section: 'subscription' } });
+      return;
+    }
     this.router.navigate(['/billing'], {
       queryParams: { redirect: this.router.url || '/dashboard' }
     });
+  }
+
+  openBrandingSettings(): void {
+    this.router.navigate(['/admin-settings'], { queryParams: { section: 'branding' } });
   }
 
   private loadCollapsedPreference(): void {
@@ -229,21 +298,25 @@ export class InternalShellComponent implements OnInit, OnDestroy {
     this.isMobile.set(window.innerWidth <= this.mobileBreakpoint);
   }
 
-  private buildThreads(messages: SmsMessage[]): MessageThread[] {
+  private buildThreads(messages: UnifiedInboxMessage[]): MessageThread[] {
     const map = new Map<string, MessageThread>();
     for (const item of messages) {
-      const key = item.customerId || item.from || item.id;
+      const key = `${item.channel}:${item.customerId || item.from || item.id}`;
       const existing = map.get(key);
       const fallbackName = item.customerId ? 'Unknown customer' : 'Unknown sender';
       const name = (item.customerName || item.from || fallbackName).trim();
+      const preview = item.channel === 'email'
+        ? `Email: ${item.message}`
+        : item.message;
       if (!existing) {
         map.set(key, {
           key,
+          channel: item.channel,
           customerId: item.customerId,
           name,
           initials: this.initialsFor(name),
           unread: 1,
-          preview: item.message,
+          preview,
           color: this.colorForSeed(key),
           latestAt: item.createdAt,
           messageIds: [item.id]
@@ -257,7 +330,7 @@ export class InternalShellComponent implements OnInit, OnDestroy {
       const nextTs = Date.parse(item.createdAt);
       if (!Number.isFinite(currentTs) || (Number.isFinite(nextTs) && nextTs > currentTs)) {
         existing.latestAt = item.createdAt;
-        existing.preview = item.message;
+        existing.preview = preview;
       }
     }
 
@@ -287,5 +360,32 @@ export class InternalShellComponent implements OnInit, OnDestroy {
     }
     const index = Math.abs(hash) % palette.length;
     return palette[index];
+  }
+
+  private toUnifiedSms(item: SmsMessage): UnifiedInboxMessage {
+    return {
+      id: item.id,
+      channel: 'sms',
+      customerId: item.customerId || null,
+      customerName: item.customerName || null,
+      from: item.from || null,
+      message: item.message || '',
+      createdAt: item.createdAt || new Date().toISOString()
+    };
+  }
+
+  private toUnifiedEmail(item: EmailMessage): UnifiedInboxMessage {
+    const subject = String(item.subject || '').trim();
+    const body = String(item.message || '').trim();
+    const preview = subject ? `${subject}${body ? ` - ${body}` : ''}` : body;
+    return {
+      id: item.id,
+      channel: 'email',
+      customerId: item.customerId || null,
+      customerName: item.customerName || null,
+      from: item.from || null,
+      message: preview || '(no content)',
+      createdAt: item.createdAt || new Date().toISOString()
+    };
   }
 }

@@ -1,13 +1,16 @@
 import { CommonModule, CurrencyPipe, DatePipe } from '@angular/common';
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, OnDestroy, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
+import { ToastController } from '@ionic/angular';
 import { IonButton, IonButtons, IonContent, IonHeader, IonTitle, IonToolbar } from '@ionic/angular/standalone';
-import { firstValueFrom } from 'rxjs';
+import { Subscription, finalize, firstValueFrom } from 'rxjs';
 import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
 import { PageBackButtonComponent } from '../../components/navigation/page-back-button/page-back-button.component';
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
 import {
+  InvoiceBoardStage,
   InvoiceDetail,
+  InvoiceDocumentType,
   InvoiceLineItem,
   InvoiceLineType,
   InvoiceStage,
@@ -16,6 +19,9 @@ import {
 import { Lane, LanesApi } from '../../services/lanes-api.service';
 import { PaymentGatewaySettingsService } from '../../services/payment-gateway-settings.service';
 import { WorkItem, WorkItemsApi } from '../../services/workitems-api.service';
+import { AddressLookupService, AddressSuggestion } from '../../services/address-lookup.service';
+import { AuthService } from '../../auth/auth.service';
+import { NotificationsApiService } from '../../services/notifications-api.service';
 
 type StatusTone = 'neutral' | 'success' | 'error';
 
@@ -39,7 +45,7 @@ type StatusTone = 'neutral' | 'success' | 'error';
   templateUrl: './invoice-detail.component.html',
   styleUrls: ['./invoice-detail.component.scss']
 })
-export default class InvoiceDetailComponent {
+export default class InvoiceDetailComponent implements OnDestroy {
   readonly lineItemsPageSize = 10;
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
@@ -47,6 +53,10 @@ export default class InvoiceDetailComponent {
   private readonly paymentSettings = inject(PaymentGatewaySettingsService);
   private readonly lanesApi = inject(LanesApi);
   private readonly workItemsApi = inject(WorkItemsApi);
+  private readonly addressLookup = inject(AddressLookupService);
+  private readonly notificationsApi = inject(NotificationsApiService);
+  private readonly auth = inject(AuthService);
+  private readonly toastController = inject(ToastController);
 
   readonly loading = signal(true);
   readonly saving = signal(false);
@@ -54,12 +64,25 @@ export default class InvoiceDetailComponent {
   readonly status = signal('');
   readonly statusTone = signal<StatusTone>('neutral');
   readonly lineItemsPage = signal(1);
+  readonly customerAddressSuggestions = signal<AddressSuggestion[]>([]);
+  readonly customerAddressSearching = signal(false);
+  readonly customerAddressNoMatches = signal(false);
+  readonly businessAddressSuggestions = signal<AddressSuggestion[]>([]);
+  readonly businessAddressSearching = signal(false);
+  readonly businessAddressNoMatches = signal(false);
+  private customerAddressLookupSub: Subscription | null = null;
+  private businessAddressLookupSub: Subscription | null = null;
+  private customerAddressSearchTimer: ReturnType<typeof setTimeout> | null = null;
+  private businessAddressSearchTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastToastKey = '';
+  private lastToastAt = 0;
 
   readonly invoice = signal<InvoiceDetail | null>(null);
   private readonly baselineSnapshot = signal('');
 
-  readonly stageOptions: InvoiceStage[] = ['draft', 'sent', 'accepted', 'declined', 'expired'];
+  readonly stageOptions: InvoiceBoardStage[] = ['draft', 'sent', 'accepted', 'declined'];
   readonly paymentAvailability = this.paymentSettings.paymentLinkAvailability;
+  readonly documentTypeLabel = computed(() => this.documentTypeLabelFor(this.invoice()?.documentType || 'invoice'));
 
   readonly totals = computed(() => {
     const detail = this.invoice();
@@ -92,6 +115,19 @@ export default class InvoiceDetailComponent {
     });
   }
 
+  ngOnDestroy(): void {
+    this.customerAddressLookupSub?.unsubscribe();
+    this.businessAddressLookupSub?.unsubscribe();
+    if (this.customerAddressSearchTimer) {
+      clearTimeout(this.customerAddressSearchTimer);
+      this.customerAddressSearchTimer = null;
+    }
+    if (this.businessAddressSearchTimer) {
+      clearTimeout(this.businessAddressSearchTimer);
+      this.businessAddressSearchTimer = null;
+    }
+  }
+
   setStage(value: string): void {
     if (!this.isStage(value)) return;
     this.updateField('stage', value);
@@ -107,6 +143,48 @@ export default class InvoiceDetailComponent {
       };
     });
     this.clearStatus();
+  }
+
+  onCustomerAddressInput(value: string): void {
+    this.updateField('customerAddress', value);
+    this.customerAddressNoMatches.set(false);
+    this.queueCustomerAddressLookup(value);
+  }
+
+  onCustomerAddressBlur(): void {
+    const normalized = String(this.invoice()?.customerAddress || '').trim().toLowerCase();
+    if (normalized) {
+      const exact = this.customerAddressSuggestions().find(item => item.display.trim().toLowerCase() === normalized);
+      if (exact) this.selectCustomerAddressSuggestion(exact);
+    }
+    setTimeout(() => this.customerAddressSuggestions.set([]), 120);
+  }
+
+  selectCustomerAddressSuggestion(item: AddressSuggestion): void {
+    this.updateField('customerAddress', item.display);
+    this.customerAddressSuggestions.set([]);
+    this.customerAddressNoMatches.set(false);
+  }
+
+  onBusinessAddressInput(value: string): void {
+    this.updateField('businessAddress', value);
+    this.businessAddressNoMatches.set(false);
+    this.queueBusinessAddressLookup(value);
+  }
+
+  onBusinessAddressBlur(): void {
+    const normalized = String(this.invoice()?.businessAddress || '').trim().toLowerCase();
+    if (normalized) {
+      const exact = this.businessAddressSuggestions().find(item => item.display.trim().toLowerCase() === normalized);
+      if (exact) this.selectBusinessAddressSuggestion(exact);
+    }
+    setTimeout(() => this.businessAddressSuggestions.set([]), 120);
+  }
+
+  selectBusinessAddressSuggestion(item: AddressSuggestion): void {
+    this.updateField('businessAddress', item.display);
+    this.businessAddressSuggestions.set([]);
+    this.businessAddressNoMatches.set(false);
   }
 
   togglePaymentLink(checked: boolean): void {
@@ -234,6 +312,7 @@ export default class InvoiceDetailComponent {
       }
 
       const saved = this.invoicesData.saveInvoice(next);
+      await this.notifyInvoiceBuildNeeded(previousStage, saved);
       const autoCompleteOutcome = await this.autoCompleteWorkItemOnInvoiceAccepted(previousStage, saved);
       this.invoice.set(saved);
       this.baselineSnapshot.set(this.snapshot(saved));
@@ -256,7 +335,19 @@ export default class InvoiceDetailComponent {
   }
 
   openInvoiceList(): void {
-    void this.router.navigate(['/invoices']);
+    const tab = this.invoice()?.documentType === 'quote' ? 'quotes' : 'invoices';
+    void this.router.navigate(['/invoices'], { queryParams: { tab } });
+  }
+
+  createInvoiceFromQuote(): void {
+    const current = this.invoice();
+    if (!current || current.documentType !== 'quote' || current.stage !== 'accepted') return;
+    const created = this.invoicesData.createInvoiceFromQuote(current.id);
+    if (!created) {
+      this.setStatus('Could not create invoice from quote.', 'error');
+      return;
+    }
+    void this.router.navigate(['/invoices', created.id]);
   }
 
   trackLineItem(_index: number, line: InvoiceLineItem): string {
@@ -465,7 +556,73 @@ export default class InvoiceDetailComponent {
   }
 
   private isStage(value: string): value is InvoiceStage {
-    return value === 'draft' || value === 'sent' || value === 'accepted' || value === 'declined' || value === 'expired';
+    return value === 'draft' || value === 'sent' || value === 'accepted' || value === 'declined';
+  }
+
+  private queueCustomerAddressLookup(raw: string): void {
+    if (this.customerAddressSearchTimer) {
+      clearTimeout(this.customerAddressSearchTimer);
+      this.customerAddressSearchTimer = null;
+    }
+    this.customerAddressLookupSub?.unsubscribe();
+    this.customerAddressSearching.set(false);
+    const query = String(raw || '').trim();
+    if (query.length < 4) {
+      this.customerAddressSuggestions.set([]);
+      this.customerAddressNoMatches.set(false);
+      return;
+    }
+    this.customerAddressSearchTimer = setTimeout(() => this.lookupCustomerAddressSuggestions(query), 320);
+  }
+
+  private lookupCustomerAddressSuggestions(query: string): void {
+    this.customerAddressSearching.set(true);
+    this.customerAddressNoMatches.set(false);
+    this.customerAddressLookupSub = this.addressLookup.search(query, 6, 'us')
+      .pipe(finalize(() => this.customerAddressSearching.set(false)))
+      .subscribe({
+        next: suggestions => {
+          this.customerAddressSuggestions.set(suggestions);
+          this.customerAddressNoMatches.set(query.length >= 4 && !suggestions.length);
+        },
+        error: () => {
+          this.customerAddressSuggestions.set([]);
+          this.customerAddressNoMatches.set(true);
+        }
+      });
+  }
+
+  private queueBusinessAddressLookup(raw: string): void {
+    if (this.businessAddressSearchTimer) {
+      clearTimeout(this.businessAddressSearchTimer);
+      this.businessAddressSearchTimer = null;
+    }
+    this.businessAddressLookupSub?.unsubscribe();
+    this.businessAddressSearching.set(false);
+    const query = String(raw || '').trim();
+    if (query.length < 4) {
+      this.businessAddressSuggestions.set([]);
+      this.businessAddressNoMatches.set(false);
+      return;
+    }
+    this.businessAddressSearchTimer = setTimeout(() => this.lookupBusinessAddressSuggestions(query), 320);
+  }
+
+  private lookupBusinessAddressSuggestions(query: string): void {
+    this.businessAddressSearching.set(true);
+    this.businessAddressNoMatches.set(false);
+    this.businessAddressLookupSub = this.addressLookup.search(query, 6, 'us')
+      .pipe(finalize(() => this.businessAddressSearching.set(false)))
+      .subscribe({
+        next: suggestions => {
+          this.businessAddressSuggestions.set(suggestions);
+          this.businessAddressNoMatches.set(query.length >= 4 && !suggestions.length);
+        },
+        error: () => {
+          this.businessAddressSuggestions.set([]);
+          this.businessAddressNoMatches.set(true);
+        }
+      });
   }
 
   private clearStatus(): void {
@@ -476,5 +633,59 @@ export default class InvoiceDetailComponent {
   private setStatus(message: string, tone: StatusTone = 'neutral'): void {
     this.status.set(message);
     this.statusTone.set(tone);
+    void this.presentStatusToast(message, tone);
+  }
+
+  private async presentStatusToast(message: string, tone: StatusTone): Promise<void> {
+    const value = String(message || '').trim();
+    if (!value) return;
+    const key = `${tone}:${value}`.toLowerCase();
+    const now = Date.now();
+    if (this.lastToastKey === key && now - this.lastToastAt < 1200) return;
+    this.lastToastKey = key;
+    this.lastToastAt = now;
+
+    const color = tone === 'error' ? 'danger' : tone === 'success' ? 'success' : 'medium';
+    const toast = await this.toastController.create({
+      message: value,
+      color,
+      duration: 1800,
+      position: 'top'
+    });
+    await toast.present();
+  }
+
+  private async notifyInvoiceBuildNeeded(previousStage: InvoiceStage, saved: InvoiceDetail): Promise<void> {
+    if (saved.documentType !== 'quote') return;
+    if (previousStage === 'accepted' || saved.stage !== 'accepted') return;
+
+    const user = this.auth.user();
+    if (!user) return;
+    try {
+      await firstValueFrom(
+        this.notificationsApi.createMention({
+          targetUserId: user.id || undefined,
+          targetEmail: user.email || undefined,
+          targetDisplayName: user.displayName || undefined,
+          title: `Quote ${saved.invoiceNumber} accepted`,
+          message: `${saved.customerName} accepted this quote. Build and send an invoice next.`,
+          route: `/invoices/${encodeURIComponent(saved.id)}`,
+          entityType: 'quote',
+          entityId: saved.id,
+          metadata: {
+            quoteId: saved.id,
+            quoteNumber: saved.invoiceNumber,
+            customerId: saved.customerId || '',
+            customerName: saved.customerName
+          }
+        })
+      );
+    } catch {
+      // Notification failure should not block save.
+    }
+  }
+
+  private documentTypeLabelFor(type: InvoiceDocumentType): string {
+    return type === 'quote' ? 'Quote' : 'Invoice';
   }
 }

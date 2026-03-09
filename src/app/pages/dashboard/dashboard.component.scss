@@ -225,6 +225,21 @@
 .card-line { font-size: 12px; display: flex; align-items: flex-start; gap: 8px; }
 .card-line.vehicle-color-line { align-items: center; }
 .muted { color: var(--ion-color-medium); }
+.doc-link {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  color: var(--ion-color-primary, #2563eb);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.doc-link:hover {
+  color: var(--ion-color-primary-shade, #1d4ed8);
+}
 
 .lead-time {
   color: var(--app-text-muted);
@@ -369,6 +384,7 @@
   border: 1px solid rgba(0,0,0,.2);
   background: var(--ion-color-medium);
   margin-left: 8px;
+  margin-right: 12px;
 }
 .api-status.up { background: var(--ion-color-success); }
 .api-status.down { background: var(--ion-color-danger); }

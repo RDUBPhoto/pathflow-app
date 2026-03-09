@@ -124,6 +124,11 @@ export const routes: Routes = [
       },
       {
         path: 'invoices',
+        redirectTo: 'quotes-invoices',
+        pathMatch: 'full'
+      },
+      {
+        path: 'quotes-invoices',
         loadComponent: () =>
           import('./pages/invoices/invoices.component').then(m => m.default)
       },

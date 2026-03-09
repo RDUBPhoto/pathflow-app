@@ -258,7 +258,7 @@ export class UserMenuComponent implements OnInit, OnDestroy {
       {
         title: 'Invoice needs approval',
         message: 'Draft invoice INV-430501 is ready for review.',
-        route: '/invoices',
+        route: '/quotes-invoices',
         entityType: 'invoice',
         entityId: 'inv-430501',
         metadata: { lane: 'draft', action: 'review' }

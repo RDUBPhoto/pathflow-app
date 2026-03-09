@@ -336,7 +336,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
 
   openInvoiceList(): void {
     const tab = this.invoice()?.documentType === 'quote' ? 'quotes' : 'invoices';
-    void this.router.navigate(['/invoices'], { queryParams: { tab } });
+    void this.router.navigate(['/quotes-invoices'], { queryParams: { tab } });
   }
 
   createInvoiceFromQuote(): void {

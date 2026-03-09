@@ -36,6 +36,7 @@ type InvoiceKpi = {
   tone: 'open' | 'accepted' | 'declined' | 'expired' | 'neutral';
 };
 type InvoicesTab = 'quotes' | 'invoices';
+const INVOICES_TAB_STORAGE_KEY = 'pathflow.quotesInvoices.activeTab';
 
 @Component({
   selector: 'app-invoices',
@@ -134,8 +135,16 @@ export default class InvoicesComponent implements OnDestroy {
   constructor(private readonly router: Router) {
     this.route.queryParamMap.subscribe(params => {
       const tab = String(params.get('tab') || '').trim().toLowerCase();
-      if (tab === 'invoices') this.activeTab.set('invoices');
-      else if (tab === 'quotes') this.activeTab.set('quotes');
+      if (tab === 'invoices') {
+        this.activeTab.set('invoices');
+        this.persistActiveTab('invoices');
+      } else if (tab === 'quotes') {
+        this.activeTab.set('quotes');
+        this.persistActiveTab('quotes');
+      } else {
+        const persisted = this.readPersistedTab();
+        this.activeTab.set(persisted);
+      }
     });
 
     void this.syncQuoteResponses();
@@ -180,8 +189,15 @@ export default class InvoicesComponent implements OnDestroy {
   setTab(tab: InvoicesTab): void {
     if (this.activeTab() === tab) return;
     this.activeTab.set(tab);
+    this.persistActiveTab(tab);
     this.openMenuId.set(null);
     this.searchQuery.set('');
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { tab },
+      queryParamsHandling: 'merge',
+      replaceUrl: true
+    });
   }
 
   onTabChanged(value: string | null | undefined): void {
@@ -303,6 +319,23 @@ export default class InvoicesComponent implements OnDestroy {
 
   private documentTypeForTab(tab: InvoicesTab): InvoiceDocumentType {
     return tab === 'quotes' ? 'quote' : 'invoice';
+  }
+
+  private persistActiveTab(tab: InvoicesTab): void {
+    try {
+      localStorage.setItem(INVOICES_TAB_STORAGE_KEY, tab);
+    } catch {
+      // Ignore storage failures.
+    }
+  }
+
+  private readPersistedTab(): InvoicesTab {
+    try {
+      const value = String(localStorage.getItem(INVOICES_TAB_STORAGE_KEY) || '').trim().toLowerCase();
+      return value === 'invoices' ? 'invoices' : 'quotes';
+    } catch {
+      return 'quotes';
+    }
   }
 
   private async showDeleteToast(message: string, color: 'success' | 'danger' | 'warning'): Promise<void> {

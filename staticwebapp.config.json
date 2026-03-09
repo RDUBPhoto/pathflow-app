@@ -8,6 +8,7 @@
     { "route": "/api/access", "allowedRoles": ["anonymous"] },
     { "route": "/api/brandingUpload", "allowedRoles": ["anonymous"] },
     { "route": "/api/brandingUpload/*", "allowedRoles": ["anonymous"] },
+    { "route": "/api/quote-response", "allowedRoles": ["anonymous"] },
     { "route": "/dashboard", "allowedRoles": ["authenticated"] },
     { "route": "/customers", "allowedRoles": ["authenticated"] },
     { "route": "/customers/*", "allowedRoles": ["authenticated"] },

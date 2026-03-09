@@ -4,6 +4,8 @@ import { ActivatedRoute } from '@angular/router';
 import { IonContent } from '@ionic/angular/standalone';
 import { InvoicesDataService } from '../../services/invoices-data.service';
 import { TenantContextService } from '../../services/tenant-context.service';
+import { firstValueFrom } from 'rxjs';
+import { QuoteResponseApiService } from '../../services/quote-response-api.service';
 
 type QuoteAction = 'accept' | 'decline' | 'view';
 
@@ -18,6 +20,7 @@ export default class QuoteResponseComponent {
   private readonly route = inject(ActivatedRoute);
   private readonly invoicesData = inject(InvoicesDataService);
   private readonly tenantContext = inject(TenantContextService);
+  private readonly quoteResponseApi = inject(QuoteResponseApiService);
 
   readonly action = computed<QuoteAction>(() => {
     const dataAction = String(this.route.snapshot.data['action'] || '').trim().toLowerCase();
@@ -50,15 +53,18 @@ export default class QuoteResponseComponent {
     return `We received your quote response link click. ${this.businessName()} will continue the next step with you.`;
   });
 
-  readonly trackingMessage = signal('');
+  readonly trackingMessage = signal('Recording your response...');
 
   constructor() {
     this.applyResponseTracking();
   }
 
-  private applyResponseTracking(): void {
+  private async applyResponseTracking(): Promise<void> {
     const action = this.action();
-    if (action === 'view') return;
+    if (action === 'view') {
+      this.trackingMessage.set('');
+      return;
+    }
 
     const quoteId = String(this.route.snapshot.queryParamMap.get('quoteId') || '').trim();
     if (!quoteId) {
@@ -70,24 +76,33 @@ export default class QuoteResponseComponent {
     const activeTenant = String(this.tenantContext.tenantId() || '').trim().toLowerCase() || 'main';
     const targetTenant = requestedTenant || activeTenant;
 
-    if (targetTenant !== activeTenant) {
-      this.tenantContext.setTenantOverride(targetTenant);
+    try {
+      await firstValueFrom(this.quoteResponseApi.capture({
+        quoteId,
+        action,
+        tenantId: targetTenant,
+        quoteNumber: this.quoteNumber(),
+        customerName: this.customerName(),
+        vehicle: this.vehicle(),
+        businessName: this.businessName()
+      }));
+
+      // Keep local fallback update for same-browser testing.
+      if (targetTenant !== activeTenant) {
+        this.tenantContext.setTenantOverride(targetTenant);
+      }
+      this.invoicesData.setStage(
+        quoteId,
+        action === 'accept' ? 'accepted' : 'declined',
+        `Customer ${action}ed quote from public link.`
+      );
+      if (targetTenant !== activeTenant) {
+        this.tenantContext.setTenantOverride(activeTenant);
+      }
+
+      this.trackingMessage.set(`Quote status updated to ${action === 'accept' ? 'Accepted' : 'Declined'}.`);
+    } catch {
+      this.trackingMessage.set('We captured your response. If status has not updated yet, please refresh and try again.');
     }
-
-    const updated = this.invoicesData.setStage(
-      quoteId,
-      action === 'accept' ? 'accepted' : 'declined',
-      `Customer ${action}ed quote from public link.`
-    );
-
-    if (targetTenant !== activeTenant) {
-      this.tenantContext.setTenantOverride(activeTenant);
-    }
-
-    this.trackingMessage.set(
-      updated
-        ? `Quote status updated to ${action === 'accept' ? 'Accepted' : 'Declined'}.`
-        : 'Quote response captured.'
-    );
   }
 }

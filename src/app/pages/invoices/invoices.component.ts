@@ -1,5 +1,5 @@
 import { CommonModule, CurrencyPipe } from '@angular/common';
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, OnDestroy, computed, inject, signal } from '@angular/core';
 import {
   IonButton,
   IonButtons,
@@ -12,6 +12,7 @@ import {
 } from '@ionic/angular/standalone';
 import { ToastController } from '@ionic/angular';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { firstValueFrom } from 'rxjs';
 import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
 import { PageBackButtonComponent } from '../../components/navigation/page-back-button/page-back-button.component';
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
@@ -24,6 +25,7 @@ import {
   InvoiceStage,
   InvoicesDataService
 } from '../../services/invoices-data.service';
+import { QuoteResponseApiService } from '../../services/quote-response-api.service';
 
 type InvoiceKpi = {
   id: string;
@@ -56,11 +58,13 @@ type InvoicesTab = 'quotes' | 'invoices';
   templateUrl: './invoices.component.html',
   styleUrls: ['./invoices.component.scss']
 })
-export default class InvoicesComponent {
+export default class InvoicesComponent implements OnDestroy {
   private readonly route = inject(ActivatedRoute);
   private readonly invoicesData = inject(InvoicesDataService);
+  private readonly quoteResponseApi = inject(QuoteResponseApiService);
   private readonly toastController = inject(ToastController);
   private readonly laneDisplayOrder: InvoiceBoardStage[] = ['draft', 'sent', 'accepted', 'declined'];
+  private syncTimer: ReturnType<typeof setInterval> | null = null;
 
   readonly lanes = [...INVOICE_LANES].sort(
     (a, b) => this.laneDisplayOrder.indexOf(a.id) - this.laneDisplayOrder.indexOf(b.id)
@@ -128,6 +132,18 @@ export default class InvoicesComponent {
       if (tab === 'invoices') this.activeTab.set('invoices');
       else if (tab === 'quotes') this.activeTab.set('quotes');
     });
+
+    void this.syncQuoteResponses();
+    this.syncTimer = setInterval(() => {
+      void this.syncQuoteResponses();
+    }, 15000);
+  }
+
+  ngOnDestroy(): void {
+    if (this.syncTimer) {
+      clearInterval(this.syncTimer);
+      this.syncTimer = null;
+    }
   }
 
   openTemplatePicker(): void {
@@ -225,5 +241,28 @@ export default class InvoicesComponent {
       position: 'top'
     });
     await toast.present();
+  }
+
+  private async syncQuoteResponses(): Promise<void> {
+    try {
+      const response = await firstValueFrom(this.quoteResponseApi.listRecent(250));
+      const items = Array.isArray(response?.items) ? response.items : [];
+      for (const item of items) {
+        const quoteId = String(item?.quoteId || '').trim();
+        const stage = String(item?.stage || '').trim().toLowerCase();
+        if (!quoteId) continue;
+        if (stage !== 'accepted' && stage !== 'declined') continue;
+        const existing = this.invoicesData.getInvoiceById(quoteId);
+        if (!existing || existing.documentType !== 'quote') continue;
+        if (existing.stage === stage) continue;
+        this.invoicesData.setStage(
+          quoteId,
+          stage,
+          `Customer ${stage === 'accepted' ? 'accepted' : 'declined'} quote from public link.`
+        );
+      }
+    } catch {
+      // Silent background sync failure; keeps UI responsive even if endpoint is unavailable.
+    }
   }
 }

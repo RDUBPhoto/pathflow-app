@@ -120,6 +120,7 @@ export default class InvoicesComponent implements OnDestroy {
     for (const invoice of this.filteredInvoices()) {
       if (invoice.isExpired) continue;
       if (invoice.stage === 'expired') continue;
+      if (invoice.stage === 'canceled') continue;
       grouped[invoice.stage].push(invoice);
     }
     return grouped;
@@ -262,7 +263,7 @@ export default class InvoicesComponent implements OnDestroy {
 
     this.invoicesData.setStage(
       candidate.id,
-      'declined',
+      'canceled',
       'Quote canceled by staff before customer approval.'
     );
 

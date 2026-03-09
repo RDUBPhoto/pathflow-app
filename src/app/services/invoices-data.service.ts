@@ -1,8 +1,8 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { TenantContextService } from './tenant-context.service';
 
-export type InvoiceStage = 'draft' | 'sent' | 'accepted' | 'declined' | 'expired';
-export type InvoiceBoardStage = Exclude<InvoiceStage, 'expired'>;
+export type InvoiceStage = 'draft' | 'sent' | 'accepted' | 'declined' | 'canceled' | 'expired';
+export type InvoiceBoardStage = Exclude<InvoiceStage, 'expired' | 'canceled'>;
 export type InvoiceDocumentType = 'quote' | 'invoice';
 export type InvoiceLineType = 'part' | 'labor';
 

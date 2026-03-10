@@ -52,7 +52,8 @@ export default class LoginComponent {
   readonly localCredentialHints = environment.auth.localUsers.map(user => ({
     email: user.email,
     password: user.password,
-    role: user.role
+    role: user.role,
+    isSuperAdmin: !!user.isSuperAdmin
   }));
 
   readonly localAuthHint = signal('');
@@ -136,6 +137,10 @@ export default class LoginComponent {
 
   signInDevAsAdmin(): void {
     this.auth.signInDev('admin');
+  }
+
+  signInDevAsSuperAdmin(): void {
+    this.auth.signInDevSuperAdmin();
   }
 
   signInWithEmailPassword(): void {

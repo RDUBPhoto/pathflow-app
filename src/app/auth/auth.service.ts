@@ -28,6 +28,7 @@ interface LocalPasswordAccount {
   email: string;
   password: string;
   role: 'admin' | 'user';
+  isSuperAdmin?: boolean;
   displayName?: string;
   phone?: string;
   avatarUrl?: string;
@@ -183,6 +184,22 @@ export class AuthService {
     this.setDevUser(record);
   }
 
+  signInDevSuperAdmin(email = 'superadmin.local@yourcompany.dev'): void {
+    const record: DevAuthRecord = {
+      role: 'admin',
+      email: (email || 'superadmin.local@yourcompany.dev').trim().toLowerCase(),
+      displayName: 'Local Super Admin'
+    };
+
+    this.setDevUser(record, {
+      isSuperAdmin: true,
+      registered: true,
+      canBootstrap: false,
+      billingStatus: 'active',
+      accessLocked: false
+    });
+  }
+
   signInWithEmailPassword(emailInput: string, passwordInput: string): { ok: boolean; error?: string } {
     if (!this.isLocalAuthEnabled()) {
       return { ok: false, error: 'Email/password login is not enabled for this environment.' };
@@ -210,7 +227,10 @@ export class AuthService {
       avatarUrl: account.avatarUrl || undefined
     }, {
       registered: customAccount ? !!customAccount.registered : true,
-      canBootstrap: customAccount ? !customAccount.registered : false
+      canBootstrap: customAccount ? !customAccount.registered : false,
+      isSuperAdmin: !!account.isSuperAdmin,
+      billingStatus: account.isSuperAdmin ? 'active' : undefined,
+      accessLocked: false
     });
 
     return { ok: true };

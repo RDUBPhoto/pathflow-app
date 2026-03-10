@@ -16,6 +16,7 @@ export const environment = {
       email: string;
       password: string;
       role: 'admin' | 'user';
+      isSuperAdmin?: boolean;
       displayName?: string;
       avatarUrl?: string;
     }>

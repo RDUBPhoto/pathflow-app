@@ -108,7 +108,7 @@
         <div class="dev-title">Local Test Accounts</div>
         <p class="auth-hint">
           <span *ngFor="let acct of localCredentialHints; let last = last">
-            {{ acct.email }} / {{ acct.password }} ({{ acct.role }})<span *ngIf="!last">, </span>
+            {{ acct.email }} / {{ acct.password }} ({{ acct.isSuperAdmin ? 'superadmin' : acct.role }})<span *ngIf="!last">, </span>
           </span>
         </p>
       </div>
@@ -118,6 +118,7 @@
         <div class="dev-actions">
           <ion-button size="small" fill="outline" (click)="signInDevAsUser()">Login as User</ion-button>
           <ion-button size="small" (click)="signInDevAsAdmin()">Login as Admin</ion-button>
+          <ion-button size="small" color="warning" (click)="signInDevAsSuperAdmin()">Login as Super Admin</ion-button>
         </div>
       </div>
     </section>

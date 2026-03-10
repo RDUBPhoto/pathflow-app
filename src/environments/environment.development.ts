@@ -20,6 +20,13 @@ export const environment = {
         displayName: 'Local Admin'
       },
       {
+        email: 'superadmin@yourcompany.local',
+        password: 'Super123!',
+        role: 'admin',
+        isSuperAdmin: true,
+        displayName: 'Local Super Admin'
+      },
+      {
         email: 'user@yourcompany.local',
         password: 'User123!',
         role: 'user',
@@ -29,6 +36,7 @@ export const environment = {
       email: string;
       password: string;
       role: 'admin' | 'user';
+      isSuperAdmin?: boolean;
       displayName?: string;
       avatarUrl?: string;
       phone?: string;

@@ -57,7 +57,7 @@
             [disabled]="saving() || !auth.canBootstrapRegistration()"
             [value]="businessName()"
             (ionInput)="businessName.set($any($event.detail).value ?? '')"
-            placeholder="Exodus 4x4">
+            placeholder="Acme Inc">
           </ion-input>
         </ion-item>
 

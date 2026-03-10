@@ -10,8 +10,8 @@ import {
   ClientPrincipal
 } from './auth.models';
 
-const DEV_AUTH_STORAGE_KEY = 'exodus.dev.auth.user';
-const AUTH_PROFILE_STORAGE_KEY = 'exodus.auth.profile';
+const DEV_AUTH_STORAGE_KEY = 'pathflow.dev.auth.user';
+const AUTH_PROFILE_STORAGE_KEY = 'pathflow.auth.profile';
 const LOCAL_PASSWORD_ACCOUNTS_KEY = 'pathflow.local.password.accounts';
 const DEFAULT_LOCATION_ID = 'primary-location';
 const DEFAULT_LOCATION_NAME = 'Primary Location';

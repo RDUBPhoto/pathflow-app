@@ -1,8 +1,8 @@
 const { TableClient } = require("@azure/data-tables");
 const { randomUUID } = require("crypto");
+const { resolveTenantId } = require("../_shared/tenant");
 
 const TABLE = "lanes";
-const PARTITION = "main";
 
 const CORE_LANES = [
   { stageKey: "lead", name: "Leads", sort: 100 },
@@ -49,16 +49,16 @@ function laneFromEntity(entity) {
   };
 }
 
-async function listLaneEntities(client) {
+async function listLaneEntities(client, tenantId) {
   const out = [];
-  const iter = client.listEntities({ queryOptions: { filter: `PartitionKey eq '${PARTITION}'` } });
+  const iter = client.listEntities({ queryOptions: { filter: `PartitionKey eq '${tenantId}'` } });
   for await (const entity of iter) {
     out.push(entity);
   }
   return out;
 }
 
-async function ensureCoreLanes(client, lanes) {
+async function ensureCoreLanes(client, lanes, tenantId) {
   const byStage = new Map();
   for (const entity of lanes) {
     const stageKey = pick(entity.stageKey).trim().toLowerCase() || inferCoreStageKeyFromName(entity.name);
@@ -71,7 +71,7 @@ async function ensureCoreLanes(client, lanes) {
     const existing = byStage.get(core.stageKey);
     if (!existing) {
       const created = {
-        partitionKey: PARTITION,
+        partitionKey: tenantId,
         rowKey: randomUUID(),
         name: core.name,
         sort: core.sort,
@@ -92,7 +92,7 @@ async function ensureCoreLanes(client, lanes) {
     if (needsPatch) {
       await client.upsertEntity(
         {
-          partitionKey: PARTITION,
+          partitionKey: tenantId,
           rowKey: existing.rowKey,
           name: core.name,
           sort: core.sort,
@@ -109,10 +109,10 @@ async function ensureCoreLanes(client, lanes) {
   }
 }
 
-async function getLaneById(client, laneId) {
+async function getLaneById(client, laneId, tenantId) {
   if (!laneId) return null;
   try {
-    const entity = await client.getEntity(PARTITION, laneId);
+    const entity = await client.getEntity(tenantId, laneId);
     return entity || null;
   } catch (_) {
     return null;
@@ -128,6 +128,7 @@ function isProtectedLaneEntity(entity) {
 module.exports = async function (context, req) {
   const method = (req.method || "GET").toUpperCase();
   const id = context.bindingData && context.bindingData.id ? String(context.bindingData.id) : "";
+  const tenantId = resolveTenantId(req, req && req.body ? req.body : {});
 
   if (method === "OPTIONS") { context.res = { status: 204 }; return; }
 
@@ -139,8 +140,8 @@ module.exports = async function (context, req) {
     try { await client.createTable(); } catch (_) {}
 
     if (method === "GET") {
-      const entities = await listLaneEntities(client);
-      await ensureCoreLanes(client, entities);
+      const entities = await listLaneEntities(client, tenantId);
+      await ensureCoreLanes(client, entities, tenantId);
       const out = entities
         .map(laneFromEntity)
         .filter(lane => !!lane.name && isCoreStage(lane.stageKey));
@@ -169,7 +170,7 @@ module.exports = async function (context, req) {
         return;
       }
 
-      const existing = await getLaneById(client, rid);
+      const existing = await getLaneById(client, rid, tenantId);
       if (!existing) {
         context.res = { status: 404, headers: { "content-type": "application/json" }, body: { error: "Lane not found" } };
         return;

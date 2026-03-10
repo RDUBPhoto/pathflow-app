@@ -668,13 +668,25 @@ function buildMeResponse(principal, userEntity, allTenants, canBootstrap) {
     };
   }
 
-  const roles = parseUserRoles(userEntity);
-  const locations = buildUserLocations(userEntity, allTenants);
-  const defaultLocationId = pickDefaultLocation(userEntity, locations);
-  const billingTenant = pickBillingTenant(userEntity, allTenants, defaultLocationId, locations);
-  const billingProfile = buildBillingProfileFromTenant(billingTenant, userEntity);
   const isSuperAdmin = asBool(userEntity.isSuperAdmin) || principalIsConfiguredSuperAdmin(principal);
-  const accessRevoked = userIsRevoked(userEntity);
+  const effectiveUserEntity = isSuperAdmin
+    ? { ...userEntity, isSuperAdmin: true, allLocations: true }
+    : userEntity;
+  const roles = parseUserRoles(effectiveUserEntity);
+  const locations = buildUserLocations(effectiveUserEntity, allTenants);
+  const defaultLocationId = pickDefaultLocation(effectiveUserEntity, locations);
+  const billingTenant = pickBillingTenant(effectiveUserEntity, allTenants, defaultLocationId, locations);
+  const billingProfile = isSuperAdmin
+    ? {
+        billingStatus: "active",
+        trialStartsAt: "",
+        trialEndsAt: "",
+        accessLocked: false,
+        accessLockReason: "",
+        planCycle: "monthly"
+      }
+    : buildBillingProfileFromTenant(billingTenant, effectiveUserEntity);
+  const accessRevoked = userIsRevoked(effectiveUserEntity);
   const accessLockReason = accessRevoked
     ? "Your account access has been removed. Contact your workspace admin."
     : billingProfile.accessLockReason;
@@ -1384,7 +1396,9 @@ module.exports = async function (context, req) {
 
       for (const locationNameRaw of locationNames) {
         const locationName = asString(locationNameRaw).slice(0, 120) || "Primary Location";
-        const requestedLocationId = sanitizeTenantId(asString(locationName || "primary-location"));
+        // Always seed with a short random suffix so new workspaces never land on a shared legacy partition.
+        const baseLocationId = sanitizeTenantId(asString(locationName || "primary-location")) || "location";
+        const requestedLocationId = sanitizeTenantId(`${baseLocationId}-${randomUUID().slice(0, 6)}`);
         const locationId = ensureUniqueTenantId(requestedLocationId, existingTenantIds);
         if (!locationId) {
           context.res = json(400, { ok: false, error: "Invalid location id." });

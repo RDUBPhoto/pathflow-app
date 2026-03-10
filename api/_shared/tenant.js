@@ -8,7 +8,7 @@ function sanitizeTenantId(value) {
     .replace(/[^a-z0-9._:-]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 80);
-  return cleaned || "main";
+  return cleaned || "tenant-unassigned";
 }
 
 function readHeader(headers, key) {
@@ -27,7 +27,7 @@ function resolveTenantId(req, body) {
   const headerTenant = readHeader(req && req.headers, "x-tenant-id");
   const queryTenant = asString(req && req.query && req.query.tenantId);
   const bodyTenant = asString(body && body.tenantId);
-  const fallback = asString(process.env.DEFAULT_TENANT_ID) || "main";
+  const fallback = asString(process.env.DEFAULT_TENANT_ID) || "tenant-unassigned";
   return sanitizeTenantId(headerTenant || queryTenant || bodyTenant || fallback);
 }
 

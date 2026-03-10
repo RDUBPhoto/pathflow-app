@@ -1,10 +1,10 @@
 // api/customers/index.js
 const { TableClient } = require("@azure/data-tables");
 const { randomUUID } = require("crypto");
+const { resolveTenantId } = require("../_shared/tenant");
 
 const TABLE = "customers";
 const NOT_DUPLICATES_TABLE = "customernotduplicates";
-const PARTITION = "main";
 const DUPLICATE_REASON_WEIGHTS = Object.freeze({
   vin: 45,
   email: 30,
@@ -392,28 +392,28 @@ function findExistingByIdentity(customers, row) {
   return bestScore >= 80 ? best : null;
 }
 
-async function listCustomers(client) {
+async function listCustomers(client, tenantId) {
   const out = [];
-  const iter = client.listEntities({ queryOptions: { filter: `PartitionKey eq '${PARTITION}'` } });
+  const iter = client.listEntities({ queryOptions: { filter: `PartitionKey eq '${tenantId}'` } });
   for await (const entity of iter) out.push(toCustomerDto(entity));
   return out;
 }
 
-async function getCustomerEntity(client, id) {
+async function getCustomerEntity(client, id, tenantId) {
   const rowKey = toStr(id).trim();
   if (!rowKey) return null;
   try {
-    return await client.getEntity(PARTITION, rowKey);
+    return await client.getEntity(tenantId, rowKey);
   } catch {
     return null;
   }
 }
 
-async function listIgnoredDuplicateKeys(conn) {
+async function listIgnoredDuplicateKeys(conn, tenantId) {
   const ignoredClient = TableClient.fromConnectionString(conn, NOT_DUPLICATES_TABLE);
   try { await ignoredClient.createTable(); } catch (_) {}
   const out = new Set();
-  const iter = ignoredClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${PARTITION}'` } });
+  const iter = ignoredClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${tenantId}'` } });
   for await (const entity of iter) {
     const key = toStr(entity.rowKey).trim();
     if (key) out.add(key);
@@ -421,14 +421,14 @@ async function listIgnoredDuplicateKeys(conn) {
   return out;
 }
 
-async function saveIgnoredDuplicate(conn, leftId, rightId) {
+async function saveIgnoredDuplicate(conn, leftId, rightId, tenantId) {
   const key = duplicatePairKey(leftId, rightId);
   if (!key) return false;
   const ignoredClient = TableClient.fromConnectionString(conn, NOT_DUPLICATES_TABLE);
   try { await ignoredClient.createTable(); } catch (_) {}
   const [a, b] = key.split("::");
   await ignoredClient.upsertEntity({
-    partitionKey: PARTITION,
+    partitionKey: tenantId,
     rowKey: key,
     leftId: a,
     rightId: b,
@@ -664,10 +664,10 @@ function combineNotes(targetNotes, sourceNotes) {
   return `${target}\n\n${source}`;
 }
 
-function buildMergePatch(targetEntity, sourceEntity) {
+function buildMergePatch(targetEntity, sourceEntity, tenantId) {
   const now = new Date().toISOString();
   const patch = {
-    partitionKey: PARTITION,
+    partitionKey: tenantId,
     rowKey: toStr(targetEntity.rowKey),
     updatedAt: now
   };
@@ -727,7 +727,7 @@ function mergedCustomerName(targetEntity, appliedPatch) {
   return fullName(first, last, name);
 }
 
-async function remapCustomerReferences(conn, sourceId, targetId, targetName) {
+async function remapCustomerReferences(conn, sourceId, targetId, targetName, tenantId) {
   const stats = {};
   const sourceFilter = escapedFilterValue(sourceId);
   const now = new Date().toISOString();
@@ -736,13 +736,13 @@ async function remapCustomerReferences(conn, sourceId, targetId, targetName) {
     const client = TableClient.fromConnectionString(conn, mapping.table);
     try { await client.createTable(); } catch (_) {}
     const iter = client.listEntities({
-      queryOptions: { filter: `PartitionKey eq '${PARTITION}' and customerId eq '${sourceFilter}'` }
+      queryOptions: { filter: `PartitionKey eq '${tenantId}' and customerId eq '${sourceFilter}'` }
     });
 
     let updated = 0;
     for await (const entity of iter) {
       const patch = {
-        partitionKey: PARTITION,
+        partitionKey: tenantId,
         rowKey: entity.rowKey,
         customerId: targetId,
         updatedAt: now
@@ -759,6 +759,7 @@ async function remapCustomerReferences(conn, sourceId, targetId, targetName) {
 
 module.exports = async function (context, req) {
   const method = (req.method || "GET").toUpperCase();
+  const tenantId = resolveTenantId(req, req && req.body ? req.body : {});
   if (method === "OPTIONS") { context.res = { status: 204 }; return; }
 
   try {
@@ -769,7 +770,7 @@ module.exports = async function (context, req) {
     try { await client.createTable(); } catch (_) {}
 
     if (method === "GET") {
-      const out = await listCustomers(client);
+      const out = await listCustomers(client, tenantId);
       context.res = { status: 200, headers: { "content-type": "application/json" }, body: out };
       return;
     }
@@ -789,7 +790,7 @@ module.exports = async function (context, req) {
       const id = toStr(b.id);
 
       if (op === "delete" && id) {
-        await client.deleteEntity(PARTITION, id);
+        await client.deleteEntity(tenantId, id);
         context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true } };
         return;
       }
@@ -800,18 +801,18 @@ module.exports = async function (context, req) {
           context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true, items: [] } };
           return;
         }
-        const customers = await listCustomers(client);
+        const customers = await listCustomers(client, tenantId);
         const excludeId = toStr(b.excludeId || b.id);
-        const ignoredKeys = excludeId ? await listIgnoredDuplicateKeys(conn) : new Set();
+        const ignoredKeys = excludeId ? await listIgnoredDuplicateKeys(conn, tenantId) : new Set();
         const items = buildDuplicateCandidates(customers, probe, excludeId, ignoredKeys);
         context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true, items } };
         return;
       }
 
       if (op === "duplicatesummary" || op === "duplicates") {
-        const customers = await listCustomers(client);
+        const customers = await listCustomers(client, tenantId);
         const includeCustomers = b.includeCustomers === true || toStr(b.includeCustomers).toLowerCase() === "true";
-        const ignoredKeys = await listIgnoredDuplicateKeys(conn);
+        const ignoredKeys = await listIgnoredDuplicateKeys(conn, tenantId);
         const summary = buildDuplicateSummary(customers, b.limit, includeCustomers, ignoredKeys);
         context.res = {
           status: 200,
@@ -837,7 +838,7 @@ module.exports = async function (context, req) {
           };
           return;
         }
-        await saveIgnoredDuplicate(conn, leftId, rightId);
+        await saveIgnoredDuplicate(conn, leftId, rightId, tenantId);
         context.res = {
           status: 200,
           headers: { "content-type": "application/json" },
@@ -852,16 +853,16 @@ module.exports = async function (context, req) {
           context.res = { status: 400, headers: { "content-type": "application/json" }, body: { error: "targetId required" } };
           return;
         }
-        const targetEntity = await getCustomerEntity(client, targetId);
+        const targetEntity = await getCustomerEntity(client, targetId, tenantId);
         if (!targetEntity) {
           context.res = { status: 404, headers: { "content-type": "application/json" }, body: { error: "Target customer not found." } };
           return;
         }
         const sourceDraft = { ...b };
         sourceDraft.name = fullName(pick(b, "firstName"), pick(b, "lastName"), pick(b, "name"));
-        const patch = buildMergePatch(targetEntity, sourceDraft);
+        const patch = buildMergePatch(targetEntity, sourceDraft, tenantId);
         await client.upsertEntity(patch, "Merge");
-        const merged = await getCustomerEntity(client, targetId);
+        const merged = await getCustomerEntity(client, targetId, tenantId);
         context.res = {
           status: 200,
           headers: { "content-type": "application/json" },
@@ -882,19 +883,19 @@ module.exports = async function (context, req) {
           return;
         }
 
-        const sourceEntity = await getCustomerEntity(client, sourceId);
-        const targetEntity = await getCustomerEntity(client, targetId);
+        const sourceEntity = await getCustomerEntity(client, sourceId, tenantId);
+        const targetEntity = await getCustomerEntity(client, targetId, tenantId);
         if (!sourceEntity || !targetEntity) {
           context.res = { status: 404, headers: { "content-type": "application/json" }, body: { error: "Source or target customer was not found." } };
           return;
         }
 
-        const patch = buildMergePatch(targetEntity, sourceEntity);
+        const patch = buildMergePatch(targetEntity, sourceEntity, tenantId);
         await client.upsertEntity(patch, "Merge");
         const targetName = mergedCustomerName(targetEntity, patch);
-        const remapped = await remapCustomerReferences(conn, sourceId, targetId, targetName);
-        await client.deleteEntity(PARTITION, sourceId);
-        const merged = await getCustomerEntity(client, targetId);
+        const remapped = await remapCustomerReferences(conn, sourceId, targetId, targetName, tenantId);
+        await client.deleteEntity(tenantId, sourceId);
+        const merged = await getCustomerEntity(client, targetId, tenantId);
         context.res = {
           status: 200,
           headers: { "content-type": "application/json" },
@@ -914,7 +915,7 @@ module.exports = async function (context, req) {
           return;
         }
 
-        const existingCustomers = await listCustomers(client);
+        const existingCustomers = await listCustomers(client, tenantId);
         let created = 0;
         let updated = 0;
         let skipped = 0;
@@ -953,7 +954,7 @@ module.exports = async function (context, req) {
               const rowKey = randomUUID();
               const now = new Date().toISOString();
               const entity = {
-                partitionKey: PARTITION,
+                partitionKey: tenantId,
                 rowKey,
                 business: pick(source, "business"),
                 accountManager: pick(source, "accountManager"),
@@ -1002,7 +1003,7 @@ module.exports = async function (context, req) {
             }
 
             const patch = {
-              partitionKey: PARTITION,
+              partitionKey: tenantId,
               rowKey: toStr(existing.id),
               updatedAt: new Date().toISOString()
             };
@@ -1106,7 +1107,7 @@ module.exports = async function (context, req) {
         const createdAt = toStr(b.createdAt) || new Date().toISOString();
         const notes = pick(b, "notes");
         const entity = {
-          partitionKey: PARTITION,
+          partitionKey: tenantId,
           rowKey,
           business: pick(b, "business"),
           accountManager: pick(b, "accountManager"),
@@ -1193,7 +1194,7 @@ module.exports = async function (context, req) {
         context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true, id: rowKey } };
         return;
       } else {
-        const patch = { partitionKey: PARTITION, rowKey: id };
+        const patch = { partitionKey: tenantId, rowKey: id };
         if (name) patch.name = name;
         setIfPresent(patch, b, "business");
         setIfPresent(patch, b, "accountManager");

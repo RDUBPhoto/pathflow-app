@@ -1,12 +1,13 @@
 const { TableClient } = require("@azure/data-tables");
+const { resolveTenantId } = require("../_shared/tenant");
 
 const T_ITEMS = "workitems";
 const T_EVENTS = "events";
-const PARTITION = "main";
 function pick(v, d = "") { return typeof v === "string" ? v : (v == null ? d : String(v)); }
 
 module.exports = async function (context, req) {
   const method = (req.method || "GET").toUpperCase();
+  const tenantId = resolveTenantId(req, req && req.body ? req.body : {});
   if (method === "OPTIONS") { context.res = { status: 204 }; return; }
 
   try {
@@ -22,8 +23,12 @@ module.exports = async function (context, req) {
     const id = pick(b.id).trim();
     if (!id) { context.res = { status: 400, headers: { "content-type": "application/json" }, body: { error: "id required" } }; return; }
 
-    try { await items.deleteEntity(PARTITION, id); } catch (_) {}
-    try { for await (const e of events.listEntities({ queryOptions: { filter: `PartitionKey eq '${PARTITION}' and workItemId eq '${id.replace(/'/g,"''")}'` } })) { await events.deleteEntity(PARTITION, e.rowKey); } } catch (_) {}
+    try { await items.deleteEntity(tenantId, id); } catch (_) {}
+    try {
+      for await (const e of events.listEntities({ queryOptions: { filter: `PartitionKey eq '${tenantId}' and workItemId eq '${id.replace(/'/g,"''")}'` } })) {
+        await events.deleteEntity(tenantId, e.rowKey);
+      }
+    } catch (_) {}
 
     context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true } };
   } catch (err) {

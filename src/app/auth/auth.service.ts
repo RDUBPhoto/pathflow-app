@@ -591,7 +591,7 @@ export class AuthService {
       if (!response.ok || !payload || !payload.ok) {
         return {
           roles: [],
-          state: this.emptyAccessState(true, { registered: true })
+          state: this.emptyAccessState(true, { registered: false, canBootstrap: false })
         };
       }
 
@@ -628,7 +628,7 @@ export class AuthService {
     } catch {
       return {
         roles: [],
-        state: this.emptyAccessState(true, { registered: true })
+        state: this.emptyAccessState(true, { registered: false, canBootstrap: false })
       };
     }
   }

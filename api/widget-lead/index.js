@@ -416,12 +416,14 @@ function shouldForceReuseExistingCustomer(match) {
 }
 
 function shouldRespectTenantPartition() {
-  return asString(process.env.WIDGET_RESPECT_TENANT_PARTITION).toLowerCase() === "true";
+  const raw = asString(process.env.WIDGET_RESPECT_TENANT_PARTITION).toLowerCase();
+  if (!raw) return true;
+  return raw === "true" || raw === "1" || raw === "yes";
 }
 
 function widgetPartitionTenant(req, body) {
-  if (shouldRespectTenantPartition()) return LEGACY_PARTITION;
-  return LEGACY_PARTITION;
+  if (!shouldRespectTenantPartition()) return LEGACY_PARTITION;
+  return resolveTenantId(req, body);
 }
 
 function mergeNotes(existingNotes, message, sourceName) {

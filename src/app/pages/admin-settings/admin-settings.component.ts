@@ -864,6 +864,34 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
       });
   }
 
+  deleteUser(user: WorkspaceUser): void {
+    this.usersError = '';
+    const email = String(user?.email || '').trim().toLowerCase();
+    if (!email) {
+      this.usersError = 'User email is required to delete this user.';
+      return;
+    }
+    const confirmed = window.confirm(
+      `Delete ${email} from Pathflow completely?\n\nThis permanently removes their user record from the app.`
+    );
+    if (!confirmed) return;
+
+    this.accessAdminApi
+      .deleteUser({
+        email,
+        tenantId: this.tenantContext.tenantId()
+      })
+      .subscribe({
+        next: res => {
+          this.users.set(Array.isArray(res.items) ? res.items : []);
+          this.statusMessage = `${email} deleted from Pathflow.`;
+        },
+        error: err => {
+          this.usersError = this.extractApiError(err, 'Could not delete user.');
+        }
+      });
+  }
+
   resetUserPassword(user: WorkspaceUser): void {
     this.usersError = '';
     this.accessAdminApi

@@ -1102,6 +1102,7 @@ module.exports = async function (context, req) {
       "update-billing",
       "invite-user",
       "remove-user-access",
+      "delete-user",
       "reset-user-password",
       "change-my-password"
     ]);
@@ -1120,7 +1121,7 @@ module.exports = async function (context, req) {
       userEntity = buildDevUserEntity(principal, tenantHint);
     }
 
-    if (op === "invite-user" || op === "remove-user-access" || op === "reset-user-password") {
+    if (op === "invite-user" || op === "remove-user-access" || op === "delete-user" || op === "reset-user-password") {
       if (!userEntity) {
         context.res = json(403, { ok: false, error: "Admin access is required." });
         return;
@@ -1142,7 +1143,7 @@ module.exports = async function (context, req) {
         context.res = json(400, { ok: false, error: "User email is required." });
         return;
       }
-      if (targetEmail === normalizeEmail(principal.email) && op === "remove-user-access") {
+      if (targetEmail === normalizeEmail(principal.email) && (op === "remove-user-access" || op === "delete-user")) {
         context.res = json(400, { ok: false, error: "You cannot remove your own access." });
         return;
       }
@@ -1222,6 +1223,23 @@ module.exports = async function (context, req) {
           },
           "Merge"
         );
+        const users = await listWorkspaceUsers(userClient, tenantId);
+        context.res = json(200, { ok: true, items: users, tenantId });
+        return;
+      }
+
+      if (op === "delete-user") {
+        const targetUser = await getUserEntity(userClient, targetEmail);
+        if (!targetUser) {
+          context.res = json(404, { ok: false, error: "User not found." });
+          return;
+        }
+        try {
+          await userClient.deleteEntity(USERS_PARTITION, targetEmail);
+        } catch {
+          context.res = json(500, { ok: false, error: "Could not delete user." });
+          return;
+        }
         const users = await listWorkspaceUsers(userClient, tenantId);
         context.res = json(200, { ok: true, items: users, tenantId });
         return;

@@ -44,6 +44,13 @@ export class AccessAdminApiService {
     });
   }
 
+  deleteUser(payload: { email: string; tenantId?: string }) {
+    return this.http.post<UsersResponse>('/api/access', {
+      op: 'delete-user',
+      ...payload
+    });
+  }
+
   resetUserPassword(payload: { email: string; tenantId?: string }) {
     return this.http.post<MessageResponse>('/api/access', {
       op: 'reset-user-password',

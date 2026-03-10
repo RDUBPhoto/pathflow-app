@@ -28,7 +28,6 @@ import {
 } from '../../services/invoices-data.service';
 import { QuoteResponseApiService } from '../../services/quote-response-api.service';
 import { EmailApiService } from '../../services/email-api.service';
-import { NotificationsApiService } from '../../services/notifications-api.service';
 import { TenantContextService } from '../../services/tenant-context.service';
 
 type InvoiceKpi = {
@@ -75,7 +74,6 @@ export default class InvoicesComponent implements OnDestroy {
   private readonly invoicesData = inject(InvoicesDataService);
   private readonly quoteResponseApi = inject(QuoteResponseApiService);
   private readonly emailApi = inject(EmailApiService);
-  private readonly notificationsApi = inject(NotificationsApiService);
   private readonly auth = inject(AuthService);
   private readonly tenantContext = inject(TenantContextService);
   private readonly toastController = inject(ToastController);
@@ -415,7 +413,6 @@ export default class InvoicesComponent implements OnDestroy {
         `Customer ${item.stage === 'accepted' ? 'accepted' : 'declined'} quote from public link.`
       );
       appliedIds.push(item.quoteId);
-      await this.createLocalQuoteResponseNotification(item.quoteId, item.stage, existing.invoiceNumber, existing.customerName);
     }
 
     if (appliedIds.length) {
@@ -446,36 +443,4 @@ export default class InvoicesComponent implements OnDestroy {
     }
   }
 
-  private async createLocalQuoteResponseNotification(
-    quoteId: string,
-    stage: 'accepted' | 'declined',
-    quoteNumber: string,
-    customerName: string
-  ): Promise<void> {
-    const user = this.auth.user();
-    if (!user) return;
-    try {
-      await firstValueFrom(
-        this.notificationsApi.createMention({
-          targetUserId: user.id || undefined,
-          targetEmail: user.email || undefined,
-          targetDisplayName: user.displayName || undefined,
-          title: `Quote ${quoteNumber || quoteId} ${stage}`,
-          message: `${customerName || 'Customer'} ${stage} quote ${quoteNumber || quoteId}.`,
-          route: `/invoices/${encodeURIComponent(quoteId)}`,
-          entityType: 'quote',
-          entityId: quoteId,
-          metadata: {
-            quoteId,
-            quoteNumber: quoteNumber || quoteId,
-            customerName: customerName || '',
-            action: stage === 'accepted' ? 'accept' : 'decline',
-            source: 'local-fallback-sync'
-          }
-        })
-      );
-    } catch {
-      // Notification should not block stage sync.
-    }
-  }
 }

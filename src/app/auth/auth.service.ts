@@ -135,7 +135,19 @@ export class AuthService {
   }
 
   signIn(provider?: string, redirectTo?: string): void {
-    const selectedProvider = (provider || environment.auth.primaryProvider || 'aad').trim();
+    const requestedProvider = (provider || environment.auth.primaryProvider || 'aad').trim();
+    const allowedProviders = new Set<string>();
+    const primary = (environment.auth.primaryProvider || 'aad').trim() || 'aad';
+    allowedProviders.add(primary);
+    for (const item of environment.auth.providers || []) {
+      const normalized = String(item || '').trim();
+      if (normalized) allowedProviders.add(normalized);
+    }
+    if (environment.auth.hostedEmailEnabled) {
+      const hosted = String(environment.auth.hostedEmailProvider || '').trim();
+      if (hosted) allowedProviders.add(hosted);
+    }
+    const selectedProvider = allowedProviders.has(requestedProvider) ? requestedProvider : primary;
     const target = this.normalizeRedirect(redirectTo);
     const url = `/.auth/login/${selectedProvider}?post_login_redirect_uri=${encodeURIComponent(target)}`;
     window.location.assign(url);

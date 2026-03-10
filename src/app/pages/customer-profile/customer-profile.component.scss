@@ -243,7 +243,33 @@
 }
 
 .contact-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: 1fr;
+}
+
+.contact-row {
+  display: grid;
+  gap: 10px;
+  align-items: end;
+  grid-column: 1 / -1;
+}
+
+.contact-row-name {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.contact-row-single {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.add-secondary-btn {
+  align-self: end;
+  margin: 0 0 4px;
+  min-width: 36px;
+  height: 36px;
+  font-size: 22px;
+  line-height: 1;
+  --padding-start: 0;
+  --padding-end: 0;
 }
 
 .address-field {
@@ -280,6 +306,7 @@
   padding: 9px 12px;
   font-size: 13px;
   cursor: pointer;
+  white-space: pre-line;
 }
 
 .address-suggestion:last-child {
@@ -971,12 +998,13 @@
     overflow: visible;
   }
 
-  .contact-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .contact-row-single {
+    grid-template-columns: 1fr;
   }
 
-  .address-field {
-    grid-column: 1 / -1;
+  .add-secondary-btn {
+    justify-self: start;
+    margin-bottom: 0;
   }
 }
 
@@ -1009,12 +1037,12 @@
     flex: 1 1 auto;
   }
 
-  .contact-grid {
+  .contact-row-name {
     grid-template-columns: 1fr;
   }
 
-  .address-field {
-    grid-column: 1 / -1;
+  .contact-row-single {
+    grid-template-columns: 1fr;
   }
 
   .sms-panel {

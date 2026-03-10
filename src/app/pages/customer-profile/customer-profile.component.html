@@ -22,6 +22,7 @@
           <span>{{ email || 'No email set' }}</span>
           <span *ngIf="secondaryEmail">Alt: {{ secondaryEmail }}</span>
           <span>{{ phone || 'No phone set' }}</span>
+          <span *ngIf="secondaryPhone">Alt: {{ secondaryPhone }}</span>
         </div>
       </div>
     </div>
@@ -130,34 +131,75 @@
         </div>
 
         <div class="form-grid contact-grid">
-          <ion-item>
-            <ion-label position="stacked">First Name *</ion-label>
-            <ion-input [(ngModel)]="firstName"></ion-input>
-          </ion-item>
-          <div class="field-error" *ngIf="showInlineValidation() && !firstName.trim()">First name is required.</div>
+          <div class="contact-row contact-row-name">
+            <ion-item>
+              <ion-label position="stacked">First Name *</ion-label>
+              <ion-input [(ngModel)]="firstName"></ion-input>
+            </ion-item>
 
-          <ion-item>
-            <ion-label position="stacked">Last Name *</ion-label>
-            <ion-input [(ngModel)]="lastName"></ion-input>
-          </ion-item>
-          <div class="field-error" *ngIf="showInlineValidation() && !lastName.trim()">Last name is required.</div>
+            <ion-item>
+              <ion-label position="stacked">Last Name *</ion-label>
+              <ion-input [(ngModel)]="lastName"></ion-input>
+            </ion-item>
+          </div>
+          <div class="field-error" *ngIf="showInlineValidation() && (!firstName.trim() || !lastName.trim())">
+            First and last name are required.
+          </div>
 
-          <ion-item>
-            <ion-label position="stacked">Phone *</ion-label>
-            <ion-input [(ngModel)]="phone" placeholder="(555) 555-5555"></ion-input>
-          </ion-item>
+          <div class="contact-row contact-row-single">
+            <ion-item>
+              <ion-label position="stacked">Phone *</ion-label>
+              <ion-input [(ngModel)]="phone" placeholder="(555) 555-5555"></ion-input>
+            </ion-item>
+            <ion-button
+              *ngIf="!showSecondaryPhone"
+              type="button"
+              size="small"
+              fill="outline"
+              class="add-secondary-btn"
+              aria-label="Add secondary phone"
+              title="Add secondary phone"
+              (click)="addSecondaryPhone()">
+              +
+            </ion-button>
+          </div>
           <div class="field-error" *ngIf="showInlineValidation() && !isPhoneValid()">Enter a valid phone number.</div>
 
-          <ion-item>
-            <ion-label position="stacked">Email *</ion-label>
-            <ion-input [(ngModel)]="email" type="email"></ion-input>
-          </ion-item>
+          <div class="contact-row contact-row-single" *ngIf="showSecondaryPhone">
+            <ion-item>
+              <ion-label position="stacked">Secondary Phone</ion-label>
+              <ion-input [(ngModel)]="secondaryPhone" placeholder="(555) 555-5555"></ion-input>
+            </ion-item>
+          </div>
+          <div class="field-error" *ngIf="showInlineValidation() && !isSecondaryPhoneValid()">
+            Enter a valid secondary phone number.
+          </div>
+
+          <div class="contact-row contact-row-single">
+            <ion-item>
+              <ion-label position="stacked">Email *</ion-label>
+              <ion-input [(ngModel)]="email" type="email"></ion-input>
+            </ion-item>
+            <ion-button
+              *ngIf="!showSecondaryEmail"
+              type="button"
+              size="small"
+              fill="outline"
+              class="add-secondary-btn"
+              aria-label="Add secondary email"
+              title="Add secondary email"
+              (click)="addSecondaryEmail()">
+              +
+            </ion-button>
+          </div>
           <div class="field-error" *ngIf="showInlineValidation() && !isEmailValid()">Enter a valid email address.</div>
 
-          <ion-item>
-            <ion-label position="stacked">Secondary Email</ion-label>
-            <ion-input [(ngModel)]="secondaryEmail" type="email"></ion-input>
-          </ion-item>
+          <div class="contact-row contact-row-single" *ngIf="showSecondaryEmail">
+            <ion-item>
+              <ion-label position="stacked">Secondary Email</ion-label>
+              <ion-input [(ngModel)]="secondaryEmail" type="email"></ion-input>
+            </ion-item>
+          </div>
           <div class="field-error" *ngIf="showInlineValidation() && !isSecondaryEmailValid()">
             Enter a valid secondary email address.
           </div>
@@ -165,11 +207,13 @@
           <div class="address-field">
             <ion-item class="address-item">
               <ion-label position="stacked">Address</ion-label>
-              <ion-input
+              <ion-textarea
                 [(ngModel)]="address"
                 (ngModelChange)="onAddressChange($event)"
                 (ionBlur)="onAddressBlur()"
-                placeholder="Start typing to validate address"></ion-input>
+                [autoGrow]="true"
+                rows="2"
+                placeholder="Start typing to validate address"></ion-textarea>
             </ion-item>
 
             <div class="address-lookup" *ngIf="addressSearching() || addressSuggestions().length || addressNoMatches()">
@@ -242,9 +286,9 @@
       <div class="vin-row">
         <ion-item>
           <ion-label position="stacked">VIN</ion-label>
-          <ion-input [(ngModel)]="vin" maxlength="17"></ion-input>
+          <ion-input [(ngModel)]="vin" (ngModelChange)="onVinInputChange($event)" maxlength="17"></ion-input>
         </ion-item>
-        <ion-button class="vin-btn" fill="outline" (click)="lookupVIN()">Decode VIN</ion-button>
+        <ion-button class="vin-btn" fill="outline" (click)="lookupVIN()" [disabled]="!canDecodeVin()">Decode VIN</ion-button>
         <ion-button
           class="vin-btn remove-vehicle-btn"
           color="danger"

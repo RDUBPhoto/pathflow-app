@@ -184,8 +184,11 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   firstName = '';
   lastName = '';
   phone = '';
+  secondaryPhone = '';
   email = '';
   secondaryEmail = '';
+  showSecondaryPhone = false;
+  showSecondaryEmail = false;
   address = '';
   notes = '';
   notesHistory: CustomerNoteHistoryEntry[] = [];
@@ -194,6 +197,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
 
   vin = '';
   vinStatus = '';
+  private vinDecodeLockedFor = '';
   vinDecoded = signal<Record<string, string>>({});
   vehicleMake = '';
   vehicleModel = '';
@@ -461,6 +465,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     const first = this.firstName.trim();
     const last = this.lastName.trim();
     const phone = this.phone.trim();
+    const secondaryPhone = this.secondaryPhone.trim();
     const email = this.email.trim();
     const secondaryEmail = this.secondaryEmail.trim();
     const year = this.vehicleYear.trim();
@@ -477,6 +482,10 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
 
     if (!this.isPhoneValid()) {
       this.error.set('Enter a valid phone number.');
+      return;
+    }
+    if (!this.isSecondaryPhoneValid()) {
+      this.error.set('Secondary phone must be a valid phone number.');
       return;
     }
 
@@ -505,9 +514,10 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
       firstName: first,
       lastName: last,
       phone,
+      mobile: secondaryPhone,
       email,
       secondaryEmail,
-      address: this.address.trim(),
+      address: this.toStoredAddress(this.address),
       vin: this.vin.trim(),
       vehicleMake: this.vehicleMake.trim(),
       vehicleModel: this.vehicleModel.trim(),
@@ -686,15 +696,20 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     silent?: boolean;
     hydrateVehicleFields?: boolean;
     hydrateFitmentFields?: boolean;
+    lockUntilInputChange?: boolean;
     onSettled?: () => void;
   }): void {
     const silent = !!options?.silent;
     const hydrateVehicleFields = options?.hydrateVehicleFields !== false;
     const hydrateFitmentFields = options?.hydrateFitmentFields ?? !silent;
+    const lockUntilInputChange = options?.lockUntilInputChange !== false;
     const onSettled = options?.onSettled;
     const settle = () => onSettled?.();
     const vin = this.vin.trim().toUpperCase();
     this.vin = vin;
+    if (lockUntilInputChange && vin) {
+      this.vinDecodeLockedFor = vin;
+    }
     if (!vin) {
       this.vinStatus = '';
       this.vinDecoded.set({});
@@ -825,6 +840,20 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
         settle();
       }
     });
+  }
+
+  onVinInputChange(value: string | null | undefined): void {
+    const normalized = String(value || '').toUpperCase().trim();
+    this.vin = normalized;
+    if (this.vinDecodeLockedFor && this.vinDecodeLockedFor !== normalized) {
+      this.vinDecodeLockedFor = '';
+    }
+  }
+
+  canDecodeVin(): boolean {
+    const normalized = this.vin.trim().toUpperCase();
+    if (!normalized) return false;
+    return normalized !== this.vinDecodeLockedFor;
   }
 
   loadSmsThread(): void {
@@ -1481,6 +1510,11 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     return !!this.normalizeE164(this.phone.trim());
   }
 
+  isSecondaryPhoneValid(): boolean {
+    const value = this.secondaryPhone.trim();
+    return !value || !!this.normalizeE164(value);
+  }
+
   isVehicleYearValid(): boolean {
     const year = this.vehicleYear.trim();
     if (!year) return true;
@@ -1497,6 +1531,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
 
   canSaveCustomer(): boolean {
     return this.hasCustomerChanges() && this.isEmailValid() && this.isPhoneValid() && this.isVehicleYearValid() &&
+      this.isSecondaryPhoneValid() &&
       this.isSecondaryEmailValid() &&
       this.isAddressValid() &&
       !!this.firstName.trim() && !!this.lastName.trim();
@@ -1606,13 +1641,13 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     this.address = String(value || '');
     this.addressValidated.set(false);
     this.addressNoMatches.set(false);
-    this.queueAddressLookup(this.address);
+    this.queueAddressLookup(this.address.replace(/\s+/g, ' '));
   }
 
   onAddressBlur(): void {
-    const normalized = this.address.trim().toLowerCase();
+    const normalized = this.normalizeAddressText(this.address);
     if (normalized && !this.addressValidated()) {
-      const exact = this.addressSuggestions().find(item => item.display.trim().toLowerCase() === normalized);
+      const exact = this.addressSuggestions().find(item => this.normalizeAddressText(item.display) === normalized);
       if (exact) {
         this.selectAddressSuggestion(exact);
       }
@@ -1623,10 +1658,18 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   }
 
   selectAddressSuggestion(item: AddressSuggestion): void {
-    this.address = item.display;
+    this.address = this.toDisplayAddress(item.display);
     this.addressValidated.set(true);
     this.addressSuggestions.set([]);
     this.addressNoMatches.set(false);
+  }
+
+  addSecondaryPhone(): void {
+    this.showSecondaryPhone = true;
+  }
+
+  addSecondaryEmail(): void {
+    this.showSecondaryEmail = true;
   }
 
   onSmsComposerKeydown(event: Event): void {
@@ -1683,8 +1726,11 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     this.firstName = customer.firstName || (parts.slice(0, -1).join(' ') || parts[0] || '');
     this.lastName = customer.lastName || (parts.length > 1 ? parts[parts.length - 1] : '');
     this.phone = customer.phone || '';
+    this.secondaryPhone = customer.mobile || '';
     this.email = customer.email || '';
     this.secondaryEmail = customer.secondaryEmail || '';
+    this.showSecondaryPhone = !!this.secondaryPhone.trim();
+    this.showSecondaryEmail = !!this.secondaryEmail.trim();
     this.emailTo = customer.email || customer.secondaryEmail || '';
     this.emailSubject = '';
     this.emailMessage = '';
@@ -1693,7 +1739,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     this.selectedEmailId.set(null);
     this.emailStatus.set('');
     this.emailError.set('');
-    this.address = customer.address || '';
+    this.address = this.toDisplayAddress(customer.address || '');
     this.notes = customer.notes || '';
     this.notesHistory = this.normalizeNotesHistory(customer.notesHistory, customer.notes, customer);
     if (this.notesHistory.length) {
@@ -1702,6 +1748,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     this.noteDraft = '';
     this.customerCreatedAt = customer.createdAt || '';
     this.vin = (customer.vin || '').toUpperCase();
+    this.vinDecodeLockedFor = '';
     this.vehicleMake = customer.vehicleMake || '';
     this.vehicleModel = customer.vehicleModel || '';
     this.vehicleYear = customer.vehicleYear || '';
@@ -1738,6 +1785,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
         silent: true,
         hydrateVehicleFields: false,
         hydrateFitmentFields: false,
+        lockUntilInputChange: false,
         onSettled: () => this.captureInitialSnapshot()
       });
     }
@@ -1747,8 +1795,11 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     this.firstName = '';
     this.lastName = '';
     this.phone = '';
+    this.secondaryPhone = '';
     this.email = '';
     this.secondaryEmail = '';
+    this.showSecondaryPhone = false;
+    this.showSecondaryEmail = false;
     this.emailTo = '';
     this.emailSubject = '';
     this.emailMessage = '';
@@ -1761,6 +1812,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     this.noteDraft = '';
     this.customerCreatedAt = '';
     this.vin = '';
+    this.vinDecodeLockedFor = '';
     this.vinStatus = '';
     this.vinDecoded.set({});
     this.addressSuggestions.set([]);
@@ -2621,9 +2673,10 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
       firstName: this.firstName.trim(),
       lastName: this.lastName.trim(),
       phone: this.phone.trim(),
+      secondaryPhone: this.secondaryPhone.trim(),
       email: this.email.trim(),
       secondaryEmail: this.secondaryEmail.trim(),
-      address: this.address.trim(),
+      address: this.toStoredAddress(this.address),
       notes: this.notes.trim(),
       notesHistory: this.notesHistoryPayload(),
       vin: this.vin.trim(),
@@ -2724,8 +2777,49 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     this.initialCustomerSnapshot = this.buildCustomerSnapshot();
   }
 
+  private toDisplayAddress(value: string): string {
+    const raw = String(value || '').replace(/\r/g, '').trim();
+    if (!raw) return '';
+    if (raw.includes('\n')) {
+      return raw
+        .split('\n')
+        .map(line => line.trim())
+        .filter(Boolean)
+        .join('\n');
+    }
+    const parts = raw
+      .split(',')
+      .map(part => part.trim())
+      .filter(Boolean);
+    if (parts.length >= 2) {
+      return `${parts[0]}\n${parts.slice(1).join(', ')}`.trim();
+    }
+    return raw;
+  }
+
+  private toStoredAddress(value: string): string {
+    const lines = String(value || '')
+      .replace(/\r/g, '')
+      .split('\n')
+      .map(line => line.trim())
+      .filter(Boolean);
+    if (lines.length <= 1) return lines[0] || '';
+    return `${lines[0]}, ${lines.slice(1).join(', ')}`.replace(/\s+/g, ' ').trim();
+  }
+
+  private normalizeAddressText(value: string): string {
+    return String(value || '')
+      .replace(/\r/g, '')
+      .replace(/\n/g, ',')
+      .replace(/,+/g, ',')
+      .replace(/\s+/g, ' ')
+      .replace(/,\s*/g, ', ')
+      .trim()
+      .toLowerCase();
+  }
+
   private isAddressValid(): boolean {
-    const value = this.address.trim();
+    const value = this.normalizeAddressText(this.address);
     if (!value) return true;
     return this.addressValidated();
   }
@@ -2766,7 +2860,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
               const line1 = [addr.house_number, addr.road].filter(Boolean).join(' ').trim();
               const city = [addr.city, addr.town, addr.village, addr.hamlet].find(Boolean);
               const line2 = [city, addr.state, addr.postcode].filter(Boolean).join(', ').trim();
-              const display = [line1, line2].filter(Boolean).join(', ').trim() || String(item?.display_name || '').trim();
+              const display = [line1, line2].filter(Boolean).join('\n').trim() || String(item?.display_name || '').trim();
               return {
                 id: String(item?.place_id || `${display}-${item?.lat || ''}-${item?.lon || ''}`),
                 display

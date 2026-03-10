@@ -42,10 +42,11 @@ export class CompanySwitcherComponent {
   readonly menuEvent = signal<Event | null>(null);
   readonly locations = computed(() => this.auth.locations());
   readonly activeLocationId = computed(() => this.tenantContext.tenantId());
-  readonly show = computed(() => this.locations().length > 1);
+  readonly show = computed(() => this.auth.isSuperAdmin() || this.locations().length > 1);
   readonly activeLocationName = computed(() => {
     const activeId = this.activeLocationId();
     const locations = this.locations();
+    if (!locations.length) return this.auth.isSuperAdmin() ? '-- Empty --' : 'Location';
     return locations.find(location => location.id === activeId)?.name || locations[0]?.name || 'Location';
   });
 

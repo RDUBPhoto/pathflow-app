@@ -8,7 +8,7 @@
   <ion-popover [isOpen]="open()" [event]="menuEvent()" (didDismiss)="closeMenu()">
     <ng-template>
       <ion-content>
-        <ion-list lines="full">
+        <ion-list lines="full" *ngIf="locations().length; else emptyState">
           <ion-item
             button
             detail="false"
@@ -20,6 +20,14 @@
             <ion-label>{{ location.name }}</ion-label>
           </ion-item>
         </ion-list>
+        <ng-template #emptyState>
+          <ion-list lines="none">
+            <ion-item detail="false">
+              <ion-icon slot="start" name="business-outline"></ion-icon>
+              <ion-label>-- Empty --</ion-label>
+            </ion-item>
+          </ion-list>
+        </ng-template>
       </ion-content>
     </ng-template>
   </ion-popover>

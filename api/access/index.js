@@ -795,6 +795,63 @@ function buildPasswordResetUrl(req) {
   return "https://passwordreset.microsoftonline.com/";
 }
 
+function buildInviteLoginUrl(req, payload) {
+  const base = buildVerifyBaseUrl(req);
+  const tenantId = sanitizeTenantId(asString(payload && payload.tenantId));
+  const email = normalizeEmail(payload && payload.email);
+  const redirectTarget = tenantId
+    ? `/register?tenantId=${encodeURIComponent(tenantId)}&invited=1`
+    : "/register?invited=1";
+  const login = new URL("/login", `${base}/`);
+  login.searchParams.set("redirect", redirectTarget);
+  if (email) login.searchParams.set("email", email);
+  return login.toString();
+}
+
+function buildInviteSignupUrl(req, payload) {
+  const base = buildVerifyBaseUrl(req);
+  const tenantId = sanitizeTenantId(asString(payload && payload.tenantId));
+  const email = normalizeEmail(payload && payload.email);
+  const signup = new URL("/signup", `${base}/`);
+  signup.searchParams.set("redirect", "/dashboard");
+  signup.searchParams.set("invited", "1");
+  if (tenantId) signup.searchParams.set("tenantId", tenantId);
+  if (email) signup.searchParams.set("email", email);
+  return signup.toString();
+}
+
+function inviteEmailMarkup(payload) {
+  const workspaceName = asString(payload.workspaceName || payload.tenantId || "your workspace");
+  const role = asString(payload.role || "user");
+  const loginUrl = asString(payload.loginUrl);
+  const signupUrl = asString(payload.signupUrl);
+  const firstName = asString(payload.firstName || "there");
+  const lines = [
+    `Hi ${firstName},`,
+    "",
+    `You were invited to join Pathflow for ${workspaceName} as ${role}.`,
+    "",
+    `Sign in: ${loginUrl}`,
+    `Create account: ${signupUrl}`,
+    "",
+    "If your workspace uses Microsoft sign-in, use that option on the login screen.",
+    "If your workspace allows email/password sign-up, choose Email on the sign-up screen."
+  ];
+
+  const html = [
+    `<p>Hi ${firstName},</p>`,
+    `<p>You were invited to join <strong>Pathflow</strong> for <strong>${workspaceName}</strong> as <strong>${role}</strong>.</p>`,
+    `<p><a href="${loginUrl}" style="display:inline-block;background:#1d4ed8;color:#fff;text-decoration:none;padding:10px 14px;border-radius:6px;font-weight:600;">Sign in to Pathflow</a></p>`,
+    `<p><a href="${signupUrl}" style="display:inline-block;background:#0f172a;color:#fff;text-decoration:none;padding:10px 14px;border-radius:6px;font-weight:600;border:1px solid #334155;">Create account</a></p>`,
+    `<p style="color:#64748b;">If your workspace uses Microsoft sign-in, use that option on the login screen.<br/>If your workspace allows email/password sign-up, choose Email on the sign-up screen.</p>`
+  ].join("");
+
+  return {
+    text: lines.join("\n"),
+    html
+  };
+}
+
 async function sendPasswordResetEmail(context, req, payload) {
   const email = normalizeEmail(payload && payload.email);
   if (!email) return false;
@@ -1123,11 +1180,25 @@ module.exports = async function (context, req) {
           },
           "Merge"
         );
+        const workspaceName =
+          allTenants.find(item => item.id === tenantId)?.name ||
+          humanizeTenantId(tenantId);
+        const firstName = targetName.split(/\s+/).filter(Boolean)[0] || "there";
+        const loginUrl = buildInviteLoginUrl(req, { email: targetEmail, tenantId });
+        const signupUrl = buildInviteSignupUrl(req, { email: targetEmail, tenantId });
+        const inviteMarkup = inviteEmailMarkup({
+          workspaceName,
+          tenantId,
+          role: requestedRole === "admin" ? "Admin" : "User",
+          firstName,
+          loginUrl,
+          signupUrl
+        });
         await sendTransactionalEmail(context, {
           to: targetEmail,
-          subject: "You were invited to Pathflow",
-          text: `You were invited to Pathflow for ${tenantId}. Sign in to access your workspace.`,
-          html: `<p>You were invited to Pathflow for <strong>${tenantId}</strong>.</p><p>Sign in to access your workspace.</p>`
+          subject: `You're invited to Pathflow - ${workspaceName}`,
+          text: inviteMarkup.text,
+          html: inviteMarkup.html
         });
         const users = await listWorkspaceUsers(userClient, tenantId);
         context.res = json(200, { ok: true, items: users, tenantId });

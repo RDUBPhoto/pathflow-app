@@ -1927,6 +1927,16 @@ export default class DashboardComponent implements OnDestroy {
     return this.finalPaidInvoiceForCheckedInItem(it) ? 'Paid in Full' : '';
   }
 
+  needsScheduledBadgeLabel(it: WorkItem, lane: Lane): string {
+    if (this.laneStageKey(lane) !== 'invoiced') return '';
+    const doc = this.linkedDocumentForCard(it, lane);
+    if (!doc || doc.documentType !== 'invoice') return '';
+    if (doc.stage !== 'accepted' && doc.stage !== 'completed') return '';
+    const customerId = String(it.customerId || '').trim();
+    if (!customerId) return '';
+    return this.hasCalendarEvent(customerId) ? '' : 'Needs Scheduled';
+  }
+
   private relativeTimeLabel(value: string): string {
     const ts = Date.parse(String(value || '').trim());
     if (!Number.isFinite(ts)) return '';

@@ -89,6 +89,9 @@
                 <ng-container *ngIf="completionBadgeLabel(it, lane) as completionBadge">
                   <span class="card-complete-badge card-complete-badge-top">{{ completionBadge }}</span>
                 </ng-container>
+                <ng-container *ngIf="needsScheduledBadgeLabel(it, lane) as needsScheduleBadge">
+                  <span class="card-complete-badge card-needs-schedule-badge card-complete-badge-top">{{ needsScheduleBadge }}</span>
+                </ng-container>
               </div>
               <div class="card-head">
                 <ion-icon name="reorder-two-outline" cdkDragHandle class="card-drag-handle"></ion-icon>

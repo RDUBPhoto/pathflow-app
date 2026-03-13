@@ -2270,9 +2270,16 @@ export default class DashboardComponent implements OnDestroy {
       const entityId = String(hint['entityId'] || '').trim();
       const metadataLeadItemId = String(metadata['leadItemId'] || '').trim();
       const metadataCustomerId = String(metadata['customerId'] || '').trim();
+      const metadataQuoteId = String(metadata['quoteId'] || '').trim();
+      const metadataQuoteNumber = String(metadata['quoteNumber'] || '').trim().toLowerCase();
+      const metadataInvoiceId = String(metadata['invoiceId'] || '').trim();
+      const metadataInvoiceNumber = String(metadata['invoiceNumber'] || '').trim().toLowerCase();
+      const entityIdLower = entityId.toLowerCase();
 
       const matchedItems: Array<{ laneId: string; item: WorkItem }> = [];
+      const lanes = this.lanes();
       for (const [laneId, rows] of Object.entries(map || {})) {
+        const lane = lanes.find(entry => String(entry.id || '').trim() === laneId) || null;
         for (const row of rows || []) {
           const itemId = String(row.id || '').trim();
           const customerId = String(row.customerId || '').trim();
@@ -2281,7 +2288,26 @@ export default class DashboardComponent implements OnDestroy {
           const customerMatch = !!metadataCustomerId && customerId === metadataCustomerId;
           const entityCustomerMatch = entityType === 'customer' && !!entityId && customerId === entityId;
           const entityLeadMatch = entityType === 'lead' && !!entityId && (itemId === entityId || customerId === entityId);
-          if (leadMatch || customerMatch || entityCustomerMatch || entityLeadMatch) {
+          let docMatch = false;
+          if (lane && (entityType === 'quote' || entityType === 'invoice')) {
+            const linked = this.linkedDocumentForCard(row, lane);
+            if (linked) {
+              const linkedId = String(linked.id || '').trim();
+              const linkedNumber = String(linked.invoiceNumber || '').trim().toLowerCase();
+              if (entityType === 'quote' && linked.documentType === 'quote') {
+                docMatch =
+                  (!!metadataQuoteId && linkedId === metadataQuoteId)
+                  || (!!metadataQuoteNumber && linkedNumber === metadataQuoteNumber)
+                  || (!!entityId && (linkedId === entityId || linkedNumber === entityIdLower));
+              } else if (entityType === 'invoice' && linked.documentType === 'invoice') {
+                docMatch =
+                  (!!metadataInvoiceId && linkedId === metadataInvoiceId)
+                  || (!!metadataInvoiceNumber && linkedNumber === metadataInvoiceNumber)
+                  || (!!entityId && (linkedId === entityId || linkedNumber === entityIdLower));
+              }
+            }
+          }
+          if (leadMatch || customerMatch || entityCustomerMatch || entityLeadMatch || docMatch) {
             matchedItems.push({ laneId, item: row });
           }
         }

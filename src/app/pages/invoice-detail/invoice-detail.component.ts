@@ -88,6 +88,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
   readonly lineItemsPage = signal(1);
   readonly sendingInvoice = signal(false);
   readonly sendInvoiceModalOpen = signal(false);
+  readonly sendInvoiceModalError = signal('');
   readonly sendInvoiceViaEmail = signal(true);
   readonly sendInvoiceViaSms = signal(false);
   readonly emailingPaidReceipt = signal(false);
@@ -485,12 +486,24 @@ export default class InvoiceDetailComponent implements OnDestroy {
 
     this.sendInvoiceViaEmail.set(hasEmail);
     this.sendInvoiceViaSms.set(hasSms && !hasEmail);
+    this.sendInvoiceModalError.set('');
     this.sendInvoiceModalOpen.set(true);
   }
 
   closeSendInvoiceModal(): void {
     if (this.sendingInvoice()) return;
+    this.sendInvoiceModalError.set('');
     this.sendInvoiceModalOpen.set(false);
+  }
+
+  setSendInvoiceViaEmail(checked: boolean): void {
+    this.sendInvoiceViaEmail.set(checked);
+    this.sendInvoiceModalError.set('');
+  }
+
+  setSendInvoiceViaSms(checked: boolean): void {
+    this.sendInvoiceViaSms.set(checked);
+    this.sendInvoiceModalError.set('');
   }
 
   async confirmSendInvoiceModal(): Promise<void> {
@@ -512,19 +525,23 @@ export default class InvoiceDetailComponent implements OnDestroy {
     const wantsEmail = options ? !!options.email : !!emailTarget;
     const wantsSms = options ? !!options.sms : !!phoneTarget;
     if (!wantsEmail && !wantsSms) {
+      this.sendInvoiceModalError.set('Pick at least one delivery channel.');
       this.setStatus('Pick at least one delivery channel.', 'error');
       return;
     }
     if (wantsEmail && !emailTarget) {
+      this.sendInvoiceModalError.set('Customer email is required to send by email.');
       this.setStatus('Customer email is required to send by email.', 'error');
       return;
     }
     if (wantsSms && !phoneTarget) {
+      this.sendInvoiceModalError.set('Customer phone is required to send by SMS.');
       this.setStatus('Customer phone is required to send by SMS.', 'error');
       return;
     }
     const amountDue = this.amountDue();
     if (amountDue <= 0) {
+      this.sendInvoiceModalError.set('Invoice balance is already paid. No payment request needed.');
       this.setStatus('Invoice balance is already paid. No payment request needed.', 'error');
       return;
     }
@@ -537,6 +554,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
         || this.paymentSettings.createHostedPaymentLink(detail.id, detail.invoiceNumber)
         || '';
       if (!paymentLink) {
+        this.sendInvoiceModalError.set('Payment link unavailable. Connect payment provider or save invoice with a payment link.');
         this.setStatus('Payment link unavailable. Save invoice or connect payment provider, then try again.', 'error');
         return;
       }
@@ -583,6 +601,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
       const anySuccess = emailSuccess || smsSuccess;
 
       if (!anySuccess) {
+        this.sendInvoiceModalError.set('Invoice send failed. Email/SMS could not be delivered.');
         this.setStatus('Invoice send failed. Email/SMS could not be delivered.', 'error');
         return;
       }
@@ -608,6 +627,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
       });
       this.invoice.set(sent);
       this.baselineSnapshot.set(this.snapshot(sent));
+      this.sendInvoiceModalError.set('');
       this.sendInvoiceModalOpen.set(false);
 
       if (wantsEmail && wantsSms) {
@@ -628,6 +648,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
         this.setStatus('Pick at least one delivery channel.', 'error');
       }
     } catch {
+      this.sendInvoiceModalError.set('Could not send invoice.');
       this.setStatus('Could not send invoice.', 'error');
     } finally {
       this.sendingInvoice.set(false);

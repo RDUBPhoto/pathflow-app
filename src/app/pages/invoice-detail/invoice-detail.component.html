@@ -499,7 +499,7 @@
                 type="checkbox"
                 [checked]="sendInvoiceViaEmail()"
                 [disabled]="!canSendInvoiceViaEmail() || sendingInvoice()"
-                (change)="sendInvoiceViaEmail.set($any($event.target).checked)" />
+                (change)="setSendInvoiceViaEmail($any($event.target).checked)" />
               <span>Email</span>
             </span>
             <span class="channel-target" *ngIf="invoiceEmailTarget()">{{ invoiceEmailTarget() }}</span>
@@ -512,12 +512,14 @@
                 type="checkbox"
                 [checked]="sendInvoiceViaSms()"
                 [disabled]="!canSendInvoiceViaSms() || sendingInvoice()"
-                (change)="sendInvoiceViaSms.set($any($event.target).checked)" />
+                (change)="setSendInvoiceViaSms($any($event.target).checked)" />
               <span>SMS</span>
             </span>
             <span class="channel-target" *ngIf="invoiceSmsTarget()">{{ invoiceSmsTarget() }}</span>
             <span class="channel-target missing" *ngIf="!invoiceSmsTarget()">No customer phone on file</span>
           </label>
+
+          <p class="send-invoice-error" *ngIf="sendInvoiceModalError()">{{ sendInvoiceModalError() }}</p>
         </div>
 
         <div class="send-invoice-actions">

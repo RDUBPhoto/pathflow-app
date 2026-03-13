@@ -5,6 +5,7 @@ const { resolveTenantId, sanitizeTenantId } = require("../_shared/tenant");
 const NOTIFICATIONS_TABLE = "notifications";
 const USERS_TABLE = "useraccess";
 const USERS_PARTITION = "v1";
+const TENANT_SCOPE_DELIMITER = "::";
 const DEFAULT_RECENT_LIMIT = 3;
 const DEFAULT_ALL_LIMIT = 100;
 const MAX_LIMIT = 250;
@@ -167,6 +168,32 @@ function isLocalRequest(req) {
   return host.includes("localhost") || host.includes("127.0.0.1");
 }
 
+function isLocalRuntime() {
+  const websiteHostname = asString(process.env.WEBSITE_HOSTNAME).toLowerCase();
+  if (!websiteHostname) return true;
+  return websiteHostname.includes("localhost") || websiteHostname.includes("127.0.0.1");
+}
+
+function notificationsScope() {
+  const explicit = sanitizeTenantId(
+    asString(process.env.NOTIFICATIONS_NAMESPACE || process.env.APP_ENV || process.env.NODE_ENV)
+  );
+  if (explicit && explicit !== "tenant-unassigned") return explicit;
+  return isLocalRuntime() ? "local" : "prod";
+}
+
+function scopedTenantPartition(tenantId) {
+  const baseTenant = sanitizeTenantId(asString(tenantId) || "main");
+  return `${baseTenant}${TENANT_SCOPE_DELIMITER}${notificationsScope()}`;
+}
+
+function baseTenantFromPartition(partitionKey) {
+  const raw = asString(partitionKey);
+  const idx = raw.indexOf(TENANT_SCOPE_DELIMITER);
+  const value = idx >= 0 ? raw.slice(0, idx) : raw;
+  return sanitizeTenantId(value || "main");
+}
+
 function matchesRecipient(actor, entity) {
   if (!actor) return false;
   const actorUserId = asString(actor.userId);
@@ -181,7 +208,7 @@ function matchesRecipient(actor, entity) {
 function toNotification(entity) {
   return {
     id: asString(entity.rowKey),
-    tenantId: sanitizeTenantId(asString(entity.partitionKey)),
+    tenantId: sanitizeTenantId(asString(entity.tenantId) || baseTenantFromPartition(entity.partitionKey)),
     type: asString(entity.type || "mention"),
     title: asString(entity.title),
     message: asString(entity.message),
@@ -230,7 +257,7 @@ function buildRecipientFilter(tenantId, actor) {
 }
 
 async function listUserNotifications(notificationClient, tenantId, actor, unreadOnly = false) {
-  const recipientFilter = buildRecipientFilter(tenantId, actor);
+  const recipientFilter = buildRecipientFilter(scopedTenantPartition(tenantId), actor);
   if (!recipientFilter) return [];
   const filter = unreadOnly ? `${recipientFilter} and read eq false` : recipientFilter;
 
@@ -261,7 +288,7 @@ function shouldPruneTenant(tenantId) {
 }
 
 async function pruneNotifications(notificationClient, tenantId) {
-  const safeTenant = sanitizeTenantId(asString(tenantId) || "main");
+  const safeTenant = scopedTenantPartition(tenantId);
   if (!shouldPruneTenant(safeTenant)) return 0;
 
   const filter = `PartitionKey eq '${escapedFilterValue(safeTenant)}'`;
@@ -365,6 +392,7 @@ async function listMentionableUsers(userClient, tenantId, search) {
 async function markReadForIds(notificationClient, tenantId, actor, ids) {
   if (!Array.isArray(ids) || !ids.length) return 0;
   const seen = new Set();
+  const scopedTenantId = scopedTenantPartition(tenantId);
   let updated = 0;
 
   for (const value of ids) {
@@ -374,7 +402,7 @@ async function markReadForIds(notificationClient, tenantId, actor, ids) {
 
     let entity = null;
     try {
-      entity = await notificationClient.getEntity(tenantId, id);
+      entity = await notificationClient.getEntity(scopedTenantId, id);
     } catch {
       entity = null;
     }
@@ -384,7 +412,7 @@ async function markReadForIds(notificationClient, tenantId, actor, ids) {
 
     await notificationClient.upsertEntity(
       {
-        partitionKey: tenantId,
+        partitionKey: scopedTenantId,
         rowKey: id,
         read: true,
         readAt: new Date().toISOString(),
@@ -416,6 +444,7 @@ module.exports = async function notificationsApi(context, req) {
 
   const body = asObject(req && req.body);
   const tenantId = resolveTenantId(req, body);
+  const scopedTenantId = scopedTenantPartition(tenantId);
   const actor = resolveActor(req, body);
 
   try {
@@ -521,8 +550,9 @@ module.exports = async function notificationsApi(context, req) {
 
       await notificationClient.upsertEntity(
         {
-          partitionKey: tenantId,
+          partitionKey: scopedTenantId,
           rowKey: id,
+          tenantId,
           type: "mention",
           title,
           message,

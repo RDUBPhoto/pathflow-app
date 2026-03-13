@@ -7,8 +7,12 @@ const CUSTOMERS_TABLE = "customers";
 const LANES_TABLE = "lanes";
 const WORKITEMS_TABLE = "workitems";
 const SMS_TABLE = "smsmessages";
+const NOTIFICATIONS_TABLE = "notifications";
+const USERS_TABLE = "useraccess";
+const USERS_PARTITION = "v1";
 const SENDER_TABLE = "smssenders";
 const SENDER_DEFAULT_ROW_KEY = "default";
+const TENANT_SCOPE_DELIMITER = "::";
 const AUTO_CREATED_CREATOR = "Auto-Created Lead";
 const DUPLICATE_REASON_WEIGHTS = Object.freeze({
   vin: 45,
@@ -82,6 +86,16 @@ function normalizeVehicleText(value) {
   const lower = raw.toLowerCase();
   if (lower === "not applicable" || lower === "n/a" || lower === "null" || lower === "undefined") return "";
   return raw;
+}
+
+function parseJson(value, fallback) {
+  const raw = asString(value);
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
 }
 
 async function decodeVinDetails(vin) {
@@ -425,6 +439,22 @@ function shouldRespectTenantPartition() {
   return raw === "true" || raw === "1" || raw === "yes";
 }
 
+function isLocalRuntime() {
+  const websiteHostname = asString(process.env.WEBSITE_HOSTNAME).toLowerCase();
+  if (!websiteHostname) return true;
+  return websiteHostname.includes("localhost") || websiteHostname.includes("127.0.0.1");
+}
+
+function notificationsScope() {
+  const explicit = asString(process.env.NOTIFICATIONS_NAMESPACE || process.env.APP_ENV || process.env.NODE_ENV).toLowerCase();
+  if (explicit) return explicit.replace(/[^a-z0-9._:-]+/g, "-").replace(/^-+|-+$/g, "") || "prod";
+  return isLocalRuntime() ? "local" : "prod";
+}
+
+function scopedTenantPartition(tenantId) {
+  return `${asString(tenantId) || "main"}${TENANT_SCOPE_DELIMITER}${notificationsScope()}`;
+}
+
 function widgetPartitionTenant(req, body) {
   if (!shouldRespectTenantPartition()) return LEGACY_PARTITION;
   return resolveTenantId(req, body);
@@ -557,6 +587,96 @@ async function setCustomerConsentStatus(customersClient, tenantId, customerId, s
     },
     "Merge"
   );
+}
+
+function parseUserLocationIds(userEntity) {
+  const parsed = parseJson(userEntity && userEntity.locationIdsJson, []);
+  const out = new Set();
+  for (const item of Array.isArray(parsed) ? parsed : []) {
+    const id = asString(item).toLowerCase();
+    if (!id) continue;
+    out.add(id);
+  }
+  return Array.from(out);
+}
+
+function userCanAccessTenant(userEntity, tenantId) {
+  const allLocations = asBool(userEntity && userEntity.allLocations);
+  if (allLocations) return true;
+  const locations = parseUserLocationIds(userEntity);
+  if (!locations.length) return true;
+  return locations.includes(asString(tenantId).toLowerCase());
+}
+
+async function listTenantNotificationRecipients(usersClient, tenantId) {
+  const filter = `PartitionKey eq '${escapedFilterValue(USERS_PARTITION)}'`;
+  const seen = new Set();
+  const out = [];
+  const iter = usersClient.listEntities({ queryOptions: { filter } });
+  for await (const entity of iter) {
+    if (!userCanAccessTenant(entity, tenantId)) continue;
+    const status = asString(entity.status).toLowerCase();
+    if (status === "disabled") continue;
+    const email = normalizeEmail(entity.email || entity.rowKey);
+    const userId = asString(entity.userId || email);
+    if (!email && !userId) continue;
+    const dedupe = `${userId}|${email}`;
+    if (seen.has(dedupe)) continue;
+    seen.add(dedupe);
+    out.push({
+      targetUserId: userId || "",
+      targetEmail: email || "",
+      targetDisplayName: asString(entity.displayName || email || userId || "User")
+    });
+  }
+  return out;
+}
+
+async function createLeadNotifications(notificationClient, usersClient, tenantId, leadId, customer) {
+  const recipients = await listTenantNotificationRecipients(usersClient, tenantId);
+  if (!recipients.length) return 0;
+  const scopedTenant = scopedTenantPartition(tenantId);
+  const leadName = asString(customer && customer.name) || "Customer";
+  const customerId = asString(customer && customer.id);
+  const route = customerId ? `/customers/${encodeURIComponent(customerId)}` : "/dashboard";
+  const nowIso = new Date().toISOString();
+  let created = 0;
+  for (const recipient of recipients) {
+    const id = randomUUID();
+    try {
+      await notificationClient.upsertEntity(
+        {
+          partitionKey: scopedTenant,
+          rowKey: id,
+          tenantId,
+          type: "mention",
+          title: `${leadName} submitted a new lead`,
+          message: `${leadName} submitted a new lead.`,
+          route,
+          entityType: "lead",
+          entityId: customerId || leadId,
+          metadataJson: JSON.stringify({
+            source: "widget-lead",
+            leadItemId: asString(leadId),
+            customerId
+          }),
+          targetUserId: asString(recipient.targetUserId),
+          targetEmail: normalizeEmail(recipient.targetEmail),
+          targetDisplayName: asString(recipient.targetDisplayName),
+          actorUserId: "system",
+          actorEmail: "",
+          actorDisplayName: "System",
+          read: false,
+          readAt: "",
+          createdAt: nowIso,
+          updatedAt: nowIso
+        },
+        "Merge"
+      );
+      created += 1;
+    } catch (_) {}
+  }
+  return created;
 }
 
 async function findExistingLeadForCustomer(workItemsClient, laneId, customerId, tenantId) {
@@ -904,6 +1024,8 @@ module.exports = async function (context, req) {
     const customersClient = await getTableClient(CUSTOMERS_TABLE);
     const lanesClient = await getTableClient(LANES_TABLE);
     const workItemsClient = await getTableClient(WORKITEMS_TABLE);
+    const notificationsClient = await getTableClient(NOTIFICATIONS_TABLE);
+    const usersClient = await getTableClient(USERS_TABLE);
 
     const match = await findMatchingCustomer(customersClient, inbound, tenantId);
     const matchAction = duplicateMatchAction(match && Number(match.confidence));
@@ -955,6 +1077,7 @@ module.exports = async function (context, req) {
     if (!leadId) {
       leadId = await createLead(workItemsClient, leadsLane.id, inbound, customer, tenantId);
       leadCreated = true;
+      await createLeadNotifications(notificationsClient, usersClient, tenantId, leadId, customer);
     }
 
     let consentStatus = initialConsentStatus(inbound);

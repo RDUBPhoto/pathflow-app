@@ -1442,6 +1442,11 @@ export default class DashboardComponent implements OnDestroy {
         const itemId = String(item.id || '').trim();
         if (!itemId) continue;
         if (seen[itemId] || notified[itemId]) continue;
+        const leadSource = String((item as any).leadSource || '').trim().toLowerCase();
+        if (leadSource === 'web') {
+          this.notifiedLeadIds.update(current => ({ ...current, [itemId]: true }));
+          continue;
+        }
         this.notifiedLeadIds.update(current => ({ ...current, [itemId]: true }));
         const leadName = this.customerName(item);
         const customerId = String(item.customerId || '').trim();

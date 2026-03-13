@@ -90,6 +90,8 @@ type ThreadView = {
 })
 export default class MessagesComponent implements OnInit, OnDestroy {
   @ViewChild('messageScroll') private messageScroll?: ElementRef<HTMLDivElement>;
+  private readonly threadsFetchLimit = 200;
+  private readonly threadMessagesFetchLimit = 300;
 
   private readonly smsApi = inject(SmsApiService);
   private readonly emailApi = inject(EmailApiService);
@@ -494,10 +496,10 @@ export default class MessagesComponent implements OnInit, OnDestroy {
     let smsRes: SmsThreadSummary[] = [];
     let emailRes: EmailThreadSummary[] = [];
 
-    this.smsApi.listThreads().subscribe({
+    this.smsApi.listThreads(this.threadsFetchLimit).subscribe({
       next: sms => {
         smsRes = Array.isArray(sms.items) ? sms.items : [];
-        this.emailApi.listThreads().subscribe({
+        this.emailApi.listThreads(this.threadsFetchLimit).subscribe({
           next: email => {
             emailRes = Array.isArray(email.items) ? email.items : [];
             this.smsThreads.set(smsRes);
@@ -543,7 +545,7 @@ export default class MessagesComponent implements OnInit, OnDestroy {
   private loadSmsMessages(customerId: string, showSpinner = true): void {
     if (!customerId) return;
     if (showSpinner) this.loadingMessages.set(true);
-    this.smsApi.listCustomerMessages(customerId).subscribe({
+    this.smsApi.listCustomerMessages(customerId, this.threadMessagesFetchLimit).subscribe({
       next: res => {
         if (showSpinner) this.loadingMessages.set(false);
         const items = Array.isArray(res.items) ? res.items : [];
@@ -561,7 +563,7 @@ export default class MessagesComponent implements OnInit, OnDestroy {
   private loadEmailMessages(customerId: string, showSpinner = true): void {
     if (!customerId) return;
     if (showSpinner) this.loadingMessages.set(true);
-    this.emailApi.listCustomerMessages(customerId).subscribe({
+    this.emailApi.listCustomerMessages(customerId, this.threadMessagesFetchLimit).subscribe({
       next: res => {
         if (showSpinner) this.loadingMessages.set(false);
         const items = Array.isArray(res.items) ? res.items : [];

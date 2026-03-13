@@ -54,31 +54,41 @@
           <div
             class="card"
             *ngFor="let it of getLaneCards(lane.id); trackBy: trackItem"
-            [class.has-activity]="hasUnreadActivity(it) || hasUnreadLeadNotice(it, lane)"
+            [class.has-activity]="hasUnreadActivity(it) || hasUnreadLeadNotice(it, lane) || hasUnseenCardNotice(it, lane)"
             [cdkDragDisabled]="isMobileLayout()"
+            (cdkDragEnded)="onCardDragEnded()"
             cdkDrag>
             <div class="card-body">
-              <div class="card-activity-reason" *ngIf="hasUnreadActivity(it)">
-                <span class="card-activity-dot activity-inline-dot" aria-hidden="true"></span>
-                <button
-                  type="button"
-                  class="activity-link"
-                  *ngIf="hasUnreadSms(it)"
-                  (click)="openCustomerActivity(it, lane, 'sms', $event)">
-                  New SMS received
-                </button>
-                <span class="activity-separator" *ngIf="hasUnreadSms(it) && hasUnreadEmail(it)">•</span>
-                <button
-                  type="button"
-                  class="activity-link"
-                  *ngIf="hasUnreadEmail(it)"
-                  (click)="openCustomerActivity(it, lane, 'email', $event)">
-                  New Email received
-                </button>
-              </div>
-              <div class="card-activity-reason" *ngIf="!hasUnreadActivity(it) && hasUnreadLeadNotice(it, lane)">
-                <span class="card-activity-dot activity-inline-dot" aria-hidden="true"></span>
-                <span>New lead</span>
+              <div class="card-top-strip">
+                <div class="card-activity-reason" *ngIf="hasUnreadActivity(it)">
+                  <span class="card-activity-dot activity-inline-dot" aria-hidden="true"></span>
+                  <button
+                    type="button"
+                    class="activity-link"
+                    *ngIf="hasUnreadSms(it)"
+                    (click)="openCustomerActivity(it, lane, 'sms', $event)">
+                    New SMS received
+                  </button>
+                  <span class="activity-separator" *ngIf="hasUnreadSms(it) && hasUnreadEmail(it)">•</span>
+                  <button
+                    type="button"
+                    class="activity-link"
+                    *ngIf="hasUnreadEmail(it)"
+                    (click)="openCustomerActivity(it, lane, 'email', $event)">
+                    New Email received
+                  </button>
+                </div>
+                <div class="card-activity-reason" *ngIf="!hasUnreadActivity(it) && hasUnreadLeadNotice(it, lane)">
+                  <span class="card-activity-dot activity-inline-dot" aria-hidden="true"></span>
+                  <span>New lead</span>
+                </div>
+                <div class="card-activity-reason" *ngIf="!hasUnreadActivity(it) && !hasUnreadLeadNotice(it, lane) && hasUnseenCardNotice(it, lane)">
+                  <span class="card-activity-dot activity-inline-dot" aria-hidden="true"></span>
+                  <span>New</span>
+                </div>
+                <ng-container *ngIf="completionBadgeLabel(it, lane) as completionBadge">
+                  <span class="card-complete-badge card-complete-badge-top">{{ completionBadge }}</span>
+                </ng-container>
               </div>
               <div class="card-head">
                 <ion-icon name="reorder-two-outline" cdkDragHandle class="card-drag-handle"></ion-icon>
@@ -104,14 +114,6 @@
                 </div>
               </div>
               <div class="card-line"><span>Vehicle: {{ vehicleOf(it) || '—' }}</span></div>
-              <div class="card-line muted" *ngIf="hasLinkedDocument(it, lane)">
-                <button
-                  type="button"
-                  class="doc-link"
-                  (click)="openLinkedDocument(it, lane, $event)">
-                  {{ linkedDocumentLabel(it, lane) }}
-                </button>
-              </div>
               <div class="card-line vehicle-color-line">
                 <span>Vehicle color:</span>
                 <span class="color-wrap" *ngIf="colorOf(it)" aria-label="vehicle color">
@@ -119,22 +121,77 @@
                 </span>
                 <span *ngIf="!colorOf(it)">—</span>
               </div>
-              <div class="card-line muted"><span>{{ customerContact(it) }}</span></div>
+              <div class="card-line muted">
+                <button
+                  type="button"
+                  class="activity-link"
+                  *ngIf="canOpenSmsFromCard(it); else dashboardContactText"
+                  (click)="openCustomerActivity(it, lane, 'sms', $event)">
+                  {{ customerPhone(it) }}
+                </button>
+                <ng-template #dashboardContactText>
+                  <span>{{ customerContact(it) }}</span>
+                </ng-template>
+              </div>
               <div class="card-line lead-time" *ngIf="isLeadLane(lane) && leadReceivedLabel(it)">
                 <span>Lead received:</span>
                 <span>{{ leadReceivedLabel(it) }}</span>
               </div>
-              <div class="card-line muted" *ngIf="appointmentLabel(it)">
+              <div class="card-line muted" *ngIf="!isLeadLane(lane) && appointmentLabel(it)">
                 <span>Scheduled:</span>
                 <span class="appt-lines" [innerHTML]="appointmentLabel(it)"></span>
               </div>
-              <div class="card-notes" *ngIf="notesOf(it)">
-                <button type="button" class="notes-toggle-link" (click)="toggleExpanded(it.id)">
-                  {{ isExpanded(it.id) ? 'Hide notes' : 'Show notes' }}
-                </button>
-                <div class="notes" *ngIf="isExpanded(it.id)">{{ notesOf(it) }}</div>
+              <div class="card-doc-meta" *ngIf="hasLinkedDocument(it, lane)">
+                <div class="doc-meta-row">
+                  <button
+                    type="button"
+                    class="doc-link"
+                    (click)="openLinkedDocument(it, lane, $event)">
+                    {{ linkedDocumentLabel(it, lane) }}
+                  </button>
+                  <span
+                    class="doc-status-chip"
+                    [ngClass]="linkedDocumentStatusClass(it, lane)"
+                    *ngIf="linkedDocumentStatusLabel(it, lane)">
+                    {{ linkedDocumentStatusLabel(it, lane) }}
+                  </span>
+                </div>
+                <span class="doc-status-time" *ngIf="linkedDocumentStatusTimeLabel(it, lane)">
+                  {{ linkedDocumentStatusTimeLabel(it, lane) }}
+                </span>
               </div>
-              <div class="card-actions" *ngIf="canCheckIn(it, lane) || canRevertCheckIn(it, lane) || needsCalendarOverride(it, lane)">
+              <div class="card-notes">
+                <div class="notes-actions-row">
+                  <button type="button" class="notes-toggle-link" (click)="toggleExpanded(it.id)">
+                    {{ isExpanded(it.id) ? 'Hide notes' : 'Show notes' }}
+                  </button>
+                  <button
+                    type="button"
+                    class="notes-toggle-link"
+                    *ngIf="canOpenFinalInvoice(it, lane)"
+                    [class.is-disabled]="isFinalInvoiceSendDisabled(it)"
+                    [disabled]="isFinalInvoiceSendDisabled(it)"
+                    (click)="openFinalInvoiceFromInProgress(it, lane, $event)">
+                    {{ finalInvoiceActionLabel(it) }}
+                  </button>
+                  <button
+                    type="button"
+                    class="notes-toggle-link"
+                    *ngIf="isLeadLane(lane) && it.customerId"
+                    (click)="createQuoteFromLead(it, lane, $event)">
+                    Create Quote
+                  </button>
+                  <button
+                    type="button"
+                    class="notes-toggle-link"
+                    *ngIf="canCreateInvoiceFromQuote(it, lane)"
+                    (click)="createInvoiceFromQuoteCard(it, lane, $event)">
+                    Create Invoice
+                  </button>
+                </div>
+                <div class="notes" *ngIf="isExpanded(it.id)">{{ notesOf(it) || 'No notes yet.' }}</div>
+              </div>
+              <div class="card-actions" *ngIf="canCheckIn(it, lane) || (canRevertCheckIn(it, lane) && !isInProgressLane(lane)) || needsCalendarOverride(it, lane)">
                 <ion-button
                   class="check-in-btn"
                   size="small"
@@ -149,7 +206,7 @@
                   size="small"
                   fill="outline"
                   color="warning"
-                  *ngIf="canRevertCheckIn(it, lane)"
+                  *ngIf="canRevertCheckIn(it, lane) && !isInProgressLane(lane)"
                   (click)="revertCheckInCard(it, lane, $event)">
                   Revert check-in
                 </ion-button>
@@ -206,6 +263,9 @@
           <ion-item button (click)="startEditFromCard()">
             <ion-label>Edit Customer</ion-label>
           </ion-item>
+          <ion-item button *ngIf="canRevertCheckInFromCardMenu()" (click)="revertCheckInFromCardMenu()">
+            <ion-label color="warning">Revert check-in</ion-label>
+          </ion-item>
           <ion-item button (click)="removeCardAction()">
             <ion-label color="danger">{{ cardRemoveLabel() }}</ion-label>
           </ion-item>
@@ -226,7 +286,7 @@
       </ion-header>
       <ion-content class="ion-padding">
         <div style="margin-bottom:12px;">
-          Are you sure you want to take them out of their current status?
+          {{ removeCustomerWarningMessage() }}
         </div>
         <div style="display:flex; gap:8px; justify-content:flex-end;">
           <ion-button fill="outline" (click)="cancelRemoveCustomer()">No</ion-button>
@@ -288,7 +348,13 @@
             <ion-label>
               <div style="font-weight:600;">{{ c.name || 'Unnamed' }}</div>
               <div style="font-size:12px; opacity:.8;">
-                <span *ngIf="c.phone">{{ c.phone }}</span>
+                <button
+                  type="button"
+                  class="activity-link"
+                  *ngIf="c.phone"
+                  (click)="openCustomerSmsById(c.id, $event)">
+                  {{ c.phone }}
+                </button>
                 <span *ngIf="c.phone && c.email"> • </span>
                 <span *ngIf="c.email">{{ c.email }}</span>
               </div>

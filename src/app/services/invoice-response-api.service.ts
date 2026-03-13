@@ -4,53 +4,54 @@ import { Observable } from 'rxjs';
 import { AuthService } from '../auth/auth.service';
 import { TenantContextService } from './tenant-context.service';
 
-export type QuoteResponseAction = 'accept' | 'decline';
-export type QuoteResponseStage = 'accepted' | 'declined';
+export type InvoiceResponseAction = 'pay';
+export type InvoiceResponseStage = 'accepted';
 
-export type QuoteResponsePayload = {
-  quoteId: string;
-  action: QuoteResponseAction;
+export type InvoiceResponsePayload = {
+  invoiceId: string;
+  action: InvoiceResponseAction;
   tenantId: string;
-  quoteNumber?: string;
+  invoiceNumber?: string;
   customerName?: string;
   vehicle?: string;
   businessName?: string;
+  paymentKind?: 'initial' | 'final';
 };
 
-export type QuoteResponseRecord = {
-  quoteId: string;
-  action: QuoteResponseAction;
-  stage: QuoteResponseStage;
-  quoteNumber: string;
+export type InvoiceResponseRecord = {
+  invoiceId: string;
+  action: InvoiceResponseAction;
+  stage: InvoiceResponseStage;
+  invoiceNumber: string;
   updatedAt: string;
 };
 
-export type QuoteResponseListResponse = {
+export type InvoiceResponseListResponse = {
   ok: boolean;
   tenantId: string;
-  items: QuoteResponseRecord[];
+  items: InvoiceResponseRecord[];
 };
 
 @Injectable({ providedIn: 'root' })
-export class QuoteResponseApiService {
+export class InvoiceResponseApiService {
   private readonly auth = inject(AuthService);
   private readonly tenantContext = inject(TenantContextService);
 
   constructor(private readonly http: HttpClient) {}
 
-  capture(payload: QuoteResponsePayload): Observable<{ ok: boolean; stage: QuoteResponseStage }> {
-    return this.http.post<{ ok: boolean; stage: QuoteResponseStage }>(
-      '/api/quote-response',
+  capture(payload: InvoiceResponsePayload): Observable<{ ok: boolean; stage: InvoiceResponseStage }> {
+    return this.http.post<{ ok: boolean; stage: InvoiceResponseStage }>(
+      '/api/invoice-response',
       payload,
       { headers: new HttpHeaders({ 'x-skip-action-toast': '1' }) }
     );
   }
 
-  listRecent(limit = 250): Observable<QuoteResponseListResponse> {
+  listRecent(limit = 250): Observable<InvoiceResponseListResponse> {
     const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 250;
     const query = this.buildQuery();
-    const url = `/api/quote-response?limit=${safeLimit}${query ? `&${query}` : ''}`;
-    return this.http.get<QuoteResponseListResponse>(url, {
+    const url = `/api/invoice-response?limit=${safeLimit}${query ? `&${query}` : ''}`;
+    return this.http.get<InvoiceResponseListResponse>(url, {
       headers: new HttpHeaders({ 'x-skip-action-toast': '1' })
     });
   }

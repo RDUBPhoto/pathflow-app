@@ -286,10 +286,15 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
       const bayName = String(tags.bayName || this.resolveBayName(String(args.data.resource || '')) || '');
       const timeAndBayLabel = bayName ? `${timeLabel} • ${bayName}` : timeLabel;
       const isBlocked = !!tags.isBlocked;
+      const isCompleted = !!tags.completed;
+      const completedAtLabel = String(tags.completedAtLabel || '').trim();
       const serviceAccent = this.resolveBayColor(String(args.data.resource || ''));
-      const accent = isBlocked ? '#94a3b8' : serviceAccent;
+      const accent = isBlocked ? '#94a3b8' : (isCompleted ? '#22c55e' : serviceAccent);
       const isDark = this.isDarkTheme();
       const textColor = isDark ? '#f8fbff' : '#10243c';
+      const metaLine = isCompleted
+        ? `Completed${completedAtLabel ? ` • ${completedAtLabel}` : ''}`
+        : timeAndBayLabel;
 
       args.data.html = `
         <div class="evt-content">
@@ -299,7 +304,7 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
               <span class="evt-accent-dot" style="background:${accent}"></span>
               <div class="evt-title">${this.escapeHtml(String(args.data.text || ''))}</div>
             </div>
-            <div class="evt-time">${this.escapeHtml(timeAndBayLabel)}</div>
+            <div class="evt-time">${this.escapeHtml(metaLine)}</div>
           </div>
         </div>
       `;
@@ -310,9 +315,16 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
         args.data.barColor = '#94a3b8';
         args.data.barBackColor = isDark ? 'rgba(148, 163, 184, 0.22)' : 'rgba(100, 116, 139, 0.18)';
         args.data.fontColor = isDark ? '#e2e8f0' : '#334155';
+      } else if (isCompleted) {
+        args.data.cssClass = 'evt-service';
+        args.data.backColor = isDark ? 'rgba(34, 197, 94, 0.28)' : 'rgba(34, 197, 94, 0.2)';
+        args.data.borderColor = isDark ? 'rgba(74, 222, 128, 0.75)' : 'rgba(34, 197, 94, 0.6)';
+        args.data.barColor = '#22c55e';
+        args.data.barBackColor = isDark ? 'rgba(74, 222, 128, 0.42)' : 'rgba(34, 197, 94, 0.32)';
+        args.data.fontColor = textColor;
       } else {
         args.data.cssClass = 'evt-service';
-        args.data.backColor = isDark ? this.hexToRgba(serviceAccent, 0.34) : this.hexToRgba(serviceAccent, 0.22);
+        args.data.backColor = isDark ? this.hexToRgba(serviceAccent, 0.9) : this.hexToRgba(serviceAccent, 0.22);
         args.data.borderColor = this.hexToRgba(serviceAccent, isDark ? 0.88 : 0.62);
         args.data.barColor = serviceAccent;
         args.data.barBackColor = this.hexToRgba(serviceAccent, isDark ? 0.5 : 0.3);
@@ -374,24 +386,31 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
       const item = this.monthItemMap()[String(data.id)] || null;
       const resourceId = String(item?.resource || data.resource || '');
       const isBlocked = Boolean(item?.isBlocked || data.tags?.isBlocked);
-      const color = isBlocked ? '#94a3b8' : this.resolveBayColor(resourceId);
+      const isCompleted = Boolean(data.tags?.completed);
+      const color = isBlocked ? '#94a3b8' : (isCompleted ? '#22c55e' : this.resolveBayColor(resourceId));
       const bayName = this.resolveBayName(resourceId);
       const label = String(data.text || '').trim() || 'Appointment';
-      const monthLabel = bayName ? `${label} • ${bayName}` : label;
+      const completedAtLabel = String(data.tags?.completedAtLabel || '').trim();
+      const monthLabelBase = bayName ? `${label} • ${bayName}` : label;
+      const monthLabel = isCompleted
+        ? `${monthLabelBase} (Completed${completedAtLabel ? ` ${completedAtLabel}` : ''})`
+        : monthLabelBase;
       const isDark = this.isDarkTheme();
-      const monthTextColor = isBlocked ? (isDark ? '#e2e8f0' : '#334155') : (isDark ? '#f8fbff' : '#10243c');
+      const monthTextColor = isBlocked
+        ? (isDark ? '#e2e8f0' : '#334155')
+        : (isCompleted ? (isDark ? '#dcfce7' : '#14532d') : (isDark ? '#f8fbff' : '#10243c'));
       args.data.barColor = color;
       args.data.barBackColor = this.hexToRgba(color, 0.3);
       args.data.borderColor = this.hexToRgba(color, isDark ? 0.88 : 0.62);
       args.data.backColor = isBlocked
         ? (isDark ? '#334155' : '#e2e8f0')
-        : this.hexToRgba(color, isDark ? 0.34 : 0.22);
+        : this.hexToRgba(color, isDark ? (isCompleted ? 0.36 : 0.46) : (isCompleted ? 0.24 : 0.28));
       args.data.fontColor = monthTextColor;
       args.data.toolTip = `${label}${bayName ? `\nLift/Bay: ${bayName}` : ''}`;
       args.data.html = `
         <div class="pf-month-event" style="cursor:grab">
           <span class="pf-month-event-dot" style="background:${color}"></span>
-          <span class="pf-month-event-text" style="color:${monthTextColor}">${this.escapeHtml(monthLabel)}</span>
+          <span class="pf-month-event-text" style="color:${monthTextColor} !important">${this.escapeHtml(monthLabel)}</span>
         </div>
       `;
     },
@@ -597,19 +616,11 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
   }
 
   private loadPersistedCalendarView(): void {
-    this.userSettings.getValue<CalendarViewMode>(SCHEDULE_VIEW_MODE_KEY).subscribe(value => {
-      if (value === 'day' || value === 'week' || value === 'month') {
-        this.viewMode.set(value);
-      }
-      this.applyViewConfig(false);
-    });
-    this.userSettings.getValue<string>(SCHEDULE_VIEW_ANCHOR_KEY).subscribe(value => {
-      if (value) {
-        const parsed = new DayPilot.Date(value);
-        this.viewAnchor.set(parsed.getDatePart().toString());
-      }
-      this.applyViewConfig(false);
-    });
+    const today = this.localTodayDatePart();
+    this.viewMode.set('day');
+    this.viewAnchor.set(today.toString());
+    this.persistCalendarView();
+    this.applyViewConfig(false, today);
   }
 
   private normalizeSettings(value: unknown): ScheduleSettings {
@@ -941,7 +952,21 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     this.reconcileResourcesWithItems();
     const map = this.customersById();
     const list: DayPilot.EventData[] = [];
+    const nowMs = Date.now();
     for (const it of this.items()) {
+      const plannedEndMs = this.toMillis(it.end);
+      const actualEndMs = this.toMillis(it.actualEnd || '');
+      const releasedMs = this.toMillis(it.bayReleasedAt || '');
+      let effectiveEndMs = plannedEndMs;
+      if (actualEndMs && (!effectiveEndMs || actualEndMs < effectiveEndMs)) effectiveEndMs = actualEndMs;
+      if (releasedMs && (!effectiveEndMs || releasedMs < effectiveEndMs)) effectiveEndMs = releasedMs;
+      const startMs = this.toMillis(it.start);
+      if (!startMs || !effectiveEndMs || effectiveEndMs <= startMs) continue;
+      const effectiveEndIso = new Date(effectiveEndMs).toISOString();
+      const isCompleted = !!releasedMs && releasedMs <= nowMs;
+      const completedAtLabel = isCompleted
+        ? new Date(releasedMs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+        : '';
       const cust = it.customerId ? map[it.customerId] : null;
       const vehicle = cust ? this.vehicleLabel(cust) : '';
       const text = it.isBlocked
@@ -950,13 +975,16 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
       list.push({
         id: it.id,
         start: it.start,
-        end: it.end,
+        end: effectiveEndIso,
         resource: it.resource,
         text,
         toolTip: it.notes || '',
         tags: {
           customerId: it.customerId || '',
           isBlocked: !!it.isBlocked,
+          completed: isCompleted,
+          completedAt: it.bayReleasedAt || '',
+          completedAtLabel,
           title: it.title || '',
           notes: it.notes || '',
           partRequests: Array.isArray(it.partRequests) ? it.partRequests : [],
@@ -1532,6 +1560,11 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     const g = (n >> 8) & 255;
     const b = n & 255;
     return `rgba(${r}, ${g}, ${b}, ${normalizedAlpha})`;
+  }
+
+  private toMillis(value: string | null | undefined): number {
+    const parsed = Date.parse(String(value || '').trim());
+    return Number.isFinite(parsed) ? parsed : 0;
   }
 
   private relativeLuminance(hex: string): number {

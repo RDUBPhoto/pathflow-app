@@ -1,0 +1,246 @@
+.invoice-payment-content {
+  --background: radial-gradient(circle at 12% 20%, rgba(26, 90, 173, 0.18), transparent 45%),
+    radial-gradient(circle at 90% 12%, rgba(15, 61, 132, 0.22), transparent 40%),
+    linear-gradient(180deg, #061327 0%, #071a30 100%);
+}
+
+.invoice-payment-wrap {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.invoice-payment-card {
+  width: min(980px, 100%);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 16px;
+  background: #f8fafc;
+  color: #0f172a;
+  padding: 24px;
+  box-shadow: 0 20px 45px rgba(2, 6, 23, 0.3);
+}
+
+.status-pill {
+  display: inline-flex;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(59, 130, 246, 0.5);
+  color: #bfdbfe;
+  margin: 0 0 10px;
+}
+
+.status-pill.paid {
+  border-color: rgba(34, 197, 94, 0.55);
+  color: #bbf7d0;
+}
+
+.invoice-header {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.company-block {
+  min-width: 0;
+}
+
+.company-logo {
+  max-height: 76px;
+  width: auto;
+  max-width: 220px;
+  object-fit: contain;
+  margin-bottom: 10px;
+}
+
+.company-name {
+  font-size: 1.2rem;
+  font-weight: 800;
+}
+
+.muted-line {
+  color: #475569;
+  line-height: 1.35;
+}
+
+.invoice-meta {
+  text-align: right;
+}
+
+.invoice-meta h1 {
+  margin: 0 0 10px;
+  color: #1e293b;
+  letter-spacing: 0.06em;
+}
+
+.billto-block {
+  margin-bottom: 16px;
+}
+
+.billto-title {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #64748b;
+}
+
+.billto-name {
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.invoice-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 14px 0 16px;
+  font-size: 0.95rem;
+}
+
+.invoice-table th {
+  text-align: left;
+  background: #d1d5db;
+  color: #1f2937;
+  padding: 9px 10px;
+  font-weight: 700;
+}
+
+.invoice-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid #e2e8f0;
+  color: #111827;
+}
+
+.invoice-table th:nth-child(3),
+.invoice-table td:nth-child(3) {
+  width: 80px;
+}
+
+.invoice-table th:nth-child(4),
+.invoice-table td:nth-child(4),
+.invoice-table th:nth-child(5),
+.invoice-table td:nth-child(5) {
+  text-align: right;
+  width: 140px;
+}
+
+.totals-panel {
+  margin-left: auto;
+  width: min(360px, 100%);
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #f1f5f9;
+  padding: 10px 12px;
+  margin-bottom: 16px;
+}
+
+.totals-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid #dbe3ee;
+}
+
+.totals-row:last-child {
+  border-bottom: 0;
+}
+
+.totals-row.grand {
+  background: #e2e8f0;
+  margin: 2px -6px;
+  padding: 8px 6px;
+  font-size: 1.02rem;
+}
+
+.card-form {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 16px;
+}
+
+.card-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.card-form span {
+  font-size: 0.78rem;
+  color: #334155;
+  font-weight: 600;
+}
+
+.card-form input {
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: #ffffff;
+  color: #0f172a;
+  border-radius: 8px;
+  padding: 10px 12px;
+  outline: none;
+}
+
+.card-form-row {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.help-text {
+  margin: 0;
+  color: #1d4ed8;
+  font-size: 0.78rem;
+}
+
+.checkout-btn {
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-weight: 700;
+  color: #ffffff;
+  background: linear-gradient(135deg, #1d4ed8, #2563eb);
+  cursor: pointer;
+}
+
+.checkout-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.status-message {
+  margin-top: 12px;
+  color: #334155;
+}
+
+.status-message.error {
+  color: #fda4af;
+}
+
+.invoice-comments {
+  margin-top: 16px;
+}
+
+.invoice-comments h3 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.invoice-comments p {
+  margin: 0 0 6px;
+  color: #334155;
+}
+
+@media (max-width: 720px) {
+  .invoice-header {
+    grid-template-columns: 1fr;
+  }
+
+  .invoice-meta {
+    text-align: left;
+  }
+
+  .card-form-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

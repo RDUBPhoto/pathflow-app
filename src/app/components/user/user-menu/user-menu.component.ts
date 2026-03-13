@@ -26,8 +26,8 @@ import {
 import { AuthService } from '../../../auth/auth.service';
 import { AppNotification, NotificationsApiService } from '../../../services/notifications-api.service';
 import { ThemeService } from '../../../services/theme.service';
-import { forkJoin } from 'rxjs';
-import { environment } from '../../../../environments/environment';
+
+const NOTIFICATION_OPENED_HINTS_KEY = 'pathflow.notifications.opened.v1';
 
 @Component({
   selector: 'app-user-menu',
@@ -62,12 +62,11 @@ export class UserMenuComponent implements OnInit, OnDestroy {
   readonly notificationsLoading = signal(false);
   readonly notificationsError = signal('');
   readonly notificationItems = signal<AppNotification[]>([]);
-  readonly demoToolsEnabled = !!environment.features?.demoTools;
   readonly notificationsTotal = signal(0);
   readonly unreadNotifications = signal(0);
   readonly showAllNotifications = signal(false);
-  readonly notificationsDrawerOpen = signal(false);
-  readonly seedingNotifications = signal(false);
+  readonly loadingMoreNotifications = signal(false);
+  readonly hasMoreAllNotifications = signal(false);
   readonly visibleNotifications = computed(() =>
     this.showAllNotifications() ? this.notificationItems() : this.notificationItems().slice(0, this.recentLimit)
   );
@@ -79,6 +78,11 @@ export class UserMenuComponent implements OnInit, OnDestroy {
   });
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
   private readonly recentLimit = 3;
+  private readonly allPageSize = 50;
+  private allOffset = 0;
+  private readonly handleNotificationsRefresh = () => {
+    this.refreshNotifications(false);
+  };
 
   private readonly avatarPalette = [
     '#0f766e',
@@ -134,12 +138,18 @@ export class UserMenuComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.refreshNotifications(false);
     this.refreshTimer = setInterval(() => this.refreshNotifications(true), 15000);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('pathflow:notifications-refresh', this.handleNotificationsRefresh);
+    }
   }
 
   ngOnDestroy(): void {
     if (this.refreshTimer) {
       clearInterval(this.refreshTimer);
       this.refreshTimer = null;
+    }
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('pathflow:notifications-refresh', this.handleNotificationsRefresh);
     }
   }
 
@@ -165,7 +175,6 @@ export class UserMenuComponent implements OnInit, OnDestroy {
     this.notificationsOpen.set(next);
     if (!next) {
       this.showAllNotifications.set(false);
-      this.notificationsDrawerOpen.set(false);
       return;
     }
 
@@ -179,28 +188,42 @@ export class UserMenuComponent implements OnInit, OnDestroy {
   closeNotifications(): void {
     this.notificationsOpen.set(false);
     this.showAllNotifications.set(false);
-    this.notificationsDrawerOpen.set(false);
+    this.allOffset = 0;
+    this.loadingMoreNotifications.set(false);
+    this.hasMoreAllNotifications.set(false);
+  }
+
+  onNotificationsPopoverDismiss(): void {
+    this.notificationsOpen.set(false);
+    this.showAllNotifications.set(false);
+    this.allOffset = 0;
+    this.loadingMoreNotifications.set(false);
+    this.hasMoreAllNotifications.set(false);
   }
 
   viewAllNotifications(event: Event): void {
     event.preventDefault();
     event.stopPropagation();
-    this.notificationsOpen.set(false);
-    this.notificationsDrawerOpen.set(true);
     this.showAllNotifications.set(true);
-    this.loadAllNotifications(false);
-  }
-
-  closeNotificationsDrawer(): void {
-    this.notificationsDrawerOpen.set(false);
-    this.showAllNotifications.set(false);
+    this.allOffset = 0;
+    this.loadAllNotifications(false, false);
   }
 
   showRecentNotifications(event: Event): void {
     event.preventDefault();
     event.stopPropagation();
     this.showAllNotifications.set(false);
+    this.allOffset = 0;
+    this.loadingMoreNotifications.set(false);
+    this.hasMoreAllNotifications.set(false);
     this.loadRecentNotifications(false);
+  }
+
+  loadMoreNotifications(event: Event): void {
+    event.preventDefault();
+    event.stopPropagation();
+    if (this.loadingMoreNotifications() || !this.hasMoreAllNotifications()) return;
+    this.loadAllNotifications(false, true);
   }
 
   markAllNotificationsRead(event: Event): void {
@@ -219,97 +242,13 @@ export class UserMenuComponent implements OnInit, OnDestroy {
     });
   }
 
-  seedDemoNotifications(event: Event): void {
-    if (!this.demoToolsEnabled) return;
-    event.preventDefault();
-    event.stopPropagation();
-
-    const user = this.user();
-    if (!user || (!user.id && !user.email)) {
-      this.notificationsError.set('Could not identify the current user for demo notifications.');
-      return;
-    }
-
-    this.notificationsError.set('');
-    this.seedingNotifications.set(true);
-
-    const targetPayload = {
-      targetUserId: user.id || undefined,
-      targetEmail: user.email || undefined,
-      targetDisplayName: user.displayName || user.email || 'You'
-    };
-
-    const samples: Array<{
-      title: string;
-      message: string;
-      route: string;
-      entityType: string;
-      entityId: string;
-      metadata: Record<string, unknown>;
-    }> = [
-      {
-        title: 'New SMS received',
-        message: 'A customer sent a new message and is waiting for a reply.',
-        route: '/messages',
-        entityType: 'sms',
-        entityId: `sms-${Date.now()}`,
-        metadata: { channel: 'sms', severity: 'high' }
-      },
-      {
-        title: 'Invoice needs approval',
-        message: 'Draft invoice INV-430501 is ready for review.',
-        route: '/quotes-invoices',
-        entityType: 'invoice',
-        entityId: 'inv-430501',
-        metadata: { lane: 'draft', action: 'review' }
-      },
-      {
-        title: 'Customer profile updated',
-        message: 'A customer profile was updated with new vehicle details.',
-        route: '/customers',
-        entityType: 'customer',
-        entityId: 'customer-update',
-        metadata: { source: 'profile', action: 'view' }
-      },
-      {
-        title: 'Weekly report is ready',
-        message: 'Your weekly operations report is available to review.',
-        route: '/reports',
-        entityType: 'report',
-        entityId: 'ops-weekly',
-        metadata: { period: 'weekly', action: 'open' }
-      }
-    ];
-
-    forkJoin(
-      samples.map(sample =>
-        this.notificationsApi.createMention({
-          ...targetPayload,
-          ...sample
-        })
-      )
-    ).subscribe({
-      next: () => {
-        this.seedingNotifications.set(false);
-        if (this.showAllNotifications()) {
-          this.loadAllNotifications(false);
-          return;
-        }
-        this.loadRecentNotifications(false);
-      },
-      error: () => {
-        this.seedingNotifications.set(false);
-        this.notificationsError.set('Could not generate demo notifications.');
-      }
-    });
-  }
-
   openNotification(notification: AppNotification, event: Event): void {
     event.preventDefault();
     event.stopPropagation();
 
     const targetRoute = this.resolveNotificationRoute(notification);
     const navigate = () => {
+      this.rememberOpenedNotification(notification);
       this.router.navigateByUrl(targetRoute);
       this.closeNotifications();
     };
@@ -360,8 +299,9 @@ export class UserMenuComponent implements OnInit, OnDestroy {
   }
 
   private refreshNotifications(background: boolean): void {
-    if ((this.notificationsOpen() || this.notificationsDrawerOpen()) && this.showAllNotifications()) {
-      this.loadAllNotifications(background);
+    if (this.notificationsOpen() && this.showAllNotifications()) {
+      this.allOffset = 0;
+      this.loadAllNotifications(background, false);
       return;
     }
     this.loadRecentNotifications(background);
@@ -380,6 +320,8 @@ export class UserMenuComponent implements OnInit, OnDestroy {
         const unread = Number.isFinite(res.unreadCount) ? Number(res.unreadCount) : unreadFromItems;
         this.notificationsTotal.set(Number.isFinite(res.total) ? Number(res.total) : this.notificationItems().length);
         this.unreadNotifications.set(Math.max(0, unread));
+        this.hasMoreAllNotifications.set(false);
+        this.loadingMoreNotifications.set(false);
         this.notificationsLoading.set(false);
       },
       error: () => {
@@ -391,28 +333,64 @@ export class UserMenuComponent implements OnInit, OnDestroy {
     });
   }
 
-  private loadAllNotifications(background: boolean): void {
-    if (!background) {
+  private loadAllNotifications(background: boolean, append = false): void {
+    if (!background && !append) {
       this.notificationsLoading.set(true);
       this.notificationsError.set('');
     }
+    if (append) {
+      this.loadingMoreNotifications.set(true);
+      this.notificationsError.set('');
+    }
 
-    this.notificationsApi.listAll(200).subscribe({
+    this.notificationsApi.listAll(this.allPageSize, this.allOffset).subscribe({
       next: res => {
-        this.notificationItems.set(Array.isArray(res.items) ? res.items : []);
+        const incoming = Array.isArray(res.items) ? res.items : [];
+        const nextItems = append
+          ? this.mergeNotifications(this.notificationItems(), incoming)
+          : incoming;
+        this.notificationItems.set(nextItems);
+        const responseOffset = Number.isFinite(res.offset) ? Number(res.offset) : this.allOffset;
+        const responseLimit = Number.isFinite(res.limit) && Number(res.limit) > 0
+          ? Number(res.limit)
+          : this.allPageSize;
+        this.allOffset = responseOffset + incoming.length;
         const unreadFromItems = this.notificationItems().filter(item => !item.read).length;
         const unread = Number.isFinite(res.unreadCount) ? Number(res.unreadCount) : unreadFromItems;
         this.notificationsTotal.set(Number.isFinite(res.total) ? Number(res.total) : this.notificationItems().length);
         this.unreadNotifications.set(Math.max(0, unread));
+        const hasMore = typeof res.hasMore === 'boolean'
+          ? res.hasMore
+          : this.allOffset < this.notificationsTotal();
+        this.hasMoreAllNotifications.set(hasMore && incoming.length >= Math.min(this.allPageSize, responseLimit));
+        this.loadingMoreNotifications.set(false);
         this.notificationsLoading.set(false);
       },
       error: () => {
+        if (append) {
+          this.loadingMoreNotifications.set(false);
+          this.notificationsError.set('Could not load more notifications.');
+          return;
+        }
         if (!background) {
           this.notificationsError.set('Could not load notifications.');
           this.notificationsLoading.set(false);
         }
       }
     });
+  }
+
+  private mergeNotifications(existing: AppNotification[], incoming: AppNotification[]): AppNotification[] {
+    if (!existing.length) return incoming;
+    if (!incoming.length) return existing;
+    const byId = new Map<string, AppNotification>();
+    for (const item of existing) {
+      byId.set(String(item.id || '').trim(), item);
+    }
+    for (const item of incoming) {
+      byId.set(String(item.id || '').trim(), item);
+    }
+    return [...byId.values()].sort((a, b) => Date.parse(b.createdAt || '') - Date.parse(a.createdAt || ''));
   }
 
   private normalizeRoute(value: string): string {
@@ -434,6 +412,17 @@ export class UserMenuComponent implements OnInit, OnDestroy {
   private resolveEntityRoute(notification: AppNotification): string | null {
     const entityType = String(notification.entityType || '').trim().toLowerCase();
     const metadata = this.asRecord(notification.metadata);
+
+    const quoteIdentifier = this.firstNonEmpty([
+      entityType === 'quote' ? notification.entityId : null,
+      this.readMetadataString(metadata, 'quoteId'),
+      this.readMetadataString(metadata, 'quoteNumber'),
+      this.readRouteQueryParam(notification.route, 'quoteId'),
+      this.readRouteQueryParam(notification.route, 'quoteNumber'),
+    ]);
+    if (quoteIdentifier) {
+      return `/quotes/${encodeURIComponent(quoteIdentifier)}`;
+    }
 
     const invoiceId = this.firstNonEmpty([
       entityType === 'invoice' ? notification.entityId : null,
@@ -464,6 +453,14 @@ export class UserMenuComponent implements OnInit, OnDestroy {
 
   private resolveRouteDerivedTarget(route: string): string | null {
     const normalized = this.normalizeRoute(route);
+
+    const quoteIdentifier = this.firstNonEmpty([
+      this.readRouteQueryParam(normalized, 'quoteId'),
+      this.readRouteQueryParam(normalized, 'quoteNumber')
+    ]);
+    if (quoteIdentifier) {
+      return `/quotes/${encodeURIComponent(quoteIdentifier)}`;
+    }
 
     const invoiceId = this.readRouteQueryParam(normalized, 'invoiceId');
     if (invoiceId) {
@@ -561,5 +558,32 @@ export class UserMenuComponent implements OnInit, OnDestroy {
 
     const index = Math.abs(hash) % this.avatarPalette.length;
     return this.avatarPalette[index];
+  }
+
+  private rememberOpenedNotification(notification: AppNotification): void {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = localStorage.getItem(NOTIFICATION_OPENED_HINTS_KEY);
+      const list = raw ? JSON.parse(raw) : [];
+      const existing = Array.isArray(list) ? list : [];
+      const next = [
+        ...existing,
+        {
+          id: String(notification.id || '').trim(),
+          entityType: String(notification.entityType || '').trim().toLowerCase(),
+          entityId: String(notification.entityId || '').trim(),
+          metadata: (notification.metadata && typeof notification.metadata === 'object')
+            ? notification.metadata
+            : {},
+          openedAt: new Date().toISOString()
+        }
+      ];
+      localStorage.setItem(
+        NOTIFICATION_OPENED_HINTS_KEY,
+        JSON.stringify(next.slice(-100))
+      );
+    } catch {
+      // Ignore local storage failures.
+    }
   }
 }

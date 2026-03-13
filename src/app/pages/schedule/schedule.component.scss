@@ -219,14 +219,14 @@ html[data-theme='light'] .schedule-shell ::ng-deep .scheduler_default_main {
 }
 
 html:not([data-theme='light']) .schedule-shell ::ng-deep .scheduler_default_main {
-  --dp-scheduler-border-color: rgba(120, 141, 168, 0.36);
-  --dp-scheduler-border-inner-color: rgba(120, 141, 168, 0.26);
+  --dp-scheduler-border-color: rgba(120, 141, 168, 0.2);
+  --dp-scheduler-border-inner-color: rgba(120, 141, 168, 0.14);
   --dp-scheduler-header-bg-color: #111a28;
   --dp-scheduler-header-color: #d8e6fb;
   --dp-scheduler-cell-bg-color: #0f1724;
   --dp-scheduler-cell-business-bg-color: #132033;
-  --dp-scheduler-grid-line-color: rgba(120, 141, 168, 0.22);
-  --dp-scheduler-grid-line-break-color: rgba(120, 141, 168, 0.32);
+  --dp-scheduler-grid-line-color: rgba(120, 141, 168, 0.12);
+  --dp-scheduler-grid-line-break-color: rgba(120, 141, 168, 0.2);
   --dp-scheduler-event-bg-top-color: #1d3048;
   --dp-scheduler-event-bg-bottom-color: #17273c;
   --dp-scheduler-event-bg-top-color-hover: #264160;
@@ -246,12 +246,12 @@ html:not([data-theme='light']) .schedule-shell ::ng-deep .scheduler_default_time
 html:not([data-theme='light']) .schedule-shell ::ng-deep .scheduler_default_timeheadercol_inner {
   background: #111a28;
   color: #d8e6fb;
-  border-color: rgba(120, 141, 168, 0.34);
+  border-color: rgba(120, 141, 168, 0.18);
 }
 
 html:not([data-theme='light']) .schedule-shell ::ng-deep .scheduler_default_cell_inner {
   background: #0f1724;
-  border-color: rgba(120, 141, 168, 0.2);
+  border-color: rgba(120, 141, 168, 0.12);
 }
 
 html:not([data-theme='light']) .schedule-shell ::ng-deep .scheduler_default_cell_business .scheduler_default_cell_inner {
@@ -323,10 +323,15 @@ html[data-theme='light'] .month-shell ::ng-deep .month_default_cell.pf-month-cel
 }
 
 .month-shell ::ng-deep .month_default_event_inner {
-  padding: 2px 4px;
+  padding: 2px 5px;
   color: inherit !important;
-  font-weight: 600;
-  line-height: 1.1;
+  font-weight: 700;
+  line-height: 1.2;
+  border-radius: 7px;
+}
+
+.month-shell ::ng-deep .month_default_event {
+  opacity: 1 !important;
 }
 
 .month-shell ::ng-deep .pf-month-event {
@@ -343,21 +348,12 @@ html[data-theme='light'] .month-shell ::ng-deep .month_default_cell.pf-month-cel
 }
 
 .month-shell ::ng-deep .pf-month-event-text {
-  font-size: 10px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: #10243c !important;
-}
-
-html:not([data-theme='light']) .month-shell ::ng-deep .pf-month-event-text {
-  color: #f8fbff !important;
-  text-shadow: 0 1px 1px rgba(2, 6, 23, 0.72);
-}
-
-html[data-theme='light'] .month-shell ::ng-deep .pf-month-event-text {
-  color: #10243c !important;
   text-shadow: none;
 }
 

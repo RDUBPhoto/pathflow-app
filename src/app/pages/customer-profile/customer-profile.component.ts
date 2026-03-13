@@ -42,7 +42,7 @@ import { SmsApiService, SmsDeliveryStatus, SmsMessage } from '../../services/sms
 import { EmailApiService, EmailMessage, EmailTemplate } from '../../services/email-api.service';
 import { AppSettingsApiService } from '../../services/app-settings-api.service';
 import { ScheduleApi, ScheduleItem } from '../../services/schedule-api.service';
-import { InvoiceCard, InvoicesDataService } from '../../services/invoices-data.service';
+import { InvoiceCard, InvoiceDetail, InvoicesDataService } from '../../services/invoices-data.service';
 import { AuthService } from '../../auth/auth.service';
 import { TenantContextService } from '../../services/tenant-context.service';
 import { BrandSettingsService } from '../../services/brand-settings.service';
@@ -55,6 +55,7 @@ import { environment } from '../../../environments/environment';
 
 type CustomerTab = 'vehicle' | 'schedule' | 'invoices' | 'sms' | 'email';
 type CustomerMobileTab = 'profile' | CustomerTab;
+type CustomerDocsFilter = 'all' | 'open' | 'paid' | 'canceled';
 type EmailView = 'list' | 'detail' | 'compose';
 type TabActivityDismissState = Record<CustomerTab, boolean>;
 type ColorOpt = { label: string; hex: string };
@@ -143,6 +144,7 @@ type CustomerNoteHistoryEntry = {
 })
 export default class CustomerProfileComponent implements OnInit, OnDestroy {
   @ViewChild('smsThreadContainer') private smsThreadContainer?: ElementRef<HTMLDivElement>;
+  private readonly customerMessagesFetchLimit = 300;
 
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
@@ -300,7 +302,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   readonly tabs: Array<{ key: CustomerTab; label: string; icon: string }> = [
     { key: 'vehicle', label: 'Vehicle', icon: 'car-outline' },
     { key: 'schedule', label: 'Scheduled', icon: 'calendar-outline' },
-    { key: 'invoices', label: 'Invoices', icon: 'cash-outline' },
+    { key: 'invoices', label: 'Quotes & Invoices', icon: 'cash-outline' },
     { key: 'sms', label: 'SMS History', icon: 'chatbubble-ellipses-outline' },
     { key: 'email', label: 'Email History', icon: 'mail-outline' }
   ];
@@ -308,22 +310,172 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     { key: 'profile', label: 'Profile', icon: 'person-outline' },
     { key: 'vehicle', label: 'Vehicle', icon: 'car-outline' },
     { key: 'schedule', label: 'Scheduled', icon: 'calendar-outline' },
-    { key: 'invoices', label: 'Invoices', icon: 'cash-outline' },
+    { key: 'invoices', label: 'Quotes & Invoices', icon: 'cash-outline' },
     { key: 'sms', label: 'SMS', icon: 'chatbubble-ellipses-outline' },
     { key: 'email', label: 'Email', icon: 'mail-outline' }
   ];
+  readonly docsFilter = signal<CustomerDocsFilter>('open');
+  readonly refundSubmitting = signal(false);
+  readonly refundStatus = signal('');
+  readonly refundError = signal('');
+  readonly docFilterOptions: Array<{ id: CustomerDocsFilter; label: string }> = [
+    { id: 'all', label: 'All' },
+    { id: 'open', label: 'Open' },
+    { id: 'paid', label: 'Paid/Complete' },
+    { id: 'canceled', label: 'Cancelled' }
+  ];
+  refundInvoiceId = '';
+  refundAmount = '';
+  refundReason = '';
 
   customerInvoices(): InvoiceCard[] {
     const fullName = `${this.firstName} ${this.lastName}`.trim();
-    return this.invoicesData.forCustomer({
+    const docs = this.invoicesData.forCustomer({
       id: this.customerId(),
       email: this.email,
       name: fullName || null
     });
+    return docs.filter(doc => !this.isConvertedQuote(doc));
+  }
+
+  filteredCustomerInvoices(): InvoiceCard[] {
+    const filter = this.docsFilter();
+    const docs = this.customerInvoices();
+    if (filter === 'all') return docs;
+    if (filter === 'open') {
+      return docs.filter(doc =>
+        doc.stage === 'draft'
+        || doc.stage === 'sent'
+        || (doc.documentType === 'quote' && doc.stage === 'accepted')
+      );
+    }
+    if (filter === 'paid') {
+      return docs.filter(doc => doc.documentType === 'invoice' && doc.stage === 'accepted');
+    }
+    return docs.filter(doc => doc.stage === 'canceled' || doc.stage === 'declined' || doc.stage === 'expired');
   }
 
   invoiceAttentionCount(): number {
-    return this.customerInvoices().filter(invoice => invoice.stage === 'draft' || invoice.stage === 'sent').length;
+    return this.customerInvoices()
+      .filter(invoice =>
+        invoice.stage === 'draft'
+        || invoice.stage === 'sent'
+        || (invoice.documentType === 'quote' && invoice.stage === 'accepted')
+      )
+      .length;
+  }
+
+  refundableInvoices(): InvoiceCard[] {
+    return this.customerInvoices()
+      .filter(doc => doc.documentType === 'invoice' && doc.stage === 'accepted')
+      .sort((a, b) => {
+        const at = Date.parse(String(a.invoicedAt || '').trim());
+        const bt = Date.parse(String(b.invoicedAt || '').trim());
+        if (Number.isFinite(bt) && Number.isFinite(at)) return bt - at;
+        if (Number.isFinite(bt)) return 1;
+        if (Number.isFinite(at)) return -1;
+        return 0;
+      });
+  }
+
+  onRefundInvoiceChange(value: string): void {
+    this.refundInvoiceId = String(value || '').trim();
+    this.refundStatus.set('');
+    this.refundError.set('');
+    if (!this.refundInvoiceId) return;
+    const detail = this.refundInvoiceDetail();
+    const max = Number(detail?.paidAmount || detail?.total || 0);
+    if (Number.isFinite(max) && max > 0) {
+      this.refundAmount = max.toFixed(2);
+    }
+  }
+
+  async issueRefund(): Promise<void> {
+    if (this.refundSubmitting()) return;
+    this.refundStatus.set('');
+    this.refundError.set('');
+
+    const invoiceId = String(this.refundInvoiceId || '').trim();
+    if (!invoiceId) {
+      this.refundError.set('Choose an invoice to refund.');
+      return;
+    }
+
+    const detail = this.refundInvoiceDetail();
+    if (!detail || detail.documentType !== 'invoice') {
+      this.refundError.set('Selected invoice could not be loaded.');
+      return;
+    }
+
+    const amount = Number(String(this.refundAmount || '').replace(/[^0-9.\-]/g, ''));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      this.refundError.set('Enter a valid refund amount.');
+      return;
+    }
+    const paid = Number(detail.paidAmount || detail.total || 0);
+    if (Number.isFinite(paid) && paid > 0 && amount > paid) {
+      this.refundError.set(`Refund amount cannot exceed paid amount (${this.formatUsd(paid)}).`);
+      return;
+    }
+
+    const reason = String(this.refundReason || '').trim();
+    const refund = this.invoicesData.recordRefund(detail.id, amount, reason || undefined);
+    if (!refund) {
+      this.refundError.set('Could not record refund. Try again.');
+      return;
+    }
+
+    this.refundSubmitting.set(true);
+    try {
+      const to = String(refund.customerEmail || this.email || '').trim();
+      if (to) {
+        const business = String(refund.businessName || this.businessProfile.companyName() || 'Your service team').trim();
+        const amountLabel = this.formatUsd(amount);
+        const reasonLine = reason ? `Reason: ${reason}` : 'Reason: not specified.';
+        const subject = `Refund issued for ${refund.invoiceNumber}`;
+        const plain = `Hi ${refund.customerName || this.displayName() || 'Customer'}, a refund of ${amountLabel} was issued for invoice ${refund.invoiceNumber}. ${reasonLine}`;
+        const html = `<div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#111827;">
+          <p>Hi ${this.escapeHtml(refund.customerName || this.displayName() || 'Customer')},</p>
+          <p>A refund of <strong>${this.escapeHtml(amountLabel)}</strong> was issued for invoice <strong>${this.escapeHtml(refund.invoiceNumber)}</strong>.</p>
+          <p>${this.escapeHtml(reasonLine)}</p>
+          <p>${this.escapeHtml(business)}</p>
+        </div>`;
+        await firstValueFrom(this.emailApi.sendToCustomer({
+          customerId: String(refund.customerId || this.customerId() || '').trim(),
+          customerName: refund.customerName || this.displayName() || 'Customer',
+          to,
+          subject,
+          message: plain,
+          html
+        }));
+      }
+
+      this.refundStatus.set(`Refund recorded for ${refund.invoiceNumber}.`);
+      this.refundAmount = '';
+      this.refundReason = '';
+      this.refundInvoiceId = '';
+    } catch {
+      this.refundStatus.set(`Refund recorded for ${refund.invoiceNumber}, but customer notification failed.`);
+    } finally {
+      this.refundSubmitting.set(false);
+    }
+  }
+
+  private refundInvoiceDetail(): InvoiceDetail | null {
+    const invoiceId = String(this.refundInvoiceId || '').trim();
+    if (!invoiceId) return null;
+    return this.invoicesData.getInvoiceById(invoiceId);
+  }
+
+  private formatUsd(value: number): string {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD'
+    }).format(Number(value || 0));
+  }
+
+  setDocsFilter(value: CustomerDocsFilter): void {
+    this.docsFilter.set(value);
   }
 
   readonly palette: ColorOpt[] = [
@@ -450,6 +602,13 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     this.mobileTab.set(tab);
     if (tab === 'profile') return;
     this.selectTab(tab);
+  }
+
+  openSmsFromPhone(event?: Event): void {
+    event?.preventDefault();
+    event?.stopPropagation();
+    if (!this.customerId()) return;
+    this.selectTab('sms');
   }
 
   canDeactivate(): boolean {
@@ -650,6 +809,11 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     if (!invoiceId) return;
     this.status.set('');
     this.error.set('');
+    if (invoice.documentType === 'quote') {
+      const quoteIdentifier = String(invoiceId || invoice.invoiceNumber).trim();
+      void this.router.navigate(['/quotes', quoteIdentifier]);
+      return;
+    }
     void this.router.navigate(['/invoices', invoiceId]);
   }
 
@@ -862,7 +1026,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     this.smsLoading.set(true);
     this.smsError.set('');
     this.smsApi
-      .listCustomerMessages(customerId)
+      .listCustomerMessages(customerId, this.customerMessagesFetchLimit)
       .pipe(finalize(() => this.smsLoading.set(false)))
       .subscribe({
         next: res => {
@@ -1218,7 +1382,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     this.emailLoading.set(true);
     this.emailError.set('');
     this.emailApi
-      .listCustomerMessages(customerId)
+      .listCustomerMessages(customerId, this.customerMessagesFetchLimit)
       .pipe(finalize(() => this.emailLoading.set(false)))
       .subscribe({
         next: res => {
@@ -1449,6 +1613,13 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   }
 
   invoiceStatusLabel(invoice: InvoiceCard): string {
+    if (invoice.documentType === 'invoice' && invoice.stage === 'accepted') return 'Paid';
+    if (invoice.documentType === 'quote' && invoice.stage === 'accepted') return 'Accepted';
+    if (invoice.stage === 'draft') return 'Draft';
+    if (invoice.stage === 'sent') return 'Sent';
+    if (invoice.stage === 'declined') return 'Declined';
+    if (invoice.stage === 'canceled') return 'Canceled';
+    if (invoice.stage === 'expired') return 'Expired';
     return `${invoice.stage.charAt(0).toUpperCase()}${invoice.stage.slice(1)}`;
   }
 
@@ -1459,6 +1630,14 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     if (invoice.stage === 'draft') return 'warning';
     if (invoice.stage === 'sent') return 'primary';
     return 'medium';
+  }
+
+  private isConvertedQuote(invoice: InvoiceCard): boolean {
+    if (invoice.documentType !== 'quote') return false;
+    if (invoice.stage !== 'canceled') return false;
+    const detail = this.invoicesData.getInvoiceById(invoice.id);
+    const timeline = Array.isArray(detail?.timeline) ? detail!.timeline : [];
+    return timeline.some(entry => /converted to invoice/i.test(String(entry?.message || '')));
   }
 
   smsDateLabel(value: string): string {
@@ -1855,6 +2034,12 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     this.emailStatus.set('');
     this.emailError.set('');
     this.unreadEmailActivityCount.set(0);
+    this.refundInvoiceId = '';
+    this.refundAmount = '';
+    this.refundReason = '';
+    this.refundSubmitting.set(false);
+    this.refundStatus.set('');
+    this.refundError.set('');
     this.duplicateMatches.set([]);
     this.duplicateLoading.set(false);
     this.duplicateSavePrompt.set(null);

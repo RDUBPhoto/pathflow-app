@@ -32,13 +32,21 @@ import {
 } from 'ionicons/icons';
 import { HttpClient } from '@angular/common/http';
 import { UserScopedSettingsService } from '../../services/user-scoped-settings.service';
-import { catchError, forkJoin, of } from 'rxjs';
+import { catchError, firstValueFrom, forkJoin, of } from 'rxjs';
+import { InvoiceResponseApiService } from '../../services/invoice-response-api.service';
+import { QuoteResponseApiService } from '../../services/quote-response-api.service';
+import { NotificationsApiService } from '../../services/notifications-api.service';
+import { AuthService } from '../../auth/auth.service';
 
 type ColorOpt = { label: string; hex: string };
 type OnboardingStep = { selector: string; title: string; body: string };
 const LANE_COLORS_SETTING_KEY = 'dashboard.laneColors';
 const DASHBOARD_ONBOARDING_KEY = 'dashboard.onboarding.v1.completed';
 const DASHBOARD_SEEN_LEADS_KEY = 'dashboard.leads.seen.v1';
+const DASHBOARD_SEEN_CARDS_KEY = 'dashboard.cards.seen.v1';
+const DASHBOARD_NOTIFIED_LEADS_KEY = 'dashboard.leads.notified.v1';
+const DASHBOARD_CARD_SEEN_KEY_SEPARATOR = '::';
+const NOTIFICATION_OPENED_HINTS_KEY = 'pathflow.notifications.opened.v1';
 
 @Component({
   selector: 'app-dashboard',
@@ -181,6 +189,10 @@ export default class DashboardComponent implements OnDestroy {
     private smsApi: SmsApiService,
     private emailApi: EmailApiService,
     private invoicesData: InvoicesDataService,
+    private invoiceResponseApi: InvoiceResponseApiService,
+    private quoteResponseApi: QuoteResponseApiService,
+    private notificationsApi: NotificationsApiService,
+    private auth: AuthService,
     private http: HttpClient,
     private userSettings: UserScopedSettingsService,
     private router: Router,
@@ -198,12 +210,18 @@ export default class DashboardComponent implements OnDestroy {
       this.userSettings.scope();
       this.loadLaneColors();
       this.loadSeenLeads();
+      this.loadSeenCards();
+      this.loadNotifiedLeads();
     });
     this.loadAll();
     this.checkApi();
+    this.syncQuoteResponsesFromApi();
+    this.syncInvoiceResponsesFromApi();
     this.refreshUnreadActivity();
     this.apiCheckTimer = setInterval(() => this.checkApi(), 600000);
     this.unreadActivityTimer = setInterval(() => this.refreshUnreadActivity(), 5000);
+    this.quoteResponseSyncTimer = setInterval(() => this.syncQuoteResponsesFromApi(), 10000);
+    this.invoiceResponseSyncTimer = setInterval(() => this.syncInvoiceResponsesFromApi(), 10000);
 
     effect(() => {
       const value = this.laneColors();
@@ -221,6 +239,32 @@ export default class DashboardComponent implements OnDestroy {
       this.seenLeadsPersistTimer = setTimeout(() => {
         const ids = Object.keys(value).filter(Boolean);
         this.userSettings.setValue(DASHBOARD_SEEN_LEADS_KEY, {
+          initialized: true,
+          ids
+        }).subscribe({ error: () => {} });
+      }, 120);
+    });
+
+    effect(() => {
+      const value = this.seenCardIds();
+      if (!this.seenCardsLoaded || !this.seenCardsInitialized) return;
+      if (this.seenCardsPersistTimer) clearTimeout(this.seenCardsPersistTimer);
+      this.seenCardsPersistTimer = setTimeout(() => {
+        const ids = Object.keys(value).filter(Boolean);
+        this.userSettings.setValue(DASHBOARD_SEEN_CARDS_KEY, {
+          initialized: true,
+          ids
+        }).subscribe({ error: () => {} });
+      }, 120);
+    });
+
+    effect(() => {
+      const value = this.notifiedLeadIds();
+      if (!this.notifiedLeadsLoaded || !this.notifiedLeadsInitialized) return;
+      if (this.notifiedLeadsPersistTimer) clearTimeout(this.notifiedLeadsPersistTimer);
+      this.notifiedLeadsPersistTimer = setTimeout(() => {
+        const ids = Object.keys(value).filter(Boolean);
+        this.userSettings.setValue(DASHBOARD_NOTIFIED_LEADS_KEY, {
           initialized: true,
           ids
         }).subscribe({ error: () => {} });
@@ -246,6 +290,8 @@ export default class DashboardComponent implements OnDestroy {
   private statusFadeTimer: any = null;
   private apiCheckTimer: any = null;
   private unreadActivityTimer: any = null;
+  private quoteResponseSyncTimer: any = null;
+  private invoiceResponseSyncTimer: any = null;
   private laneColorPersistTimer: any = null;
   private laneColorsLoadToken = 0;
   private laneColorsLoaded = false;
@@ -253,9 +299,20 @@ export default class DashboardComponent implements OnDestroy {
   private seenLeadsLoadToken = 0;
   private seenLeadsLoaded = false;
   private seenLeadsInitialized = false;
+  private seenCardsPersistTimer: any = null;
+  private seenCardsLoadToken = 0;
+  private seenCardsLoaded = false;
+  private seenCardsInitialized = false;
+  private notifiedLeadsPersistTimer: any = null;
+  private notifiedLeadsLoadToken = 0;
+  private notifiedLeadsLoaded = false;
+  private notifiedLeadsInitialized = false;
+  private interactivityRestoreTimer: any = null;
   private lastToastMessage = '';
   private lastToastAt = 0;
   seenLeadIds = signal<Record<string, true>>({});
+  seenCardIds = signal<Record<string, true>>({});
+  notifiedLeadIds = signal<Record<string, true>>({});
 
   private async presentStatusToast(message: string): Promise<void> {
     const value = String(message || '').trim();
@@ -278,8 +335,13 @@ export default class DashboardComponent implements OnDestroy {
   ngOnDestroy() {
     if (this.apiCheckTimer) { clearInterval(this.apiCheckTimer); this.apiCheckTimer = null; }
     if (this.unreadActivityTimer) { clearInterval(this.unreadActivityTimer); this.unreadActivityTimer = null; }
+    if (this.quoteResponseSyncTimer) { clearInterval(this.quoteResponseSyncTimer); this.quoteResponseSyncTimer = null; }
+    if (this.invoiceResponseSyncTimer) { clearInterval(this.invoiceResponseSyncTimer); this.invoiceResponseSyncTimer = null; }
     if (this.laneColorPersistTimer) { clearTimeout(this.laneColorPersistTimer); this.laneColorPersistTimer = null; }
     if (this.seenLeadsPersistTimer) { clearTimeout(this.seenLeadsPersistTimer); this.seenLeadsPersistTimer = null; }
+    if (this.seenCardsPersistTimer) { clearTimeout(this.seenCardsPersistTimer); this.seenCardsPersistTimer = null; }
+    if (this.notifiedLeadsPersistTimer) { clearTimeout(this.notifiedLeadsPersistTimer); this.notifiedLeadsPersistTimer = null; }
+    if (this.interactivityRestoreTimer) { clearTimeout(this.interactivityRestoreTimer); this.interactivityRestoreTimer = null; }
   }
 
   ionViewWillEnter() {
@@ -490,6 +552,11 @@ export default class DashboardComponent implements OnDestroy {
     return this.isCompletedLane(lane);
   }
 
+  private isLeadLaneById(laneId: string): boolean {
+    const lane = this.lanes().find(item => item.id === laneId) || null;
+    return this.laneStageKey(lane) === 'lead';
+  }
+
   private isScheduleRequiredLaneById(laneId: string): boolean {
     const lane = this.lanes().find(item => item.id === laneId) || null;
     const stage = this.laneStageKey(lane);
@@ -537,6 +604,10 @@ export default class DashboardComponent implements OnDestroy {
   private asMillis(value: string | null | undefined): number {
     const parsed = Date.parse(String(value || '').trim());
     return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  private roundCurrency(value: number): number {
+    return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
   }
 
   private elapsedMs(fromIso: string | null | undefined, toIso: string): number {
@@ -611,7 +682,7 @@ export default class DashboardComponent implements OnDestroy {
 
   canRevertCheckIn(it: WorkItem, lane: Lane): boolean {
     if (!(it.checkedInAt || '').trim()) return false;
-    if (!(this.isInProgressLane(lane) || this.isCompletedLane(lane))) return false;
+    if (!this.isInProgressLane(lane)) return false;
     return !!this.scheduledLaneId();
   }
 
@@ -827,6 +898,23 @@ export default class DashboardComponent implements OnDestroy {
   }
   closeCardMenu() { this.cardMenuOpen.set(false); }
 
+  canRevertCheckInFromCardMenu(): boolean {
+    const item = this.findItemById(this.cardMenuItemId());
+    const lane = this.laneForItem(item);
+    if (!item || !lane) return false;
+    if (!this.isInProgressLane(lane)) return false;
+    return this.canRevertCheckIn(item, lane);
+  }
+
+  revertCheckInFromCardMenu(): void {
+    const item = this.findItemById(this.cardMenuItemId());
+    const lane = this.laneForItem(item);
+    this.cardMenuOpen.set(false);
+    if (!item || !lane) return;
+    if (!this.isInProgressLane(lane)) return;
+    this.revertCheckInCard(item, lane);
+  }
+
   startEditFromCard() {
     const itId = this.cardMenuItemId();
     this.cardMenuOpen.set(false);
@@ -902,6 +990,21 @@ export default class DashboardComponent implements OnDestroy {
     return 'Remove from lane';
   }
 
+  removeCustomerWarningMessage(): string {
+    const customerId = String(this.removeCustomerCustomerId() || '').trim();
+    const docKinds = this.removeCustomerDocumentKinds(customerId);
+    if (docKinds === 'both') {
+      return 'This will cancel the quote and invoice for this customer. Are you sure you want to do this?';
+    }
+    if (docKinds === 'invoice') {
+      return 'This will cancel the invoice for this customer. Are you sure you want to do this?';
+    }
+    if (docKinds === 'quote') {
+      return 'This will cancel the quote for this customer. Are you sure you want to do this?';
+    }
+    return 'Are you sure you want to take them out of their current status?';
+  }
+
   removeCardAction() {
     const item = this.findItemById(this.cardMenuItemId());
     this.cardMenuOpen.set(false);
@@ -927,6 +1030,8 @@ export default class DashboardComponent implements OnDestroy {
   confirmRemoveCustomer() {
     const itemId = this.removeCustomerItemId();
     const customerId = this.removeCustomerCustomerId();
+    const customer = customerId ? this.customersMap()[customerId] : null;
+    const affectedDocs = customerId ? this.matchedActiveDocumentsForCustomer(customerId) : [];
     this.cancelRemoveCustomer();
     if (!itemId) return;
 
@@ -949,6 +1054,16 @@ export default class DashboardComponent implements OnDestroy {
             this.items.set(snapshot);
             this.status.set('Remove error');
             this.loadAll();
+            return;
+          }
+          const canceledDocs = this.invoicesData.cancelForCustomer({
+            id: customerId || undefined,
+            email: String(customer?.email || '').trim().toLowerCase() || undefined,
+            name: String(customer?.name || '').trim() || undefined
+          });
+          if (canceledDocs > 0) {
+            void this.sendCancellationEmailsForDocuments(affectedDocs, customerId);
+            this.status.set('Customer removed and quote/invoice canceled');
             return;
           }
           this.status.set('Customer removed');
@@ -989,6 +1104,112 @@ export default class DashboardComponent implements OnDestroy {
       next: () => deleteWorkItem(),
       error: () => deleteWorkItem()
     });
+  }
+
+  private removeCustomerDocumentKinds(customerId: string): 'none' | 'quote' | 'invoice' | 'both' {
+    const id = String(customerId || '').trim();
+    if (!id) return 'none';
+    const customer = this.customersMap()[id] || null;
+    const email = String(customer?.email || '').trim().toLowerCase();
+    const name = String(customer?.name || '').trim().toLowerCase();
+
+    let hasQuote = false;
+    let hasInvoice = false;
+    for (const doc of this.invoiceDetails()) {
+      if (!this.isCancelableDocumentForRemoval(doc)) continue;
+      const docCustomerId = String(doc.customerId || '').trim();
+      const docEmail = String(doc.customerEmail || '').trim().toLowerCase();
+      const docName = String(doc.customerName || '').trim().toLowerCase();
+      const matches =
+        (!!id && !!docCustomerId && id === docCustomerId)
+        || (!!email && !!docEmail && email === docEmail)
+        || (!!name && !!docName && name === docName);
+      if (!matches) continue;
+      if (doc.documentType === 'quote') hasQuote = true;
+      if (doc.documentType === 'invoice') hasInvoice = true;
+    }
+
+    if (hasQuote && hasInvoice) return 'both';
+    if (hasInvoice) return 'invoice';
+    if (hasQuote) return 'quote';
+    return 'none';
+  }
+
+  private matchedActiveDocumentsForCustomer(customerId: string): InvoiceDetail[] {
+    const id = String(customerId || '').trim();
+    if (!id) return [];
+    const customer = this.customersMap()[id] || null;
+    const email = String(customer?.email || '').trim().toLowerCase();
+    const name = String(customer?.name || '').trim().toLowerCase();
+
+    return this.invoiceDetails().filter(doc => {
+      if (!this.isCancelableDocumentForRemoval(doc)) return false;
+      const docCustomerId = String(doc.customerId || '').trim();
+      const docEmail = String(doc.customerEmail || '').trim().toLowerCase();
+      const docName = String(doc.customerName || '').trim().toLowerCase();
+      return (
+        (!!id && !!docCustomerId && id === docCustomerId)
+        || (!!email && !!docEmail && email === docEmail)
+        || (!!name && !!docName && name === docName)
+      );
+    });
+  }
+
+  private isCancelableDocumentForRemoval(doc: InvoiceDetail): boolean {
+    if (doc.stage === 'canceled' || doc.stage === 'expired') return false;
+    if (doc.documentType === 'invoice' && (doc.stage === 'accepted' || doc.stage === 'completed')) return false;
+    return true;
+  }
+
+  private async sendCancellationEmailsForDocuments(docs: InvoiceDetail[], customerId: string): Promise<void> {
+    const customer = this.customersMap()[String(customerId || '').trim()] || null;
+    const customerName = String(customer?.name || docs[0]?.customerName || 'Customer').trim();
+    const seen = new Set<string>();
+    const sends = docs
+      .filter(doc => {
+        const id = String(doc.id || '').trim();
+        if (!id || seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      })
+      .map(async doc => {
+        const to = String(doc.customerEmail || customer?.email || '').trim();
+        if (!to) return { skipped: true };
+        const business = String(doc.businessName || 'Your Company').trim();
+        const docLabel = doc.documentType === 'invoice' ? 'invoice' : 'quote';
+        const subject = `${doc.documentType === 'invoice' ? 'Invoice' : 'Quote'} ${doc.invoiceNumber} canceled`;
+        const plain = `Hi ${customerName}, your ${docLabel} ${doc.invoiceNumber} has been canceled. If you have questions, reply to this email and ${business} will help.`;
+        const html = `<div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#111827;">
+          <p>Hi ${this.escapeHtml(customerName)},</p>
+          <p>Your ${this.escapeHtml(docLabel)} <strong>${this.escapeHtml(doc.invoiceNumber)}</strong> has been canceled.</p>
+          <p>If you have questions, reply to this email and ${this.escapeHtml(business)} will help.</p>
+        </div>`;
+        await firstValueFrom(this.emailApi.sendToCustomer({
+          customerId: String(doc.customerId || customerId || '').trim(),
+          customerName,
+          to,
+          subject,
+          message: plain,
+          html
+        }));
+        return { skipped: false };
+      });
+
+    const settled = await Promise.allSettled(sends);
+    const attempted = settled.some(item => item.status === 'fulfilled' && !item.value.skipped);
+    const failed = settled.some(item => item.status === 'rejected');
+    if (attempted && failed) {
+      this.status.set('Customer removed and quote/invoice canceled. Some cancellation emails failed.');
+    }
+  }
+
+  private escapeHtml(value: string): string {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   confirmDelete() {
@@ -1080,13 +1301,70 @@ export default class DashboardComponent implements OnDestroy {
     this.seenLeadsLoaded = false;
     this.seenLeadsInitialized = false;
     const token = ++this.seenLeadsLoadToken;
-    this.userSettings.getValue<{ initialized?: boolean; ids?: string[] }>(DASHBOARD_SEEN_LEADS_KEY).subscribe(value => {
-      if (token !== this.seenLeadsLoadToken) return;
-      const normalized = this.normalizeSeenLeads(value);
-      this.seenLeadIds.set(normalized.ids);
-      this.seenLeadsInitialized = normalized.initialized;
-      this.seenLeadsLoaded = true;
-      this.maybeInitializeSeenLeads(this.items());
+    this.userSettings.getValue<{ initialized?: boolean; ids?: string[] }>(DASHBOARD_SEEN_LEADS_KEY).subscribe({
+      next: value => {
+        if (token !== this.seenLeadsLoadToken) return;
+        const normalized = this.normalizeSeenLeads(value);
+        this.seenLeadIds.set(normalized.ids);
+        this.seenLeadsInitialized = normalized.initialized;
+        this.seenLeadsLoaded = true;
+        this.maybeInitializeSeenLeads(this.items());
+      },
+      error: () => {
+        if (token !== this.seenLeadsLoadToken) return;
+        this.seenLeadIds.set({});
+        this.seenLeadsInitialized = false;
+        this.seenLeadsLoaded = true;
+        this.maybeInitializeSeenLeads(this.items());
+      }
+    });
+  }
+
+  loadSeenCards() {
+    this.seenCardsLoaded = false;
+    this.seenCardsInitialized = false;
+    const token = ++this.seenCardsLoadToken;
+    this.userSettings.getValue<{ initialized?: boolean; ids?: string[] }>(DASHBOARD_SEEN_CARDS_KEY).subscribe({
+      next: value => {
+        if (token !== this.seenCardsLoadToken) return;
+        const normalized = this.normalizeSeenLeads(value);
+        this.seenCardIds.set(normalized.ids);
+        this.seenCardsInitialized = normalized.initialized;
+        this.seenCardsLoaded = true;
+        this.maybeInitializeSeenCards(this.items());
+      },
+      error: () => {
+        if (token !== this.seenCardsLoadToken) return;
+        this.seenCardIds.set({});
+        this.seenCardsInitialized = false;
+        this.seenCardsLoaded = true;
+        this.maybeInitializeSeenCards(this.items());
+      }
+    });
+  }
+
+  loadNotifiedLeads() {
+    this.notifiedLeadsLoaded = false;
+    this.notifiedLeadsInitialized = false;
+    const token = ++this.notifiedLeadsLoadToken;
+    this.userSettings.getValue<{ initialized?: boolean; ids?: string[] }>(DASHBOARD_NOTIFIED_LEADS_KEY).subscribe({
+      next: value => {
+        if (token !== this.notifiedLeadsLoadToken) return;
+        const normalized = this.normalizeSeenLeads(value);
+        this.notifiedLeadIds.set(normalized.ids);
+        this.notifiedLeadsInitialized = normalized.initialized;
+        this.notifiedLeadsLoaded = true;
+        this.maybeInitializeNotifiedLeads(this.items());
+        this.maybeNotifyNewLeads(this.items());
+      },
+      error: () => {
+        if (token !== this.notifiedLeadsLoadToken) return;
+        this.notifiedLeadIds.set({});
+        this.notifiedLeadsInitialized = false;
+        this.notifiedLeadsLoaded = true;
+        this.maybeInitializeNotifiedLeads(this.items());
+        this.maybeNotifyNewLeads(this.items());
+      }
     });
   }
 
@@ -1123,6 +1401,96 @@ export default class DashboardComponent implements OnDestroy {
     }
     this.seenLeadIds.set(next);
     this.seenLeadsInitialized = true;
+  }
+
+  private maybeInitializeNotifiedLeads(map: Record<string, WorkItem[]>): void {
+    if (!this.notifiedLeadsLoaded || this.notifiedLeadsInitialized) return;
+    const leadLaneIds = this.lanes()
+      .filter(lane => this.laneStageKey(lane) === 'lead')
+      .map(lane => lane.id);
+    const next: Record<string, true> = {};
+    for (const laneId of leadLaneIds) {
+      for (const item of map[laneId] || []) {
+        const id = String(item.id || '').trim();
+        if (!id) continue;
+        next[id] = true;
+      }
+    }
+    this.notifiedLeadIds.set(next);
+    this.notifiedLeadsInitialized = true;
+  }
+
+  private maybeNotifyNewLeads(map: Record<string, WorkItem[]>): void {
+    if (!this.seenLeadsLoaded || !this.seenLeadsInitialized) return;
+    if (!this.notifiedLeadsLoaded || !this.notifiedLeadsInitialized) return;
+
+    const user = this.auth.user();
+    if (!user) return;
+    const targetUserId = String(user.id || '').trim();
+    const targetEmail = String(user.email || '').trim();
+    if (!targetUserId && !targetEmail) return;
+
+    const leadLaneIds = this.lanes()
+      .filter(lane => this.laneStageKey(lane) === 'lead')
+      .map(lane => lane.id);
+    if (!leadLaneIds.length) return;
+
+    const seen = this.seenLeadIds();
+    const notified = this.notifiedLeadIds();
+    for (const laneId of leadLaneIds) {
+      for (const item of map[laneId] || []) {
+        const itemId = String(item.id || '').trim();
+        if (!itemId) continue;
+        if (seen[itemId] || notified[itemId]) continue;
+        this.notifiedLeadIds.update(current => ({ ...current, [itemId]: true }));
+        const leadName = this.customerName(item);
+        const customerId = String(item.customerId || '').trim();
+        this.notificationsApi.createMention({
+          targetUserId: targetUserId || undefined,
+          targetEmail: targetEmail || undefined,
+          targetDisplayName: String(user.displayName || '').trim() || undefined,
+          title: `${leadName} submitted a new lead`,
+          message: `${leadName} submitted a new lead.`,
+          route: customerId ? `/customers/${encodeURIComponent(customerId)}` : '/dashboard',
+          entityType: 'lead',
+          entityId: customerId || itemId,
+          metadata: {
+            leadItemId: itemId,
+            customerId,
+            source: 'dashboard-new-lead'
+          }
+        }).subscribe({
+          next: () => {
+            this.emitNotificationsRefresh();
+          },
+          error: () => {
+            this.notifiedLeadIds.update(current => {
+              const next = { ...current };
+              delete next[itemId];
+              return next;
+            });
+          }
+        });
+      }
+    }
+  }
+
+  private maybeInitializeSeenCards(map: Record<string, WorkItem[]>): void {
+    if (!this.seenCardsLoaded) return;
+    if (this.seenCardsInitialized) {
+      this.migrateLegacySeenCards(map);
+      return;
+    }
+    const next: Record<string, true> = {};
+    for (const [laneId, rows] of Object.entries(map || {})) {
+      for (const item of rows || []) {
+        const id = String(item.id || '').trim();
+        if (!id) continue;
+        next[this.cardSeenKey(id, laneId)] = true;
+      }
+    }
+    this.seenCardIds.set(next);
+    this.seenCardsInitialized = true;
   }
 
   private normalizeLaneColors(value: unknown): Record<string, string> {
@@ -1218,9 +1586,15 @@ export default class DashboardComponent implements OnDestroy {
                     }
                     for (const id of Object.keys(map)) map[id].sort((a,b) => (a.sort ?? 0) - (b.sort ?? 0));
                     this.items.set(map);
-    this.maybeInitializeSeenLeads(map);
-                    this.pruneExpiredCompletedFromBoard();
+                    this.maybeInitializeSeenLeads(map);
+                    this.maybeInitializeSeenCards(map);
+                    this.maybeInitializeNotifiedLeads(map);
+                    this.maybeNotifyNewLeads(map);
+                    this.applyOpenedNotificationSeenHints(map);
+                    this.syncFinalPaidInvoicesToCompleted();
                     this.syncScheduledLane();
+                    this.pruneExpiredCompletedFromBoard();
+                    this.syncInvoiceResponsesFromApi();
                     this.loading.set(false);
                   },
                   error: () => { this.status.set('Load items error'); this.loading.set(false); }
@@ -1244,8 +1618,14 @@ export default class DashboardComponent implements OnDestroy {
                     }
                     for (const id of Object.keys(map)) map[id].sort((a,b) => (a.sort ?? 0) - (b.sort ?? 0));
                     this.items.set(map);
-    this.maybeInitializeSeenLeads(map);
+                    this.maybeInitializeSeenLeads(map);
+                    this.maybeInitializeSeenCards(map);
+                    this.maybeInitializeNotifiedLeads(map);
+                    this.maybeNotifyNewLeads(map);
+                    this.applyOpenedNotificationSeenHints(map);
+                    this.syncFinalPaidInvoicesToCompleted();
                     this.pruneExpiredCompletedFromBoard();
+                    this.syncInvoiceResponsesFromApi();
                     this.loading.set(false);
                   },
                   error: () => { this.status.set('Load items error'); this.loading.set(false); }
@@ -1291,6 +1671,49 @@ export default class DashboardComponent implements OnDestroy {
     return `${doc.documentType === 'invoice' ? 'Invoice' : 'Quote'}: ${doc.invoiceNumber}`;
   }
 
+  linkedDocumentStatusLabel(it: WorkItem, lane: Lane): string {
+    const doc = this.linkedDocumentForCard(it, lane);
+    if (!doc) return '';
+    if (doc.documentType === 'invoice') {
+      if (doc.stage === 'completed') return 'Completed';
+      if (doc.stage === 'accepted') return 'Paid';
+      if (doc.stage === 'draft') return 'Draft';
+      if (doc.stage === 'sent') return 'Sent';
+      if (doc.stage === 'declined') return 'Declined';
+      if (doc.stage === 'canceled') return 'Canceled';
+      if (doc.stage === 'expired') return 'Expired';
+      return doc.stage;
+    }
+    if (doc.stage === 'accepted') return 'Accepted';
+    if (doc.stage === 'draft') return 'Draft';
+    if (doc.stage === 'sent') return 'Sent';
+    if (doc.stage === 'declined') return 'Declined';
+    if (doc.stage === 'canceled') return 'Canceled';
+    if (doc.stage === 'expired') return 'Expired';
+    return doc.stage;
+  }
+
+  linkedDocumentStatusClass(it: WorkItem, lane: Lane): string {
+    const doc = this.linkedDocumentForCard(it, lane);
+    if (!doc) return '';
+    if (doc.documentType === 'invoice' && (doc.stage === 'accepted' || doc.stage === 'completed')) return 'is-paid';
+    if (doc.stage === 'draft') return 'is-draft';
+    if (doc.stage === 'sent') return 'is-sent';
+    if (doc.stage === 'accepted') return 'is-accepted';
+    if (doc.stage === 'declined') return 'is-declined';
+    if (doc.stage === 'canceled') return 'is-canceled';
+    if (doc.stage === 'expired') return 'is-expired';
+    return '';
+  }
+
+  linkedDocumentStatusTimeLabel(it: WorkItem, lane: Lane): string {
+    const doc = this.linkedDocumentForCard(it, lane);
+    if (!doc) return '';
+    const stamp = String(doc.updatedAt || doc.createdAt || '').trim();
+    if (!stamp) return '';
+    return this.relativeTimeLabel(stamp);
+  }
+
   hasLinkedDocument(it: WorkItem, lane: Lane): boolean {
     return !!this.linkedDocumentForCard(it, lane);
   }
@@ -1298,8 +1721,14 @@ export default class DashboardComponent implements OnDestroy {
   openLinkedDocument(it: WorkItem, lane: Lane, event?: Event): void {
     event?.preventDefault();
     event?.stopPropagation();
+    this.markCardSeen(it, lane);
+    this.markLeadSeen(it, lane);
     const doc = this.linkedDocumentForCard(it, lane);
     if (!doc) return;
+    if (doc.documentType === 'quote') {
+      this.router.navigate(['/quotes', doc.id || doc.invoiceNumber]);
+      return;
+    }
     this.router.navigate(['/invoices', doc.id]);
   }
 
@@ -1319,14 +1748,181 @@ export default class DashboardComponent implements OnDestroy {
         if (email && docEmail && docEmail === email) return true;
         const docName = String(doc.customerName || '').trim().toLowerCase();
         return !!name && !!docName && docName === name;
-      })
-      .sort((a, b) => this.asMillis(b.updatedAt || b.createdAt || '') - this.asMillis(a.updatedAt || a.createdAt || ''));
+      });
 
     if (!matched.length) return null;
     if (stage === 'invoiced') {
-      return matched.find(doc => doc.documentType === 'invoice') || null;
+      const invoices = matched
+        .filter(doc => doc.documentType === 'invoice');
+      const activeInvoices = invoices.filter(doc => doc.stage !== 'canceled' && doc.stage !== 'expired');
+      const candidates = activeInvoices.length ? activeInvoices : invoices;
+      return candidates
+        .filter(doc => doc.documentType === 'invoice')
+        .sort((a, b) => {
+          const updatedDiff = this.asMillis(b.updatedAt || b.createdAt || '') - this.asMillis(a.updatedAt || a.createdAt || '');
+          if (updatedDiff !== 0) return updatedDiff;
+          const priorityDiff = this.invoiceStagePriority(b.stage) - this.invoiceStagePriority(a.stage);
+          if (priorityDiff !== 0) return priorityDiff;
+          return this.asMillis(b.createdAt || '') - this.asMillis(a.createdAt || '');
+        })[0] || null;
     }
-    return matched.find(doc => doc.documentType === 'quote') || null;
+    return matched
+      .filter(doc => doc.documentType === 'quote')
+      .sort((a, b) => {
+        const priorityDiff = this.quoteStagePriority(b.stage) - this.quoteStagePriority(a.stage);
+        if (priorityDiff !== 0) return priorityDiff;
+        return this.asMillis(b.updatedAt || b.createdAt || '') - this.asMillis(a.updatedAt || a.createdAt || '');
+      })[0] || null;
+  }
+
+  private quoteStagePriority(stage: InvoiceDetail['stage']): number {
+    if (stage === 'accepted') return 6;
+    if (stage === 'sent') return 5;
+    if (stage === 'draft') return 4;
+    if (stage === 'declined') return 3;
+    if (stage === 'expired') return 2;
+    if (stage === 'canceled') return 1;
+    return 0;
+  }
+
+  private invoiceStagePriority(stage: InvoiceDetail['stage']): number {
+    if (stage === 'completed') return 6;
+    if (stage === 'accepted') return 5;
+    if (stage === 'sent') return 4;
+    if (stage === 'draft') return 3;
+    if (stage === 'declined') return 2;
+    if (stage === 'expired') return 1;
+    if (stage === 'canceled') return 1;
+    return 0;
+  }
+
+  private latestInvoiceDocumentForCard(it: WorkItem): InvoiceDetail | null {
+    const matches = this.matchedInvoicesForCard(it)
+      .filter(doc => doc.documentType === 'invoice')
+      .sort((a, b) => {
+        const stageDiff = this.invoiceStagePriority(b.stage) - this.invoiceStagePriority(a.stage);
+        if (stageDiff !== 0) return stageDiff;
+        return this.asMillis(b.updatedAt || b.createdAt || '') - this.asMillis(a.updatedAt || a.createdAt || '');
+      });
+    return matches[0] || null;
+  }
+
+  private latestPaidInvoiceDocumentForCard(it: WorkItem): InvoiceDetail | null {
+    const invoices = this.matchedInvoicesForCard(it)
+      .filter(doc => doc.documentType === 'invoice' && doc.stage !== 'canceled' && doc.stage !== 'expired');
+    if (!invoices.length) return null;
+
+    const withOutstandingFinalBalance = invoices
+      .filter(doc => {
+        const total = this.roundCurrency(Math.max(0, Number(doc.total || 0)));
+        const paid = this.roundCurrency(Math.max(0, Number((doc as any).paidAmount || 0)));
+        return paid > 0 && this.roundCurrency(total - paid) > 0;
+      })
+      .sort((a, b) => this.asMillis(b.updatedAt || b.createdAt || '') - this.asMillis(a.updatedAt || a.createdAt || ''));
+    if (withOutstandingFinalBalance.length) return withOutstandingFinalBalance[0] || null;
+
+    const paidInvoices = invoices
+      .filter(doc => doc.stage === 'accepted' || doc.stage === 'completed')
+      .sort((a, b) => this.asMillis(b.updatedAt || b.createdAt || '') - this.asMillis(a.updatedAt || a.createdAt || ''));
+    if (!paidInvoices.length) return null;
+    return paidInvoices[0] || null;
+  }
+
+  private matchedInvoicesForCard(it: WorkItem): InvoiceDetail[] {
+    const customerId = String(it.customerId || '').trim();
+    const customer = this.customersMap()[customerId] || null;
+    const email = String(customer?.email || '').trim().toLowerCase();
+    const name = this.customerName(it).trim().toLowerCase();
+
+    return this.invoiceDetails().filter(doc => {
+      const docCustomerId = String(doc.customerId || '').trim();
+      if (customerId && docCustomerId && docCustomerId === customerId) return true;
+      const docEmail = String(doc.customerEmail || '').trim().toLowerCase();
+      if (email && docEmail && docEmail === email) return true;
+      const docName = String(doc.customerName || '').trim().toLowerCase();
+      return !!name && !!docName && docName === name;
+    });
+  }
+
+  private isInvoicePaidInFull(doc: InvoiceDetail): boolean {
+    if (doc.documentType !== 'invoice' || (doc.stage !== 'accepted' && doc.stage !== 'completed')) return false;
+    const total = this.roundCurrency(Math.max(0, Number(doc.total || 0)));
+    const paid = this.roundCurrency(Math.max(0, Number((doc as any).paidAmount || 0)));
+    if (total <= 0) return false;
+    return this.roundCurrency(total - paid) <= 0;
+  }
+
+  private isFinalInvoiceSendLocked(doc: InvoiceDetail): boolean {
+    if (!doc || doc.documentType !== 'invoice') return false;
+    const total = this.roundCurrency(Math.max(0, Number(doc.total || 0)));
+    const paid = this.roundCurrency(Math.max(0, Number((doc as any).paidAmount || 0)));
+    const due = this.roundCurrency(Math.max(0, total - paid));
+    if (paid <= 0 || due <= 0) return false;
+    const sentAt = this.latestTimelineEventAt(doc, 'final invoice sent to customer');
+    if (!sentAt) return false;
+    const updatedAt = this.latestTimelineEventAt(doc, 'final invoice updated after send');
+    return !updatedAt || sentAt >= updatedAt;
+  }
+
+  private latestTimelineEventAt(doc: InvoiceDetail, needle: string): number {
+    const target = String(needle || '').trim().toLowerCase();
+    if (!target) return 0;
+    let latest = 0;
+    for (const entry of doc.timeline || []) {
+      const message = String(entry?.message || '').trim().toLowerCase();
+      if (!message.includes(target)) continue;
+      const stamp = this.asMillis(String(entry?.createdAt || '').trim());
+      if (stamp > latest) latest = stamp;
+    }
+    return latest;
+  }
+
+  private hasStageTransitionAfter(doc: InvoiceDetail, targetStage: 'sent' | 'accepted' | 'completed', afterMs: number): boolean {
+    const needle = `updated to ${targetStage}`;
+    return (doc.timeline || []).some(entry => {
+      const createdAtMs = this.asMillis(entry.createdAt || '');
+      if (!createdAtMs || createdAtMs < afterMs) return false;
+      return String(entry.message || '').toLowerCase().includes(needle);
+    });
+  }
+
+  private finalPaidInvoiceForCheckedInItem(it: WorkItem): InvoiceDetail | null {
+    const checkedInAtMs = this.asMillis((it.checkedInAt || '').trim());
+    if (!checkedInAtMs) return null;
+
+    const settledInvoices = this.matchedInvoicesForCard(it)
+      .filter(doc => this.isInvoicePaidInFull(doc))
+      .sort((a, b) => this.asMillis(b.updatedAt || b.createdAt || '') - this.asMillis(a.updatedAt || a.createdAt || ''));
+    if (!settledInvoices.length) return null;
+
+    for (const doc of settledInvoices) {
+      const finalSentAtMs = this.latestTimelineEventAt(doc, 'final invoice sent to customer');
+      if (!finalSentAtMs || finalSentAtMs < checkedInAtMs) continue;
+      const paidAtMs = this.asMillis(doc.updatedAt || doc.paymentDate || doc.createdAt || '');
+      if (paidAtMs && paidAtMs < finalSentAtMs) continue;
+      return doc;
+    }
+    return null;
+  }
+
+  completionBadgeLabel(it: WorkItem, lane: Lane): string {
+    if (!this.isCompletedLane(lane)) return '';
+    return this.finalPaidInvoiceForCheckedInItem(it) ? 'Paid in Full' : '';
+  }
+
+  private relativeTimeLabel(value: string): string {
+    const ts = Date.parse(String(value || '').trim());
+    if (!Number.isFinite(ts)) return '';
+    const diffMs = Date.now() - ts;
+    if (diffMs < 0) return 'just now';
+    const minute = 60 * 1000;
+    const hour = 60 * minute;
+    const day = 24 * hour;
+    if (diffMs < minute) return 'just now';
+    if (diffMs < hour) return `${Math.max(1, Math.floor(diffMs / minute))}m ago`;
+    if (diffMs < day) return `${Math.max(1, Math.floor(diffMs / hour))}h ago`;
+    if (diffMs < day * 7) return `${Math.max(1, Math.floor(diffMs / day))}d ago`;
+    return new Intl.DateTimeFormat('en-US', { month: 'numeric', day: 'numeric', year: '2-digit' }).format(new Date(ts));
   }
 
   hasUnreadActivity(it: WorkItem): boolean {
@@ -1339,6 +1935,13 @@ export default class DashboardComponent implements OnDestroy {
     const id = String(it.id || '').trim();
     if (!id) return false;
     return !this.seenLeadIds()[id];
+  }
+
+  hasUnseenCardNotice(it: WorkItem, lane?: Lane): boolean {
+    if (!this.seenCardsLoaded || !this.seenCardsInitialized) return false;
+    const key = this.cardSeenKeyForItem(it, lane);
+    if (!key) return false;
+    return !this.seenCardIds()[key];
   }
 
   unreadSmsCount(it: WorkItem): number {
@@ -1377,6 +1980,7 @@ export default class DashboardComponent implements OnDestroy {
   openCustomerProfileFromCard(it: WorkItem, lane?: Lane, event?: Event): void {
     event?.stopPropagation();
     event?.preventDefault();
+    this.markCardSeen(it, lane);
     this.markLeadSeen(it, lane);
     const customerId = (it.customerId || '').trim();
     if (!customerId) return;
@@ -1386,6 +1990,7 @@ export default class DashboardComponent implements OnDestroy {
   openCustomerActivity(it: WorkItem, lane: Lane, activity: 'sms' | 'email', event?: Event): void {
     event?.stopPropagation();
     event?.preventDefault();
+    this.markCardSeen(it, lane);
     this.markLeadSeen(it, lane);
     const customerId = (it.customerId || '').trim();
     if (!customerId) return;
@@ -1433,9 +2038,89 @@ export default class DashboardComponent implements OnDestroy {
     });
   }
 
+  openCustomerSmsById(customerId: string | null | undefined, event?: Event): void {
+    event?.stopPropagation();
+    event?.preventDefault();
+    const id = String(customerId || '').trim();
+    if (!id) return;
+    this.router.navigate(['/customers', id], { queryParams: { tab: 'sms' } });
+  }
+
+  createQuoteFromLead(it: WorkItem, lane: Lane, event?: Event): void {
+    event?.stopPropagation();
+    event?.preventDefault();
+    if (!this.isLeadLane(lane)) return;
+    this.markCardSeen(it, lane);
+    this.markLeadSeen(it, lane);
+    const customerId = String(it.customerId || '').trim();
+    if (!customerId) {
+      this.status.set('No customer linked to this lead yet.');
+      return;
+    }
+    this.openQuoteBuilderForCustomer(customerId);
+  }
+
+  canCreateInvoiceFromQuote(it: WorkItem, lane: Lane): boolean {
+    if (this.laneStageKey(lane) !== 'quote') return false;
+    const doc = this.linkedDocumentForCard(it, lane);
+    if (!doc) return false;
+    return doc.documentType === 'quote' && doc.stage === 'accepted';
+  }
+
+  createInvoiceFromQuoteCard(it: WorkItem, lane: Lane, event?: Event): void {
+    event?.stopPropagation();
+    event?.preventDefault();
+    if (!this.canCreateInvoiceFromQuote(it, lane)) return;
+    this.markCardSeen(it, lane);
+    this.markLeadSeen(it, lane);
+    const doc = this.linkedDocumentForCard(it, lane);
+    if (!doc) return;
+    this.router.navigate(['/quotes', doc.id || doc.invoiceNumber]);
+  }
+
+  canOpenFinalInvoice(it: WorkItem, lane: Lane): boolean {
+    if (this.laneStageKey(lane) !== 'inprogress') return false;
+    return !!this.latestPaidInvoiceDocumentForCard(it);
+  }
+
+  isFinalInvoiceSendDisabled(it: WorkItem): boolean {
+    const doc = this.latestPaidInvoiceDocumentForCard(it);
+    return !!doc && this.isFinalInvoiceSendLocked(doc);
+  }
+
+  finalInvoiceActionLabel(it: WorkItem): string {
+    return this.isFinalInvoiceSendDisabled(it) ? 'Final invoice sent' : 'Send Final Invoice';
+  }
+
+  openFinalInvoiceFromInProgress(it: WorkItem, lane: Lane, event?: Event): void {
+    event?.stopPropagation();
+    event?.preventDefault();
+    if (!this.canOpenFinalInvoice(it, lane)) return;
+    if (this.isFinalInvoiceSendDisabled(it)) return;
+    this.markCardSeen(it, lane);
+    this.markLeadSeen(it, lane);
+    const doc = this.latestPaidInvoiceDocumentForCard(it);
+    if (doc) {
+      this.router.navigate(['/invoices', doc.id], {
+        queryParams: { openSendModal: '1' }
+      });
+      return;
+    }
+    this.status.set('Final invoice is available after an initial invoice is paid.');
+  }
+
   customerContact(it: WorkItem): string {
     const c = this.customersMap()[it.customerId ?? ''];
     return c?.phone || c?.email || '';
+  }
+
+  customerPhone(it: WorkItem): string {
+    const c = this.customersMap()[it.customerId ?? ''];
+    return String(c?.phone || '').trim();
+  }
+
+  canOpenSmsFromCard(it: WorkItem): boolean {
+    return !!String(it.customerId || '').trim() && !!this.customerPhone(it);
   }
 
   isLeadLane(lane: Lane): boolean {
@@ -1457,6 +2142,58 @@ export default class DashboardComponent implements OnDestroy {
     this.persistSeenLeadsNow(next);
   }
 
+  private markCardSeen(it: WorkItem, lane?: Lane): void {
+    if (!this.seenCardsLoaded || !this.seenCardsInitialized) return;
+    const key = this.cardSeenKeyForItem(it, lane);
+    if (!key) return;
+    const current = this.seenCardIds();
+    if (current[key]) return;
+    const next: Record<string, true> = {
+      ...current,
+      [key]: true
+    };
+    this.seenCardIds.set(next);
+    this.persistSeenCardsNow(next);
+  }
+
+  private cardSeenKey(itemId: string, laneId: string): string {
+    const safeItemId = String(itemId || '').trim();
+    const safeLaneId = String(laneId || '').trim();
+    if (!safeItemId || !safeLaneId) return '';
+    return `${safeItemId}${DASHBOARD_CARD_SEEN_KEY_SEPARATOR}${safeLaneId}`;
+  }
+
+  private cardSeenKeyForItem(it: WorkItem, lane?: Lane): string {
+    const itemId = String(it?.id || '').trim();
+    const laneId = String(lane?.id || it?.laneId || '').trim();
+    return this.cardSeenKey(itemId, laneId);
+  }
+
+  private migrateLegacySeenCards(map: Record<string, WorkItem[]>): void {
+    const current = this.seenCardIds();
+    const keys = Object.keys(current);
+    if (!keys.length) return;
+    const legacyKeys = keys.filter(key => !key.includes(DASHBOARD_CARD_SEEN_KEY_SEPARATOR));
+    if (!legacyKeys.length) return;
+
+    const legacySet = new Set(legacyKeys);
+    let changed = false;
+    const next: Record<string, true> = { ...current };
+    for (const [laneId, rows] of Object.entries(map || {})) {
+      for (const item of rows || []) {
+        const itemId = String(item.id || '').trim();
+        if (!itemId || !legacySet.has(itemId)) continue;
+        const laneAwareKey = this.cardSeenKey(itemId, laneId);
+        if (!laneAwareKey || next[laneAwareKey]) continue;
+        next[laneAwareKey] = true;
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    this.seenCardIds.set(next);
+    this.persistSeenCardsNow(next);
+  }
+
   private persistSeenLeadsNow(idsMap?: Record<string, true>): void {
     const source = idsMap || this.seenLeadIds();
     const ids = Object.keys(source).filter(Boolean);
@@ -1464,6 +2201,106 @@ export default class DashboardComponent implements OnDestroy {
       initialized: true,
       ids
     }).subscribe({ error: () => {} });
+  }
+
+  private persistSeenCardsNow(idsMap?: Record<string, true>): void {
+    const source = idsMap || this.seenCardIds();
+    const ids = Object.keys(source).filter(Boolean);
+    this.userSettings.setValue(DASHBOARD_SEEN_CARDS_KEY, {
+      initialized: true,
+      ids
+    }).subscribe({ error: () => {} });
+  }
+
+  private applyOpenedNotificationSeenHints(map: Record<string, WorkItem[]>): void {
+    if (typeof window === 'undefined') return;
+    if (!this.seenLeadsLoaded || !this.seenLeadsInitialized) return;
+    if (!this.seenCardsLoaded || !this.seenCardsInitialized) return;
+
+    let raw = '';
+    try {
+      raw = String(localStorage.getItem(NOTIFICATION_OPENED_HINTS_KEY) || '');
+    } catch {
+      return;
+    }
+    if (!raw) return;
+
+    let parsed: Array<Record<string, unknown>> = [];
+    try {
+      const value = JSON.parse(raw);
+      parsed = Array.isArray(value) ? value : [];
+    } catch {
+      return;
+    }
+    if (!parsed.length) return;
+
+    const nowMs = Date.now();
+    const keepHints: Array<Record<string, unknown>> = [];
+    const seenLeadIds = { ...this.seenLeadIds() };
+    const seenCardIds = { ...this.seenCardIds() };
+    let changed = false;
+
+    for (const hint of parsed) {
+      const openedAtMs = this.asMillis(String(hint['openedAt'] || ''));
+      if (openedAtMs && nowMs - openedAtMs > 7 * 24 * 60 * 60 * 1000) {
+        continue;
+      }
+
+      const metadata = (hint['metadata'] && typeof hint['metadata'] === 'object')
+        ? (hint['metadata'] as Record<string, unknown>)
+        : {};
+      const entityType = String(hint['entityType'] || '').trim().toLowerCase();
+      const entityId = String(hint['entityId'] || '').trim();
+      const metadataLeadItemId = String(metadata['leadItemId'] || '').trim();
+      const metadataCustomerId = String(metadata['customerId'] || '').trim();
+
+      const matchedItems: Array<{ laneId: string; item: WorkItem }> = [];
+      for (const [laneId, rows] of Object.entries(map || {})) {
+        for (const row of rows || []) {
+          const itemId = String(row.id || '').trim();
+          const customerId = String(row.customerId || '').trim();
+          if (!itemId) continue;
+          const leadMatch = !!metadataLeadItemId && itemId === metadataLeadItemId;
+          const customerMatch = !!metadataCustomerId && customerId === metadataCustomerId;
+          const entityCustomerMatch = entityType === 'customer' && !!entityId && customerId === entityId;
+          const entityLeadMatch = entityType === 'lead' && !!entityId && (itemId === entityId || customerId === entityId);
+          if (leadMatch || customerMatch || entityCustomerMatch || entityLeadMatch) {
+            matchedItems.push({ laneId, item: row });
+          }
+        }
+      }
+
+      if (!matchedItems.length) {
+        keepHints.push(hint);
+        continue;
+      }
+
+      for (const match of matchedItems) {
+        const itemId = String(match.item.id || '').trim();
+        if (!itemId) continue;
+        if (!seenLeadIds[itemId]) {
+          seenLeadIds[itemId] = true;
+          changed = true;
+        }
+        const cardKey = this.cardSeenKey(itemId, match.laneId);
+        if (cardKey && !seenCardIds[cardKey]) {
+          seenCardIds[cardKey] = true;
+          changed = true;
+        }
+      }
+    }
+
+    try {
+      localStorage.setItem(NOTIFICATION_OPENED_HINTS_KEY, JSON.stringify(keepHints.slice(-100)));
+    } catch {
+      // Ignore local storage failures.
+    }
+
+    if (!changed) return;
+    this.seenLeadIds.set(seenLeadIds);
+    this.seenCardIds.set(seenCardIds);
+    this.persistSeenLeadsNow(seenLeadIds);
+    this.persistSeenCardsNow(seenCardIds);
   }
 
   leadReceivedLabel(it: WorkItem): string {
@@ -1511,10 +2348,27 @@ export default class DashboardComponent implements OnDestroy {
 
     const title = it.title || '';
     const idx = title.indexOf('— ');
-    if (idx < 0) return '';
-    let note = title.slice(idx + 2);
-    note = note.replace(/\[c=[^\]]+\]/gi, '').trim().replace(/\s{2,}/g, ' ');
-    return note;
+    if (idx >= 0) {
+      let note = title.slice(idx + 2);
+      note = note.replace(/\[c=[^\]]+\]/gi, '').trim().replace(/\s{2,}/g, ' ');
+      if (note) return note;
+    }
+
+    const customerId = String(it.customerId || '').trim();
+    const customerEmail = String(cust?.email || '').trim().toLowerCase();
+    const customerName = this.customerName(it).trim().toLowerCase();
+    const doc = this.invoiceDetails()
+      .filter(row => {
+        const rowCustomerId = String(row.customerId || '').trim();
+        if (customerId && rowCustomerId && rowCustomerId === customerId) return true;
+        const rowEmail = String(row.customerEmail || '').trim().toLowerCase();
+        if (customerEmail && rowEmail && rowEmail === customerEmail) return true;
+        const rowName = String(row.customerName || '').trim().toLowerCase();
+        return !!customerName && !!rowName && rowName === customerName;
+      })
+      .sort((a, b) => this.asMillis(b.updatedAt || b.createdAt || '') - this.asMillis(a.updatedAt || a.createdAt || ''))[0];
+    if (!doc) return '';
+    return String(doc.staffNote || doc.customerNote || '').trim();
   }
 
   appointmentLabel(it: WorkItem): string {
@@ -1542,9 +2396,22 @@ export default class DashboardComponent implements OnDestroy {
     return lane?.id || null;
   }
 
+  private invoicedLaneId(): string | null {
+    const lane = this.lanes().find(l => this.laneStageKey(l) === 'invoiced');
+    return lane?.id || null;
+  }
+
   private leadLaneId(): string | null {
     const lane = this.lanes().find(l => this.laneStageKey(l) === 'lead');
     return lane?.id || null;
+  }
+
+  private hasActiveInvoiceForCard(it: WorkItem): boolean {
+    return this.matchedInvoicesForCard(it).some(doc =>
+      doc.documentType === 'invoice' &&
+      doc.stage !== 'canceled' &&
+      doc.stage !== 'expired'
+    );
   }
 
   private hasFutureSchedule(customerId: string, nowMs: number = Date.now()): boolean {
@@ -1588,6 +2455,94 @@ export default class DashboardComponent implements OnDestroy {
     return vehicle ? `${displayName} (${vehicle})` : displayName;
   }
 
+  private effectiveScheduleEndMs(item: ScheduleItem): number {
+    const plannedEnd = this.asMillis(item.end || '');
+    const actualEnd = this.asMillis(item.actualEnd || '');
+    const releasedAt = this.asMillis(item.bayReleasedAt || '');
+    let effective = plannedEnd;
+    if (actualEnd && (!effective || actualEnd < effective)) effective = actualEnd;
+    if (releasedAt && (!effective || releasedAt < effective)) effective = releasedAt;
+    return effective;
+  }
+
+  private activeScheduleIdsForCustomerAt(customerId: string, atMs: number): string[] {
+    const key = String(customerId || '').trim();
+    if (!key) return [];
+    return this.scheduleItems()
+      .filter(item => {
+        if (!!item.isBlocked) return false;
+        if (String(item.customerId || '').trim() !== key) return false;
+        const startMs = this.asMillis(item.start || '');
+        const endMs = this.effectiveScheduleEndMs(item);
+        if (!startMs || !endMs || endMs <= startMs) return false;
+        return startMs <= atMs && atMs < endMs;
+      })
+      .map(item => String(item.id || '').trim())
+      .filter(Boolean);
+  }
+
+  private releaseActiveBayForCustomer(customerId: string, releasedAtIso: string): void {
+    const whenMs = this.asMillis(releasedAtIso);
+    if (!whenMs) return;
+    const targetIds = new Set(this.activeScheduleIdsForCustomerAt(customerId, whenMs));
+    if (!targetIds.size) return;
+
+    this.scheduleItems.update(rows =>
+      rows.map(item => {
+        const id = String(item.id || '').trim();
+        if (!targetIds.has(id)) return item;
+        return {
+          ...item,
+          actualEnd: releasedAtIso,
+          bayReleasedAt: releasedAtIso
+        };
+      })
+    );
+
+    for (const id of targetIds) {
+      this.scheduleApi
+        .update({ id, actualEnd: releasedAtIso, bayReleasedAt: releasedAtIso })
+        .subscribe({ error: () => {} });
+    }
+  }
+
+  private reopenReleasedBayForCustomer(customerId: string): void {
+    const nowMs = Date.now();
+    const key = String(customerId || '').trim();
+    if (!key) return;
+    const candidates = this.scheduleItems()
+      .filter(item => {
+        if (!!item.isBlocked) return false;
+        if (String(item.customerId || '').trim() !== key) return false;
+        if (!String(item.bayReleasedAt || '').trim()) return false;
+        const startMs = this.asMillis(item.start || '');
+        const endMs = this.asMillis(item.end || '');
+        return !!startMs && !!endMs && startMs <= nowMs && nowMs < endMs;
+      })
+      .map(item => String(item.id || '').trim())
+      .filter(Boolean);
+    if (!candidates.length) return;
+
+    const targetIds = new Set(candidates);
+    this.scheduleItems.update(rows =>
+      rows.map(item => {
+        const id = String(item.id || '').trim();
+        if (!targetIds.has(id)) return item;
+        return {
+          ...item,
+          actualEnd: '',
+          bayReleasedAt: ''
+        };
+      })
+    );
+
+    for (const id of candidates) {
+      this.scheduleApi
+        .update({ id, actualEnd: '', bayReleasedAt: '' })
+        .subscribe({ error: () => {} });
+    }
+  }
+
   private ensureScheduledCardsForCustomers(customerIds: string[], scheduledLaneId: string): void {
     const pending = [...new Set(customerIds.map(id => id.trim()).filter(Boolean))];
     if (!pending.length) return;
@@ -1617,17 +2572,32 @@ export default class DashboardComponent implements OnDestroy {
   private syncScheduledLane() {
     const scheduledId = this.scheduledLaneId();
     if (!scheduledId) return;
-    const leadId = this.leadLaneId();
     const inProgressId = this.inProgressLaneId();
+    const invoicedId = this.invoicedLaneId();
     const nowMs = Date.now();
     const futureCustomerIds = this.futureScheduleCustomerIds(nowMs);
+    const activeCheckedInCustomerIds = new Set<string>();
+    const customersWithProtectedLaneCards = new Set<string>();
     const map: Record<string, WorkItem[]> = {};
     for (const [laneId, rows] of Object.entries(this.items())) {
       map[laneId] = [...rows];
+      for (const row of rows || []) {
+        const customerId = String(row.customerId || '').trim();
+        if (!customerId) continue;
+        const hasCheckIn = !!String(row.checkedInAt || '').trim();
+        const isCompleted = !!String(row.completedAt || '').trim();
+        if (hasCheckIn && !isCompleted) {
+          activeCheckedInCustomerIds.add(customerId);
+        }
+        if (this.isInProgressLaneById(laneId) || this.isCompletedLaneById(laneId) || isCompleted) {
+          customersWithProtectedLaneCards.add(customerId);
+        }
+      }
     }
 
     const movedToScheduled: WorkItem[] = [];
     const movedOutOfScheduled: Array<{ item: WorkItem; targetLaneId: string }> = [];
+    const removedFromScheduled: WorkItem[] = [];
     for (const laneId of Object.keys(map)) {
       if (this.isInProgressLaneById(laneId) || this.isCompletedLaneById(laneId)) continue;
       const keep: WorkItem[] = [];
@@ -1635,9 +2605,11 @@ export default class DashboardComponent implements OnDestroy {
         const alreadyCheckedIn = !!(it.checkedInAt || '').trim();
         const customerId = (it.customerId || '').trim();
         const hasFutureSchedule = customerId ? futureCustomerIds.has(customerId) : false;
+        const hasActiveCheckIn = customerId ? activeCheckedInCustomerIds.has(customerId) : false;
+        const hasProtectedLaneCard = customerId ? customersWithProtectedLaneCards.has(customerId) : false;
 
         if (laneId !== scheduledId) {
-          if (customerId && hasFutureSchedule && !alreadyCheckedIn) {
+          if (customerId && hasFutureSchedule && !alreadyCheckedIn && !hasActiveCheckIn && !this.isLeadLaneById(laneId)) {
             movedToScheduled.push({ ...it, laneId: scheduledId });
             continue;
           }
@@ -1645,18 +2617,34 @@ export default class DashboardComponent implements OnDestroy {
           continue;
         }
 
-        // Scheduled lane should only contain customers with future appointments.
-        if (!customerId || (hasFutureSchedule && !alreadyCheckedIn)) {
+        // Keep scheduled cards in Scheduled so appointment save/race conditions do not bounce them back to Leads.
+        if (!customerId) {
           keep.push(it);
           continue;
         }
 
-        const fallbackLaneId =
-          alreadyCheckedIn && inProgressId && inProgressId !== scheduledId
-            ? inProgressId
-            : (leadId && leadId !== scheduledId ? leadId : '');
-        if (fallbackLaneId) {
-          movedOutOfScheduled.push({ item: { ...it, laneId: fallbackLaneId }, targetLaneId: fallbackLaneId });
+        const moveToInProgress =
+          alreadyCheckedIn && inProgressId && inProgressId !== scheduledId;
+        if (moveToInProgress) {
+          movedOutOfScheduled.push({ item: { ...it, laneId: inProgressId }, targetLaneId: inProgressId });
+          continue;
+        }
+
+        const moveBackToInvoices =
+          !hasFutureSchedule &&
+          !alreadyCheckedIn &&
+          !hasActiveCheckIn &&
+          !!invoicedId &&
+          invoicedId !== scheduledId &&
+          this.hasActiveInvoiceForCard(it);
+        if (moveBackToInvoices) {
+          movedOutOfScheduled.push({ item: { ...it, laneId: invoicedId }, targetLaneId: invoicedId });
+          continue;
+        }
+
+        if (hasProtectedLaneCard && !hasFutureSchedule && !alreadyCheckedIn && !hasActiveCheckIn) {
+          // Only remove duplicate scheduled cards when there is no future appointment to preserve.
+          removedFromScheduled.push(it);
           continue;
         }
 
@@ -1672,14 +2660,20 @@ export default class DashboardComponent implements OnDestroy {
       map[move.targetLaneId] = [...(map[move.targetLaneId] || []), move.item];
     }
 
-    if (movedToScheduled.length || movedOutOfScheduled.length) {
+    if (movedToScheduled.length || movedOutOfScheduled.length || removedFromScheduled.length) {
       this.items.set(map);
-    this.maybeInitializeSeenLeads(map);
+      this.maybeInitializeSeenLeads(map);
+      this.maybeInitializeSeenCards(map);
+      this.maybeInitializeNotifiedLeads(map);
+      this.maybeNotifyNewLeads(map);
       for (const it of movedToScheduled) {
         this.itemsApi.update({ id: it.id, laneId: scheduledId }).subscribe();
       }
       for (const move of movedOutOfScheduled) {
         this.itemsApi.update({ id: move.item.id, laneId: move.targetLaneId }).subscribe();
+      }
+      for (const it of removedFromScheduled) {
+        this.itemsApi.delete(it.id).subscribe({ error: () => {} });
       }
     }
 
@@ -1688,10 +2682,267 @@ export default class DashboardComponent implements OnDestroy {
         .map(item => (item.customerId || '').trim())
         .filter(Boolean)
     );
+    const customersWithNonScheduledCards = new Set(
+      Object.entries(map)
+        .filter(([laneId]) => laneId !== scheduledId)
+        .flatMap(([, rows]) => (rows || []).map(item => (item.customerId || '').trim()))
+        .filter(Boolean)
+    );
     const missingScheduledCards = [...futureCustomerIds].filter(customerId => !scheduledCustomers.has(customerId));
-    if (missingScheduledCards.length) {
-      this.ensureScheduledCardsForCustomers(missingScheduledCards, scheduledId);
+    const missingWithoutActiveCheckIn = missingScheduledCards.filter(customerId =>
+      !activeCheckedInCustomerIds.has(customerId) &&
+      !customersWithProtectedLaneCards.has(customerId) &&
+      !customersWithNonScheduledCards.has(customerId)
+    );
+    if (missingWithoutActiveCheckIn.length) {
+      this.ensureScheduledCardsForCustomers(missingWithoutActiveCheckIn, scheduledId);
     }
+  }
+
+  private completedLaneId(): string | null {
+    const lane = this.lanes().find(item => this.isCompletedLane(item));
+    return lane?.id || null;
+  }
+
+  private syncFinalPaidInvoicesToCompleted(): void {
+    const inProgressLaneId = this.inProgressLaneId();
+    const completedLaneId = this.completedLaneId();
+    if (!inProgressLaneId || !completedLaneId || inProgressLaneId === completedLaneId) return;
+
+    const current = this.items();
+    const inProgressRows = [...(current[inProgressLaneId] || [])];
+    if (!inProgressRows.length) return;
+
+    const moves = inProgressRows
+      .map(item => {
+        const paidInvoice = this.finalPaidInvoiceForCheckedInItem(item);
+        if (!paidInvoice) return null;
+
+        const completedAtMs = this.asMillis(paidInvoice.updatedAt || paidInvoice.paymentDate || paidInvoice.createdAt || '');
+        const completedAt = (completedAtMs ? new Date(completedAtMs) : new Date()).toISOString();
+        const completionTiming = this.buildCompletionTimingPatch(item, completedAt);
+        return {
+          currentItem: item,
+          nextItem: {
+            ...item,
+            ...completionTiming,
+            laneId: completedLaneId,
+            completedAt,
+            calendarOverrideAt: ''
+          } as WorkItem,
+          patch: {
+            id: item.id,
+            laneId: completedLaneId,
+            completedAt,
+            calendarOverrideAt: '',
+            ...completionTiming
+          } as Partial<WorkItem> & { id: string }
+        };
+      })
+      .filter((row): row is {
+        currentItem: WorkItem;
+        nextItem: WorkItem;
+        patch: Partial<WorkItem> & { id: string };
+      } => !!row);
+
+    if (!moves.length) return;
+
+    const movedIds = new Set(moves.map(move => move.currentItem.id));
+    const nextMap: Record<string, WorkItem[]> = {};
+    for (const [laneId, rows] of Object.entries(current)) {
+      nextMap[laneId] = [...(rows || [])];
+    }
+    nextMap[inProgressLaneId] = (nextMap[inProgressLaneId] || []).filter(item => !movedIds.has(item.id));
+    nextMap[completedLaneId] = [...moves.map(move => move.nextItem), ...(nextMap[completedLaneId] || [])];
+
+    this.items.set(nextMap);
+    this.maybeInitializeSeenLeads(nextMap);
+    this.maybeInitializeSeenCards(nextMap);
+    this.maybeInitializeNotifiedLeads(nextMap);
+    this.maybeNotifyNewLeads(nextMap);
+
+    for (const move of moves) {
+      this.itemsApi.update(move.patch).subscribe({ error: () => {} });
+      const customerId = String(move.currentItem.customerId || '').trim();
+      if (customerId) {
+        this.releaseActiveBayForCustomer(customerId, String(move.nextItem.completedAt || new Date().toISOString()));
+      }
+    }
+  }
+
+  private syncInvoiceResponsesFromApi(): void {
+    this.invoiceResponseApi.listRecent(250).subscribe({
+      next: response => {
+        const items = Array.isArray(response?.items) ? response.items : [];
+        let applied = false;
+
+        for (const item of items) {
+          const invoiceId = String(item?.invoiceId || '').trim();
+          const invoiceNumber = String(item?.invoiceNumber || '').trim();
+          const stage = String(item?.stage || '').trim().toLowerCase();
+          const responseUpdatedAt = String(item?.updatedAt || '').trim();
+          if (!invoiceId || stage !== 'accepted') continue;
+
+          const existing = this.invoicesData.getInvoiceById(invoiceId)
+            || (invoiceNumber ? this.invoicesData.getInvoiceById(invoiceNumber) : null);
+          if (!existing || existing.documentType !== 'invoice') continue;
+
+          const responseUpdatedMs = this.asMillis(responseUpdatedAt || new Date().toISOString());
+          const invoiceUpdatedMs = this.asMillis(existing.updatedAt || existing.createdAt || '');
+          if (responseUpdatedMs && invoiceUpdatedMs && responseUpdatedMs < invoiceUpdatedMs) continue;
+
+          const total = Number(existing.total || 0);
+          const paid = Number(existing.paidAmount || 0);
+          if ((existing.stage === 'accepted' || existing.stage === 'completed') && paid >= total) continue;
+          const wasFinalInvoicePayment = paid > 0 && paid < total;
+
+          this.invoicesData.setPaidAmount(existing.id, total, 'Customer paid invoice from public payment link.');
+          if (wasFinalInvoicePayment) {
+            this.invoicesData.setStage(existing.id, 'completed', 'Final invoice paid by customer. Marked as Completed.');
+          } else {
+            this.invoicesData.setStage(existing.id, 'accepted', 'Invoice updated to Accepted.');
+          }
+          this.createInvoicePaidNotification(existing.id, existing.invoiceNumber, existing.customerName, wasFinalInvoicePayment);
+          applied = true;
+        }
+
+        if (!applied) return;
+        this.syncFinalPaidInvoicesToCompleted();
+        this.syncScheduledLane();
+      },
+      error: () => {
+        // Keep dashboard functional when response sync endpoint is temporarily unavailable.
+      }
+    });
+  }
+
+  private syncQuoteResponsesFromApi(): void {
+    this.quoteResponseApi.listRecent(250).subscribe({
+      next: response => {
+        const items = Array.isArray(response?.items) ? response.items : [];
+        for (const item of items) {
+          const quoteId = String(item?.quoteId || '').trim();
+          const stage = String(item?.stage || '').trim().toLowerCase();
+          if (!quoteId) continue;
+          if (stage !== 'accepted' && stage !== 'declined') continue;
+
+          const existing = this.invoicesData.getInvoiceById(quoteId);
+          if (!existing || existing.documentType !== 'quote') continue;
+          if (existing.stage === 'canceled' || existing.stage === 'expired') continue;
+          if (existing.stage === stage) continue;
+
+          this.invoicesData.setStage(
+            existing.id,
+            stage,
+            `Customer ${stage === 'accepted' ? 'accepted' : 'declined'} quote from public link.`
+          );
+          this.createQuoteStatusNotification(
+            existing.id,
+            existing.invoiceNumber,
+            existing.customerName,
+            stage as 'accepted' | 'declined'
+          );
+        }
+      },
+      error: () => {
+        // Keep dashboard functional when response sync endpoint is temporarily unavailable.
+      }
+    });
+  }
+
+  private createQuoteStatusNotification(
+    quoteId: string,
+    quoteNumber: string,
+    customerName: string,
+    stage: 'accepted' | 'declined'
+  ): void {
+    const user = this.auth.user();
+    if (!user) return;
+
+    const targetUserId = String(user.id || '').trim();
+    const targetEmail = String(user.email || '').trim();
+    if (!targetUserId && !targetEmail) return;
+
+    const number = String(quoteNumber || quoteId || '').trim() || 'Quote';
+    const customer = String(customerName || '').trim() || 'Customer';
+    const accepted = stage === 'accepted';
+
+    this.notificationsApi.createMention({
+      targetUserId: targetUserId || undefined,
+      targetEmail: targetEmail || undefined,
+      targetDisplayName: String(user.displayName || '').trim() || undefined,
+      title: `Quote ${number} ${accepted ? 'accepted' : 'declined'}`,
+      message: `${customer} ${accepted ? 'accepted' : 'declined'} quote ${number}.`,
+      route: `/quotes/${encodeURIComponent(quoteId || number)}`,
+      entityType: 'quote',
+      entityId: quoteId || number,
+      metadata: {
+        quoteId: quoteId || '',
+        quoteNumber: number,
+        customerName: customer,
+        stage,
+        source: 'dashboard-response-sync'
+      }
+    }).subscribe({
+      next: () => {
+        this.emitNotificationsRefresh();
+      },
+      error: () => {
+        // Notification failures must not block status sync.
+      }
+    });
+  }
+
+  private createInvoicePaidNotification(
+    invoiceId: string,
+    invoiceNumber: string,
+    customerName: string,
+    isFinalInvoice: boolean
+  ): void {
+    const user = this.auth.user();
+    if (!user) return;
+
+    const targetUserId = String(user.id || '').trim();
+    const targetEmail = String(user.email || '').trim();
+    if (!targetUserId && !targetEmail) return;
+
+    const number = String(invoiceNumber || invoiceId || '').trim() || 'Invoice';
+    const customer = String(customerName || '').trim() || 'Customer';
+    const titlePrefix = isFinalInvoice ? 'Final invoice' : 'Invoice';
+    const messageBody = isFinalInvoice
+      ? `${customer} paid final invoice ${number}.`
+      : `${customer} paid invoice ${number}.`;
+
+    this.notificationsApi.createMention({
+      targetUserId: targetUserId || undefined,
+      targetEmail: targetEmail || undefined,
+      targetDisplayName: String(user.displayName || '').trim() || undefined,
+      title: `${titlePrefix} ${number} paid`,
+      message: messageBody,
+      route: `/invoices/${encodeURIComponent(invoiceId || number)}`,
+      entityType: 'invoice',
+      entityId: invoiceId || number,
+      metadata: {
+        invoiceId: invoiceId || '',
+        invoiceNumber: number,
+        customerName: customer,
+        stage: 'accepted',
+        paymentKind: isFinalInvoice ? 'final' : 'initial',
+        source: 'dashboard-response-sync'
+      }
+    }).subscribe({
+      next: () => {
+        this.emitNotificationsRefresh();
+      },
+      error: () => {
+        // Do not block dashboard state updates on notification write failures.
+      }
+    });
+  }
+
+  private emitNotificationsRefresh(): void {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('pathflow:notifications-refresh'));
   }
 
   private pruneExpiredCompletedFromBoard(): void {
@@ -1744,14 +2995,85 @@ export default class DashboardComponent implements OnDestroy {
     this.scheduleModalOpen.set(true);
   }
 
+  private openScheduleModalDeferred(customerId: string): void {
+    const id = String(customerId || '').trim();
+    if (!id) return;
+    setTimeout(() => {
+      this.clearResidualDragState();
+      this.openScheduleModal(id);
+    }, 220);
+  }
+
   closeScheduleModal() {
     this.scheduleModalOpen.set(false);
     this.scheduleModalCustomerId.set(null);
+    this.deferInteractivityRestore(220);
+    setTimeout(() => this.forceOverlayInteractivityReset(), 200);
   }
 
   onScheduleSaved() {
-    this.closeScheduleModal();
-    this.loadAll();
+    this.deferInteractivityRestore(260);
+    // Let the nested appointment editor modal finish dismissing before closing the schedule modal.
+    setTimeout(() => {
+      this.closeScheduleModal();
+      this.loadAll();
+      this.deferInteractivityRestore(320);
+      this.forceOverlayInteractivityReset();
+    }, 160);
+  }
+
+  private clearResidualDragState(): void {
+    if (typeof document === 'undefined') return;
+    const draggingCards = document.querySelectorAll('.cdk-drag-dragging');
+    draggingCards.forEach(node => node.classList.remove('cdk-drag-dragging'));
+
+    const draggingLanes = document.querySelectorAll('.cdk-drop-list-dragging');
+    draggingLanes.forEach(node => node.classList.remove('cdk-drop-list-dragging'));
+
+    document.body.classList.remove('cdk-drag-drop-disable-native-interactions');
+
+    const activeDrag = document.querySelector('.cdk-drag-dragging, .cdk-drop-list-dragging');
+    if (!activeDrag) {
+      document.querySelectorAll('.cdk-drag-preview, .cdk-drag-placeholder').forEach(node => node.remove());
+    }
+    this.forceOverlayInteractivityReset();
+  }
+
+  onCardDragEnded(): void {
+    this.deferInteractivityRestore(100);
+  }
+
+  private deferInteractivityRestore(delayMs: number = 140): void {
+    if (this.interactivityRestoreTimer) {
+      clearTimeout(this.interactivityRestoreTimer);
+      this.interactivityRestoreTimer = null;
+    }
+    this.interactivityRestoreTimer = setTimeout(() => {
+      this.interactivityRestoreTimer = null;
+      this.clearResidualDragState();
+    }, Math.max(0, delayMs));
+  }
+
+  private forceOverlayInteractivityReset(): void {
+    if (typeof document === 'undefined') return;
+    const hasVisibleOverlay = !!document.querySelector(
+      'ion-modal:not(.overlay-hidden), ion-popover:not(.overlay-hidden), ion-alert:not(.overlay-hidden), ion-action-sheet:not(.overlay-hidden), ion-loading:not(.overlay-hidden), ion-picker:not(.overlay-hidden)'
+    );
+    if (hasVisibleOverlay) return;
+
+    document.querySelectorAll('ion-backdrop').forEach(node => {
+      const el = node as HTMLElement;
+      el.classList.remove('backdrop-show');
+      el.classList.add('backdrop-hide');
+      el.style.pointerEvents = 'none';
+    });
+
+    document.querySelectorAll('.cdk-overlay-backdrop').forEach(node => {
+      const el = node as HTMLElement;
+      el.classList.remove('cdk-overlay-backdrop-showing');
+      el.style.pointerEvents = 'none';
+      el.style.opacity = '0';
+    });
   }
 
 
@@ -1806,15 +3128,15 @@ export default class DashboardComponent implements OnDestroy {
       return;
     }
     const isCompletedLane = this.isCompletedLaneById(laneId);
+    const scheduledId = this.scheduledLaneId();
+    const isScheduledLane = !!scheduledId && laneId === scheduledId;
     const hasCalendar = this.hasCalendarEvent(c.id);
-    if (this.isScheduleRequiredLaneById(laneId) && !hasCalendar && !isCompletedLane) {
+    if (this.isScheduleRequiredLaneById(laneId) && !hasCalendar && !isCompletedLane && !isScheduledLane) {
       this.status.set('Calendar event required before moving to this lane.');
       this.closeSearch();
       this.openScheduleModal(c.id);
       return;
     }
-    const scheduledId = this.scheduledLaneId();
-    const isScheduledLane = !!scheduledId && laneId === scheduledId;
     const baseName = (c.name || 'Unnamed').trim();
     const veh = this.customerVehicleBasic(c);
     const title = veh ? `${baseName} (${veh})` : baseName;
@@ -1831,7 +3153,10 @@ export default class DashboardComponent implements OnDestroy {
               this.status.set('Added to lane');
             }
             if (isScheduledLane) {
-              this.openScheduleModal(c.id);
+              if (!this.hasFutureSchedule(c.id)) {
+                this.status.set('Add appointment details for this scheduled customer.');
+              }
+              this.openScheduleModalDeferred(c.id);
             }
           }
         });
@@ -1873,14 +3198,14 @@ export default class DashboardComponent implements OnDestroy {
         const veh = this.customerVehicleBasic(cust);
         const title = veh ? `${baseName} (${veh})` : baseName;
         const isCompletedLane = this.isCompletedLaneById(laneId);
+        const scheduledId = this.scheduledLaneId();
+        const isScheduledLane = !!scheduledId && laneId === scheduledId;
         const hasCalendar = this.hasCalendarEvent(cust.id);
-        if (this.isScheduleRequiredLaneById(laneId) && !hasCalendar && !isCompletedLane) {
+        if (this.isScheduleRequiredLaneById(laneId) && !hasCalendar && !isCompletedLane && !isScheduledLane) {
           this.status.set('Calendar event required before moving to this lane.');
           this.openScheduleModal(cust.id);
           return;
         }
-        const scheduledId = this.scheduledLaneId();
-        const isScheduledLane = !!scheduledId && laneId === scheduledId;
         this.itemsApi.create(title, laneId).subscribe({
           next: created => {
             this.itemsApi.update({ id: created.id, customerId: cust.id }).subscribe({
@@ -1893,7 +3218,10 @@ export default class DashboardComponent implements OnDestroy {
                 }
                 this.loadAll();
                 if (isScheduledLane) {
-                  this.openScheduleModal(cust.id);
+                  if (!this.hasFutureSchedule(cust.id)) {
+                    this.status.set('Add appointment details for this scheduled customer.');
+                  }
+                  this.openScheduleModalDeferred(cust.id);
                 }
               }
             });
@@ -1946,13 +3274,17 @@ export default class DashboardComponent implements OnDestroy {
   }
 
   onCardsDrop(event: CdkDragDrop<WorkItem[]>, targetLaneId: string) {
+    this.deferInteractivityRestore(80);
     const map = { ...this.items() };
     const sourceId = event.previousContainer.id;
     const targetId = event.container.id;
     if (sourceId === targetId) {
       map[targetId] = [...map[targetId]].sort((a, b) => this.compareCreatedDesc(a, b));
       this.items.set(map);
-    this.maybeInitializeSeenLeads(map);
+      this.maybeInitializeSeenLeads(map);
+      this.maybeInitializeSeenCards(map);
+      this.maybeInitializeNotifiedLeads(map);
+      this.maybeNotifyNewLeads(map);
       return;
     } else {
       const moved = map[sourceId][event.previousIndex];
@@ -1963,23 +3295,24 @@ export default class DashboardComponent implements OnDestroy {
         return;
       }
       const toCompleted = this.isCompletedLaneById(targetLaneId);
+      const fromCompleted = this.isCompletedLaneById(sourceId);
+      const scheduledId = this.scheduledLaneId();
+      const isTargetScheduled = !!scheduledId && targetLaneId === scheduledId;
       if (movedCustomerId && this.isScheduleRequiredLaneById(targetLaneId) && !this.hasCalendarEvent(movedCustomerId)) {
-        if (!toCompleted) {
+        if (!toCompleted && !isTargetScheduled) {
           this.status.set('Calendar event required before moving to this lane.');
           this.openScheduleModal(movedCustomerId);
           return;
         }
       }
-      const scheduledId = this.scheduledLaneId();
-      if (scheduledId && targetLaneId === scheduledId && moved?.customerId && !this.hasFutureSchedule(moved.customerId)) {
-        this.status.set('Scheduled lane requires a future appointment.');
-        this.openScheduleModal(moved.customerId);
-        return;
-      }
+      const needsSchedulePrompt = !!(isTargetScheduled && movedCustomerId && !this.hasFutureSchedule(movedCustomerId));
 
       transferArrayItem(map[sourceId], map[targetId], event.previousIndex, event.currentIndex);
       this.items.set(map);
-    this.maybeInitializeSeenLeads(map);
+      this.maybeInitializeSeenLeads(map);
+      this.maybeInitializeSeenCards(map);
+      this.maybeInitializeNotifiedLeads(map);
+      this.maybeNotifyNewLeads(map);
       const updated = map[targetId][event.currentIndex];
       const fromInProgress = this.isInProgressLaneById(sourceId);
       const toInProgress = this.isInProgressLaneById(targetLaneId);
@@ -2046,16 +3379,25 @@ export default class DashboardComponent implements OnDestroy {
           map[targetId] = [...map[targetId]].sort((a, b) => this.compareCreatedDesc(a, b));
           map[sourceId] = [...map[sourceId]].sort((a, b) => this.compareCreatedDesc(a, b));
           this.items.set(map);
-    this.maybeInitializeSeenLeads(map);
+          this.maybeInitializeSeenLeads(map);
+          this.maybeInitializeSeenCards(map);
+          this.maybeInitializeNotifiedLeads(map);
+          this.maybeNotifyNewLeads(map);
           if (needsCalendarOverride) {
             this.status.set('Moved to Completed. Click "No appointment required" to confirm override.');
+          }
+          if (needsSchedulePrompt && movedCustomerId) {
+            this.status.set('Add appointment details for this scheduled customer.');
+            this.openScheduleModalDeferred(movedCustomerId);
           }
           if (launchQuoteAfterMove && movedCustomerId) {
             this.openQuoteBuilderForCustomer(movedCustomerId);
             this.status.set('Opening quote builder');
           }
-          if (scheduledId && targetLaneId === scheduledId && updated.customerId) {
-            this.openScheduleModal(updated.customerId);
+          if (movedCustomerId && toCompleted) {
+            this.releaseActiveBayForCustomer(movedCustomerId, nowIso);
+          } else if (movedCustomerId && fromCompleted && toInProgress) {
+            this.reopenReleasedBayForCustomer(movedCustomerId);
           }
         }
       });

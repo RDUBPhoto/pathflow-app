@@ -24,6 +24,7 @@ import {
 } from '../../services/invoices-data.service';
 import { InventoryApiService, InventoryItem } from '../../services/inventory-api.service';
 import { Lane, LanesApi } from '../../services/lanes-api.service';
+import { PaymentGatewaySettingsService } from '../../services/payment-gateway-settings.service';
 import { SmsApiService } from '../../services/sms-api.service';
 import { TenantContextService } from '../../services/tenant-context.service';
 import { WorkItem, WorkItemsApi } from '../../services/workitems-api.service';
@@ -91,6 +92,7 @@ export default class InvoicesNewComponent {
   private readonly invoicesData = inject(InvoicesDataService);
   private readonly emailApi = inject(EmailApiService);
   private readonly smsApi = inject(SmsApiService);
+  private readonly paymentSettings = inject(PaymentGatewaySettingsService);
   private readonly branding = inject(BrandSettingsService);
   private readonly businessProfile = inject(BusinessProfileService);
   private readonly settingsApi = inject(AppSettingsApiService);
@@ -184,7 +186,7 @@ export default class InvoicesNewComponent {
   readonly quoteNumberDisplay = computed(() => {
     const draft = this.currentDraft();
     if (draft?.invoiceNumber) return draft.invoiceNumber;
-    return this.invoicesData.previewNextDocumentNumber('quote');
+    return this.invoicesData.previewNextDocumentNumber(this.documentType());
   });
   readonly quoteDateDisplay = computed(() => this.formatDisplayDate(this.currentDraft()?.issueDate || this.todayIso()));
   readonly quoteExpirationDisplay = computed(() =>
@@ -210,7 +212,10 @@ export default class InvoicesNewComponent {
   });
 
   readonly templateSubject = computed(() => {
-    return this.selectedTemplateSubject().trim() || this.selectedTemplate()?.subject || this.manualTemplateSubject().trim() || `Quote from ${this.companyName()}`;
+    return this.selectedTemplateSubject().trim()
+      || this.selectedTemplate()?.subject
+      || this.manualTemplateSubject().trim()
+      || `${this.documentLabel()} from ${this.companyName()}`;
   });
 
   readonly availableEmailTargets = computed(() => {
@@ -331,8 +336,11 @@ export default class InvoicesNewComponent {
     this.customerQuery.set(value || '');
   }
 
-  selectCustomer(customer: Customer): void {
+  selectCustomer(customer: Customer, options?: { syncQuery?: boolean }): void {
     this.selectedCustomer.set(customer);
+    if (options?.syncQuery) {
+      this.customerQuery.set(this.customerDisplayName(customer));
+    }
     this.seedTargetsFromCustomer(customer);
     this.clearStatus();
   }
@@ -503,13 +511,17 @@ export default class InvoicesNewComponent {
         return;
       }
 
-      const sent = this.invoicesData.saveInvoice({
+      const sentDraft = this.invoicesData.saveInvoice({
         ...draft,
         stage: 'sent',
         template: this.templateDisplayName(),
         staffNote: this.staffNote(),
         customerNote: this.customerNote()
       });
+      const sent = sentDraft.stage === 'sent'
+        ? sentDraft
+        : (this.invoicesData.setStage(sentDraft.id, 'sent', `${this.documentLabel()} sent to customer.`) || sentDraft);
+      await this.ensureDashboardCardForSentDocument(customer, sent);
       this.draftSavedAt.set(sent.updatedAt || new Date().toISOString());
 
       if (emailSuccess && smsSuccess) {
@@ -527,7 +539,11 @@ export default class InvoicesNewComponent {
       } else {
         this.setStatus(`${this.documentLabel()} sent successfully.`, 'success');
       }
-      await this.router.navigate(['/invoices', sent.id]);
+      if (sent.documentType === 'quote') {
+        await this.router.navigate(['/quotes', sent.id]);
+      } else {
+        await this.router.navigate(['/invoices', sent.id]);
+      }
     } catch {
       this.setStatus(`Could not send ${this.documentLabelLower()}.`, 'error');
     } finally {
@@ -743,6 +759,11 @@ export default class InvoicesNewComponent {
     const profile = this.businessProfile.profile();
     const issueDate = this.currentDraft()?.issueDate || this.todayIso();
     const dueDate = this.currentDraft()?.dueDate || this.plusDaysIso(issueDate, 30);
+    const draftId = this.draftId() || 'preview';
+    const nextNumber = this.quoteNumberDisplay();
+    const paymentLink = this.documentType() === 'invoice'
+      ? (this.paymentSettings.createHostedPaymentLink(draftId, nextNumber) || '')
+      : '';
     return {
       documentType: this.documentType(),
       customerId: String(customer.id || '').trim() || undefined,
@@ -760,6 +781,9 @@ export default class InvoicesNewComponent {
       staffNote: this.staffNote(),
       customerNote: this.customerNote(),
       lineItems: this.quoteLineItems(),
+      includePaymentLink: this.documentType() === 'invoice',
+      paymentProviderKey: this.documentType() === 'invoice' ? (this.paymentSettings.defaultProvider()?.key || undefined) : undefined,
+      paymentLinkUrl: paymentLink || undefined,
       issueDate,
       dueDate,
       stage: 'draft'
@@ -938,7 +962,7 @@ export default class InvoicesNewComponent {
     if (this.pendingCustomerId) {
       const byId = this.customers().find(item => String(item.id || '').trim() === this.pendingCustomerId) || null;
       if (byId) {
-        this.selectCustomer(byId);
+        this.selectCustomer(byId, { syncQuery: true });
         this.pendingCustomerId = '';
         return;
       }
@@ -949,7 +973,7 @@ export default class InvoicesNewComponent {
 
     const byEmail = this.customers().find(item => String(item.email || '').trim().toLowerCase() === prefill.email.toLowerCase()) || null;
     if (byEmail) {
-      this.selectCustomer(byEmail);
+      this.selectCustomer(byEmail, { syncQuery: true });
       return;
     }
   }
@@ -997,20 +1021,74 @@ export default class InvoicesNewComponent {
     return Number.isFinite(parsed) ? parsed : 0;
   }
 
+  private async ensureDashboardCardForSentDocument(customer: Customer, detail: InvoiceDetail): Promise<void> {
+    const customerId = String(customer.id || '').trim();
+    if (!customerId) return;
+    try {
+      const [lanes, items] = await Promise.all([
+        firstValueFrom(this.lanesApi.list()),
+        firstValueFrom(this.workItemsApi.list())
+      ]);
+      const targetStage = detail.documentType === 'invoice' ? 'invoiced' : 'quote';
+      const targetLane = this.findLaneByStage(lanes || [], targetStage);
+      if (!targetLane) return;
+
+      const activeCustomerItem = (items || [])
+        .filter(item => String(item.customerId || '').trim() === customerId)
+        .sort((a, b) => this.asMillis(b.updatedAt || b.createdAt) - this.asMillis(a.updatedAt || a.createdAt))[0];
+
+      const title = this.composeWorkItemTitle(customer);
+      if (!activeCustomerItem) {
+        const created = await firstValueFrom(this.workItemsApi.create(title, targetLane.id));
+        await firstValueFrom(this.workItemsApi.update({ id: created.id, customerId }));
+        return;
+      }
+
+      const patch: Partial<WorkItem> & { id: string } = {
+        id: activeCustomerItem.id,
+        laneId: targetLane.id
+      };
+      if (String(activeCustomerItem.title || '').trim() !== title) {
+        patch.title = title;
+      }
+      await firstValueFrom(this.workItemsApi.update(patch));
+    } catch {
+      // Do not block send flow if dashboard sync fails.
+    }
+  }
+
+  private findLaneByStage(lanes: Lane[], stage: 'quote' | 'invoiced'): Lane | null {
+    const explicit = (lanes || []).find(lane => String(lane.stageKey || '').trim().toLowerCase() === stage) || null;
+    if (explicit) return explicit;
+    if (stage === 'quote') {
+      return (lanes || []).find(lane => /quote|estimate/.test(String(lane.name || '').trim().toLowerCase())) || null;
+    }
+    return (lanes || []).find(lane => /invoice|invoiced|billing|bill|paid/.test(String(lane.name || '').trim().toLowerCase())) || null;
+  }
+
+  private composeWorkItemTitle(customer: Customer): string {
+    const name = this.customerDisplayName(customer);
+    const vehicle = this.customerVehicleSummary(customer);
+    return vehicle ? `${name} (${vehicle})` : name;
+  }
+
   private buildPreviewHtml(): string {
+    const isQuote = this.documentType() === 'quote';
     const customer = this.selectedCustomer();
     const customerName = this.customerDisplayName(customer);
     const vehicle = this.customerVehicleSummary(customer) || 'Vehicle details pending';
     const noteToCustomer = this.customerNote().trim();
     const subject = this.resolveMergeTags(this.templateSubject());
-    const quoteNumber = this.quoteNumberDisplay();
-    const quoteDate = this.quoteDateDisplay();
-    const quoteExpiration = this.quoteExpirationDisplay();
+    const documentNumber = this.quoteNumberDisplay();
+    const issueDate = this.quoteDateDisplay();
+    const dueDate = this.quoteExpirationDisplay();
     const businessAddress = this.formatAddressHtml(this.companyAddress());
 
     const baseBody = String(this.selectedTemplate()?.body || '').trim() || String(this.manualTemplateBody() || '').trim();
 
-    const bodySource = baseBody || `<p>Hi {{customer_name}},</p><p>Here is your quote for {{vehicle_summary}}.</p>`;
+    const bodySource = baseBody || (isQuote
+      ? `<p>Hi {{customer_name}},</p><p>Here is your quote for {{vehicle_summary}}.</p>`
+      : `<p>Hi {{customer_name}},</p><p>Your invoice is ready for {{vehicle_summary}}.</p>`);
     const resolvedBody = this.normalizeHtmlHrefAttributes(
       this.stripInlineQuoteActionLinks(this.resolveMergeTags(bodySource))
     );
@@ -1030,6 +1108,13 @@ export default class InvoicesNewComponent {
         <td align="center" style="text-align:center;vertical-align:middle;">
           <a href="${this.escapeHtmlAttribute(this.quoteActionUrl('accept'))}" style="display:inline-block;background:#1d4ed8;border:1px solid #1d4ed8;color:#ffffff !important;text-decoration:none;font-weight:700;font-size:16px;line-height:1;padding:10px 16px;border-radius:6px;margin-right:16px;">Accept Quote</a>
           <a href="${this.escapeHtmlAttribute(this.quoteActionUrl('decline'))}" style="display:inline-block;color:#0369a1 !important;text-decoration:underline;font-weight:600;font-size:16px;line-height:1;vertical-align:middle;">Decline Quote</a>
+        </td>
+      </tr>
+    </table>`;
+    const invoiceActionsHtml = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:14px 0 8px;width:100%;">
+      <tr>
+        <td align="center" style="text-align:center;vertical-align:middle;">
+          <a href="${this.escapeHtmlAttribute(this.invoicePaymentUrl())}" style="display:inline-block;background:#1d4ed8;border:1px solid #1d4ed8;color:#ffffff !important;text-decoration:none;font-weight:700;font-size:16px;line-height:1;padding:10px 16px;border-radius:6px;">Pay Invoice</a>
         </td>
       </tr>
     </table>`;
@@ -1061,9 +1146,9 @@ export default class InvoicesNewComponent {
           </td>
           <td style="vertical-align:top;width:48%;">
             <div>
-              <div><strong>Date:</strong> ${this.escapeHtml(quoteDate)}</div>
-              <div><strong>Quote Number:</strong> ${this.escapeHtml(quoteNumber)}</div>
-              <div><strong>Expiration Date:</strong> ${this.escapeHtml(quoteExpiration)}</div>
+              <div><strong>Date:</strong> ${this.escapeHtml(issueDate)}</div>
+              <div><strong>${isQuote ? 'Quote' : 'Invoice'} Number:</strong> ${this.escapeHtml(documentNumber)}</div>
+              <div><strong>${isQuote ? 'Expiration' : 'Due'} Date:</strong> ${this.escapeHtml(dueDate)}</div>
             </div>
           </td>
         </tr>
@@ -1073,7 +1158,7 @@ export default class InvoicesNewComponent {
       <div>${resolvedBody}</div>
       ${lineItemsHtml}
       ${totalsHtml}
-      ${quoteActionsHtml}
+      ${isQuote ? quoteActionsHtml : invoiceActionsHtml}
       ${customerNoteHtml}
       ${terms}
       ${signature ? `<div style="margin-top:18px;">${this.resolveMergeTags(signature)}</div>` : ''}
@@ -1083,6 +1168,9 @@ export default class InvoicesNewComponent {
   private buildSmsMessage(): string {
     const customer = this.selectedCustomer();
     const customerName = this.customerDisplayName(customer);
+    if (this.documentType() === 'invoice') {
+      return `${this.companyName()}: Invoice ${this.quoteNumberDisplay()} is ready for ${customerName}. Pay: ${this.invoicePaymentUrl()}`;
+    }
     return `${this.companyName()}: Quote ready for ${customerName}. View: ${this.quotePublicUrl()} | Accept: ${this.quoteActionUrl('accept')} | Decline: ${this.quoteActionUrl('decline')}`;
   }
 
@@ -1091,6 +1179,9 @@ export default class InvoicesNewComponent {
   }
 
   private quoteActionUrl(action: 'accept' | 'decline' | 'view'): string {
+    if (this.documentType() === 'invoice') {
+      return this.invoicePaymentUrl();
+    }
     const id = this.draftId() || 'preview';
     const path = action === 'accept' ? '/quote-accepted' : action === 'decline' ? '/quote-declined' : '/quote-response';
     const query = new URLSearchParams();
@@ -1101,17 +1192,59 @@ export default class InvoicesNewComponent {
     query.set('customerName', this.customerDisplayName(this.selectedCustomer()));
     query.set('vehicle', this.customerVehicleSummary(this.selectedCustomer()) || 'Vehicle details pending');
     query.set('businessName', this.companyName());
-    const base = this.publicAppBaseUrl();
-    return `${base}${path}?${query.toString()}`;
+    return this.publicRouteUrl(path, query);
+  }
+
+  private invoicePaymentUrl(): string {
+    const id = this.draftId() || 'preview';
+    const number = this.quoteNumberDisplay();
+    const hostedPaymentLink = this.paymentSettings.createHostedPaymentLink(id, number) || '';
+    const query = new URLSearchParams();
+    query.set('invoiceId', id);
+    query.set('tenantId', String(this.tenantContext.tenantId() || 'main').trim().toLowerCase() || 'main');
+    query.set('invoiceNumber', number);
+    query.set('customerName', this.customerDisplayName(this.selectedCustomer()));
+    query.set('customerEmail', String(this.selectedCustomer()?.email || '').trim());
+    query.set('vehicle', this.customerVehicleSummary(this.selectedCustomer()) || 'Vehicle details pending');
+    query.set('businessName', this.companyName());
+    query.set('amount', this.formatMoney(this.quoteGrandTotal()));
+    query.set('dueDate', this.quoteExpirationDisplay());
+    query.set('paymentUrl', hostedPaymentLink);
+    query.set('paymentProvider', String(this.paymentSettings.defaultProvider()?.key || '').trim().toLowerCase());
+    return this.publicRouteUrl('/invoice-payment', query);
   }
 
   private publicAppBaseUrl(): string {
+    if (typeof window !== 'undefined' && window.location?.hostname) {
+      const host = String(window.location.hostname || '').trim().toLowerCase();
+      if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0') {
+        return String(window.location.origin).trim().replace(/\/+$/, '');
+      }
+    }
     const configured = String(environment.publicAppUrl || '').trim().replace(/\/+$/, '');
     if (configured) return configured;
     if (typeof window !== 'undefined' && window.location?.origin) {
       return window.location.origin.replace(/\/+$/, '');
     }
     return '';
+  }
+
+  private publicRouteUrl(path: string, query?: URLSearchParams): string {
+    const normalizedPath = `/${String(path || '').replace(/^\/+/, '')}`;
+    const base = this.publicAppBaseUrl() || (typeof window !== 'undefined' ? String(window.location.origin || '').trim() : '');
+    if (!base) {
+      const suffix = query && query.toString() ? `?${query.toString()}` : '';
+      return `${normalizedPath}${suffix}`;
+    }
+    try {
+      const url = new URL(normalizedPath, base);
+      if (query && query.toString()) url.search = query.toString();
+      return url.toString();
+    } catch {
+      const trimmed = base.replace(/\/+$/, '');
+      const suffix = query && query.toString() ? `?${query.toString()}` : '';
+      return `${trimmed}${normalizedPath}${suffix}`;
+    }
   }
 
   private resolveMergeTags(source: string): string {
@@ -1130,7 +1263,8 @@ export default class InvoicesNewComponent {
       quote_expiration_date: this.quoteExpirationDisplay(),
       quote_link: this.quotePublicUrl(),
       quote_accept_url: this.quoteActionUrl('accept'),
-      quote_decline_url: this.quoteActionUrl('decline')
+      quote_decline_url: this.quoteActionUrl('decline'),
+      invoice_pay_url: this.invoicePaymentUrl()
     };
 
     return String(source || '').replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, (_match, key: string) => {

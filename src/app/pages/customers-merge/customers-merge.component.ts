@@ -81,6 +81,14 @@ export default class CustomersMergeComponent implements OnInit, OnDestroy {
     private readonly router: Router
   ) {}
 
+  openCustomerSms(customerId: string, event?: Event): void {
+    event?.preventDefault();
+    event?.stopPropagation();
+    const id = String(customerId || '').trim();
+    if (!id) return;
+    this.router.navigate(['/customers', id], { queryParams: { tab: 'sms' } });
+  }
+
   ngOnInit(): void {
     this.querySub = this.route.queryParamMap.subscribe(query => {
       const leftId = String(query.get('left') || query.get('current') || '').trim();

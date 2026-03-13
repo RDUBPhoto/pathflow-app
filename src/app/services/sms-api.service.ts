@@ -145,12 +145,20 @@ export class SmsApiService {
     return this.http.post<SmsSendResponse>('/api/sms', payload);
   }
 
-  listInbox(): Observable<SmsInboxResponse> {
-    return this.http.get<SmsInboxResponse>('/api/sms?scope=inbox');
+  listInbox(limit?: number): Observable<SmsInboxResponse> {
+    const normalizedLimit = typeof limit === 'number' && Number.isFinite(limit) && limit > 0
+      ? Math.floor(limit)
+      : 0;
+    const suffix = normalizedLimit > 0 ? `&limit=${normalizedLimit}` : '';
+    return this.http.get<SmsInboxResponse>(`/api/sms?scope=inbox${suffix}`);
   }
 
-  listCustomerMessages(customerId: string): Observable<SmsCustomerResponse> {
-    return this.http.get<SmsCustomerResponse>(`/api/sms?scope=customer&customerId=${encodeURIComponent(customerId)}`);
+  listCustomerMessages(customerId: string, limit?: number): Observable<SmsCustomerResponse> {
+    const normalizedLimit = typeof limit === 'number' && Number.isFinite(limit) && limit > 0
+      ? Math.floor(limit)
+      : 0;
+    const suffix = normalizedLimit > 0 ? `&limit=${normalizedLimit}` : '';
+    return this.http.get<SmsCustomerResponse>(`/api/sms?scope=customer&customerId=${encodeURIComponent(customerId)}${suffix}`);
   }
 
   listThreads(limit?: number): Observable<SmsThreadsResponse> {

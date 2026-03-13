@@ -59,7 +59,18 @@
       <div class="customer-fields">
         <div><span>Name</span><strong>{{ customerName(leftCustomer()) }}</strong></div>
         <div><span>Email</span><strong>{{ customerEmails(leftCustomer()) || '—' }}</strong></div>
-        <div><span>Phone</span><strong>{{ leftCustomer()!.phone || leftCustomer()!.mobile || '—' }}</strong></div>
+        <div>
+          <span>Phone</span>
+          <strong *ngIf="leftCustomer()!.phone || leftCustomer()!.mobile; else noLeftPhone">
+            <button
+              type="button"
+              class="phone-link-btn"
+              (click)="openCustomerSms(leftCustomer()!.id, $event)">
+              {{ leftCustomer()!.phone || leftCustomer()!.mobile }}
+            </button>
+          </strong>
+          <ng-template #noLeftPhone><strong>—</strong></ng-template>
+        </div>
         <div><span>Address</span><strong>{{ leftCustomer()!.address || '—' }}</strong></div>
         <div><span>Vehicle</span><strong>{{ customerVehicle(leftCustomer()) || '—' }}</strong></div>
         <div><span>Notes</span><strong>{{ leftCustomer()!.notes || '—' }}</strong></div>
@@ -83,7 +94,18 @@
       <div class="customer-fields">
         <div><span>Name</span><strong>{{ customerName(rightCustomer()) }}</strong></div>
         <div><span>Email</span><strong>{{ customerEmails(rightCustomer()) || '—' }}</strong></div>
-        <div><span>Phone</span><strong>{{ rightCustomer()!.phone || rightCustomer()!.mobile || '—' }}</strong></div>
+        <div>
+          <span>Phone</span>
+          <strong *ngIf="rightCustomer()!.phone || rightCustomer()!.mobile; else noRightPhone">
+            <button
+              type="button"
+              class="phone-link-btn"
+              (click)="openCustomerSms(rightCustomer()!.id, $event)">
+              {{ rightCustomer()!.phone || rightCustomer()!.mobile }}
+            </button>
+          </strong>
+          <ng-template #noRightPhone><strong>—</strong></ng-template>
+        </div>
         <div><span>Address</span><strong>{{ rightCustomer()!.address || '—' }}</strong></div>
         <div><span>Vehicle</span><strong>{{ customerVehicle(rightCustomer()) || '—' }}</strong></div>
         <div><span>Notes</span><strong>{{ rightCustomer()!.notes || '—' }}</strong></div>

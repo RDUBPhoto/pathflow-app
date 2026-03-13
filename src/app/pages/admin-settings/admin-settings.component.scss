@@ -878,6 +878,38 @@ ion-card-title {
   border-top: 1px solid var(--app-border-subtle);
 }
 
+.payment-gateway-list {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.payment-gateway-row {
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 12px;
+  padding: 10px;
+  background: var(--app-control-bg);
+}
+
+.payment-gateway-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.payment-gateway-name {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.payment-gateway-grid {
+  margin-top: 10px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 @media (max-width: 740px) {
   .toolbar-actions {
     flex-wrap: wrap;
@@ -919,6 +951,10 @@ ion-card-title {
   }
 
   .schedule-settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .payment-gateway-grid {
     grid-template-columns: 1fr;
   }
 

@@ -1,7 +1,7 @@
 const { TableClient } = require("@azure/data-tables");
 const { resolveTenantId } = require("../_shared/tenant");
 
-const TABLE = "quoteresponses";
+const TABLE = "invoiceresponses";
 const NOTIFICATIONS_TABLE = "notifications";
 const USERS_TABLE = "useraccess";
 const USERS_PARTITION = "v1";
@@ -158,13 +158,12 @@ function isLocalRequest(req) {
 
 function normalizeAction(value) {
   const action = asString(value).toLowerCase();
-  if (action === "accept" || action === "accepted") return "accept";
-  if (action === "decline" || action === "declined") return "decline";
+  if (action === "pay" || action === "paid") return "pay";
   return "";
 }
 
-function rowKeyForNotification(quoteId, stage, recipientKey) {
-  return String(`quote-${quoteId}-${stage}-${recipientKey}`)
+function rowKeyForNotification(invoiceId, stage, recipientKey) {
+  return String(`invoice-${invoiceId}-${stage}-${recipientKey}`)
     .toLowerCase()
     .replace(/[^a-z0-9._:-]+/g, "-")
     .replace(/-+/g, "-")
@@ -209,8 +208,7 @@ async function listTenantRecipients(userClient, tenantId) {
   for await (const entity of iter) {
     if (!userCanAccessTenant(entity, tenantId)) continue;
     const userId = asString(entity.userId || entity.rowKey);
-    const rawEmail = asString(entity.email);
-    const email = normalizeEmail(rawEmail.includes("@") ? rawEmail : "");
+    const email = normalizeEmail(entity.email || entity.rowKey);
     if (!userId && !email) continue;
     const dedupe = `${userId}|${email}`;
     if (seen.has(dedupe)) continue;
@@ -246,11 +244,10 @@ async function listAllUserRecipients(userClient) {
   return out;
 }
 
-async function createQuoteStageNotifications(notificationClient, userClient, tenantId, payload) {
-  const quoteId = asString(payload.quoteId);
-  if (!quoteId) return 0;
-  const stage = asString(payload.stage).toLowerCase() === "declined" ? "declined" : "accepted";
-  const action = stage === "accepted" ? "accept" : "decline";
+async function createInvoicePaidNotifications(notificationClient, userClient, tenantId, payload) {
+  const invoiceId = asString(payload.invoiceId);
+  if (!invoiceId) return 0;
+  const paymentKind = asString(payload.paymentKind).toLowerCase() === "final" ? "final" : "initial";
   let recipients = await listTenantRecipients(userClient, tenantId);
   // Fallback so notifications still appear if tenant access mapping is temporarily incomplete.
   if (!recipients.length) {
@@ -273,7 +270,7 @@ async function createQuoteStageNotifications(notificationClient, userClient, ten
   recipients = Array.from(deduped.values());
   if (!recipients.length) return 0;
 
-  const quoteNumber = asString(payload.quoteNumber) || quoteId;
+  const invoiceNumber = asString(payload.invoiceNumber) || invoiceId;
   const customerName = asString(payload.customerName) || "Customer";
   const nowIso = new Date().toISOString();
   let count = 0;
@@ -281,24 +278,24 @@ async function createQuoteStageNotifications(notificationClient, userClient, ten
   for (const recipient of recipients) {
     const recipientKey = asString(recipient.targetEmail || recipient.targetUserId);
     if (!recipientKey) continue;
-    const rowKey = rowKeyForNotification(quoteId, stage, recipientKey);
+    const rowKey = rowKeyForNotification(invoiceId, "paid", recipientKey);
     await notificationClient.upsertEntity(
       {
         partitionKey: tenantId,
         rowKey,
-        type: "quote-response",
-        title: `Quote ${quoteNumber} ${stage}`,
-        message: `${customerName} ${stage === "accepted" ? "accepted" : "declined"} quote ${quoteNumber}.`,
-        route: `/quotes/${encodeURIComponent(quoteId)}`,
-        entityType: "quote",
-        entityId: quoteId,
+        type: "invoice-response",
+        title: `${paymentKind === "final" ? "Final invoice" : "Invoice"} ${invoiceNumber} paid`,
+        message: `${customerName} paid ${paymentKind === "final" ? "final invoice" : "invoice"} ${invoiceNumber}.`,
+        route: `/invoices/${encodeURIComponent(invoiceId)}`,
+        entityType: "invoice",
+        entityId: invoiceId,
         metadataJson: JSON.stringify({
-          quoteId,
-          quoteNumber,
+          invoiceId,
+          invoiceNumber,
           customerName,
-          action,
-          stage,
-          source: "public-quote-link"
+          action: "pay",
+          paymentKind,
+          source: "public-invoice-link"
         }),
         targetUserId: asString(recipient.targetUserId),
         targetEmail: normalizeEmail(recipient.targetEmail),
@@ -341,18 +338,18 @@ module.exports = async function (context, req) {
         return;
       }
 
-      const quoteId = asString(readQueryParam(req, "quoteId"));
-      if (quoteId) {
+      const invoiceId = asString(readQueryParam(req, "invoiceId"));
+      if (invoiceId) {
         try {
-          const item = await client.getEntity(tenantId, quoteId);
+          const item = await client.getEntity(tenantId, invoiceId);
           context.res = json(200, {
             ok: true,
             tenantId,
             item: {
-              quoteId,
+              invoiceId,
               action: asString(item.action),
               stage: asString(item.stage),
-              quoteNumber: asString(item.quoteNumber),
+              invoiceNumber: asString(item.invoiceNumber),
               updatedAt: asString(item.updatedAt)
             }
           });
@@ -372,10 +369,10 @@ module.exports = async function (context, req) {
       });
       for await (const entity of iter) {
         out.push({
-          quoteId: asString(entity.rowKey),
+          invoiceId: asString(entity.rowKey),
           action: asString(entity.action),
           stage: asString(entity.stage),
-          quoteNumber: asString(entity.quoteNumber),
+          invoiceNumber: asString(entity.invoiceNumber),
           updatedAt: asString(entity.updatedAt)
         });
       }
@@ -389,27 +386,27 @@ module.exports = async function (context, req) {
       return;
     }
 
-    const quoteId = asString(body.quoteId || body.id);
+    const invoiceId = asString(body.invoiceId || body.id);
     const action = normalizeAction(body.action);
-    if (!quoteId) {
-      context.res = json(400, { ok: false, error: "quoteId is required." });
+    if (!invoiceId) {
+      context.res = json(400, { ok: false, error: "invoiceId is required." });
       return;
     }
     if (!action) {
-      context.res = json(400, { ok: false, error: "action must be `accept` or `decline`." });
+      context.res = json(400, { ok: false, error: "action must be `pay`." });
       return;
     }
 
     const now = new Date().toISOString();
-    const stage = action === "accept" ? "accepted" : "declined";
+    const stage = "accepted";
     await client.upsertEntity(
       {
         partitionKey: tenantId,
-        rowKey: quoteId,
-        quoteId,
+        rowKey: invoiceId,
+        invoiceId,
         action,
         stage,
-        quoteNumber: asString(body.quoteNumber),
+        invoiceNumber: asString(body.invoiceNumber),
         customerName: asString(body.customerName),
         vehicle: asString(body.vehicle),
         businessName: asString(body.businessName),
@@ -418,18 +415,18 @@ module.exports = async function (context, req) {
       "Merge"
     );
 
-    const notificationsCreated = await createQuoteStageNotifications(notificationClient, userClient, tenantId, {
-      quoteId,
-      quoteNumber: asString(body.quoteNumber),
+    const notificationsCreated = await createInvoicePaidNotifications(notificationClient, userClient, tenantId, {
+      invoiceId,
+      invoiceNumber: asString(body.invoiceNumber),
       customerName: asString(body.customerName),
-      stage,
+      paymentKind: asString(body.paymentKind),
       actor
     });
 
     context.res = json(200, {
       ok: true,
       tenantId,
-      quoteId,
+      invoiceId,
       action,
       stage,
       updatedAt: now,

@@ -1,0 +1,125 @@
+<ion-content class="invoice-payment-content">
+  <div class="invoice-payment-wrap">
+    <section class="invoice-payment-card">
+      <div class="invoice-header">
+        <div class="company-block">
+          <img *ngIf="businessLogoUrl()" [src]="businessLogoUrl()" alt="Company logo" class="company-logo">
+          <div class="company-name">{{ detail()?.businessName || businessName() }}</div>
+          <div class="muted-line" *ngFor="let line of businessAddressLines()">{{ line }}</div>
+          <div class="muted-line" *ngIf="detail()?.businessPhone"><strong>Phone:</strong> {{ detail()?.businessPhone }}</div>
+          <div class="muted-line" *ngIf="detail()?.businessEmail">{{ detail()?.businessEmail }}</div>
+        </div>
+
+        <div class="invoice-meta">
+          <h1>INVOICE</h1>
+          <div><strong>Invoice #:</strong> {{ invoiceNumber() }}</div>
+          <div><strong>Invoice Date:</strong> {{ detail()?.issueDate || '' }}</div>
+          <div *ngIf="dueDate()"><strong>Due Date:</strong> {{ dueDate() }}</div>
+        </div>
+      </div>
+
+      <div class="billto-block">
+        <div class="billto-title">Bill To</div>
+        <div class="billto-name">{{ customerName() }}</div>
+        <div class="muted-line" *ngFor="let line of customerAddressLines()">{{ line }}</div>
+        <div class="muted-line" *ngIf="detail()?.customerPhone"><strong>Phone:</strong> {{ detail()?.customerPhone }}</div>
+        <div class="muted-line" *ngIf="detail()?.customerEmail">{{ detail()?.customerEmail }}</div>
+        <div class="muted-line"><strong>Vehicle:</strong> {{ vehicle() }}</div>
+      </div>
+
+      <table class="invoice-table" *ngIf="lineItems().length">
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th>Description</th>
+            <th>Qty</th>
+            <th>Price</th>
+            <th>Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let item of lineItems()">
+            <td>{{ item.type === 'labor' ? 'Labor' : 'Part' }}</td>
+            <td>{{ item.description }}</td>
+            <td>{{ item.quantity }}</td>
+            <td>{{ money(item.unitPrice) }}</td>
+            <td>{{ money(item.lineTotal) }}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="totals-panel">
+        <div class="totals-row">
+          <span>Subtotal:</span>
+          <strong>{{ money(displaySubtotal()) }}</strong>
+        </div>
+        <div class="totals-row">
+          <span>Tax:</span>
+          <strong>{{ money(displayTax()) }}</strong>
+        </div>
+        <div class="totals-row grand">
+          <span>Invoice Total:</span>
+          <strong>{{ money(displayTotal()) }}</strong>
+        </div>
+        <div class="totals-row" *ngIf="displayPaid() > 0">
+          <span>Paid To Date:</span>
+          <strong>{{ money(displayPaid()) }}</strong>
+        </div>
+        <div class="totals-row grand">
+          <span>Amount Due Now:</span>
+          <strong>{{ money(displayDue()) }}</strong>
+        </div>
+        <div class="totals-row" *ngIf="dueDate()">
+          <span>Due Date:</span>
+          <strong>{{ dueDate() }}</strong>
+        </div>
+      </div>
+
+      <div class="card-form" *ngIf="isAuthorizeNet()">
+        <label>
+          <span>Cardholder Name</span>
+          <input type="text" [ngModel]="cardholderName()" (ngModelChange)="cardholderName.set($event)" placeholder="Jane Customer">
+        </label>
+        <label>
+          <span>Card Number</span>
+          <input type="text" inputmode="numeric" [ngModel]="cardNumber()" (ngModelChange)="cardNumber.set($event)" placeholder="4111111111111111">
+        </label>
+        <div class="card-form-row">
+          <label>
+            <span>Exp Month</span>
+            <input type="text" inputmode="numeric" [ngModel]="expiryMonth()" (ngModelChange)="expiryMonth.set($event)" placeholder="12">
+          </label>
+          <label>
+            <span>Exp Year</span>
+            <input type="text" inputmode="numeric" [ngModel]="expiryYear()" (ngModelChange)="expiryYear.set($event)" placeholder="2030">
+          </label>
+          <label>
+            <span>CVV</span>
+            <input type="password" inputmode="numeric" [ngModel]="cardCode()" (ngModelChange)="cardCode.set($event)" placeholder="123">
+          </label>
+          <label>
+            <span>ZIP</span>
+            <input type="text" inputmode="numeric" [ngModel]="billingZip()" (ngModelChange)="billingZip.set($event)" placeholder="78154">
+          </label>
+        </div>
+        <p class="help-text">Sandbox example card: 4111111111111111, any future expiry, CVV 123.</p>
+      </div>
+
+      <button
+        type="button"
+        class="checkout-btn"
+        [disabled]="!canCheckout() || paymentState() === 'processing' || paymentState() === 'paid'"
+        (click)="checkoutAndPay()">
+        {{ paymentState() === 'paid' ? 'Paid' : (paymentState() === 'processing' ? 'Processing...' : (isAuthorizeNet() ? 'Pay Invoice' : 'Checkout & Pay')) }}
+      </button>
+
+      <div class="invoice-comments" *ngIf="detail()?.customerNote">
+        <h3>Comments</h3>
+        <p *ngIf="detail()?.customerNote">{{ detail()?.customerNote }}</p>
+      </div>
+
+      <p class="status-message" *ngIf="statusMessage()">{{ statusMessage() }}</p>
+      <p class="status-message error" *ngIf="!canCheckout() && checkoutBlockedReason()">{{ checkoutBlockedReason() }}</p>
+    </section>
+  </div>
+</ion-content>

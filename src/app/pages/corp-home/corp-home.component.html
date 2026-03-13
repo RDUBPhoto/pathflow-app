@@ -5,7 +5,7 @@
       <div class="brand">Pathflow</div>
       <div class="actions">
         <ion-button fill="clear" routerLink="/signup">Get Started</ion-button>
-        <ion-button routerLink="/login">Login</ion-button>
+        <ion-button (click)="openLogin()">Login</ion-button>
       </div>
     </header>
 
@@ -17,7 +17,7 @@
       </p>
       <div class="cta-row">
         <ion-button size="large" routerLink="/signup">Start Free Trial</ion-button>
-        <ion-button size="large" fill="outline" routerLink="/login">Sign In</ion-button>
+        <ion-button size="large" fill="outline" (click)="openLogin()">Sign In</ion-button>
       </div>
     </section>
 

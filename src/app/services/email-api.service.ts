@@ -146,12 +146,20 @@ export class EmailApiService {
     });
   }
 
-  listInbox(): Observable<EmailInboxResponse> {
-    return this.http.get<EmailInboxResponse>('/api/email?scope=inbox');
+  listInbox(limit?: number): Observable<EmailInboxResponse> {
+    const normalizedLimit = typeof limit === 'number' && Number.isFinite(limit) && limit > 0
+      ? Math.floor(limit)
+      : 0;
+    const suffix = normalizedLimit > 0 ? `&limit=${normalizedLimit}` : '';
+    return this.http.get<EmailInboxResponse>(`/api/email?scope=inbox${suffix}`);
   }
 
-  listCustomerMessages(customerId: string): Observable<EmailCustomerResponse> {
-    return this.http.get<EmailCustomerResponse>(`/api/email?scope=customer&customerId=${encodeURIComponent(customerId)}`);
+  listCustomerMessages(customerId: string, limit?: number): Observable<EmailCustomerResponse> {
+    const normalizedLimit = typeof limit === 'number' && Number.isFinite(limit) && limit > 0
+      ? Math.floor(limit)
+      : 0;
+    const suffix = normalizedLimit > 0 ? `&limit=${normalizedLimit}` : '';
+    return this.http.get<EmailCustomerResponse>(`/api/email?scope=customer&customerId=${encodeURIComponent(customerId)}${suffix}`);
   }
 
   listThreads(limit?: number): Observable<EmailThreadsResponse> {
@@ -169,6 +177,7 @@ export class EmailApiService {
     subject: string;
     message: string;
     html?: string;
+    tenantId?: string;
   }): Observable<EmailSendResponse> {
     return this.http.post<EmailSendResponse>('/api/email', payload);
   }

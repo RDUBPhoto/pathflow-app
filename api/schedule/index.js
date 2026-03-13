@@ -46,9 +46,19 @@ function isActiveScheduleRecord(record, nowMs) {
   const resource = asString(record.resource);
   if (!customerId || !resource) return false;
   const startMs = toMillis(record.start);
-  const endMs = toMillis(record.end);
+  const endMs = effectiveScheduleEndMs(record);
   if (!startMs || !endMs || endMs <= startMs) return false;
   return startMs <= nowMs && nowMs < endMs;
+}
+
+function effectiveScheduleEndMs(record) {
+  const plannedEndMs = toMillis(record && record.end);
+  const actualEndMs = toMillis(record && record.actualEnd);
+  const releasedMs = toMillis(record && record.bayReleasedAt);
+  let effective = plannedEndMs;
+  if (actualEndMs && (!effective || actualEndMs < effective)) effective = actualEndMs;
+  if (releasedMs && (!effective || releasedMs < effective)) effective = releasedMs;
+  return effective;
 }
 
 function compareSchedulePriority(a, b) {
@@ -300,6 +310,8 @@ async function reconcileWorkTimers(conn, context) {
       id: entity.rowKey,
       start: pick(entity.start),
       end: pick(entity.end),
+      actualEnd: pick(entity.actualEnd),
+      bayReleasedAt: pick(entity.bayReleasedAt),
       resource: pick(entity.resource),
       customerId: pick(entity.customerId),
       isBlocked: bool(entity.isBlocked),
@@ -394,6 +406,8 @@ module.exports = async function (context, req) {
           id: e.rowKey,
           start: pick(e.start),
           end: pick(e.end),
+          actualEnd: pick(e.actualEnd),
+          bayReleasedAt: pick(e.bayReleasedAt),
           resource: pick(e.resource),
           customerId: pick(e.customerId),
           isBlocked: bool(e.isBlocked),
@@ -417,6 +431,8 @@ module.exports = async function (context, req) {
       const customerId = pick(b.customerId).trim();
       const title = pick(b.title).trim();
       const notes = pick(b.notes).trim();
+      const actualEnd = Object.prototype.hasOwnProperty.call(b, "actualEnd") ? pick(b.actualEnd).trim() : null;
+      const bayReleasedAt = Object.prototype.hasOwnProperty.call(b, "bayReleasedAt") ? pick(b.bayReleasedAt).trim() : null;
       const isBlocked = bool(b.isBlocked);
       const hasPartRequests = Object.prototype.hasOwnProperty.call(b, "partRequests")
         || Object.prototype.hasOwnProperty.call(b, "parts")
@@ -443,6 +459,8 @@ module.exports = async function (context, req) {
           isBlocked,
           title,
           notes,
+          actualEnd: "",
+          bayReleasedAt: "",
           partRequests: JSON.stringify(requestedPartRequests || []),
           createdAt: now,
           updatedAt: now
@@ -477,6 +495,8 @@ module.exports = async function (context, req) {
         if (Object.prototype.hasOwnProperty.call(b, "isBlocked")) patch.isBlocked = isBlocked;
         if (Object.prototype.hasOwnProperty.call(b, "title")) patch.title = title;
         if (Object.prototype.hasOwnProperty.call(b, "notes")) patch.notes = notes;
+        if (actualEnd !== null) patch.actualEnd = actualEnd;
+        if (bayReleasedAt !== null) patch.bayReleasedAt = bayReleasedAt;
         if (requestedPartRequests != null) patch.partRequests = JSON.stringify(requestedPartRequests);
         await client.upsertEntity(patch, "Merge");
 

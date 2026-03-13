@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, ViewChild, signal, computed, OnDestroy } from '@angular/core';
+import { Component, Input, Output, EventEmitter, ViewChild, signal, computed, OnDestroy, OnChanges, SimpleChanges } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
@@ -42,7 +42,7 @@ const SCHEDULE_SETTINGS_KEY = 'schedule.settings';
   templateUrl: './schedule-modal.component.html',
   styleUrls: ['./schedule-modal.component.scss']
 })
-export default class ScheduleModalComponent implements OnDestroy {
+export default class ScheduleModalComponent implements OnDestroy, OnChanges {
   @Input() isOpen: boolean = false;
   @Input() customerId: string | null = null;
 
@@ -73,6 +73,7 @@ export default class ScheduleModalComponent implements OnDestroy {
   editorError = signal('');
   private editorInitialSnapshot = signal('');
   readonly editorDirty = computed(() => this.editorSnapshotValue() !== this.editorInitialSnapshot());
+  private afterEditorDismissAction: (() => void) | null = null;
 
   config: DayPilot.SchedulerConfig = {
     startDate: DayPilot.Date.today(),
@@ -178,7 +179,14 @@ export default class ScheduleModalComponent implements OnDestroy {
     this.loadSettings();
   }
 
-  ngOnChanges() {
+  ngOnChanges(changes: SimpleChanges): void {
+    if (changes['isOpen'] && !this.isOpen) {
+      this.editorOpen.set(false);
+      this.afterEditorDismissAction = null;
+      this.editorError.set('');
+      this.clearStatus();
+      return;
+    }
     if (this.isOpen) {
       this.loadAll();
     }
@@ -186,6 +194,18 @@ export default class ScheduleModalComponent implements OnDestroy {
 
   close() {
     this.closed.emit();
+  }
+
+  closeEditor(): void {
+    this.afterEditorDismissAction = null;
+    this.editorOpen.set(false);
+  }
+
+  onEditorDidDismiss(): void {
+    this.editorOpen.set(false);
+    const action = this.afterEditorDismissAction;
+    this.afterEditorDismissAction = null;
+    if (action) action();
   }
 
   private loadAll() {
@@ -305,10 +325,12 @@ export default class ScheduleModalComponent implements OnDestroy {
     if (id) {
       this.scheduleApi.update({ id, ...base }).subscribe({
         next: () => {
+          this.afterEditorDismissAction = () => {
+            this.loadAll();
+            this.saved.emit();
+            this.setStatusSuccess('Appointment saved.');
+          };
           this.editorOpen.set(false);
-          this.loadAll();
-          this.saved.emit();
-          this.setStatusSuccess('Appointment saved.');
         },
         error: () => {
           this.editorError.set('Could not save appointment. Try again.');
@@ -319,10 +341,12 @@ export default class ScheduleModalComponent implements OnDestroy {
     }
     this.scheduleApi.create(base).subscribe({
       next: () => {
+        this.afterEditorDismissAction = () => {
+          this.loadAll();
+          this.saved.emit();
+          this.setStatusSuccess('Appointment saved.');
+        };
         this.editorOpen.set(false);
-        this.loadAll();
-        this.saved.emit();
-        this.setStatusSuccess('Appointment saved.');
       },
       error: () => {
         this.editorError.set('Could not save appointment. Try again.');
@@ -333,14 +357,16 @@ export default class ScheduleModalComponent implements OnDestroy {
 
   deleteEditor() {
     const id = this.editorId();
-    if (!id) { this.editorOpen.set(false); return; }
+    if (!id) { this.closeEditor(); return; }
     if (!window.confirm('Delete this appointment?')) return;
     this.scheduleApi.delete(id).subscribe({
       next: () => {
+        this.afterEditorDismissAction = () => {
+          this.loadAll();
+          this.saved.emit();
+          this.setStatusSuccess('Appointment deleted.');
+        };
         this.editorOpen.set(false);
-        this.loadAll();
-        this.saved.emit();
-        this.setStatusSuccess('Appointment deleted.');
       },
       error: () => this.setStatusError('Could not delete appointment.')
     });

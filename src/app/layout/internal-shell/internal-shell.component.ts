@@ -65,6 +65,7 @@ type UnifiedInboxMessage = {
 export class InternalShellComponent implements OnInit, OnDestroy {
   private readonly dayMs = 24 * 60 * 60 * 1000;
   private readonly hubThreadLimit = 6;
+  private readonly inboxFetchLimit = 200;
   private readonly mobileBreakpoint = 900;
   private readonly isLocalHost = typeof window !== 'undefined'
     && ['localhost', '127.0.0.1'].includes(window.location.hostname);
@@ -173,9 +174,9 @@ export class InternalShellComponent implements OnInit, OnDestroy {
       this.inboxLoading.set(true);
       this.inboxError.set('');
     }
-    this.smsApi.listInbox().subscribe({
+    this.smsApi.listInbox(this.inboxFetchLimit).subscribe({
       next: smsRes => {
-        this.emailApi.listInbox().subscribe({
+        this.emailApi.listInbox(this.inboxFetchLimit).subscribe({
           next: emailRes => {
             const smsItems = (Array.isArray(smsRes.items) ? smsRes.items : []).map(item => this.toUnifiedSms(item));
             const emailItems = (Array.isArray(emailRes.items) ? emailRes.items : []).map(item => this.toUnifiedEmail(item));
@@ -198,7 +199,7 @@ export class InternalShellComponent implements OnInit, OnDestroy {
         });
       },
       error: () => {
-        this.emailApi.listInbox().subscribe({
+        this.emailApi.listInbox(this.inboxFetchLimit).subscribe({
           next: emailRes => {
             const emailItems = (Array.isArray(emailRes.items) ? emailRes.items : []).map(item => this.toUnifiedEmail(item));
             this.unreadMessages.set(emailItems);

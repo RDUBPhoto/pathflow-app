@@ -47,6 +47,9 @@ type NotificationsAllResponse = {
   scope: 'all';
   unreadCount: number;
   total: number;
+  hasMore: boolean;
+  offset: number;
+  limit: number;
   items: AppNotification[];
 };
 
@@ -83,11 +86,13 @@ export class NotificationsApiService {
     return this.http.get<NotificationsRecentResponse>('/api/notifications', { params });
   }
 
-  listAll(limit = 100): Observable<NotificationsAllResponse> {
+  listAll(limit = 100, offset = 0): Observable<NotificationsAllResponse> {
+    const safeOffset = Number.isFinite(offset) && offset > 0 ? Math.floor(offset) : 0;
     const params = this.withActorParams(
       new HttpParams()
         .set('scope', 'all')
         .set('limit', String(this.normalizeLimit(limit, 100)))
+        .set('offset', String(safeOffset))
     );
     return this.http.get<NotificationsAllResponse>('/api/notifications', { params });
   }

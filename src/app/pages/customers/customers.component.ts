@@ -173,6 +173,14 @@ export default class CustomersComponent {
     this.router.navigate(['/customers', c.id]);
   }
 
+  openSmsForCustomer(c: UICustomer, event?: Event): void {
+    event?.preventDefault();
+    event?.stopPropagation();
+    const customerId = String(c?.id || '').trim();
+    if (!customerId) return;
+    this.router.navigate(['/customers', customerId], { queryParams: { tab: 'sms' } });
+  }
+
   openDuplicateReview() {
     this.router.navigate(['/customers/duplicates']);
   }

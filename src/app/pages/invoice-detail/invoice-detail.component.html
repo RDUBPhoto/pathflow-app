@@ -37,6 +37,9 @@
         <div class="invoice-meta">
           <span>{{ detail.customerName }}</span>
           <span>{{ detail.template }}</span>
+          <span class="status-chip completed" *ngIf="detail.documentType === 'invoice' && detail.stage === 'completed'">
+            Completed
+          </span>
         </div>
       </div>
 
@@ -44,34 +47,57 @@
         <label class="field stage-field">
           <span>Stage</span>
           <select [value]="detail.stage" (change)="setStage($any($event.target).value)">
-            <option *ngFor="let stage of stageOptions" [value]="stage">
-              {{ stage | titlecase }}
+            <option *ngFor="let stage of stageOptions()" [value]="stage">
+              {{ stageDisplayLabel(stage) }}
             </option>
           </select>
         </label>
-        <ion-button size="small" fill="outline" (click)="openInvoiceList()">
-          Back To {{ detail.documentType === 'quote' ? 'Quotes' : 'Invoices' }}
+        <ion-button size="small" fill="outline" *ngIf="detail.documentType !== 'quote' && !isFinalInvoiceMode()" (click)="openInvoiceList()">
+          Back To Invoices
         </ion-button>
         <ion-button
           size="small"
           fill="outline"
           *ngIf="detail.documentType === 'quote' && detail.stage === 'accepted'"
           (click)="createInvoiceFromQuote()">
-          Build Invoice
+          Create Invoice
+        </ion-button>
+        <ion-button
+          size="small"
+          [fill]="isFinalInvoiceMode() ? 'solid' : 'outline'"
+          *ngIf="detail.documentType === 'invoice'"
+          [disabled]="sendingInvoice() || isFinalInvoiceSendDisabled()"
+          (click)="openSendInvoiceModal()">
+          {{ sendingInvoice() ? 'Sending...' : sendInvoiceLabel() }}
+        </ion-button>
+        <ion-button
+          size="small"
+          fill="outline"
+          *ngIf="detail.documentType === 'invoice' && detail.stage === 'accepted' && !isFinalInvoiceMode()"
+          [disabled]="emailingPaidReceipt()"
+          (click)="emailPaidReceipt()">
+          {{ emailingPaidReceipt() ? 'Emailing...' : 'Email Receipt' }}
+        </ion-button>
+        <ion-button
+          size="small"
+          fill="outline"
+          *ngIf="detail.documentType === 'invoice' && detail.stage === 'accepted' && !isFinalInvoiceMode()"
+          [disabled]="textingPaidReceipt()"
+          (click)="sendPaidReceiptSms()">
+          {{ textingPaidReceipt() ? 'Sending SMS...' : 'Send Receipt SMS' }}
+        </ion-button>
+        <ion-button
+          size="small"
+          fill="outline"
+          *ngIf="detail.documentType === 'invoice' && isFinalInvoiceMode()"
+          (click)="printPaidInvoice()">
+          Print Invoice
         </ion-button>
         <ion-button size="small" (click)="save()" [disabled]="!canSave()">
           {{ saving() ? 'Saving...' : ('Save ' + documentTypeLabel()) }}
         </ion-button>
       </div>
     </section>
-
-    <div
-      class="status-row"
-      *ngIf="status()"
-      [class.success]="statusTone() === 'success'"
-      [class.error]="statusTone() === 'error'">
-      {{ status() }}
-    </div>
 
     <section class="editor-grid" *ngIf="invoice() as detail">
       <article class="glass-surface form-card">
@@ -398,9 +424,30 @@
         <h3>Timeline</h3>
         <div class="timeline-empty" *ngIf="!detail.timeline.length">No timeline entries yet.</div>
         <ul class="timeline-list" *ngIf="detail.timeline.length">
-          <li class="timeline-item" *ngFor="let entry of detail.timeline">
-            <div class="timeline-time">{{ entry.createdAt | date:'short' }}</div>
-            <div class="timeline-message">{{ entry.message }}</div>
+          <li
+            class="timeline-item"
+            *ngFor="let entry of detail.timeline"
+            [class.timeline-right]="isCustomerTimelineEntry(entry)"
+            [class.timeline-left]="!isCustomerTimelineEntry(entry)">
+            <div
+              class="timeline-marker"
+              [class.is-draft]="timelineMarkerKind(entry.message) === 'draft'"
+              [class.is-sent]="timelineMarkerKind(entry.message) === 'sent'"
+              [class.is-accepted]="timelineMarkerKind(entry.message) === 'accepted'"
+              [class.is-declined]="timelineMarkerKind(entry.message) === 'declined'"
+              [class.is-paused]="timelineMarkerKind(entry.message) === 'paused'">
+              <ion-icon [name]="timelineMarkerGlyph(entry.message)"></ion-icon>
+            </div>
+            <article
+              class="timeline-content"
+              [class.is-system-entry]="!isCustomerTimelineEntry(entry)"
+              [class.is-customer-entry]="isCustomerTimelineEntry(entry)">
+              <div class="timeline-actor-row">
+                <span class="timeline-actor-label">{{ timelineActorName(entry) }}</span>
+              </div>
+              <div class="timeline-time">{{ entry.createdAt | date:'short' }}</div>
+              <div class="timeline-message">{{ entry.message }}</div>
+            </article>
           </li>
         </ul>
       </article>
@@ -419,7 +466,69 @@
           <span>Total</span>
           <strong>{{ totals().total | currency:'USD':'symbol':'1.2-2' }}</strong>
         </div>
+        <div class="total-row" *ngIf="detail.documentType === 'invoice'">
+          <span>Paid To Date</span>
+          <strong>{{ paidAmount() | currency:'USD':'symbol':'1.2-2' }}</strong>
+        </div>
+        <div class="total-row total-grand" *ngIf="detail.documentType === 'invoice'">
+          <span>Amount Due</span>
+          <strong>{{ amountDue() | currency:'USD':'symbol':'1.2-2' }}</strong>
+        </div>
       </article>
     </section>
   </ng-template>
+
+  <ion-modal [isOpen]="sendInvoiceModalOpen()" (didDismiss)="closeSendInvoiceModal()">
+    <ng-template>
+      <ion-header>
+        <ion-toolbar>
+          <ion-title>{{ sendInvoiceLabel() }}</ion-title>
+          <ion-buttons slot="end">
+            <ion-button [disabled]="sendingInvoice()" (click)="closeSendInvoiceModal()">Close</ion-button>
+          </ion-buttons>
+        </ion-toolbar>
+      </ion-header>
+      <ion-content class="ion-padding send-invoice-modal-content">
+        <div class="send-invoice-options">
+          <p>Select how to send this invoice:</p>
+          <p class="send-due">Amount due to request: <strong>{{ amountDue() | currency:'USD':'symbol':'1.2-2' }}</strong></p>
+
+          <label class="check-row modal-check-row">
+            <span class="modal-check-main">
+              <input
+                type="checkbox"
+                [checked]="sendInvoiceViaEmail()"
+                [disabled]="!canSendInvoiceViaEmail() || sendingInvoice()"
+                (change)="sendInvoiceViaEmail.set($any($event.target).checked)" />
+              <span>Email</span>
+            </span>
+            <span class="channel-target" *ngIf="invoiceEmailTarget()">{{ invoiceEmailTarget() }}</span>
+            <span class="channel-target missing" *ngIf="!invoiceEmailTarget()">No customer email on file</span>
+          </label>
+
+          <label class="check-row modal-check-row">
+            <span class="modal-check-main">
+              <input
+                type="checkbox"
+                [checked]="sendInvoiceViaSms()"
+                [disabled]="!canSendInvoiceViaSms() || sendingInvoice()"
+                (change)="sendInvoiceViaSms.set($any($event.target).checked)" />
+              <span>SMS</span>
+            </span>
+            <span class="channel-target" *ngIf="invoiceSmsTarget()">{{ invoiceSmsTarget() }}</span>
+            <span class="channel-target missing" *ngIf="!invoiceSmsTarget()">No customer phone on file</span>
+          </label>
+        </div>
+
+        <div class="send-invoice-actions">
+          <ion-button fill="outline" [disabled]="sendingInvoice()" (click)="closeSendInvoiceModal()">
+            Cancel
+          </ion-button>
+          <ion-button [disabled]="sendingInvoice() || !canConfirmSendInvoice()" (click)="confirmSendInvoiceModal()">
+            {{ sendingInvoice() ? 'Sending...' : 'Send Now' }}
+          </ion-button>
+        </div>
+      </ion-content>
+    </ng-template>
+  </ion-modal>
 </ion-content>

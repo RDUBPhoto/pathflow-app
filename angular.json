@@ -46,8 +46,8 @@
               "budgets": [
                 {
                   "type": "initial",
-                  "maximumWarning": "1.2mb",
-                  "maximumError": "1.3mb"
+                  "maximumWarning": "1.5mb",
+                  "maximumError": "1.6mb"
                 },
                 {
                   "type": "anyComponentStyle",
@@ -58,6 +58,7 @@
               "outputHashing": "all"
             },
             "development": {
+              "aot": true,
               "optimization": false,
               "extractLicenses": false,
               "sourceMap": true,
@@ -74,7 +75,8 @@
         "serve": {
           "builder": "@angular-devkit/build-angular:dev-server",
           "options": {
-            "proxyConfig": "proxy.conf.local.json"
+            "proxyConfig": "proxy.conf.local.json",
+            "hmr": false
           },
           "configurations": {
             "production": {

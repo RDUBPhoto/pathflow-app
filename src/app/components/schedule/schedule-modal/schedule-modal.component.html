@@ -30,13 +30,13 @@
   </ng-template>
 </ion-modal>
 
-<ion-modal [isOpen]="editorOpen()" (didDismiss)="editorOpen.set(false)">
+<ion-modal [isOpen]="editorOpen()" (didDismiss)="onEditorDidDismiss()">
   <ng-template>
     <ion-header>
       <ion-toolbar>
         <ion-title>Appointment</ion-title>
         <ion-buttons slot="end">
-          <ion-button (click)="editorOpen.set(false)">Close</ion-button>
+          <ion-button (click)="closeEditor()">Close</ion-button>
         </ion-buttons>
       </ion-toolbar>
     </ion-header>
@@ -95,7 +95,7 @@
             <ion-button fill="outline" color="danger" *ngIf="editorId()" (click)="deleteEditor()">Delete</ion-button>
           </div>
           <div class="modal-footer-right">
-            <ion-button fill="outline" (click)="editorOpen.set(false)">Cancel</ion-button>
+            <ion-button fill="outline" (click)="closeEditor()">Cancel</ion-button>
             <ion-button (click)="saveEditor()" [disabled]="!canSaveEditor()">Save</ion-button>
           </div>
         </div>

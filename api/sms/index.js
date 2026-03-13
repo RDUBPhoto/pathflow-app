@@ -1056,11 +1056,14 @@ module.exports = async function (context, req) {
 
       const all = await listAllMessages(smsTable, tenantId);
       await hydrateMessagesWithCustomerData(customersTable, tenantId, all);
+      const rawLimit = Number(queryParam(req, "limit"));
+      const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : 0;
 
       if (scope === "inbox") {
-        const items = all
+        let items = all
           .filter(item => item.direction === "inbound" && !item.read)
           .sort(sortByCreatedDesc);
+        if (limit > 0) items = items.slice(0, limit);
         context.res = json(200, { ok: true, tenantId, scope, items });
         return;
       }
@@ -1071,16 +1074,15 @@ module.exports = async function (context, req) {
           context.res = json(400, { error: "customerId is required for scope=customer." });
           return;
         }
-        const items = all
+        let items = all
           .filter(item => item.customerId === customerId)
           .sort(sortByCreatedAsc);
+        if (limit > 0) items = items.slice(Math.max(0, items.length - limit));
         context.res = json(200, { ok: true, tenantId, scope, customerId, items });
         return;
       }
 
       if (scope === "threads") {
-        const rawLimit = Number(queryParam(req, "limit"));
-        const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : 0;
         let items = toThreadSummaries(all);
         if (limit > 0) items = items.slice(0, limit);
         context.res = json(200, { ok: true, tenantId, scope, items });

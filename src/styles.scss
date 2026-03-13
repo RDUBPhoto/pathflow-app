@@ -558,3 +558,17 @@ html[data-theme='light'] ion-footer.modal-form-footer ion-button[disabled][fill=
 thead, th, tr, td {
   padding: 6px;
 }
+
+/* Guard against hidden overlays/backdrops intercepting clicks. */
+ion-modal.overlay-hidden,
+ion-popover.overlay-hidden,
+ion-alert.overlay-hidden,
+ion-action-sheet.overlay-hidden,
+ion-loading.overlay-hidden,
+ion-picker.overlay-hidden {
+  pointer-events: none !important;
+}
+
+ion-backdrop:not(.backdrop-show) {
+  pointer-events: none !important;
+}

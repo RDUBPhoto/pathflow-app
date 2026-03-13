@@ -6,6 +6,8 @@ export type ScheduleItem = {
   id: string;
   start: string;
   end: string;
+  actualEnd?: string;
+  bayReleasedAt?: string;
   resource: string;
   customerId?: string;
   isBlocked?: boolean;

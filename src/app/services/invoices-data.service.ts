@@ -1,8 +1,9 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { TenantContextService } from './tenant-context.service';
+import { AuthService } from '../auth/auth.service';
 
-export type InvoiceStage = 'draft' | 'sent' | 'accepted' | 'declined' | 'canceled' | 'expired';
-export type InvoiceBoardStage = Exclude<InvoiceStage, 'expired' | 'canceled'>;
+export type InvoiceStage = 'draft' | 'sent' | 'accepted' | 'completed' | 'declined' | 'canceled' | 'expired';
+export type InvoiceBoardStage = Exclude<InvoiceStage, 'expired' | 'canceled'> | 'completed';
 export type InvoiceDocumentType = 'quote' | 'invoice';
 export type InvoiceLineType = 'part' | 'labor';
 
@@ -40,10 +41,15 @@ export type InvoiceLineItem = {
   lineTotal: number;
 };
 
+export type InvoiceTimelineActorType = 'system' | 'customer';
+
 export type InvoiceTimelineEntry = {
   id: string;
   createdAt: string;
   message: string;
+  createdBy?: string;
+  createdById?: string;
+  actorType?: InvoiceTimelineActorType;
 };
 
 export type InvoiceDetail = {
@@ -86,6 +92,7 @@ export type InvoiceDetail = {
   subtotal: number;
   taxTotal: number;
   total: number;
+  paidAmount?: number;
 
   createdAt: string;
   updatedAt: string;
@@ -131,6 +138,7 @@ export type InvoiceDraftPayload = {
   paymentLinkUrl?: string | null;
 
   lineItems?: Array<Partial<InvoiceLineItem>> | null;
+  paidAmount?: number | null;
   stage?: InvoiceStage | null;
 };
 
@@ -512,16 +520,21 @@ const MOCK_INVOICES: InvoiceDetail[] = [
 ];
 
 const INVOICES_STORAGE_KEY_PREFIX = 'pathflow.invoices.v1';
+const LOCAL_PENDING_QUOTE_RESPONSES_KEY = 'pathflow.quoteResponses.pending.v1';
+const LOCAL_PENDING_INVOICE_RESPONSES_KEY = 'pathflow.invoiceResponses.pending.v1';
+const LOCALHOST_ONE_TIME_PURGE_MARKER_KEY = 'pathflow.local.invoiceQuotePurge.v5';
 
 @Injectable({ providedIn: 'root' })
 export class InvoicesDataService {
   private readonly tenantContext = inject(TenantContextService);
+  private readonly auth = inject(AuthService);
   private readonly state = signal<InvoiceDetail[]>([]);
 
   readonly invoiceDetails = computed(() => this.state().map(item => this.cloneInvoice(item)));
   readonly invoices = computed(() => this.state().map(item => this.toCard(item)));
 
   constructor() {
+    this.purgeLocalhostInvoiceQuoteDataOnce();
     effect(
       () => {
         const tenantId = this.storageTenantId();
@@ -549,7 +562,7 @@ export class InvoicesDataService {
     const numberPrefix = documentType === 'quote' ? 'QTE' : 'INV';
 
     const invoice = this.normalizeInvoice({
-      id: `inv-${sequence}`,
+      id: this.generateDocumentId(),
       documentType,
       invoiceNumber: `${numberPrefix}-${sequence}`,
       stage: payload.stage || 'draft',
@@ -588,15 +601,16 @@ export class InvoicesDataService {
       subtotal: 0,
       taxTotal: 0,
       total: 0,
+      paidAmount: this.safeNumber(payload.paidAmount, 0),
 
       createdAt: nowIso,
       updatedAt: nowIso,
       timeline: [
-        {
-          id: `timeline-${sequence}-created`,
-          createdAt: nowIso,
-          message: 'Draft created.'
-        }
+        this.createTimelineEntry(
+          `timeline-${sequence}-created`,
+          nowIso,
+          'Draft created.'
+        )
       ]
     });
 
@@ -608,11 +622,26 @@ export class InvoicesDataService {
     const key = String(id || '').trim();
     if (!key) return null;
     const lookup = key.toLowerCase();
-    const item = this.state().find(invoice => {
-      if (invoice.id === key) return true;
-      return String(invoice.invoiceNumber || '').trim().toLowerCase() === lookup;
-    });
-    return item ? this.cloneInvoice(item) : null;
+    const all = this.state();
+    const rankMatches = (matches: InvoiceDetail[]) =>
+      matches.sort((a, b) => {
+        const stageDiff = this.stageLookupPriority(b.stage) - this.stageLookupPriority(a.stage);
+        if (stageDiff !== 0) return stageDiff;
+        const updatedDiff = this.asMillis(b.updatedAt || b.createdAt || '') - this.asMillis(a.updatedAt || a.createdAt || '');
+        if (updatedDiff !== 0) return updatedDiff;
+        return this.asMillis(b.createdAt || '') - this.asMillis(a.createdAt || '');
+      });
+
+    const exactMatches = rankMatches(all.filter(invoice => String(invoice.id || '').trim() === key));
+    const numberMatches = rankMatches(
+      all.filter(invoice => String(invoice.invoiceNumber || '').trim().toLowerCase() === lookup)
+    );
+
+    if (this.looksLikeDocumentNumber(key) && numberMatches.length) {
+      return this.cloneInvoice(numberMatches[0]);
+    }
+    if (exactMatches.length) return this.cloneInvoice(exactMatches[0]);
+    return numberMatches.length ? this.cloneInvoice(numberMatches[0]) : null;
   }
 
   saveInvoice(invoice: InvoiceDetail): InvoiceDetail {
@@ -624,7 +653,7 @@ export class InvoicesDataService {
       if (index === -1) {
         const created = this.normalizeInvoice({
           ...incoming,
-          id: incoming.id || `inv-${this.nextInvoiceSequence()}`,
+          id: incoming.id || this.generateDocumentId(),
           invoiceNumber: incoming.invoiceNumber || this.previewNextDocumentNumber(incoming.documentType),
           createdAt: incoming.createdAt || nowIso,
           updatedAt: nowIso
@@ -637,11 +666,11 @@ export class InvoicesDataService {
       const nextStage = incoming.stage;
       const timeline = this.mergeTimeline(existing.timeline, incoming.timeline);
       if (previousStage !== nextStage) {
-        timeline.push({
-          id: `timeline-${incoming.id}-${Date.now()}`,
-          createdAt: nowIso,
-          message: `Stage updated to ${this.stageLabel(nextStage)}.`
-        });
+        timeline.push(this.createTimelineEntry(
+          `timeline-${incoming.id}-${Date.now()}`,
+          nowIso,
+          this.stageTransitionMessage(previousStage, nextStage)
+        ));
       }
 
       const merged = this.normalizeInvoice({
@@ -673,15 +702,109 @@ export class InvoicesDataService {
 
       const existing = current[index];
       const timeline = [...existing.timeline];
-      timeline.push({
-        id: `timeline-${key}-${Date.now()}`,
-        createdAt: nowIso,
-        message: note?.trim() || `Stage updated to ${this.stageLabel(stage)}.`
-      });
+      timeline.push(this.createTimelineEntry(
+        `timeline-${key}-${Date.now()}`,
+        nowIso,
+        note?.trim() || this.stageTransitionMessage(existing.stage, stage)
+      ));
+
+      const normalizedPaidAmount = (stage === 'accepted' || stage === 'completed') && existing.documentType === 'invoice'
+        ? this.roundCurrency(Math.max(0, Number(existing.total || 0)))
+        : this.roundCurrency(Math.max(0, Number((existing as any).paidAmount || 0)));
 
       const nextInvoice = this.normalizeInvoice({
         ...existing,
         stage,
+        paidAmount: normalizedPaidAmount,
+        paymentDate: stage === 'accepted' || stage === 'completed'
+          ? (this.safeText(existing.paymentDate) || this.formatIsoDate(new Date()))
+          : this.safeText(existing.paymentDate),
+        updatedAt: nowIso,
+        timeline
+      });
+
+      const next = [...current];
+      next[index] = nextInvoice;
+      updated = this.cloneInvoice(nextInvoice);
+      return next;
+    });
+
+    return updated;
+  }
+
+  setPaidAmount(id: string, paidAmount: number, note?: string): InvoiceDetail | null {
+    const key = String(id || '').trim();
+    if (!key) return null;
+
+    const nowIso = new Date().toISOString();
+    let updated: InvoiceDetail | null = null;
+
+    this.updateState(current => {
+      const index = current.findIndex(item => item.id === key);
+      if (index === -1) return current;
+
+      const existing = current[index];
+      const normalizedPaidAmount = this.roundCurrency(Math.max(0, Number.isFinite(Number(paidAmount)) ? Number(paidAmount) : 0));
+      const previousStage = existing.stage;
+      const nextStage = this.resolveStageFromBalance(existing, normalizedPaidAmount);
+      const timeline = [...existing.timeline];
+      timeline.push(this.createTimelineEntry(
+        `timeline-${key}-${Date.now()}`,
+        nowIso,
+        note?.trim() || `Payment applied: ${this.formatCurrency(normalizedPaidAmount)}.`
+      ));
+      if (previousStage !== nextStage) {
+        timeline.push(this.createTimelineEntry(
+          `timeline-${key}-${Date.now()}-stage`,
+          nowIso,
+          this.stageTransitionMessage(previousStage, nextStage)
+        ));
+      }
+
+      const nextInvoice = this.normalizeInvoice({
+        ...existing,
+        stage: nextStage,
+        paidAmount: normalizedPaidAmount,
+        paymentDate: nextStage === 'accepted' ? this.safeText(existing.paymentDate) || this.formatIsoDate(new Date()) : '',
+        updatedAt: nowIso,
+        timeline
+      });
+
+      const next = [...current];
+      next[index] = nextInvoice;
+      updated = this.cloneInvoice(nextInvoice);
+      return next;
+    });
+
+    return updated;
+  }
+
+  recordRefund(id: string, amount: number, note?: string): InvoiceDetail | null {
+    const key = String(id || '').trim();
+    if (!key) return null;
+
+    const normalizedAmount = this.roundCurrency(Math.max(0, Number.isFinite(Number(amount)) ? Number(amount) : 0));
+    if (!normalizedAmount) return null;
+
+    const nowIso = new Date().toISOString();
+    let updated: InvoiceDetail | null = null;
+
+    this.updateState(current => {
+      const index = current.findIndex(item => item.id === key);
+      if (index === -1) return current;
+
+      const existing = current[index];
+      const timeline = [...existing.timeline];
+      const amountLabel = this.formatCurrency(normalizedAmount);
+      const detail = String(note || '').trim();
+      timeline.push(this.createTimelineEntry(
+        `timeline-${key}-${Date.now()}-refund`,
+        nowIso,
+        detail ? `Refund issued: ${amountLabel}. ${detail}` : `Refund issued: ${amountLabel}.`
+      ));
+
+      const nextInvoice = this.normalizeInvoice({
+        ...existing,
         updatedAt: nowIso,
         timeline
       });
@@ -714,6 +837,43 @@ export class InvoicesDataService {
     });
   }
 
+  cancelForCustomer(lookup: InvoiceCustomerLookup, note = 'Removed from dashboard workflow.'): number {
+    const id = this.normalize(lookup.id);
+    const email = this.normalize(lookup.email);
+    const name = this.normalize(lookup.name);
+    if (!id && !email && !name) return 0;
+
+    let changed = 0;
+    const nowIso = new Date().toISOString();
+    this.updateState(current => current.map(invoice => {
+      const invoiceId = this.normalize(invoice.customerId);
+      const invoiceEmail = this.normalize(invoice.customerEmail);
+      const invoiceName = this.normalize(invoice.customerName);
+      const matches =
+        (id && invoiceId && id === invoiceId)
+        || (email && invoiceEmail && email === invoiceEmail)
+        || (name && invoiceName && name === invoiceName);
+      if (!matches) return invoice;
+      if (invoice.documentType === 'invoice' && invoice.stage === 'accepted') return invoice;
+      if (invoice.stage === 'canceled' || invoice.stage === 'expired') return invoice;
+
+      changed += 1;
+      const timeline = [...invoice.timeline, this.createTimelineEntry(
+        `timeline-${invoice.id}-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        nowIso,
+        note
+      )];
+      return this.normalizeInvoice({
+        ...invoice,
+        stage: 'canceled',
+        updatedAt: nowIso,
+        timeline
+      });
+    }));
+
+    return changed;
+  }
+
   invoicesByType(documentType: InvoiceDocumentType): InvoiceCard[] {
     return this.invoices().filter(invoice => invoice.documentType === documentType);
   }
@@ -722,7 +882,7 @@ export class InvoicesDataService {
     const quote = this.getInvoiceById(quoteId);
     if (!quote || quote.documentType !== 'quote' || quote.stage !== 'accepted') return null;
 
-    return this.createDraftInvoice({
+    const created = this.createDraftInvoice({
       documentType: 'invoice',
       customerId: quote.customerId,
       customerName: quote.customerName,
@@ -745,9 +905,23 @@ export class InvoicesDataService {
       lineItems: quote.lineItems.map(item => ({ ...item })),
       includePaymentLink: true
     });
+
+    if (created) {
+      this.setStage(
+        quote.id,
+        'canceled',
+        `Converted to invoice ${created.invoiceNumber}.`
+      );
+    }
+
+    return created;
   }
 
   deleteDraftQuote(id: string): boolean {
+    return this.deleteDraftDocument(id);
+  }
+
+  deleteDraftDocument(id: string): boolean {
     const key = String(id || '').trim();
     if (!key) return false;
 
@@ -755,8 +929,8 @@ export class InvoicesDataService {
     this.updateState(current => {
       const next = current.filter(item => {
         const isMatch = item.id === key;
-        const isDraftQuote = item.documentType === 'quote' && item.stage === 'draft';
-        if (isMatch && isDraftQuote) {
+        const isDraftDocument = item.stage === 'draft';
+        if (isMatch && isDraftDocument) {
           removed = true;
           return false;
         }
@@ -786,6 +960,27 @@ export class InvoicesDataService {
     return String(value || '').trim().toLowerCase();
   }
 
+  private asMillis(value: string | null | undefined): number {
+    const parsed = Date.parse(String(value || '').trim());
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  private looksLikeDocumentNumber(value: string): boolean {
+    const normalized = String(value || '').trim().toUpperCase();
+    return /^(QTE|INV)-\d+$/.test(normalized);
+  }
+
+  private stageLookupPriority(stage: InvoiceStage): number {
+    if (stage === 'completed') return 7;
+    if (stage === 'accepted') return 6;
+    if (stage === 'sent') return 5;
+    if (stage === 'draft') return 4;
+    if (stage === 'declined') return 3;
+    if (stage === 'expired') return 2;
+    if (stage === 'canceled') return 1;
+    return 0;
+  }
+
   private toCard(invoice: InvoiceDetail): InvoiceCard {
     return {
       id: invoice.id,
@@ -808,10 +1003,29 @@ export class InvoicesDataService {
     const subtotal = this.roundCurrency(lineItems.reduce((sum, line) => sum + line.lineSubtotal, 0));
     const taxTotal = this.roundCurrency(lineItems.reduce((sum, line) => sum + line.taxAmount, 0));
     const total = this.roundCurrency(subtotal + taxTotal);
+    const normalizedDocumentType: InvoiceDocumentType = invoice.documentType === 'quote' ? 'quote' : 'invoice';
+    const requestedStage = this.normalizeStage(invoice.stage);
+    const rawPaidAmount = Number((invoice as any).paidAmount);
+    const hasExplicitPaidAmount = Number.isFinite(rawPaidAmount);
+    let paidAmount = this.roundCurrency(Math.min(total, Math.max(0, this.safeNumber((invoice as any).paidAmount, 0))));
+    if (normalizedDocumentType === 'invoice' && requestedStage === 'accepted' && !hasExplicitPaidAmount) {
+      // Backfill legacy paid invoices that had stage but no paidAmount persisted.
+      paidAmount = total;
+    }
+    const normalizedStage = this.resolveStageFromBalance(
+      {
+        ...invoice,
+        documentType: normalizedDocumentType,
+        stage: requestedStage,
+        total
+      },
+      paidAmount
+    );
 
     return {
       ...invoice,
-      documentType: invoice.documentType === 'quote' ? 'quote' : 'invoice',
+      documentType: normalizedDocumentType,
+      stage: normalizedStage,
       customerId: this.safeText(invoice.customerId),
       customerName: this.safeText(invoice.customerName) || 'Customer',
       customerEmail: this.safeText(invoice.customerEmail),
@@ -831,7 +1045,6 @@ export class InvoicesDataService {
       customerNote: this.safeText(invoice.customerNote),
       issueDate: this.safeText(invoice.issueDate) || this.formatIsoDate(new Date()),
       dueDate: this.safeText(invoice.dueDate) || this.formatIsoDate(new Date()),
-      paymentDate: this.safeText(invoice.paymentDate),
       exportedDate: this.safeText(invoice.exportedDate),
       includePaymentLink: !!invoice.includePaymentLink,
       paymentProviderKey: this.safeText(invoice.paymentProviderKey),
@@ -840,10 +1053,34 @@ export class InvoicesDataService {
       subtotal,
       taxTotal,
       total,
+      paidAmount,
+      paymentDate: normalizedStage === 'accepted' ? this.safeText(invoice.paymentDate) : '',
       createdAt: this.safeText(invoice.createdAt) || new Date().toISOString(),
       updatedAt: this.safeText(invoice.updatedAt) || new Date().toISOString(),
       timeline: this.normalizeTimeline(invoice.timeline || [])
     };
+  }
+
+  private resolveStageFromBalance(invoice: Pick<InvoiceDetail, 'documentType' | 'stage' | 'total'>, paidAmount: number): InvoiceStage {
+    const currentStage = this.normalizeStage(invoice.stage);
+    if (invoice.documentType !== 'invoice') return currentStage;
+    if (currentStage !== 'sent' && currentStage !== 'accepted' && currentStage !== 'completed') return currentStage;
+    const total = this.roundCurrency(Math.max(0, this.safeNumber(invoice.total, 0)));
+    const due = this.roundCurrency(Math.max(0, total - Math.max(0, paidAmount)));
+    if (due <= 0) return currentStage === 'completed' ? 'completed' : 'accepted';
+    return 'sent';
+  }
+
+  private normalizeStage(value: unknown): InvoiceStage {
+    const stage = String(value || '').trim().toLowerCase();
+    if (stage === 'draft' || stage === 'drafts') return 'draft';
+    if (stage === 'sent') return 'sent';
+    if (stage === 'accepted' || stage === 'paid') return 'accepted';
+    if (stage === 'completed' || stage === 'complete') return 'completed';
+    if (stage === 'declined') return 'declined';
+    if (stage === 'canceled' || stage === 'cancelled') return 'canceled';
+    if (stage === 'expired') return 'expired';
+    return 'draft';
   }
 
   private normalizeLineItems(items: Array<Partial<InvoiceLineItem>>): InvoiceLineItem[] {
@@ -875,7 +1112,10 @@ export class InvoicesDataService {
       .map((entry, index) => ({
         id: this.safeText(entry.id) || `timeline-${Date.now()}-${index}`,
         createdAt: this.safeText(entry.createdAt) || new Date().toISOString(),
-        message: this.safeText(entry.message)
+        message: this.safeText(entry.message),
+        createdBy: this.safeText(entry.createdBy),
+        createdById: this.safeText(entry.createdById),
+        actorType: this.normalizeTimelineActorType(entry.actorType, this.safeText(entry.message))
       }))
       .filter(entry => !!entry.message);
 
@@ -893,6 +1133,58 @@ export class InvoicesDataService {
     return Array.from(map.values()).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   }
 
+  private normalizeTimelineActorType(value: unknown, message: string): InvoiceTimelineActorType {
+    const raw = this.safeText(value).toLowerCase();
+    if (raw === 'customer') return 'customer';
+    if (raw === 'system') return 'system';
+    return this.inferTimelineActorType(message);
+  }
+
+  private inferTimelineActorType(message: string): InvoiceTimelineActorType {
+    const text = this.safeText(message).toLowerCase();
+    const looksCustomerAction =
+      text.includes('customer accepted')
+      || text.includes('customer declined')
+      || text.includes('customer paid')
+      || text.includes('from public link');
+    return looksCustomerAction ? 'customer' : 'system';
+  }
+
+  private currentActor(): { id: string; name: string } {
+    const user = this.auth.user();
+    const id = this.safeText(user?.id) || this.safeText(user?.email);
+    const name = this.safeText(user?.displayName) || this.safeText(user?.email) || 'Staff';
+    return { id, name };
+  }
+
+  private createTimelineEntry(
+    id: string,
+    createdAt: string,
+    message: string,
+    actorType?: InvoiceTimelineActorType
+  ): InvoiceTimelineEntry {
+    const resolvedActorType = actorType || this.inferTimelineActorType(message);
+    if (resolvedActorType === 'customer') {
+      return {
+        id,
+        createdAt,
+        message,
+        actorType: 'customer',
+        createdBy: 'Customer',
+        createdById: ''
+      };
+    }
+    const actor = this.currentActor();
+    return {
+      id,
+      createdAt,
+      message,
+      actorType: 'system',
+      createdBy: actor.name,
+      createdById: actor.id
+    };
+  }
+
   private safeNumber(value: unknown, fallback: number): number {
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) return fallback;
@@ -901,6 +1193,10 @@ export class InvoicesDataService {
 
   private roundCurrency(value: number): number {
     return Math.round((value + Number.EPSILON) * 100) / 100;
+  }
+
+  private formatCurrency(value: number): string {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(this.roundCurrency(value));
   }
 
   private cloneInvoice(invoice: InvoiceDetail): InvoiceDetail {
@@ -928,8 +1224,6 @@ export class InvoicesDataService {
     const key = this.storageKey(tenantId);
     const fallbackKeys = [
       key,
-      this.storageKey('primary-location'),
-      this.storageKey('main'),
       INVOICES_STORAGE_KEY_PREFIX
     ];
     try {
@@ -946,10 +1240,11 @@ export class InvoicesDataService {
       if (!raw) return [];
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return [];
-      return parsed
+      const normalized = parsed
         .map(item => this.normalizeInvoice(item as InvoiceDetail))
-        .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
-        .map(item => this.cloneInvoice(item));
+        .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+      const migrated = this.migrateLegacyCompletedInvoices(normalized);
+      return migrated.map(item => this.cloneInvoice(item));
     } catch {
       return [];
     }
@@ -962,6 +1257,41 @@ export class InvoicesDataService {
     } catch {
       // Ignore when storage is unavailable.
     }
+  }
+
+  private migrateLegacyCompletedInvoices(items: InvoiceDetail[]): InvoiceDetail[] {
+    let changed = false;
+    const migrated = (items || []).map(item => {
+      if (item.documentType !== 'invoice') return item;
+      if (item.stage !== 'accepted') return item;
+      const total = this.roundCurrency(Math.max(0, Number(item.total || 0)));
+      const paid = this.roundCurrency(Math.max(0, Number(item.paidAmount || 0)));
+      if (total <= 0 || this.roundCurrency(total - paid) > 0) return item;
+      if (!this.hasFinalInvoiceSentTimeline(item.timeline || [])) return item;
+
+      changed = true;
+      const nowIso = new Date().toISOString();
+      const timeline = [...(item.timeline || []), this.createTimelineEntry(
+        `timeline-${item.id}-${Date.now()}-legacy-completed`,
+        nowIso,
+        this.stageTransitionMessage('accepted', 'completed')
+      )];
+      return this.normalizeInvoice({
+        ...item,
+        stage: 'completed',
+        updatedAt: nowIso,
+        timeline
+      });
+    });
+
+    if (changed) {
+      setTimeout(() => this.persistToStorage());
+    }
+    return migrated;
+  }
+
+  private hasFinalInvoiceSentTimeline(timeline: InvoiceTimelineEntry[]): boolean {
+    return (timeline || []).some(entry => String(entry?.message || '').trim().toLowerCase().includes('final invoice sent to customer'));
   }
 
   private nextInvoiceSequence(): number {
@@ -978,6 +1308,11 @@ export class InvoicesDataService {
     }, 430500);
 
     return max + 1;
+  }
+
+  private generateDocumentId(): string {
+    const random = Math.random().toString(36).slice(2, 8);
+    return `inv-${Date.now().toString(36)}-${random}`;
   }
 
   private formatInvoiceDate(value: string | Date): string {
@@ -998,5 +1333,33 @@ export class InvoicesDataService {
 
   private stageLabel(stage: InvoiceStage): string {
     return stage.charAt(0).toUpperCase() + stage.slice(1);
+  }
+
+  private stageTransitionMessage(fromStage: InvoiceStage, toStage: InvoiceStage): string {
+    return `${this.stageLabel(fromStage)} updated to ${this.stageLabel(toStage)}.`;
+  }
+
+  private purgeLocalhostInvoiceQuoteDataOnce(): void {
+    try {
+      const host = String(window?.location?.hostname || '').trim().toLowerCase();
+      if (host !== 'localhost' && host !== '127.0.0.1') return;
+      if (localStorage.getItem(LOCALHOST_ONE_TIME_PURGE_MARKER_KEY)) return;
+
+      const keysToRemove: string[] = [];
+      for (let index = 0; index < localStorage.length; index += 1) {
+        const key = String(localStorage.key(index) || '').trim();
+        if (!key) continue;
+        if (key === INVOICES_STORAGE_KEY_PREFIX || key.startsWith(`${INVOICES_STORAGE_KEY_PREFIX}.`)) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.push(LOCAL_PENDING_QUOTE_RESPONSES_KEY, LOCAL_PENDING_INVOICE_RESPONSES_KEY);
+      for (const key of keysToRemove) {
+        try { localStorage.removeItem(key); } catch {}
+      }
+      localStorage.setItem(LOCALHOST_ONE_TIME_PURGE_MARKER_KEY, new Date().toISOString());
+    } catch {
+      // Ignore if localStorage/window is unavailable.
+    }
   }
 }

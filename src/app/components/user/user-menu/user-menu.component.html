@@ -69,75 +69,17 @@
   </ng-template>
 </ion-popover>
 
-<div
-  class="notifications-drawer-backdrop"
-  *ngIf="notificationsDrawerOpen()"
-  (click)="closeNotificationsDrawer()"
-  aria-hidden="true">
-</div>
-
-<aside class="notifications-drawer" *ngIf="notificationsDrawerOpen()" role="dialog" aria-label="All notifications">
-  <header class="notifications-header">
-    <div class="notifications-title">All Notifications</div>
-    <div class="notifications-header-actions">
-      <button
-        type="button"
-        class="header-link"
-        *ngIf="unreadNotifications() > 0"
-        (click)="markAllNotificationsRead($event)">
-        <ion-icon name="checkmark-done-outline"></ion-icon>
-        Mark all read
-      </button>
-      <button
-        type="button"
-        class="notifications-close"
-        aria-label="Close all notifications"
-        (click)="closeNotificationsDrawer()">
-        <ion-icon name="close-outline"></ion-icon>
-      </button>
-    </div>
-  </header>
-
-  <div class="notifications-loading" *ngIf="notificationsLoading()">Loading notifications...</div>
-  <section class="notifications-body">
-    <div class="notifications-error" *ngIf="!notificationsLoading() && notificationsError()">{{ notificationsError() }}</div>
-
-    <div class="notifications-empty" *ngIf="!notificationsLoading() && !notificationsError() && !visibleNotifications().length">
-      <div class="notifications-empty-title">No notifications yet</div>
-    </div>
-
-    <div class="notifications-list" *ngIf="!notificationsLoading() && visibleNotifications().length">
-      <button
-        type="button"
-        class="notification-item"
-        *ngFor="let notification of visibleNotifications()"
-        [class.unread]="!notification.read"
-        (click)="openNotification(notification, $event)">
-        <div class="notification-item-head">
-          <div class="notification-item-title">{{ notification.title }}</div>
-          <div class="notification-item-time">{{ notificationTimeLabel(notification.createdAt) }}</div>
-        </div>
-        <div class="notification-item-message">{{ notification.message }}</div>
-        <div class="notification-item-route">
-          <ion-icon name="open-outline"></ion-icon>
-          <span>Open</span>
-        </div>
-      </button>
-    </div>
-  </section>
-</aside>
-
 <ion-popover
   class="notifications-popover"
   [isOpen]="notificationsOpen()"
   [event]="notificationsEvent()"
   side="bottom"
   alignment="end"
-  (didDismiss)="closeNotifications()">
+  (didDismiss)="onNotificationsPopoverDismiss()">
   <ng-template>
     <aside class="notifications-panel glass-surface">
       <header class="notifications-header">
-        <div class="notifications-title">Notifications</div>
+        <div class="notifications-title">{{ showAllNotifications() ? 'All Notifications' : 'Notifications' }}</div>
         <div class="notifications-header-actions">
           <button
             type="button"
@@ -163,14 +105,6 @@
           </button>
           <button
             type="button"
-            class="header-link"
-            *ngIf="demoToolsEnabled"
-            [disabled]="seedingNotifications()"
-            (click)="seedDemoNotifications($event)">
-            {{ seedingNotifications() ? 'Adding…' : 'Add samples' }}
-          </button>
-          <button
-            type="button"
             class="notifications-close"
             aria-label="Close notifications"
             (click)="closeNotifications()">
@@ -185,10 +119,7 @@
 
         <div class="notifications-empty" *ngIf="!notificationsLoading() && !notificationsError() && !visibleNotifications().length">
           <div class="notifications-empty-title">No notifications yet</div>
-          <div class="notifications-empty-text" *ngIf="demoToolsEnabled">
-            Use <strong>Add samples</strong> above to generate test notifications.
-          </div>
-          <div class="notifications-empty-text" *ngIf="!demoToolsEnabled">
+          <div class="notifications-empty-text">
             Notifications will appear here as activity happens.
           </div>
         </div>
@@ -210,6 +141,16 @@
               <span>Open</span>
             </div>
           </button>
+        </div>
+        <div class="notifications-more" *ngIf="!notificationsLoading() && showAllNotifications()">
+          <button
+            type="button"
+            class="header-link"
+            *ngIf="hasMoreAllNotifications() && !loadingMoreNotifications()"
+            (click)="loadMoreNotifications($event)">
+            Load more
+          </button>
+          <div class="notifications-loading-more" *ngIf="loadingMoreNotifications()">Loading more…</div>
         </div>
       </section>
     </aside>

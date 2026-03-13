@@ -62,7 +62,16 @@
       <tbody>
         <tr class="data-row" *ngFor="let c of pagedCustomers(); trackBy: trackCustomer" (click)="openEdit(c)">
           <td>{{ c.name || 'Unnamed' }}</td>
-          <td>{{ c.phone || '—' }}</td>
+          <td>
+            <button
+              type="button"
+              class="phone-link-btn"
+              *ngIf="c.phone; else noCustomerPhone"
+              (click)="openSmsForCustomer(c, $event)">
+              {{ c.phone }}
+            </button>
+            <ng-template #noCustomerPhone>—</ng-template>
+          </td>
           <td>{{ c.email || c.secondaryEmail || '—' }}</td>
           <td>{{ vehicleSummaryFor(c) || '—' }}</td>
         </tr>

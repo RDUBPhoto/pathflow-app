@@ -37,6 +37,10 @@ function escapedFilterValue(value) {
   return asString(value).replace(/'/g, "''");
 }
 
+function escapeRegex(value) {
+  return asString(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function normalizeEmail(value) {
   return asString(value).toLowerCase();
 }
@@ -430,10 +434,12 @@ function mergeNotes(existingNotes, message, sourceName) {
   const existing = asString(existingNotes);
   const inbound = asString(message);
   if (!inbound) return existing;
+  const sourceLabel = `Web Lead${sourceName ? ` - ${sourceName}` : ""}`;
+  const dedupePattern = new RegExp(`\\[${escapeRegex(sourceLabel)}\\s*•[^\\]]*\\]\\n${escapeRegex(inbound)}(?:\\n|$)`, "m");
+  if (existing && dedupePattern.test(existing)) return existing;
   const stamp = new Date().toLocaleString("en-US", { hour12: true });
-  const block = `[Web Lead${sourceName ? ` - ${sourceName}` : ""} • ${stamp}]\n${inbound}`;
+  const block = `[${sourceLabel} • ${stamp}]\n${inbound}`;
   if (!existing) return block;
-  if (existing.includes(block)) return existing;
   return `${existing}\n\n${block}`;
 }
 

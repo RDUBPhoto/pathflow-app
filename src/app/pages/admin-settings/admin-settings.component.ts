@@ -67,6 +67,10 @@ import { AuthService } from '../../auth/auth.service';
 import { environment } from '../../../environments/environment';
 import { AccessAdminApiService, WorkspaceUser } from '../../services/access-admin-api.service';
 import {
+  PaymentGatewayProviderKey,
+  PaymentGatewaySettingsService
+} from '../../services/payment-gateway-settings.service';
+import {
   CustomerImportResponse,
   CustomerImportRow,
   CustomersApi
@@ -115,6 +119,7 @@ const LEGACY_QUOTE_TERMS_SETTING_KEY = 'quote.terms.html';
 const BUSINESS_TAX_RATE_SETTING_KEY = 'business.tax.rate';
 const BUSINESS_LABOR_RATES_SETTING_KEY = 'business.labor.rates';
 const BUSINESS_DOCUMENT_TEMPLATES_SETTING_KEY = 'business.document.templates';
+const AUTHORIZE_NET_CREDENTIALS_SETTING_KEY = 'billing.paymentProviders.authorizeNetCredentials';
 const DEFAULT_ADMIN_USERS: WorkspaceUser[] = [
   {
     id: 'u-1',
@@ -167,6 +172,7 @@ const DEFAULT_INTEGRATIONS: AppIntegration[] = [
 
 type AdminSectionKey =
   | 'branding'
+  | 'payments'
   | 'subscription'
   | 'users'
   | 'customerImport'
@@ -373,6 +379,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
   private readonly route = inject(ActivatedRoute);
   private readonly customersApi = inject(CustomersApi);
   private readonly accessAdminApi = inject(AccessAdminApiService);
+  readonly paymentGatewaySettings = inject(PaymentGatewaySettingsService);
 
   readonly users = signal<WorkspaceUser[]>(this.cloneDefaultUsers());
   readonly integrations = signal<AppIntegration[]>(this.cloneDefaultIntegrations());
@@ -386,6 +393,12 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
       label: 'Business Profile',
       description: 'Business logo, address, phone, etc.',
       icon: 'image-outline'
+    },
+    {
+      key: 'payments',
+      label: 'Payment Gateways',
+      description: 'Connect sandbox/live providers for invoice payments',
+      icon: 'card-outline'
     },
     {
       key: 'subscription',
@@ -546,6 +559,10 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
   widgetTestSmsOptIn = true;
   supplierStatus = '';
   supplierError = '';
+  paymentGatewayStatus = '';
+  paymentGatewayError = '';
+  authorizeNetApiLoginId = '';
+  authorizeNetTransactionKey = '';
   scheduleStatus = '';
   scheduleError = '';
   scheduleOpenHour = 7;
@@ -567,6 +584,14 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
   customerImportMappings: Array<{ source: string; target: keyof CustomerImportRow | '' }> = [];
   customerImportStatus = '';
   customerImportError = '';
+  readonly paymentGatewayDraft = signal<
+    Record<PaymentGatewayProviderKey, { accountLabel: string; mode: 'test' | 'live' }>
+  >({
+    'authorize-net': { accountLabel: '', mode: 'test' },
+    stripe: { accountLabel: '', mode: 'test' },
+    paypal: { accountLabel: '', mode: 'test' },
+    quickbooks: { accountLabel: '', mode: 'test' }
+  });
 
   private readonly businessProfileSync = effect(() => {
     const profile = this.businessProfile.profile();
@@ -574,6 +599,22 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
     this.businessProfileEmail = String(profile.companyEmail || '').trim();
     this.businessProfilePhone = String(profile.companyPhone || '').trim();
     this.businessProfileAddress = String(profile.companyAddress || '').trim();
+  });
+  private readonly paymentGatewaySync = effect(() => {
+    const providers = this.paymentGatewaySettings.providers();
+    const next: Record<PaymentGatewayProviderKey, { accountLabel: string; mode: 'test' | 'live' }> = {
+      'authorize-net': { accountLabel: '', mode: 'test' },
+      stripe: { accountLabel: '', mode: 'test' },
+      paypal: { accountLabel: '', mode: 'test' },
+      quickbooks: { accountLabel: '', mode: 'test' }
+    };
+    for (const provider of providers) {
+      next[provider.key] = {
+        accountLabel: provider.accountLabel || '',
+        mode: provider.mode === 'live' ? 'live' : 'test'
+      };
+    }
+    this.paymentGatewayDraft.set(next);
   });
 
   constructor() {
@@ -603,7 +644,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
     const sectionParam = (this.route.snapshot.queryParamMap.get('section') || '').trim();
     const matchingSection = this.sections.find(section => section.key === sectionParam);
     if (matchingSection) {
-      this.activeSection.set(matchingSection.key);
+      this.setActiveSection(matchingSection.key);
     }
     this.loadPersistedAdminSettings();
     this.loadSubscriptionState();
@@ -941,12 +982,115 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
 
   setActiveSection(section: AdminSectionKey): void {
     this.activeSection.set(section);
+    if (section === 'payments') {
+      void this.paymentGatewaySettings.load();
+      this.loadAuthorizeNetCredentials();
+    }
     if (section === 'subscription') {
       this.loadSubscriptionState();
     }
     if (section === 'users') {
       this.loadWorkspaceUsers();
     }
+  }
+
+  paymentGatewayDraftFor(key: PaymentGatewayProviderKey): { accountLabel: string; mode: 'test' | 'live' } {
+    return this.paymentGatewayDraft()[key] || { accountLabel: '', mode: 'test' };
+  }
+
+  updatePaymentGatewayDraftAccount(key: PaymentGatewayProviderKey, value: string): void {
+    this.paymentGatewayDraft.update(current => ({
+      ...current,
+      [key]: {
+        ...this.paymentGatewayDraftFor(key),
+        accountLabel: String(value || '')
+      }
+    }));
+  }
+
+  updatePaymentGatewayDraftMode(key: PaymentGatewayProviderKey, value: string): void {
+    this.paymentGatewayDraft.update(current => ({
+      ...current,
+      [key]: {
+        ...this.paymentGatewayDraftFor(key),
+        mode: value === 'live' ? 'live' : 'test'
+      }
+    }));
+  }
+
+  async togglePaymentGatewayConnection(key: PaymentGatewayProviderKey, connected: boolean): Promise<void> {
+    this.paymentGatewayStatus = '';
+    this.paymentGatewayError = '';
+    const draft = this.paymentGatewayDraftFor(key);
+    try {
+      const currentDefault = this.paymentGatewaySettings.defaultProvider();
+      await this.paymentGatewaySettings.setConnection(key, connected, {
+        accountLabel: draft.accountLabel,
+        mode: draft.mode,
+        setAsDefault: connected && !currentDefault
+      });
+      this.paymentGatewayStatus = connected
+        ? 'Payment gateway connected.'
+        : 'Payment gateway disconnected.';
+    } catch {
+      this.paymentGatewayError = 'Could not update payment gateway connection.';
+    }
+  }
+
+  async savePaymentGatewayProvider(key: PaymentGatewayProviderKey): Promise<void> {
+    this.paymentGatewayStatus = '';
+    this.paymentGatewayError = '';
+    const draft = this.paymentGatewayDraftFor(key);
+    try {
+      await this.paymentGatewaySettings.updateProvider(key, {
+        accountLabel: draft.accountLabel,
+        mode: draft.mode
+      });
+      this.paymentGatewayStatus = 'Payment gateway settings saved.';
+    } catch {
+      this.paymentGatewayError = 'Could not save payment gateway settings.';
+    }
+  }
+
+  async setDefaultPaymentGateway(key: PaymentGatewayProviderKey): Promise<void> {
+    this.paymentGatewayStatus = '';
+    this.paymentGatewayError = '';
+    try {
+      await this.paymentGatewaySettings.setDefaultProvider(key);
+      this.paymentGatewayStatus = 'Default payment gateway updated.';
+    } catch {
+      this.paymentGatewayError = 'Could not set default payment gateway.';
+    }
+  }
+
+  saveAuthorizeNetCredentials(): void {
+    this.paymentGatewayStatus = '';
+    this.paymentGatewayError = '';
+    const payload = {
+      apiLoginId: String(this.authorizeNetApiLoginId || '').trim(),
+      transactionKey: String(this.authorizeNetTransactionKey || '').trim()
+    };
+    this.settingsApi
+      .setValue(AUTHORIZE_NET_CREDENTIALS_SETTING_KEY, payload)
+      .subscribe({
+        next: () => {
+          this.paymentGatewayStatus = 'Authorize.net credentials saved.';
+        },
+        error: err => {
+          this.paymentGatewayError = this.extractApiError(err, 'Could not save Authorize.net credentials.');
+        }
+      });
+  }
+
+  private loadAuthorizeNetCredentials(): void {
+    this.settingsApi
+      .getValue<{ apiLoginId?: string; transactionKey?: string }>(AUTHORIZE_NET_CREDENTIALS_SETTING_KEY)
+      .subscribe({
+        next: value => {
+          this.authorizeNetApiLoginId = String(value?.apiLoginId || '').trim();
+          this.authorizeNetTransactionKey = String(value?.transactionKey || '').trim();
+        }
+      });
   }
 
   private loadWorkspaceUsers(): void {

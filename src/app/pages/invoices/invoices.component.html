@@ -63,12 +63,12 @@
         <div class="invoice-board">
         <article
           class="invoice-lane glass-surface"
-          *ngFor="let lane of lanes; trackBy: trackLane"
+          *ngFor="let lane of lanes(); trackBy: trackLane"
           [style.--lane-color]="lane.color">
           <header class="lane-head">
             <div class="lane-head-meta">
               <div class="lane-title">{{ lane.title }}</div>
-              <div class="lane-count">{{ laneCards()[lane.id].length }}</div>
+              <div class="lane-count">{{ laneCardsFor(lane).length }}</div>
             </div>
             <ion-button
               size="small"
@@ -82,20 +82,21 @@
           <div class="lane-cards">
             <a
               class="invoice-card invoice-card-button"
-              *ngFor="let invoice of laneCards()[lane.id]; trackBy: trackInvoice"
-              [routerLink]="['/invoices', invoice.id]"
+              *ngFor="let invoice of laneCardsFor(lane); trackBy: trackInvoice"
+              [routerLink]="documentRoute(invoice)"
+              (click)="openDocument(invoice, $event)"
               [attr.aria-label]="'Open invoice ' + invoice.invoiceNumber + ' for ' + invoice.customerName">
               <div class="invoice-card-top">
                 <div class="invoice-card-headline">
                   <div class="invoice-customer">{{ invoice.customerName }}</div>
                   <div
                     class="invoice-card-menu-wrap"
-                    *ngIf="activeTab() === 'quotes' && (lane.id === 'draft' || lane.id === 'sent')"
+                    *ngIf="lane.id === 'draft' || (activeTab() === 'quotes' && lane.id === 'sent')"
                     (click)="$event.preventDefault(); $event.stopPropagation()">
                     <button
                       type="button"
                       class="invoice-card-menu-trigger"
-                      aria-label="Open draft actions"
+                      aria-label="Open document actions"
                       (click)="toggleCardMenu(invoice, $event)">
                       ⋯
                     </button>
@@ -105,7 +106,7 @@
                         class="invoice-card-menu-item danger"
                         *ngIf="lane.id === 'draft'"
                         (click)="requestDeleteDraft(invoice, $event)">
-                        Delete Draft
+                        Delete Draft {{ invoice.documentType === 'invoice' ? 'Invoice' : 'Quote' }}
                       </button>
                       <button
                         type="button"
@@ -122,10 +123,9 @@
               <div class="invoice-line muted">Updated: {{ invoice.invoicedAt }}</div>
               <div class="invoice-line">Vehicle: {{ invoice.vehicle }}</div>
               <div class="invoice-line total">Total: {{ invoice.total | currency:'USD':'symbol':'1.2-2' }}</div>
-              <div class="invoice-template">{{ invoice.template }}</div>
             </a>
 
-            <div class="lane-empty" *ngIf="!laneCards()[lane.id].length">
+            <div class="lane-empty" *ngIf="!laneCardsFor(lane).length">
               No {{ activeTab() === 'quotes' ? 'quotes' : 'invoices' }} in this stage.
             </div>
           </div>
@@ -137,10 +137,10 @@
 
   <div class="quote-delete-modal-backdrop" *ngIf="deleteDialogOpen()" (click)="cancelDeleteDraft()"></div>
   <section class="quote-delete-modal glass-surface" *ngIf="deleteDialogOpen()" role="dialog" aria-modal="true">
-    <h3>Delete Draft Quote</h3>
+    <h3>Delete Draft {{ deleteDialogDocumentLabel() }}</h3>
     <p>
       Delete
-      <strong>{{ deleteCandidate()?.invoiceNumber || 'this draft quote' }}</strong>
+      <strong>{{ deleteCandidate()?.invoiceNumber || ('this draft ' + deleteDialogDocumentLabel().toLowerCase()) }}</strong>
       for
       <strong>{{ deleteCandidate()?.customerName || 'this customer' }}</strong>?
     </p>

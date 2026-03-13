@@ -21,8 +21,21 @@
         <div class="hero-meta">
           <span>{{ email || 'No email set' }}</span>
           <span *ngIf="secondaryEmail">Alt: {{ secondaryEmail }}</span>
-          <span>{{ phone || 'No phone set' }}</span>
-          <span *ngIf="secondaryPhone">Alt: {{ secondaryPhone }}</span>
+          <button
+            type="button"
+            class="phone-link-btn"
+            *ngIf="phone; else noPrimaryPhone"
+            (click)="openSmsFromPhone($event)">
+            {{ phone }}
+          </button>
+          <ng-template #noPrimaryPhone><span>No phone set</span></ng-template>
+          <button
+            type="button"
+            class="phone-link-btn secondary-phone-link"
+            *ngIf="secondaryPhone"
+            (click)="openSmsFromPhone($event)">
+            Alt: {{ secondaryPhone }}
+          </button>
         </div>
       </div>
     </div>
@@ -597,10 +610,65 @@
         </section>
 
         <section class="right-panel" *ngIf="activeTab() === 'invoices'">
-          <div class="invoice-grid" *ngIf="customerInvoices().length; else noCustomerInvoices">
+          <div class="invoice-card">
+            <div class="invoice-line">
+              <strong>Issue Refund</strong>
+              <span class="invoice-date">Attach to a paid invoice</span>
+            </div>
+            <div class="schedule-grid">
+              <ion-item>
+                <ion-label position="stacked">Invoice Reference</ion-label>
+                <ion-select
+                  [(ngModel)]="refundInvoiceId"
+                  (ionChange)="onRefundInvoiceChange($event.detail.value || '')"
+                  interface="popover">
+                  <ion-select-option value="">Select paid invoice</ion-select-option>
+                  <ion-select-option *ngFor="let invoice of refundableInvoices(); trackBy: trackInvoice" [value]="invoice.id">
+                    {{ invoice.invoiceNumber }} • {{ invoice.total | currency:'USD':'symbol':'1.2-2' }}
+                  </ion-select-option>
+                </ion-select>
+              </ion-item>
+              <ion-item>
+                <ion-label position="stacked">Refund Amount</ion-label>
+                <ion-input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  [(ngModel)]="refundAmount">
+                </ion-input>
+              </ion-item>
+            </div>
+            <ion-item>
+              <ion-label position="stacked">Refund Reason (Optional)</ion-label>
+              <ion-textarea
+                [autoGrow]="true"
+                rows="2"
+                [(ngModel)]="refundReason">
+              </ion-textarea>
+            </ion-item>
+            <div class="schedule-actions">
+              <ion-button (click)="issueRefund()" [disabled]="refundSubmitting()">
+                {{ refundSubmitting() ? 'Issuing Refund...' : 'Issue Refund' }}
+              </ion-button>
+            </div>
+            <div class="sms-feedback success" *ngIf="refundStatus()">{{ refundStatus() }}</div>
+            <div class="sms-feedback error" *ngIf="refundError()">{{ refundError() }}</div>
+          </div>
+
+          <div class="invoice-filters">
+            <button
+              type="button"
+              class="invoice-filter-btn"
+              *ngFor="let option of docFilterOptions"
+              [class.is-active]="docsFilter() === option.id"
+              (click)="setDocsFilter(option.id)">
+              {{ option.label }}
+            </button>
+          </div>
+          <div class="invoice-grid" *ngIf="filteredCustomerInvoices().length; else noCustomerInvoices">
             <article
               class="invoice-card invoice-card-link"
-              *ngFor="let invoice of customerInvoices(); trackBy: trackInvoice"
+              *ngFor="let invoice of filteredCustomerInvoices(); trackBy: trackInvoice"
               role="button"
               tabindex="0"
               (click)="openInvoice(invoice)"
@@ -612,6 +680,7 @@
                   {{ invoiceStatusLabel(invoice) }}
                 </ion-badge>
               </div>
+              <div class="invoice-date">Type: {{ invoice.documentType === 'quote' ? 'Quote' : 'Invoice' }}</div>
               <div class="invoice-date">Template: {{ invoice.template }}</div>
               <div class="invoice-date">Vehicle: {{ invoice.vehicle }}</div>
               <div class="invoice-amount">{{ invoice.total | currency:'USD':'symbol':'1.2-2' }}</div>
@@ -619,7 +688,7 @@
             </article>
           </div>
           <ng-template #noCustomerInvoices>
-            <div class="invoice-note">No invoices for this customer yet.</div>
+            <div class="invoice-note">No matching quotes or invoices for this filter.</div>
           </ng-template>
         </section>
 

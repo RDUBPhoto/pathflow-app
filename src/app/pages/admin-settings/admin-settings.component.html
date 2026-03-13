@@ -340,6 +340,115 @@
         </ion-card-content>
       </ion-card>
 
+      <ion-card class="glass-surface" *ngIf="activeSection() === 'payments'">
+        <ion-card-header>
+          <ion-card-title>
+            <ion-icon name="card-outline"></ion-icon>
+            Payment Gateways
+          </ion-card-title>
+        </ion-card-header>
+        <ion-card-content>
+          <div class="sms-help">
+            Connect at least one provider to enable invoice payment links. Start in <strong>test</strong> mode with your sandbox credentials.
+          </div>
+
+          <div class="payment-gateway-list">
+            <div class="payment-gateway-row" *ngFor="let provider of paymentGatewaySettings.providers()">
+              <div class="payment-gateway-head">
+                <div class="payment-gateway-name">{{ provider.label }}</div>
+                <div class="badges">
+                  <ion-badge [color]="provider.connected ? 'success' : 'medium'">
+                    {{ provider.connected ? 'connected' : 'disconnected' }}
+                  </ion-badge>
+                  <ion-badge color="primary" *ngIf="paymentGatewaySettings.defaultProvider()?.key === provider.key">
+                    default
+                  </ion-badge>
+                </div>
+              </div>
+
+              <div class="payment-gateway-grid">
+                <ion-item>
+                  <ion-label position="stacked">Account Label</ion-label>
+                  <ion-input
+                    [ngModel]="paymentGatewayDraftFor(provider.key).accountLabel"
+                    (ngModelChange)="updatePaymentGatewayDraftAccount(provider.key, $event)"
+                    placeholder="Sandbox account / merchant id">
+                  </ion-input>
+                </ion-item>
+                <ion-item>
+                  <ion-label position="stacked">Mode</ion-label>
+                  <ion-select
+                    interface="popover"
+                    [ngModel]="paymentGatewayDraftFor(provider.key).mode"
+                    (ngModelChange)="updatePaymentGatewayDraftMode(provider.key, $event)">
+                    <ion-select-option value="test">Test (Sandbox)</ion-select-option>
+                    <ion-select-option value="live">Live (Production)</ion-select-option>
+                  </ion-select>
+                </ion-item>
+              </div>
+
+              <div class="payment-gateway-grid" *ngIf="provider.key === 'authorize-net'">
+                <ion-item>
+                  <ion-label position="stacked">API Login ID</ion-label>
+                  <ion-input
+                    type="text"
+                    [(ngModel)]="authorizeNetApiLoginId"
+                    placeholder="Authorize.net API Login ID">
+                  </ion-input>
+                </ion-item>
+                <ion-item>
+                  <ion-label position="stacked">Transaction Key</ion-label>
+                  <ion-input
+                    type="password"
+                    [(ngModel)]="authorizeNetTransactionKey"
+                    placeholder="Authorize.net Transaction Key">
+                  </ion-input>
+                </ion-item>
+              </div>
+
+              <div class="sms-actions">
+                <ion-button
+                  size="small"
+                  fill="outline"
+                  (click)="togglePaymentGatewayConnection(provider.key, !provider.connected)"
+                  [disabled]="paymentGatewaySettings.saving()">
+                  {{ provider.connected ? 'Disconnect' : 'Connect' }}
+                </ion-button>
+
+                <ion-button
+                  size="small"
+                  fill="outline"
+                  (click)="savePaymentGatewayProvider(provider.key)"
+                  [disabled]="paymentGatewaySettings.saving()">
+                  Save
+                </ion-button>
+
+                <ion-button
+                  size="small"
+                  fill="outline"
+                  *ngIf="provider.key === 'authorize-net'"
+                  (click)="saveAuthorizeNetCredentials()"
+                  [disabled]="paymentGatewaySettings.saving()">
+                  Save Credentials
+                </ion-button>
+
+                <ion-button
+                  size="small"
+                  fill="outline"
+                  (click)="setDefaultPaymentGateway(provider.key)"
+                  [disabled]="!provider.connected || paymentGatewaySettings.defaultProvider()?.key === provider.key || paymentGatewaySettings.saving()">
+                  Set Default
+                </ion-button>
+              </div>
+            </div>
+          </div>
+
+          <div class="sms-feedback success" *ngIf="paymentGatewayStatus">{{ paymentGatewayStatus }}</div>
+          <div class="sms-feedback error" *ngIf="paymentGatewayError">{{ paymentGatewayError }}</div>
+          <div class="sms-feedback error" *ngIf="paymentGatewaySettings.loadError()">{{ paymentGatewaySettings.loadError() }}</div>
+        </ion-card-content>
+      </ion-card>
+
       <ion-card class="glass-surface" *ngIf="activeSection() === 'users'">
         <ion-card-header>
           <ion-card-title>

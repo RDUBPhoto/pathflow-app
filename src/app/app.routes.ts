@@ -1,6 +1,7 @@
 import { Routes } from '@angular/router';
 import { registeredGuard, registrationGuard, roleGuard } from './auth/auth.guards';
 import { customerProfileUnsavedGuard } from './pages/customer-profile/customer-profile.unsaved.guard';
+import InvoiceDetailComponent from './pages/invoice-detail/invoice-detail.component';
 
 export const routes: Routes = [
   {
@@ -25,6 +26,11 @@ export const routes: Routes = [
     data: { action: 'decline' },
     loadComponent: () =>
       import('./pages/quote-response/quote-response.component').then(m => m.default)
+  },
+  {
+    path: 'invoice-payment',
+    loadComponent: () =>
+      import('./pages/invoice-payment/invoice-payment.component').then(m => m.default)
   },
   {
     path: 'sms-opt-in-other',
@@ -118,9 +124,12 @@ export const routes: Routes = [
           import('./pages/invoices-new/invoices-new.component').then(m => m.default)
       },
       {
+        path: 'quotes/:id',
+        component: InvoiceDetailComponent
+      },
+      {
         path: 'invoices/:id',
-        loadComponent: () =>
-          import('./pages/invoice-detail/invoice-detail.component').then(m => m.default)
+        component: InvoiceDetailComponent
       },
       {
         path: 'invoices',

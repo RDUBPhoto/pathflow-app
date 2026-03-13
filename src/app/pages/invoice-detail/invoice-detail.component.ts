@@ -506,10 +506,6 @@ export default class InvoiceDetailComponent implements OnDestroy {
     if (!detail || detail.documentType !== 'invoice' || this.sendingInvoice()) return;
 
     const availability = this.paymentAvailability();
-    if (!availability.enabled) {
-      this.setStatus('Need to connect your payment provider before sending invoices.', 'error');
-      return;
-    }
 
     const emailTarget = String(detail.customerEmail || '').trim();
     const phoneTarget = String(detail.customerPhone || '').trim();
@@ -540,6 +536,10 @@ export default class InvoiceDetailComponent implements OnDestroy {
         String(detail.paymentLinkUrl || '').trim()
         || this.paymentSettings.createHostedPaymentLink(detail.id, detail.invoiceNumber)
         || '';
+      if (!paymentLink) {
+        this.setStatus('Payment link unavailable. Save invoice or connect payment provider, then try again.', 'error');
+        return;
+      }
       const publicLink = this.invoicePaymentPublicUrl(detail, paymentLink, amountDue);
       const business = String(detail.businessName || '').trim() || 'Your Company';
       const subject = `Invoice ${detail.invoiceNumber} - payment requested`;

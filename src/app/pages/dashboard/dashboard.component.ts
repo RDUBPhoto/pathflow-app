@@ -2874,6 +2874,7 @@ export default class DashboardComponent implements OnDestroy {
           } else {
             this.invoicesData.setStage(existing.id, 'accepted', 'Invoice updated to Accepted.');
           }
+          this.markDashboardCardsAsUnseenForDocument(existing);
           this.createInvoicePaidNotification(existing.id, existing.invoiceNumber, existing.customerName, wasFinalInvoicePayment);
           applied = true;
         }
@@ -2908,6 +2909,7 @@ export default class DashboardComponent implements OnDestroy {
             stage,
             `Customer ${stage === 'accepted' ? 'accepted' : 'declined'} quote from public link.`
           );
+          this.markDashboardCardsAsUnseenForDocument(existing);
           this.createQuoteStatusNotification(
             existing.id,
             existing.invoiceNumber,
@@ -2963,6 +2965,43 @@ export default class DashboardComponent implements OnDestroy {
         // Notification failures must not block status sync.
       }
     });
+  }
+
+  private markDashboardCardsAsUnseenForDocument(doc: InvoiceDetail): void {
+    if (!this.seenCardsLoaded || !this.seenCardsInitialized) return;
+
+    const current = this.seenCardIds();
+    const next = { ...current };
+    let changed = false;
+
+    for (const [laneId, rows] of Object.entries(this.items() || {})) {
+      for (const row of rows || []) {
+        if (!this.itemMatchesDocumentCustomer(row, doc)) continue;
+        const key = this.cardSeenKey(String(row.id || '').trim(), laneId);
+        if (!key || !next[key]) continue;
+        delete next[key];
+        changed = true;
+      }
+    }
+
+    if (!changed) return;
+    this.seenCardIds.set(next);
+    this.persistSeenCardsNow(next);
+  }
+
+  private itemMatchesDocumentCustomer(item: WorkItem, doc: InvoiceDetail): boolean {
+    const docCustomerId = String(doc.customerId || '').trim();
+    const itemCustomerId = String(item.customerId || '').trim();
+    if (docCustomerId && itemCustomerId && docCustomerId === itemCustomerId) return true;
+
+    const customer = this.customersMap()[itemCustomerId] || null;
+    const itemEmail = String(customer?.email || '').trim().toLowerCase();
+    const docEmail = String(doc.customerEmail || '').trim().toLowerCase();
+    if (docEmail && itemEmail && docEmail === itemEmail) return true;
+
+    const itemName = this.customerName(item).trim().toLowerCase();
+    const docName = String(doc.customerName || '').trim().toLowerCase();
+    return !!docName && !!itemName && docName === itemName;
   }
 
   private createInvoicePaidNotification(

@@ -546,7 +546,8 @@ export default class InvoicesComponent implements OnDestroy {
       this.invoicesData.setStage(
         item.quoteId,
         item.stage,
-        `Customer ${item.stage === 'accepted' ? 'accepted' : 'declined'} quote from public link.`
+        `Customer ${item.stage === 'accepted' ? 'accepted' : 'declined'} quote from public link.`,
+        'customer'
       );
       await this.createQuoteStatusNotification(existing.id, existing.invoiceNumber, existing.customerName, item.stage);
       appliedIds.push(item.quoteId);
@@ -614,10 +615,11 @@ export default class InvoicesComponent implements OnDestroy {
       this.invoicesData.setPaidAmount(
         existing.id,
         Number(existing.total || 0),
-        'Customer paid invoice from public payment link.'
+        'Customer paid invoice from public payment link.',
+        'customer'
       );
       if (wasFinalInvoicePayment) {
-        this.invoicesData.setStage(existing.id, 'completed', 'Final invoice paid by customer. Marked as Completed.');
+        this.invoicesData.setStage(existing.id, 'completed', 'Final invoice paid by customer. Marked as Completed.', 'customer');
       }
       await this.createInvoicePaidNotification(existing.id, existing.invoiceNumber, existing.customerName, wasFinalInvoicePayment);
       appliedIds.push(item.invoiceId);

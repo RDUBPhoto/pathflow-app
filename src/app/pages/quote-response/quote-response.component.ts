@@ -109,7 +109,8 @@ export default class QuoteResponseComponent {
       this.invoicesData.setStage(
         quoteId,
         stage,
-        `Customer ${action}ed quote from public link.`
+        `Customer ${action}ed quote from public link.`,
+        'customer'
       );
       if (targetTenant !== activeTenant) {
         this.tenantContext.setTenantOverride(activeTenant);

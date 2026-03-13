@@ -697,7 +697,7 @@ export class InvoicesDataService {
     return this.getInvoiceById(incoming.id || incoming.invoiceNumber) || this.cloneInvoice(this.normalizeInvoice(incoming));
   }
 
-  setStage(id: string, stage: InvoiceStage, note?: string): InvoiceDetail | null {
+  setStage(id: string, stage: InvoiceStage, note?: string, actorType?: InvoiceTimelineActorType): InvoiceDetail | null {
     const key = String(id || '').trim();
     if (!key) return null;
 
@@ -713,7 +713,8 @@ export class InvoicesDataService {
       timeline.push(this.createTimelineEntry(
         `timeline-${key}-${Date.now()}`,
         nowIso,
-        note?.trim() || this.stageTransitionMessage(existing.stage, stage)
+        note?.trim() || this.stageTransitionMessage(existing.stage, stage),
+        actorType
       ));
 
       const normalizedPaidAmount = (stage === 'accepted' || stage === 'completed') && existing.documentType === 'invoice'
@@ -740,7 +741,7 @@ export class InvoicesDataService {
     return updated;
   }
 
-  setPaidAmount(id: string, paidAmount: number, note?: string): InvoiceDetail | null {
+  setPaidAmount(id: string, paidAmount: number, note?: string, actorType?: InvoiceTimelineActorType): InvoiceDetail | null {
     const key = String(id || '').trim();
     if (!key) return null;
 
@@ -759,13 +760,15 @@ export class InvoicesDataService {
       timeline.push(this.createTimelineEntry(
         `timeline-${key}-${Date.now()}`,
         nowIso,
-        note?.trim() || `Payment applied: ${this.formatCurrency(normalizedPaidAmount)}.`
+        note?.trim() || `Payment applied: ${this.formatCurrency(normalizedPaidAmount)}.`,
+        actorType
       ));
       if (previousStage !== nextStage) {
         timeline.push(this.createTimelineEntry(
           `timeline-${key}-${Date.now()}-stage`,
           nowIso,
-          this.stageTransitionMessage(previousStage, nextStage)
+          this.stageTransitionMessage(previousStage, nextStage),
+          actorType
         ));
       }
 

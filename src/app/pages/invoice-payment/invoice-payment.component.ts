@@ -212,7 +212,8 @@ export default class InvoicePaymentComponent {
     const updated = this.invoicesData.setPaidAmount(
       targetId,
       nextPaid,
-      `Customer paid ${this.money(chargeAmount)} from public payment link.`
+      `Customer paid ${this.money(chargeAmount)} from public payment link.`,
+      'customer'
     );
     const resolved = updated || this.invoicesData.getInvoiceById(targetId) || detail;
     const total = this.roundCurrency(Math.max(0, Number(resolved?.total || 0)));

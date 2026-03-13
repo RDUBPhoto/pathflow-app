@@ -2878,11 +2878,11 @@ export default class DashboardComponent implements OnDestroy {
           if ((existing.stage === 'accepted' || existing.stage === 'completed') && paid >= total) continue;
           const wasFinalInvoicePayment = paid > 0 && paid < total;
 
-          this.invoicesData.setPaidAmount(existing.id, total, 'Customer paid invoice from public payment link.');
+          this.invoicesData.setPaidAmount(existing.id, total, 'Customer paid invoice from public payment link.', 'customer');
           if (wasFinalInvoicePayment) {
-            this.invoicesData.setStage(existing.id, 'completed', 'Final invoice paid by customer. Marked as Completed.');
+            this.invoicesData.setStage(existing.id, 'completed', 'Final invoice paid by customer. Marked as Completed.', 'customer');
           } else {
-            this.invoicesData.setStage(existing.id, 'accepted', 'Invoice updated to Accepted.');
+            this.invoicesData.setStage(existing.id, 'accepted', 'Customer approved and paid invoice from public payment link.', 'customer');
           }
           this.markDashboardCardsAsUnseenForDocument(existing);
           this.createInvoicePaidNotification(existing.id, existing.invoiceNumber, existing.customerName, wasFinalInvoicePayment);
@@ -2917,7 +2917,8 @@ export default class DashboardComponent implements OnDestroy {
           this.invoicesData.setStage(
             existing.id,
             stage,
-            `Customer ${stage === 'accepted' ? 'accepted' : 'declined'} quote from public link.`
+            `Customer ${stage === 'accepted' ? 'accepted' : 'declined'} quote from public link.`,
+            'customer'
           );
           this.markDashboardCardsAsUnseenForDocument(existing);
           this.createQuoteStatusNotification(

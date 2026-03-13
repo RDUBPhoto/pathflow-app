@@ -1614,18 +1614,20 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
 
   invoiceStatusLabel(invoice: InvoiceCard): string {
     if (invoice.documentType === 'invoice' && invoice.stage === 'accepted') return 'Paid';
+    if (invoice.stage === 'completed') return 'Completed';
     if (invoice.documentType === 'quote' && invoice.stage === 'accepted') return 'Accepted';
     if (invoice.stage === 'draft') return 'Draft';
     if (invoice.stage === 'sent') return 'Sent';
     if (invoice.stage === 'declined') return 'Declined';
-    if (invoice.stage === 'canceled') return 'Canceled';
+    if (invoice.stage === 'canceled') return 'Cancelled';
     if (invoice.stage === 'expired') return 'Expired';
     return `${invoice.stage.charAt(0).toUpperCase()}${invoice.stage.slice(1)}`;
   }
 
   invoiceBadgeColor(invoice: InvoiceCard): string {
-    if (invoice.stage === 'accepted') return 'success';
+    if (invoice.stage === 'accepted' || invoice.stage === 'completed') return 'success';
     if (invoice.stage === 'declined') return 'danger';
+    if (invoice.stage === 'canceled') return 'danger';
     if (invoice.stage === 'expired') return 'medium';
     if (invoice.stage === 'draft') return 'warning';
     if (invoice.stage === 'sent') return 'primary';

@@ -1676,10 +1676,12 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
     const phone = this.widgetTestPhone.trim();
     const phoneE164 = this.normalizeWidgetPhone(phone);
     const vin = this.widgetTestVin.trim().toUpperCase();
+    const message = this.widgetTestMessage.trim();
     if (!firstName || !lastName) return false;
     if (!email && !phone) return false;
     if (phone && !phoneE164) return false;
     if (!this.isValidVin(vin)) return false;
+    if (!message) return false;
     if (phone && !this.widgetTestSmsOptIn) return false;
     return true;
   }
@@ -1744,6 +1746,10 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
     }
     if (!this.isValidVin(vin)) {
       this.widgetError = 'VIN must be 17 characters and cannot include I, O, or Q.';
+      return;
+    }
+    if (!message) {
+      this.widgetError = 'Message is required.';
       return;
     }
     if (phone && !smsOptIn) {
@@ -2129,7 +2135,8 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
       "    '  <input name=\"email\" type=\"email\" placeholder=\"Email\" style=\"padding:10px;border:1px solid #cbd5e1;border-radius:8px;\">',",
       "    '  <input name=\"phone\" type=\"tel\" placeholder=\"Phone\" style=\"padding:10px;border:1px solid #cbd5e1;border-radius:8px;\">',",
       "    '  <input name=\"vin\" type=\"text\" required minlength=\"17\" maxlength=\"17\" pattern=\"[A-HJ-NPR-Z0-9]{17}\" placeholder=\"VIN (17 chars)\" style=\"padding:10px;border:1px solid #cbd5e1;border-radius:8px;\">',",
-      "    '  <textarea name=\"message\" rows=\"4\" placeholder=\"How can we help?\" style=\"padding:10px;border:1px solid #cbd5e1;border-radius:8px;\"></textarea>',",
+      "    '  <label style=\"font-size:13px;color:#334155;font-weight:600;\">Message (provide all details about what work you are interested in)</label>',",
+      "    '  <textarea name=\"message\" rows=\"4\" required placeholder=\"Provide all details about what work you are interested in\" style=\"padding:10px;border:1px solid #cbd5e1;border-radius:8px;\"></textarea>',",
       "    '  <label style=\"font-size:13px;line-height:1.4;color:#334155;\">',",
       `    '    <input name="smsOptIn" type="checkbox" value="true" style="margin-right:6px;vertical-align:middle;">${escapedConsentHtml}',`,
       "    '  </label>',",
@@ -2169,6 +2176,11 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
       '    }',
       '    if (!payload.vin) {',
       "      status.textContent = 'VIN is required.';",
+      "      status.style.color = '#dc2626';",
+      '      return;',
+      '    }',
+      '    if (!payload.message) {',
+      "      status.textContent = 'Message is required.';",
       "      status.style.color = '#dc2626';",
       '      return;',
       '    }',

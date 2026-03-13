@@ -1166,6 +1166,7 @@ export default class DashboardComponent implements OnDestroy {
     const customerName = String(customer?.name || docs[0]?.customerName || 'Customer').trim();
     const seen = new Set<string>();
     const sends = docs
+      .filter(doc => this.shouldSendCancellationEmail(doc))
       .filter(doc => {
         const id = String(doc.id || '').trim();
         if (!id || seen.has(id)) return false;
@@ -1201,6 +1202,17 @@ export default class DashboardComponent implements OnDestroy {
     if (attempted && failed) {
       this.status.set('Customer removed and quote/invoice canceled. Some cancellation emails failed.');
     }
+  }
+
+  private shouldSendCancellationEmail(doc: InvoiceDetail): boolean {
+    const stage = String(doc?.stage || '').trim().toLowerCase();
+    if (!stage || stage === 'draft') return false;
+    if (doc.documentType === 'invoice') {
+      // Only notify invoice cancellation if the invoice had already been sent.
+      return stage === 'sent';
+    }
+    // Quotes may be customer-visible across sent/accepted/declined.
+    return stage === 'sent' || stage === 'accepted' || stage === 'declined';
   }
 
   private escapeHtml(value: string): string {

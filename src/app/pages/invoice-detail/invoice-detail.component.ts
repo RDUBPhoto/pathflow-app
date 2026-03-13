@@ -150,6 +150,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
   readonly isFinalInvoiceMode = computed(() => {
     const detail = this.invoice();
     if (!detail || detail.documentType !== 'invoice') return false;
+    if (detail.stage === 'draft') return false;
     return this.paidAmount() > 0;
   });
   readonly isFinalInvoiceSendDisabled = computed(() => {

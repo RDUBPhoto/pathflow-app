@@ -649,16 +649,22 @@ export class InvoicesDataService {
     const nowIso = new Date().toISOString();
 
     this.updateState(current => {
-      const index = current.findIndex(item => item.id === incoming.id);
+      const incomingId = this.safeText(incoming.id);
+      const incomingNumber = this.normalize(incoming.invoiceNumber);
+      let index = current.findIndex(item => item.id === incomingId);
+      if (index === -1 && incomingNumber) {
+        index = current.findIndex(item => this.normalize(item.invoiceNumber) === incomingNumber);
+      }
       if (index === -1) {
         const created = this.normalizeInvoice({
           ...incoming,
-          id: incoming.id || this.generateDocumentId(),
+          id: incomingId || this.generateDocumentId(),
           invoiceNumber: incoming.invoiceNumber || this.previewNextDocumentNumber(incoming.documentType),
           createdAt: incoming.createdAt || nowIso,
           updatedAt: nowIso
         });
-        return [created, ...current];
+        const next = this.reconcileQuoteSiblings([created, ...current], created, nowIso);
+        return next;
       }
 
       const existing = current[index];
@@ -676,6 +682,8 @@ export class InvoicesDataService {
       const merged = this.normalizeInvoice({
         ...existing,
         ...incoming,
+        id: existing.id,
+        invoiceNumber: existing.invoiceNumber || incoming.invoiceNumber,
         createdAt: existing.createdAt || incoming.createdAt || nowIso,
         updatedAt: nowIso,
         timeline
@@ -683,10 +691,10 @@ export class InvoicesDataService {
 
       const next = [...current];
       next[index] = merged;
-      return next;
+      return this.reconcileQuoteSiblings(next, merged, nowIso);
     });
 
-    return this.getInvoiceById(incoming.id) || this.cloneInvoice(this.normalizeInvoice(incoming));
+    return this.getInvoiceById(incoming.id || incoming.invoiceNumber) || this.cloneInvoice(this.normalizeInvoice(incoming));
   }
 
   setStage(id: string, stage: InvoiceStage, note?: string): InvoiceDetail | null {
@@ -903,7 +911,9 @@ export class InvoicesDataService {
       staffNote: quote.staffNote,
       customerNote: quote.customerNote,
       lineItems: quote.lineItems.map(item => ({ ...item })),
-      includePaymentLink: true
+      includePaymentLink: true,
+      stage: 'draft',
+      paidAmount: 0
     });
 
     if (created) {
@@ -1243,8 +1253,9 @@ export class InvoicesDataService {
       const normalized = parsed
         .map(item => this.normalizeInvoice(item as InvoiceDetail))
         .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
-      const migrated = this.migrateLegacyCompletedInvoices(normalized);
-      return migrated.map(item => this.cloneInvoice(item));
+      const legacyMigrated = this.migrateLegacyCompletedInvoices(normalized);
+      const siblingMigrated = this.migrateDuplicateActiveQuotes(legacyMigrated);
+      return siblingMigrated.map(item => this.cloneInvoice(item));
     } catch {
       return [];
     }
@@ -1294,6 +1305,78 @@ export class InvoicesDataService {
     return (timeline || []).some(entry => String(entry?.message || '').trim().toLowerCase().includes('final invoice sent to customer'));
   }
 
+  private migrateDuplicateActiveQuotes(items: InvoiceDetail[]): InvoiceDetail[] {
+    const source = Array.isArray(items) ? items : [];
+    if (!source.length) return source;
+
+    const activeQuoteStages = new Set<InvoiceStage>(['draft', 'sent', 'accepted', 'declined']);
+    const buckets = new Map<string, number[]>();
+
+    for (let index = 0; index < source.length; index += 1) {
+      const item = source[index];
+      if (item.documentType !== 'quote') continue;
+      if (!activeQuoteStages.has(item.stage)) continue;
+      const key = this.quoteDedupKey(item);
+      if (!key) continue;
+      const list = buckets.get(key) || [];
+      list.push(index);
+      buckets.set(key, list);
+    }
+
+    let changed = false;
+    const nowIso = new Date().toISOString();
+    const next = [...source];
+
+    for (const indexes of buckets.values()) {
+      if (indexes.length <= 1) continue;
+      const keepIndex = indexes
+        .slice()
+        .sort((a, b) => {
+          const aItem = source[a];
+          const bItem = source[b];
+          const stageDiff = this.stageLookupPriority(bItem.stage) - this.stageLookupPriority(aItem.stage);
+          if (stageDiff !== 0) return stageDiff;
+          const updatedDiff = this.asMillis(bItem.updatedAt || bItem.createdAt) - this.asMillis(aItem.updatedAt || aItem.createdAt);
+          if (updatedDiff !== 0) return updatedDiff;
+          return this.asMillis(bItem.createdAt) - this.asMillis(aItem.createdAt);
+        })[0];
+      const keeper = source[keepIndex];
+
+      for (const index of indexes) {
+        if (index === keepIndex) continue;
+        const candidate = next[index];
+        if (candidate.stage === 'canceled' || candidate.stage === 'expired') continue;
+        changed = true;
+        const timeline = [...candidate.timeline, this.createTimelineEntry(
+          `timeline-${candidate.id}-${Date.now()}-dedup`,
+          nowIso,
+          `Superseded by ${keeper.invoiceNumber}.`
+        )];
+        next[index] = this.normalizeInvoice({
+          ...candidate,
+          stage: 'canceled',
+          updatedAt: nowIso,
+          timeline
+        });
+      }
+    }
+
+    if (changed) {
+      setTimeout(() => this.persistToStorage());
+    }
+    return next;
+  }
+
+  private quoteDedupKey(item: InvoiceDetail): string {
+    const customerId = this.normalize(item.customerId);
+    if (customerId) return `id:${customerId}`;
+    const email = this.normalize(item.customerEmail);
+    if (email) return `email:${email}`;
+    const name = this.normalize(item.customerName);
+    if (name) return `name:${name}`;
+    return '';
+  }
+
   private nextInvoiceSequence(): number {
     const max = this.state().reduce((highest, invoice) => {
       const invoiceNumberMatch = String(invoice.invoiceNumber || '').match(/(\d+)/);
@@ -1337,6 +1420,42 @@ export class InvoicesDataService {
 
   private stageTransitionMessage(fromStage: InvoiceStage, toStage: InvoiceStage): string {
     return `${this.stageLabel(fromStage)} updated to ${this.stageLabel(toStage)}.`;
+  }
+
+  private reconcileQuoteSiblings(source: InvoiceDetail[], focus: InvoiceDetail, nowIso: string): InvoiceDetail[] {
+    if (focus.documentType !== 'quote') return source;
+    const focusStage = this.normalizeStage(focus.stage);
+    if (focusStage !== 'sent' && focusStage !== 'accepted') return source;
+
+    const focusId = this.safeText(focus.id);
+    const focusCustomerId = this.normalize(focus.customerId);
+    const focusEmail = this.normalize(focus.customerEmail);
+    const focusName = this.normalize(focus.customerName);
+    if (!focusCustomerId && !focusEmail && !focusName) return source;
+
+    return source.map(item => {
+      if (item.documentType !== 'quote') return item;
+      if (this.safeText(item.id) === focusId) return item;
+      if (item.stage === 'canceled' || item.stage === 'expired') return item;
+
+      const sameCustomer =
+        (focusCustomerId && focusCustomerId === this.normalize(item.customerId))
+        || (focusEmail && focusEmail === this.normalize(item.customerEmail))
+        || (focusName && focusName === this.normalize(item.customerName));
+      if (!sameCustomer) return item;
+
+      const timeline = [...item.timeline, this.createTimelineEntry(
+        `timeline-${item.id}-${Date.now()}-quote-replaced`,
+        nowIso,
+        `Superseded by ${focus.invoiceNumber}.`
+      )];
+      return this.normalizeInvoice({
+        ...item,
+        stage: 'canceled',
+        updatedAt: nowIso,
+        timeline
+      });
+    });
   }
 
   private purgeLocalhostInvoiceQuoteDataOnce(): void {

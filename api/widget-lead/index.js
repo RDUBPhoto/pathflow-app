@@ -981,7 +981,7 @@ module.exports = async function (context, req) {
       requestedTenantId,
       securedByApiKey: !!asString(process.env.WIDGET_API_KEY),
       accepts: ["name", "phone", "email", "vin", "message", "smsOptIn"],
-      requiredFields: ["email or phone", "name (recommended)", "vin (required: 17 chars, A-HJ-NPR-Z0-9)", "smsOptIn (if phone will receive SMS)"]
+      requiredFields: ["email or phone", "name (recommended)", "vin (required: 17 chars, A-HJ-NPR-Z0-9)", "message", "smsOptIn (if phone will receive SMS)"]
     });
     return;
   }
@@ -1003,6 +1003,10 @@ module.exports = async function (context, req) {
   }
   if (!inbound.vin) {
     context.res = json(req, 400, { error: "VIN is required." });
+    return;
+  }
+  if (!inbound.message) {
+    context.res = json(req, 400, { error: "Message is required." });
     return;
   }
   if (!isValidVin(inbound.vin)) {

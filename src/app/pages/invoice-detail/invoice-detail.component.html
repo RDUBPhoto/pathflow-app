@@ -521,13 +521,10 @@
         </div>
 
         <div class="send-invoice-actions">
-          <ion-button fill="outline" [disabled]="sendingInvoice()" (click)="editInvoiceFromSendModal()">
-            Edit/Add to Invoice
-          </ion-button>
           <ion-button fill="outline" [disabled]="sendingInvoice()" (click)="closeSendInvoiceModal()">
             Cancel
           </ion-button>
-          <ion-button [disabled]="sendingInvoice() || !canConfirmSendInvoice()" (click)="confirmSendInvoiceModal()">
+          <ion-button [disabled]="sendingInvoice()" (click)="confirmSendInvoiceModal()">
             {{ sendingInvoice() ? 'Sending...' : 'Send Now' }}
           </ion-button>
         </div>

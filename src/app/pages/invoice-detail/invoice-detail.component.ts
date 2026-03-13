@@ -121,10 +121,8 @@ export default class InvoiceDetailComponent implements OnDestroy {
   readonly canSendInvoiceViaEmail = computed(() => !!this.invoiceEmailTarget());
   readonly canSendInvoiceViaSms = computed(() => !!this.invoiceSmsTarget());
   readonly canConfirmSendInvoice = computed(() =>
-    this.paymentAvailability().enabled && (
-      (this.sendInvoiceViaEmail() && this.canSendInvoiceViaEmail())
-      || (this.sendInvoiceViaSms() && this.canSendInvoiceViaSms())
-    )
+    (this.sendInvoiceViaEmail() && this.canSendInvoiceViaEmail())
+    || (this.sendInvoiceViaSms() && this.canSendInvoiceViaSms())
   );
 
   readonly totals = computed(() => {
@@ -495,14 +493,8 @@ export default class InvoiceDetailComponent implements OnDestroy {
     this.sendInvoiceModalOpen.set(false);
   }
 
-  editInvoiceFromSendModal(): void {
-    if (this.sendingInvoice()) return;
-    this.sendInvoiceModalOpen.set(false);
-    this.setStatus('Invoice ready to edit.', 'neutral');
-  }
-
   async confirmSendInvoiceModal(): Promise<void> {
-    if (!this.canConfirmSendInvoice() || this.sendingInvoice()) return;
+    if (this.sendingInvoice()) return;
     await this.sendInvoiceForPayment({
       email: this.sendInvoiceViaEmail(),
       sms: this.sendInvoiceViaSms()

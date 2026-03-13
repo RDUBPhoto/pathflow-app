@@ -2084,7 +2084,7 @@ export default class DashboardComponent implements OnDestroy {
     return doc.documentType === 'quote' && doc.stage === 'accepted';
   }
 
-  createInvoiceFromQuoteCard(it: WorkItem, lane: Lane, event?: Event): void {
+  async createInvoiceFromQuoteCard(it: WorkItem, lane: Lane, event?: Event): Promise<void> {
     event?.stopPropagation();
     event?.preventDefault();
     if (!this.canCreateInvoiceFromQuote(it, lane)) return;
@@ -2092,7 +2092,36 @@ export default class DashboardComponent implements OnDestroy {
     this.markLeadSeen(it, lane);
     const doc = this.linkedDocumentForCard(it, lane);
     if (!doc) return;
-    this.router.navigate(['/quotes', doc.id || doc.invoiceNumber]);
+    const created = this.invoicesData.createInvoiceFromQuote(doc.id || doc.invoiceNumber);
+    if (!created) {
+      this.status.set('Could not create invoice from quote.');
+      return;
+    }
+
+    const targetLaneId = this.invoicedLaneId();
+    if (targetLaneId && targetLaneId !== String(it.laneId || '').trim()) {
+      this.items.update(current => {
+        const next: Record<string, WorkItem[]> = {};
+        for (const [laneId, rows] of Object.entries(current || {})) {
+          next[laneId] = [...(rows || [])].filter(row => row.id !== it.id);
+        }
+        const targetRows = next[targetLaneId] || [];
+        targetRows.unshift({ ...it, laneId: targetLaneId });
+        next[targetLaneId] = targetRows;
+        return next;
+      });
+      try {
+        await firstValueFrom(this.itemsApi.update({ id: it.id, laneId: targetLaneId }));
+      } catch {
+        this.status.set(`Created invoice ${created.invoiceNumber}, but could not move card to Invoices lane.`);
+        this.loadAll();
+      }
+    }
+
+    this.status.set(`Created invoice ${created.invoiceNumber}.`);
+    await this.router.navigate(['/invoices', created.id], {
+      queryParams: { openSendModal: '1' }
+    });
   }
 
   canOpenFinalInvoice(it: WorkItem, lane: Lane): boolean {

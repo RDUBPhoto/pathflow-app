@@ -502,6 +502,12 @@ export default class InvoiceDetailComponent implements OnDestroy {
     this.sendInvoiceModalOpen.set(false);
   }
 
+  editInvoiceFromSendModal(): void {
+    if (this.sendingInvoice()) return;
+    this.sendInvoiceModalOpen.set(false);
+    this.setStatus('Invoice ready to edit.', 'neutral');
+  }
+
   async confirmSendInvoiceModal(): Promise<void> {
     if (!this.canConfirmSendInvoice() || this.sendingInvoice()) return;
     await this.sendInvoiceForPayment({

@@ -121,8 +121,10 @@ export default class InvoiceDetailComponent implements OnDestroy {
   readonly canSendInvoiceViaEmail = computed(() => !!this.invoiceEmailTarget());
   readonly canSendInvoiceViaSms = computed(() => !!this.invoiceSmsTarget());
   readonly canConfirmSendInvoice = computed(() =>
-    (this.sendInvoiceViaEmail() && this.canSendInvoiceViaEmail())
-    || (this.sendInvoiceViaSms() && this.canSendInvoiceViaSms())
+    this.paymentAvailability().enabled && (
+      (this.sendInvoiceViaEmail() && this.canSendInvoiceViaEmail())
+      || (this.sendInvoiceViaSms() && this.canSendInvoiceViaSms())
+    )
   );
 
   readonly totals = computed(() => {
@@ -480,17 +482,8 @@ export default class InvoiceDetailComponent implements OnDestroy {
       return;
     }
 
-    const availability = this.paymentAvailability();
-    if (!availability.enabled) {
-      this.setStatus('Need to connect your payment provider before sending invoices.', 'error');
-      return;
-    }
     const hasEmail = this.canSendInvoiceViaEmail();
     const hasSms = this.canSendInvoiceViaSms();
-    if (!hasEmail && !hasSms) {
-      this.setStatus('Need customer email or phone to send this invoice.', 'error');
-      return;
-    }
 
     this.sendInvoiceViaEmail.set(hasEmail);
     this.sendInvoiceViaSms.set(hasSms && !hasEmail);

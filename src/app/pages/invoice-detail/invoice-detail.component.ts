@@ -630,23 +630,33 @@ export default class InvoiceDetailComponent implements OnDestroy {
       this.sendInvoiceModalError.set('');
       this.sendInvoiceModalOpen.set(false);
 
+      let successMessage = '';
+      let successTone: StatusTone = 'success';
       if (wantsEmail && wantsSms) {
         if (emailSuccess && smsSuccess) {
-          this.setStatus('Invoice sent by email and SMS.', 'success');
+          successMessage = 'Invoice sent by email and SMS.';
+          successTone = 'success';
         } else if (emailSuccess) {
-          this.setStatus('Invoice sent by email. SMS delivery failed.', 'error');
+          successMessage = 'Invoice sent by email. SMS delivery failed.';
+          successTone = 'error';
         } else if (smsSuccess) {
-          this.setStatus('Invoice sent by SMS. Email delivery failed.', 'error');
+          successMessage = 'Invoice sent by SMS. Email delivery failed.';
+          successTone = 'error';
         } else {
-          this.setStatus('Invoice send failed. Email/SMS could not be delivered.', 'error');
+          successMessage = 'Invoice send failed. Email/SMS could not be delivered.';
+          successTone = 'error';
         }
       } else if (wantsEmail) {
-        this.setStatus(emailSuccess ? 'Invoice sent by email.' : 'Invoice send failed. Email could not be delivered.', emailSuccess ? 'success' : 'error');
+        successMessage = emailSuccess ? 'Invoice sent by email.' : 'Invoice send failed. Email could not be delivered.';
+        successTone = emailSuccess ? 'success' : 'error';
       } else if (wantsSms) {
-        this.setStatus(smsSuccess ? 'Invoice sent by SMS.' : 'Invoice send failed. SMS could not be delivered.', smsSuccess ? 'success' : 'error');
+        successMessage = smsSuccess ? 'Invoice sent by SMS.' : 'Invoice send failed. SMS could not be delivered.';
+        successTone = smsSuccess ? 'success' : 'error';
       } else {
-        this.setStatus('Pick at least one delivery channel.', 'error');
+        successMessage = 'Pick at least one delivery channel.';
+        successTone = 'error';
       }
+      this.setStatusAfterModalClose(successMessage, successTone);
     } catch {
       this.sendInvoiceModalError.set('Could not send invoice.');
       this.setStatus('Could not send invoice.', 'error');
@@ -1505,6 +1515,12 @@ export default class InvoiceDetailComponent implements OnDestroy {
     this.status.set(message);
     this.statusTone.set(tone);
     void this.presentStatusToast(message, tone);
+  }
+
+  private setStatusAfterModalClose(message: string, tone: StatusTone = 'neutral'): void {
+    const value = String(message || '').trim();
+    if (!value) return;
+    setTimeout(() => this.setStatus(value, tone), 220);
   }
 
   private async presentStatusToast(message: string, tone: StatusTone): Promise<void> {

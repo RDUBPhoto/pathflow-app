@@ -16,6 +16,9 @@ jobs:
     timeout-minutes: 25
     env:
       PLAYWRIGHT_BASE_URL: ${{ secrets.PLAYWRIGHT_BASE_URL }}
+      SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+      EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+      QA_REPORT_EMAIL_TO: ${{ secrets.QA_REPORT_EMAIL_TO }}
     steps:
       - uses: actions/checkout@v4
 
@@ -40,7 +43,13 @@ jobs:
           fi
 
       - name: Run hosted smoke tests
+        id: hosted_smoke_tests
+        continue-on-error: true
         run: npm run test:e2e:hosted
+
+      - name: Send hosted QA summary email
+        if: always()
+        run: node scripts/send-hosted-qa-email.mjs
 
       - name: Upload hosted Playwright report
         if: always()
@@ -57,3 +66,7 @@ jobs:
           name: playwright-hosted-junit
           path: test-results/playwright/hosted-junit.xml
           if-no-files-found: ignore
+
+      - name: Fail workflow when hosted smoke tests fail
+        if: steps.hosted_smoke_tests.outcome != 'success'
+        run: exit 1

@@ -117,6 +117,11 @@ GitHub Actions workflow `.github/workflows/hosted-qa-smoke.yml` runs hosted smok
 Required GitHub secret:
 1. `PLAYWRIGHT_BASE_URL` set to your hosted app origin (for example `https://www.pathflow-app.com`).
 
+Optional hosted QA summary email (sent every scheduled/manual run):
+1. `QA_REPORT_EMAIL_TO` recipient email(s), comma-separated (for example `robert@pathflow-app.com`).
+2. `SENDGRID_API_KEY` valid SendGrid API key.
+3. `EMAIL_FROM` verified sender email.
+
 ## Additional Resources
 
 For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.

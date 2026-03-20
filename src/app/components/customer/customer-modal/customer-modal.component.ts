@@ -9,6 +9,7 @@ import { HttpClient } from '@angular/common/http';
 import { CustomersApi, Customer } from '../../../services/customers-api.service';
 import { AddressLookupService, AddressSuggestion } from '../../../services/address-lookup.service';
 import { Subscription, finalize } from 'rxjs';
+import { formatUsPhoneInput } from '../../../utils/phone-format';
 
 type ColorOpt = { label: string; hex: string };
 type Mode = 'add' | 'edit';
@@ -179,17 +180,7 @@ export default class CustomerModalComponent implements OnInit, OnChanges, OnDest
   onFirstChange(v: string) { this.firstName.set(v ?? ''); this.recomputeDupMatches(); }
   onLastChange(v: string) { this.lastName.set(v ?? ''); this.recomputeDupMatches(); }
   onPhoneInput(v: string) {
-    const digits = (v || '').replace(/\D+/g, '').slice(0, 15);
-    let pretty = digits;
-    if (digits.length >= 10) {
-      const d = digits.slice(-10);
-      pretty = `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6,10)}` + (digits.length > 10 ? ` x${digits.slice(10)}` : '');
-    } else if (digits.length > 6) {
-      pretty = `(${digits.slice(0,3)}) ${digits.slice(3,6)}-${digits.slice(6)}`;
-    } else if (digits.length > 3) {
-      pretty = `(${digits.slice(0,3)}) ${digits.slice(3)}`;
-    }
-    this.phone.set(pretty);
+    this.phone.set(formatUsPhoneInput(v));
     this.recomputeDupMatches();
   }
   onEmailChange(v: string) { this.email.set(v ?? ''); this.recomputeDupMatches(); }
@@ -268,7 +259,7 @@ export default class CustomerModalComponent implements OnInit, OnChanges, OnDest
     const last = parts.length > 1 ? parts[parts.length - 1] : '';
     this.firstName.set(first);
     this.lastName.set(last);
-    this.phone.set(d.phone || '');
+    this.phone.set(formatUsPhoneInput(d.phone || ''));
     this.email.set(d.email || '');
     const ext = d as any as UICustomer;
     this.address.set(ext['address'] || '');
@@ -399,7 +390,7 @@ export default class CustomerModalComponent implements OnInit, OnChanges, OnDest
     const last = c.lastName || (parts.length > 1 ? parts[parts.length - 1] : '');
     this.firstName.set(first);
     this.lastName.set(last);
-    this.phone.set(c.phone || '');
+    this.phone.set(formatUsPhoneInput(c.phone || ''));
     this.email.set(c.email || '');
     this.address.set((c as any)['address'] || '');
     this.vin.set((c as any)['vin'] || '');

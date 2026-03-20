@@ -71,10 +71,14 @@ import {
   PaymentGatewaySettingsService
 } from '../../services/payment-gateway-settings.service';
 import {
+  Customer,
   CustomerImportResponse,
   CustomerImportRow,
   CustomersApi
 } from '../../services/customers-api.service';
+import { ScheduleApi, ScheduleItem } from '../../services/schedule-api.service';
+import { WorkItem, WorkItemsApi } from '../../services/workitems-api.service';
+import { formatUsPhoneInput } from '../../utils/phone-format';
 import * as XLSX from 'xlsx';
 
 interface AppIntegration {
@@ -378,6 +382,8 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
   private readonly tenantContext = inject(TenantContextService);
   private readonly route = inject(ActivatedRoute);
   private readonly customersApi = inject(CustomersApi);
+  private readonly scheduleApi = inject(ScheduleApi);
+  private readonly workItemsApi = inject(WorkItemsApi);
   private readonly accessAdminApi = inject(AccessAdminApiService);
   readonly paymentGatewaySettings = inject(PaymentGatewaySettingsService);
 
@@ -559,6 +565,9 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
   widgetTestSmsOptIn = true;
   supplierStatus = '';
   supplierError = '';
+  qaCleanupStatus = '';
+  qaCleanupError = '';
+  readonly qaCleanupRunning = signal(false);
   paymentGatewayStatus = '';
   paymentGatewayError = '';
   authorizeNetApiLoginId = '';
@@ -597,7 +606,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
     const profile = this.businessProfile.profile();
     this.businessProfileName = String(profile.companyName || '').trim();
     this.businessProfileEmail = String(profile.companyEmail || '').trim();
-    this.businessProfilePhone = String(profile.companyPhone || '').trim();
+    this.businessProfilePhone = formatUsPhoneInput(String(profile.companyPhone || '').trim());
     this.businessProfileAddress = String(profile.companyAddress || '').trim();
   });
   private readonly paymentGatewaySync = effect(() => {
@@ -705,6 +714,10 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
         this.businessProfileError = this.extractApiError(err, 'Could not save business profile.');
       }
     });
+  }
+
+  onBusinessProfilePhoneInput(value: string | null | undefined): void {
+    this.businessProfilePhone = formatUsPhoneInput(value);
   }
 
   addLaborRate(): void {
@@ -1481,6 +1494,81 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
 
   trackSupplierConnector(_index: number, connector: InventoryConnector): string {
     return connector.id;
+  }
+
+  async purgeQaTestData(): Promise<void> {
+    if (this.qaCleanupRunning()) return;
+    if (!window.confirm('Delete QA test schedule events, QA cards, and QA customer profiles from this tenant?')) return;
+
+    this.qaCleanupRunning.set(true);
+    this.qaCleanupStatus = '';
+    this.qaCleanupError = '';
+
+    try {
+      const [customers, schedules, workItems] = await Promise.all([
+        firstValueFrom(this.customersApi.list()),
+        firstValueFrom(this.scheduleApi.list()),
+        firstValueFrom(this.workItemsApi.list())
+      ]);
+
+      const qaText = (value: unknown) => /\bqa\b/i.test(String(value || ''));
+      const qaCalendarText = (value: unknown) => /qa calendar event/i.test(String(value || ''));
+      const qaCustomer = (customer: Customer) => {
+        const name = String(customer?.name || '').trim();
+        const email = String(customer?.email || '').trim().toLowerCase();
+        return /^qa(?:\b|[-\s_])/.test(name.toLowerCase()) || email.endsWith('@example.com');
+      };
+
+      const customerIds = new Set(
+        (Array.isArray(customers) ? customers : [])
+          .filter(item => qaCustomer(item))
+          .map(item => String(item.id || '').trim())
+          .filter(Boolean)
+      );
+
+      const scheduleMatches = (row: ScheduleItem) => {
+        const idMatch = customerIds.has(String(row.customerId || '').trim());
+        const textBlob = `${String(row.title || '')} ${String(row.notes || '')}`.trim();
+        return idMatch || qaCalendarText(textBlob) || /^qa(?:\b|[-\s_])/.test(textBlob.toLowerCase()) || qaText(textBlob);
+      };
+
+      const workItemMatches = (row: WorkItem) => {
+        const idMatch = customerIds.has(String(row.customerId || '').trim());
+        const title = String(row.title || '').trim();
+        return idMatch || /^qa(?:\b|[-\s_])/.test(title.toLowerCase());
+      };
+
+      const scheduleIds = (Array.isArray(schedules) ? schedules : [])
+        .filter(scheduleMatches)
+        .map(row => String(row.id || '').trim())
+        .filter(Boolean);
+      const workItemIds = (Array.isArray(workItems) ? workItems : [])
+        .filter(workItemMatches)
+        .map(row => String(row.id || '').trim())
+        .filter(Boolean);
+      const qaCustomerIds = [...customerIds];
+
+      const scheduleDeletes = await Promise.allSettled(scheduleIds.map(id => firstValueFrom(this.scheduleApi.delete(id))));
+      const workItemDeletes = await Promise.allSettled(workItemIds.map(id => firstValueFrom(this.workItemsApi.delete(id))));
+      const customerDeletes = await Promise.allSettled(qaCustomerIds.map(id => firstValueFrom(this.customersApi.delete(id))));
+
+      const failed = [
+        ...scheduleDeletes.filter(result => result.status === 'rejected'),
+        ...workItemDeletes.filter(result => result.status === 'rejected'),
+        ...customerDeletes.filter(result => result.status === 'rejected')
+      ].length;
+
+      this.qaCleanupStatus =
+        failed === 0
+          ? `Removed ${scheduleIds.length} schedule event(s), ${workItemIds.length} card(s), and ${qaCustomerIds.length} customer(s).`
+          : `Cleanup partially completed. Removed ${scheduleIds.length} schedule event(s), ${workItemIds.length} card(s), ${qaCustomerIds.length} customer(s); ${failed} operation(s) failed.`;
+      this.qaCleanupError = failed === 0 ? '' : 'Some delete operations failed. Retry once to clear remaining QA records.';
+    } catch (err) {
+      this.qaCleanupError = this.extractApiError(err, 'Could not complete QA cleanup.');
+      this.qaCleanupStatus = '';
+    } finally {
+      this.qaCleanupRunning.set(false);
+    }
   }
 
   onLogoFileSelected(event: Event): void {

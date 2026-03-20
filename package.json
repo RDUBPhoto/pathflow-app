@@ -12,9 +12,17 @@
     "dev:local": "node scripts/dev-local.mjs",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
-    "test": "ng test"
+    "test": "ng test",
+    "test:unit:ci": "ng test --watch=false --browsers=ChromeHeadless --code-coverage --progress=false",
+    "test:e2e": "playwright test",
+    "test:e2e:hosted": "playwright test -c playwright.hosted.config.ts",
+    "test:qa": "node scripts/run-qa.mjs",
+    "qa:purge": "node scripts/purge-qa-data.mjs"
   },
   "private": true,
+  "engines": {
+    "node": ">=18 <20"
+  },
   "dependencies": {
     "@angular/cdk": "^19.2.4",
     "@angular/common": "^19.2.0",

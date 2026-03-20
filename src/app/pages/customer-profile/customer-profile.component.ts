@@ -51,6 +51,7 @@ import { UserMenuComponent } from '../../components/user/user-menu/user-menu.com
 import { PageBackButtonComponent } from '../../components/navigation/page-back-button/page-back-button.component';
 import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
 import { formatLocalDateTime, toLocalDateTimeInput, toLocalDateTimeStorage } from '../../utils/datetime-local';
+import { formatUsPhoneInput } from '../../utils/phone-format';
 import { environment } from '../../../environments/environment';
 
 type CustomerTab = 'vehicle' | 'schedule' | 'invoices' | 'sms' | 'email';
@@ -602,6 +603,14 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     this.mobileTab.set(tab);
     if (tab === 'profile') return;
     this.selectTab(tab);
+  }
+
+  onPrimaryPhoneInput(value: string | null | undefined): void {
+    this.phone = formatUsPhoneInput(value);
+  }
+
+  onSecondaryPhoneInput(value: string | null | undefined): void {
+    this.secondaryPhone = formatUsPhoneInput(value);
   }
 
   openSmsFromPhone(event?: Event): void {
@@ -1906,8 +1915,8 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     const parts = fullName.split(/\s+/).filter(Boolean);
     this.firstName = customer.firstName || (parts.slice(0, -1).join(' ') || parts[0] || '');
     this.lastName = customer.lastName || (parts.length > 1 ? parts[parts.length - 1] : '');
-    this.phone = customer.phone || '';
-    this.secondaryPhone = customer.mobile || '';
+    this.phone = formatUsPhoneInput(customer.phone || '');
+    this.secondaryPhone = formatUsPhoneInput(customer.mobile || '');
     this.email = customer.email || '';
     this.secondaryEmail = customer.secondaryEmail || '';
     this.showSecondaryPhone = !!this.secondaryPhone.trim();

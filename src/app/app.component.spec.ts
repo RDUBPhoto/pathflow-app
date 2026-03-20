@@ -1,10 +1,25 @@
 import { TestBed } from '@angular/core/testing';
-import { AppComponent } from './app.component';
+import AppComponent from './app.component';
+import { AuthService } from './auth/auth.service';
+import { ThemeService } from './services/theme.service';
+import { provideRouter } from '@angular/router';
 
 describe('AppComponent', () => {
   beforeEach(async () => {
+    const authStub = {
+      isAuthenticated: () => false,
+      signOut: jasmine.createSpy('signOut')
+    } as unknown as AuthService;
+
+    const themeStub = {} as ThemeService;
+
     await TestBed.configureTestingModule({
       imports: [AppComponent],
+      providers: [
+        provideRouter([]),
+        { provide: AuthService, useValue: authStub },
+        { provide: ThemeService, useValue: themeStub }
+      ]
     }).compileComponents();
   });
 
@@ -12,18 +27,5 @@ describe('AppComponent', () => {
     const fixture = TestBed.createComponent(AppComponent);
     const app = fixture.componentInstance;
     expect(app).toBeTruthy();
-  });
-
-  it(`should have the 'web' title`, () => {
-    const fixture = TestBed.createComponent(AppComponent);
-    const app = fixture.componentInstance;
-    expect(app.title).toEqual('web');
-  });
-
-  it('should render title', () => {
-    const fixture = TestBed.createComponent(AppComponent);
-    fixture.detectChanges();
-    const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.querySelector('h1')?.textContent).toContain('Hello, web');
   });
 });

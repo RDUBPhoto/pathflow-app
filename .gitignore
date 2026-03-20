@@ -40,6 +40,9 @@ testem.log
 /api/local.settings.json
 /.azurite
 /.azurite/*
+/playwright-report
+/test-results
+/qa-reports
 
 # System files
 .DS_Store

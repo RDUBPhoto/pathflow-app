@@ -76,7 +76,7 @@
           <ion-input
             [disabled]="saving() || !auth.canBootstrapRegistration()"
             [value]="businessPhone()"
-            (ionInput)="businessPhone.set($any($event.detail).value ?? '')"
+            (ionInput)="onBusinessPhoneInput($any($event.detail).value)"
             placeholder="(555) 555-0100">
           </ion-input>
         </ion-item>

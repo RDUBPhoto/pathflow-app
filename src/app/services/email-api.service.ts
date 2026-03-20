@@ -178,6 +178,7 @@ export class EmailApiService {
     message: string;
     html?: string;
     tenantId?: string;
+    skipFooterTerms?: boolean;
   }): Observable<EmailSendResponse> {
     return this.http.post<EmailSendResponse>('/api/email', payload);
   }

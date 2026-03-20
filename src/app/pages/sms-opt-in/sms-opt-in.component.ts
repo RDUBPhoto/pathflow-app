@@ -4,6 +4,7 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { finalize } from 'rxjs';
 import { environment } from '../../../environments/environment';
+import { formatUsPhoneInput } from '../../utils/phone-format';
 import {
   IonBadge,
   IonButton,
@@ -163,6 +164,10 @@ export default class SmsOptInComponent {
           this.error.set(this.extractError(err, 'Could not submit opt-in form.'));
         }
       });
+  }
+
+  onPhoneInput(value: string | null | undefined): void {
+    this.phone = formatUsPhoneInput(value);
   }
 
   private extractError(err: unknown, fallback: string): string {

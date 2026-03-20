@@ -1149,6 +1149,7 @@ module.exports = async function (context, req) {
     const requestSubject = asString(body.subject);
     const requestMessage = asString(body.message || body.text || body.body);
     const requestHtml = asString(body.html);
+    const skipFooterTerms = asBool(body.skipFooterTerms) || asBool(body.omitFooterTerms);
     const requestFrom = normalizeEmail(body.from || body.sender || body.fromEmail || body.email);
     const requestFromName = asString(body.fromName || body.senderName || body.name || body.from);
     const requestTo = normalizeEmail(body.to || body.toEmail);
@@ -1254,9 +1255,13 @@ module.exports = async function (context, req) {
     const templateClient = await getTableClient(EMAIL_TEMPLATE_TABLE);
     const sender = await getSenderConfig(templateClient);
     const config = await getConfigStatus(templateClient);
-    const appSettingsClient = await getTableClient(APP_SETTINGS_TABLE);
-    const footerTerms = await getEmailFooterTerms(appSettingsClient, tenantId);
-    const composed = appendGlobalFooter(requestMessage, requestHtml, footerTerms);
+    const composed = skipFooterTerms
+      ? { message: requestMessage, html: requestHtml || "" }
+      : appendGlobalFooter(
+        requestMessage,
+        requestHtml,
+        await getEmailFooterTerms(await getTableClient(APP_SETTINGS_TABLE), tenantId)
+      );
     let simulated = true;
     let provider = config.provider;
     let providerMessageId = "";

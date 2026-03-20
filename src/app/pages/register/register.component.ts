@@ -15,6 +15,7 @@ import { AuthService } from '../../auth/auth.service';
 import { TenantContextService } from '../../services/tenant-context.service';
 import { BusinessProfileService } from '../../services/business-profile.service';
 import { AddressLookupService, AddressSuggestion } from '../../services/address-lookup.service';
+import { formatUsPhoneInput, phoneDigits } from '../../utils/phone-format';
 
 @Component({
   selector: 'app-register',
@@ -310,6 +311,10 @@ export default class RegisterComponent implements OnDestroy {
     this.extraLocationNames.set(current);
   }
 
+  onBusinessPhoneInput(value: string | null | undefined): void {
+    this.businessPhone.set(formatUsPhoneInput(value));
+  }
+
   onBusinessAddressChange(value: string | null | undefined): void {
     this.businessAddress.set(String(value || ''));
     this.businessAddressNoMatches.set(false);
@@ -340,7 +345,7 @@ export default class RegisterComponent implements OnDestroy {
   }
 
   private digitsOnly(value: unknown): string {
-    return String(value ?? '').replace(/\D+/g, '');
+    return phoneDigits(value);
   }
 
   private buildBillingPayload(): {

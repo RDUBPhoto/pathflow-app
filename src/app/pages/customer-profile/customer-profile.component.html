@@ -162,7 +162,7 @@
           <div class="contact-row contact-row-single">
             <ion-item>
               <ion-label position="stacked">Phone *</ion-label>
-              <ion-input [(ngModel)]="phone" placeholder="(555) 555-5555"></ion-input>
+              <ion-input [ngModel]="phone" (ngModelChange)="onPrimaryPhoneInput($event)" placeholder="(555) 555-5555"></ion-input>
             </ion-item>
             <ion-button
               *ngIf="!showSecondaryPhone"
@@ -181,7 +181,7 @@
           <div class="contact-row contact-row-single" *ngIf="showSecondaryPhone">
             <ion-item>
               <ion-label position="stacked">Secondary Phone</ion-label>
-              <ion-input [(ngModel)]="secondaryPhone" placeholder="(555) 555-5555"></ion-input>
+              <ion-input [ngModel]="secondaryPhone" (ngModelChange)="onSecondaryPhoneInput($event)" placeholder="(555) 555-5555"></ion-input>
             </ion-item>
           </div>
           <div class="field-error" *ngIf="showInlineValidation() && !isSecondaryPhoneValid()">

@@ -1,6 +1,7 @@
 import { Component, HostListener, OnDestroy, OnInit, computed, effect, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { ToastController } from '@ionic/angular';
 import { IonButton, IonIcon } from '@ionic/angular/standalone';
 import { addIcons } from 'ionicons';
 import {
@@ -72,6 +73,7 @@ export class InternalShellComponent implements OnInit, OnDestroy {
   readonly branding = inject(BrandSettingsService);
   private readonly smsApi = inject(SmsApiService);
   private readonly emailApi = inject(EmailApiService);
+  private readonly toastController = inject(ToastController);
   private readonly userSettings = inject(UserScopedSettingsService);
   readonly auth = inject(AuthService);
   private readonly router = inject(Router);
@@ -84,6 +86,14 @@ export class InternalShellComponent implements OnInit, OnDestroy {
   readonly visibleMessageThreads = computed(() => this.messageThreads().slice(0, this.hubThreadLimit));
   readonly hasMoreMessageThreads = computed(() => this.messageThreads().length > this.hubThreadLimit);
   readonly nowMs = signal(Date.now());
+  readonly feedbackOpen = signal(false);
+  readonly feedbackName = signal('');
+  readonly feedbackEmail = signal('');
+  readonly feedbackIssue = signal('');
+  readonly feedbackStatus = signal('');
+  readonly feedbackError = signal('');
+  readonly feedbackSending = signal(false);
+  private readonly feedbackRecipient = 'robert@pathflow-app.com';
   readonly trialEndsAtMs = computed(() => {
     const parsed = Date.parse(this.auth.trialEndsAt());
     return Number.isFinite(parsed) ? parsed : null;
@@ -135,6 +145,17 @@ export class InternalShellComponent implements OnInit, OnDestroy {
     effect(() => {
       this.userSettings.scope();
       this.loadCollapsedPreference();
+    });
+
+    effect(() => {
+      const user = this.auth.user();
+      if (!user) return;
+      if (!this.feedbackName().trim()) {
+        this.feedbackName.set(String(user.displayName || '').trim());
+      }
+      if (!this.feedbackEmail().trim()) {
+        this.feedbackEmail.set(String(user.email || '').trim());
+      }
     });
   }
 
@@ -284,6 +305,87 @@ export class InternalShellComponent implements OnInit, OnDestroy {
 
   openBrandingSettings(): void {
     this.router.navigate(['/admin-settings'], { queryParams: { section: 'branding' } });
+  }
+
+  toggleFeedback(): void {
+    const next = !this.feedbackOpen();
+    this.feedbackOpen.set(next);
+    this.feedbackStatus.set('');
+    this.feedbackError.set('');
+  }
+
+  closeFeedback(): void {
+    this.feedbackOpen.set(false);
+    this.feedbackStatus.set('');
+    this.feedbackError.set('');
+  }
+
+  submitFeedback(): void {
+    if (this.feedbackSending()) return;
+    const name = this.feedbackName().trim();
+    const email = this.feedbackEmail().trim();
+    const issue = this.feedbackIssue().trim();
+    if (!name || !email || !issue) {
+      this.feedbackError.set('Name, email, and issue details are required.');
+      this.feedbackStatus.set('');
+      return;
+    }
+
+    const currentHref = window.location.href;
+    const currentRoute = this.router.url || '/';
+    const timestamp = new Date().toISOString();
+    const body = [
+      'Pathflow feedback submission',
+      '',
+      `Name: ${name}`,
+      `Email: ${email}`,
+      `Current route: ${currentRoute}`,
+      `Screen link: ${currentHref}`,
+      `Submitted at: ${timestamp}`,
+      `User agent: ${navigator.userAgent}`,
+      '',
+      'Issue details:',
+      issue
+    ].join('\n');
+    const subject = `Pathflow Feedback - ${currentRoute}`;
+    this.feedbackSending.set(true);
+    this.feedbackStatus.set('');
+    this.feedbackError.set('');
+
+    this.emailApi.sendToCustomer({
+      customerId: '',
+      customerName: name,
+      to: this.feedbackRecipient,
+      subject,
+      message: body,
+      skipFooterTerms: true
+    }).subscribe({
+      next: result => {
+        this.feedbackSending.set(false);
+        const toastMessage = result.simulated ? 'Feedback logged (mock mode).' : 'Feedback sent.';
+        this.feedbackStatus.set(toastMessage);
+        this.feedbackError.set('');
+        this.feedbackIssue.set('');
+        this.feedbackOpen.set(false);
+        void this.presentFeedbackToast(toastMessage, result.simulated ? 'medium' : 'success');
+      },
+      error: err => {
+        this.feedbackSending.set(false);
+        const detail = String(err?.error?.error || err?.error?.message || err?.message || '').trim();
+        this.feedbackError.set(detail || 'Could not send feedback email.');
+        this.feedbackStatus.set('');
+      }
+    });
+  }
+
+  private async presentFeedbackToast(message: string, color: 'success' | 'medium' = 'success'): Promise<void> {
+    const toast = await this.toastController.create({
+      message,
+      color,
+      duration: 1800,
+      position: 'top'
+    });
+    await toast.present();
   }
 
   private loadCollapsedPreference(): void {

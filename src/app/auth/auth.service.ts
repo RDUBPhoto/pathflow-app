@@ -1,5 +1,6 @@
 import { Injectable, computed, signal } from '@angular/core';
 import { environment } from '../../environments/environment';
+import { formatUsPhoneInput, phoneDigits } from '../utils/phone-format';
 import {
   AccessProfileResponse,
   AuthAccessState,
@@ -856,7 +857,7 @@ export class AuthService {
   }
 
   private digitsOnly(value: unknown): string {
-    return String(value ?? '').replace(/\D+/g, '');
+    return phoneDigits(value);
   }
 
   private normalizePhone(value: unknown): string {
@@ -864,11 +865,8 @@ export class AuthService {
     if (!raw) return '';
     const digits = this.digitsOnly(raw);
     if (!digits) return '';
-    if (digits.length === 10) {
-      return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
-    }
-    if (digits.length === 11 && digits.startsWith('1')) {
-      return `+1 (${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`;
+    if (digits.length >= 10 && digits.length <= 11) {
+      return formatUsPhoneInput(digits);
     }
     return raw;
   }

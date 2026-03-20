@@ -84,7 +84,7 @@
               </ion-item>
               <ion-item>
                 <ion-label position="stacked">Business Phone</ion-label>
-                <ion-input [(ngModel)]="businessProfilePhone" placeholder="(555) 555-0100"></ion-input>
+                <ion-input [ngModel]="businessProfilePhone" (ngModelChange)="onBusinessProfilePhoneInput($event)" placeholder="(555) 555-0100"></ion-input>
               </ion-item>
               <ion-item>
                 <ion-label position="stacked">Business Address / Location</ion-label>
@@ -1303,6 +1303,26 @@
           <div class="sms-help" *ngIf="!supplierLoading() && !supplierConnectors().length">
             No supplier connections configured.
           </div>
+
+          <div class="integration-section-header" style="margin-top:16px;">
+            <div class="integration-section-title">
+              <ion-icon name="trash-outline"></ion-icon>
+              QA Cleanup
+            </div>
+            <ion-button
+              size="small"
+              color="danger"
+              fill="outline"
+              (click)="purgeQaTestData()"
+              [disabled]="qaCleanupRunning()">
+              {{ qaCleanupRunning() ? 'Cleaning...' : 'Purge QA Test Data' }}
+            </ion-button>
+          </div>
+          <div class="sms-help">
+            Removes obvious QA artifacts in this tenant: QA schedule events, QA dashboard cards, and QA customers.
+          </div>
+          <div class="sms-feedback success" *ngIf="qaCleanupStatus">{{ qaCleanupStatus }}</div>
+          <div class="sms-feedback error" *ngIf="qaCleanupError">{{ qaCleanupError }}</div>
         </ion-card-content>
       </ion-card>
     </section>

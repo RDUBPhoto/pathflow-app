@@ -45,7 +45,7 @@
 
           <ion-item>
             <ion-label position="stacked">Mobile phone</ion-label>
-            <ion-input [(ngModel)]="phone" placeholder="(555) 555-1212"></ion-input>
+            <ion-input [ngModel]="phone" (ngModelChange)="onPhoneInput($event)" placeholder="(555) 555-1212"></ion-input>
           </ion-item>
 
           <ion-item>

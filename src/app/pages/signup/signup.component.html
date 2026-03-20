@@ -99,7 +99,7 @@
             <ion-label position="stacked">Phone</ion-label>
             <ion-input
               [value]="phone()"
-              (ionInput)="phone.set($any($event.detail).value ?? '')"
+              (ionInput)="onPhoneInput($any($event.detail).value)"
               type="tel"
               inputmode="tel"
               autocomplete="tel"

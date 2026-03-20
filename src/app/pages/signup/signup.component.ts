@@ -15,6 +15,7 @@ import { addIcons } from 'ionicons';
 import { keyOutline, logoGoogle, shieldCheckmarkOutline } from 'ionicons/icons';
 import { environment } from '../../../environments/environment';
 import { AuthService } from '../../auth/auth.service';
+import { formatUsPhoneInput, phoneDigits } from '../../utils/phone-format';
 
 type SignupMethod = 'email' | 'aad' | 'google';
 type SignupPlan = 'trial' | 'monthly' | 'annual';
@@ -156,6 +157,10 @@ export default class SignupComponent {
     this.selectedPlan.set(plan);
   }
 
+  onPhoneInput(value: string | null | undefined): void {
+    this.phone.set(formatUsPhoneInput(value));
+  }
+
   goToPlans(): void {
     this.error.set('');
     this.hint.set('');
@@ -292,6 +297,6 @@ export default class SignupComponent {
   }
 
   private digitsOnly(value: unknown): string {
-    return String(value ?? '').replace(/\D+/g, '');
+    return phoneDigits(value);
   }
 }

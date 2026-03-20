@@ -54,11 +54,57 @@ function requestHost(req) {
   return asString(host).split(",")[0].trim().toLowerCase();
 }
 
+function normalizeHost(rawHost) {
+  const first = asString(rawHost).split(",")[0].trim().toLowerCase();
+  if (!first) return "";
+  if (first.startsWith("http://") || first.startsWith("https://")) {
+    try {
+      return asString(new URL(first).host).toLowerCase();
+    } catch {
+      return "";
+    }
+  }
+  return first;
+}
+
+function isLoopbackHost(rawHost) {
+  const host = normalizeHost(rawHost);
+  if (!host) return false;
+  const hostname = host.split(":")[0].toLowerCase();
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "::1" ||
+    hostname.endsWith(".localhost")
+  );
+}
+
 function isLocalRequest(req) {
   const host = requestHost(req);
-  if (!host) return false;
-  const hostname = host.split(":")[0];
-  return hostname === "localhost" || hostname === "127.0.0.1";
+  return isLoopbackHost(host);
+}
+
+function isLocalRuntime() {
+  const websiteHost = asString(process.env.WEBSITE_HOSTNAME);
+  if (!websiteHost) return true;
+  return isLoopbackHost(websiteHost);
+}
+
+function normalizeBaseUrl(rawValue, fallbackProto = "https") {
+  const raw = asString(rawValue);
+  if (!raw) return "";
+  if (raw.startsWith("http://") || raw.startsWith("https://")) {
+    try {
+      const parsed = new URL(raw);
+      return `${parsed.protocol}//${parsed.host}`.replace(/\/+$/, "");
+    } catch {
+      return "";
+    }
+  }
+  const host = normalizeHost(raw);
+  if (!host) return "";
+  const scheme = isLoopbackHost(host) ? "http" : fallbackProto;
+  return `${scheme}://${host}`.replace(/\/+$/, "");
 }
 
 function readQueryParam(req, key) {
@@ -286,15 +332,46 @@ async function sendTransactionalEmail(context, payload) {
 }
 
 function buildVerifyBaseUrl(req) {
-  const explicit = asString(process.env.APP_BASE_URL || process.env.PUBLIC_APP_BASE_URL);
-  if (explicit) return explicit.replace(/\/+$/, "");
+  const isLocal = isLocalRequest(req) || isLocalRuntime();
+  const requestedProto = asString(readHeader(req && req.headers, "x-forwarded-proto")).toLowerCase();
+  const proto = requestedProto === "http" || requestedProto === "https"
+    ? requestedProto
+    : (isLocal ? "http" : "https");
 
-  const proto = asString(readHeader(req && req.headers, "x-forwarded-proto")) || "https";
-  const host = asString(readHeader(req && req.headers, "x-forwarded-host")) ||
-    asString(readHeader(req && req.headers, "host")) ||
-    asString(process.env.WEBSITE_HOSTNAME);
-  if (!host) return "http://localhost:4200";
-  return `${proto}://${host}`.replace(/\/+$/, "");
+  const explicit = normalizeBaseUrl(asString(process.env.APP_BASE_URL || process.env.PUBLIC_APP_BASE_URL), proto);
+  if (explicit) {
+    if (!isLocal && isLoopbackHost(explicit)) {
+      throw new Error("APP_BASE_URL/PUBLIC_APP_BASE_URL cannot point to localhost in production.");
+    }
+    return explicit;
+  }
+
+  const forwardedBase = normalizeBaseUrl(asString(readHeader(req && req.headers, "x-forwarded-host")), proto);
+  if (forwardedBase) {
+    if (!isLocal && isLoopbackHost(forwardedBase)) {
+      throw new Error("x-forwarded-host resolved to localhost in production.");
+    }
+    return forwardedBase;
+  }
+
+  const hostBase = normalizeBaseUrl(asString(readHeader(req && req.headers, "host")), proto);
+  if (hostBase) {
+    if (!isLocal && isLoopbackHost(hostBase)) {
+      throw new Error("host resolved to localhost in production.");
+    }
+    return hostBase;
+  }
+
+  const websiteBase = normalizeBaseUrl(asString(process.env.WEBSITE_HOSTNAME), proto);
+  if (websiteBase) {
+    if (!isLocal && isLoopbackHost(websiteBase)) {
+      throw new Error("WEBSITE_HOSTNAME resolved to localhost in production.");
+    }
+    return websiteBase;
+  }
+
+  if (isLocal) return "http://localhost:4200";
+  throw new Error("Unable to resolve public app base URL. Set APP_BASE_URL in production.");
 }
 
 function html(status, markup) {

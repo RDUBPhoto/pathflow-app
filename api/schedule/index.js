@@ -1,8 +1,8 @@
 const { TableClient } = require("@azure/data-tables");
 const { randomUUID } = require("crypto");
+const { resolveTenantId } = require("../_shared/tenant");
 
 const TABLE = "schedule";
-const PARTITION = "main";
 const CUSTOMERS_TABLE = "customers";
 const INVENTORY_NEEDS_TABLE = "inventoryneeds";
 const WORKITEMS_TABLE = "workitems";
@@ -185,33 +185,33 @@ async function getTableClient(conn, tableName) {
   return client;
 }
 
-async function listNeedsForSchedule(needsClient, scheduleId) {
+async function listNeedsForSchedule(needsClient, tenantId, scheduleId) {
   const safeId = asString(scheduleId).replace(/'/g, "''");
   const out = [];
-  const filter = `PartitionKey eq '${PARTITION}' and sourceType eq 'schedule' and sourceId eq '${safeId}'`;
+  const filter = `PartitionKey eq '${tenantId}' and sourceType eq 'schedule' and sourceId eq '${safeId}'`;
   const iter = needsClient.listEntities({ queryOptions: { filter } });
   for await (const entity of iter) out.push(entity);
   return out;
 }
 
-async function getCustomerSummary(customersClient, customerId) {
+async function getCustomerSummary(customersClient, tenantId, customerId) {
   const id = asString(customerId);
   if (!id) return null;
   try {
-    return await customersClient.getEntity(PARTITION, id);
+    return await customersClient.getEntity(tenantId, id);
   } catch {
     return null;
   }
 }
 
-async function syncScheduleNeeds(conn, scheduleRecord) {
+async function syncScheduleNeeds(conn, tenantId, scheduleRecord) {
   const scheduleId = asString(scheduleRecord.id);
   if (!scheduleId) return;
   const needsClient = await getTableClient(conn, INVENTORY_NEEDS_TABLE);
-  const existing = await listNeedsForSchedule(needsClient, scheduleId);
+  const existing = await listNeedsForSchedule(needsClient, tenantId, scheduleId);
   const removeAll = async () => {
     for (const need of existing) {
-      try { await needsClient.deleteEntity(PARTITION, asString(need.rowKey)); } catch (_) {}
+      try { await needsClient.deleteEntity(tenantId, asString(need.rowKey)); } catch (_) {}
     }
   };
 
@@ -227,7 +227,7 @@ async function syncScheduleNeeds(conn, scheduleRecord) {
   }
 
   const customersClient = await getTableClient(conn, CUSTOMERS_TABLE);
-  const customer = await getCustomerSummary(customersClient, scheduleRecord.customerId);
+  const customer = await getCustomerSummary(customersClient, tenantId, scheduleRecord.customerId);
   const customerName = asString(customer && (customer.name || `${customer.firstName || ""} ${customer.lastName || ""}`)) || "";
   const vehicle = vehicleLabel(customer);
   const now = new Date().toISOString();
@@ -257,7 +257,7 @@ async function syncScheduleNeeds(conn, scheduleRecord) {
 
     await needsClient.upsertEntity(
       {
-        partitionKey: PARTITION,
+        partitionKey: tenantId,
         rowKey: needId,
         sourceType: "schedule",
         sourceId: scheduleId,
@@ -284,27 +284,27 @@ async function syncScheduleNeeds(conn, scheduleRecord) {
   for (const item of existing) {
     const needId = asString(item.rowKey);
     if (!needId || retainedIds.has(needId)) continue;
-    try { await needsClient.deleteEntity(PARTITION, needId); } catch (_) {}
+    try { await needsClient.deleteEntity(tenantId, needId); } catch (_) {}
   }
 }
 
-async function clearScheduleNeeds(conn, scheduleId) {
+async function clearScheduleNeeds(conn, tenantId, scheduleId) {
   const needsClient = await getTableClient(conn, INVENTORY_NEEDS_TABLE);
-  const existing = await listNeedsForSchedule(needsClient, scheduleId);
+  const existing = await listNeedsForSchedule(needsClient, tenantId, scheduleId);
   for (const item of existing) {
     const needId = asString(item.rowKey);
     if (!needId) continue;
-    try { await needsClient.deleteEntity(PARTITION, needId); } catch (_) {}
+    try { await needsClient.deleteEntity(tenantId, needId); } catch (_) {}
   }
 }
 
-async function reconcileWorkTimers(conn, context) {
+async function reconcileWorkTimers(conn, context, tenantId) {
   const schedulesClient = await getTableClient(conn, TABLE);
   const lanesClient = await getTableClient(conn, LANES_TABLE);
   const itemsClient = await getTableClient(conn, WORKITEMS_TABLE);
 
   const schedules = [];
-  const scheduleIter = schedulesClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${PARTITION}'` } });
+  const scheduleIter = schedulesClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${tenantId}'` } });
   for await (const entity of scheduleIter) {
     schedules.push({
       id: entity.rowKey,
@@ -321,7 +321,7 @@ async function reconcileWorkTimers(conn, context) {
   }
 
   const laneStageById = new Map();
-  const laneIter = lanesClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${PARTITION}'` } });
+  const laneIter = lanesClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${tenantId}'` } });
   for await (const lane of laneIter) {
     laneStageById.set(asString(lane.rowKey), laneStageKey(lane));
   }
@@ -331,7 +331,7 @@ async function reconcileWorkTimers(conn, context) {
   const activeCustomers = activeBayOccupants(schedules, nowMs);
 
   let touched = 0;
-  const itemsIter = itemsClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${PARTITION}'` } });
+  const itemsIter = itemsClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${tenantId}'` } });
   for await (const item of itemsIter) {
     const itemId = asString(item.rowKey);
     if (!itemId) continue;
@@ -351,7 +351,7 @@ async function reconcileWorkTimers(conn, context) {
       const workIncrement = elapsedMs(resumedAt, nowIso);
       await itemsClient.upsertEntity(
         {
-          partitionKey: PARTITION,
+          partitionKey: tenantId,
           rowKey: itemId,
           isPaused: true,
           pausedAt: nowIso,
@@ -369,7 +369,7 @@ async function reconcileWorkTimers(conn, context) {
       const pauseIncrement = elapsedMs(item.pausedAt, nowIso);
       await itemsClient.upsertEntity(
         {
-          partitionKey: PARTITION,
+          partitionKey: tenantId,
           rowKey: itemId,
           isPaused: false,
           pausedAt: "",
@@ -389,6 +389,10 @@ async function reconcileWorkTimers(conn, context) {
 module.exports = async function (context, req) {
   const method = (req.method || "GET").toUpperCase();
   const id = context.bindingData && context.bindingData.id ? String(context.bindingData.id) : "";
+  const resolvedTenantId = resolveTenantId(req, req && req.body ? req.body : {});
+  // Legacy compatibility: existing schedule rows were historically stored in "main".
+  // Keep "primary-location" mapped to that partition until schedule data is fully migrated.
+  const tenantId = resolvedTenantId === "primary-location" ? "main" : resolvedTenantId;
 
   if (method === "OPTIONS") { context.res = { status: 204 }; return; }
 
@@ -400,7 +404,7 @@ module.exports = async function (context, req) {
 
     if (method === "GET") {
       const out = [];
-      const iter = client.listEntities({ queryOptions: { filter: `PartitionKey eq '${PARTITION}'` } });
+      const iter = client.listEntities({ queryOptions: { filter: `PartitionKey eq '${tenantId}'` } });
       for await (const e of iter) {
         out.push({
           id: e.rowKey,
@@ -450,7 +454,7 @@ module.exports = async function (context, req) {
         const rowKey = randomUUID();
         const now = new Date().toISOString();
         const entity = {
-          partitionKey: PARTITION,
+          partitionKey: tenantId,
           rowKey,
           start,
           end,
@@ -466,7 +470,7 @@ module.exports = async function (context, req) {
           updatedAt: now
         };
         await client.upsertEntity(entity, "Merge");
-        await syncScheduleNeeds(conn, {
+        await syncScheduleNeeds(conn, tenantId, {
           id: rowKey,
           start,
           end,
@@ -475,19 +479,19 @@ module.exports = async function (context, req) {
           isBlocked,
           partRequests: requestedPartRequests || []
         });
-        try { await reconcileWorkTimers(conn, context); } catch (error) { context.log.warn(`work timer reconcile failed: ${String(error && error.message || error)}`); }
+        try { await reconcileWorkTimers(conn, context, tenantId); } catch (error) { context.log.warn(`work timer reconcile failed: ${String(error && error.message || error)}`); }
         context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true, id: rowKey } };
         return;
       } else {
         let current = null;
         try {
-          current = await client.getEntity(PARTITION, rid);
+          current = await client.getEntity(tenantId, rid);
         } catch (_) {}
         const effectivePartRequests = requestedPartRequests != null
           ? requestedPartRequests
           : parsePartRequests(current && current.partRequests);
 
-        const patch = { partitionKey: PARTITION, rowKey: rid, updatedAt: new Date().toISOString() };
+        const patch = { partitionKey: tenantId, rowKey: rid, updatedAt: new Date().toISOString() };
         if (start) patch.start = start;
         if (end) patch.end = end;
         if (resource) patch.resource = resource;
@@ -500,7 +504,7 @@ module.exports = async function (context, req) {
         if (requestedPartRequests != null) patch.partRequests = JSON.stringify(requestedPartRequests);
         await client.upsertEntity(patch, "Merge");
 
-        await syncScheduleNeeds(conn, {
+        await syncScheduleNeeds(conn, tenantId, {
           id: rid,
           start: start || pick(current && current.start),
           end: end || pick(current && current.end),
@@ -513,16 +517,16 @@ module.exports = async function (context, req) {
             : bool(current && current.isBlocked),
           partRequests: effectivePartRequests
         });
-        try { await reconcileWorkTimers(conn, context); } catch (error) { context.log.warn(`work timer reconcile failed: ${String(error && error.message || error)}`); }
+        try { await reconcileWorkTimers(conn, context, tenantId); } catch (error) { context.log.warn(`work timer reconcile failed: ${String(error && error.message || error)}`); }
         context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true, id: rid } };
         return;
       }
     }
 
     if (method === "DELETE" && id) {
-      await client.deleteEntity(PARTITION, id);
-      await clearScheduleNeeds(conn, id);
-      try { await reconcileWorkTimers(conn, context); } catch (error) { context.log.warn(`work timer reconcile failed: ${String(error && error.message || error)}`); }
+      await client.deleteEntity(tenantId, id);
+      await clearScheduleNeeds(conn, tenantId, id);
+      try { await reconcileWorkTimers(conn, context, tenantId); } catch (error) { context.log.warn(`work timer reconcile failed: ${String(error && error.message || error)}`); }
       context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true } };
       return;
     }

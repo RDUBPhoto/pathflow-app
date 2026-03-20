@@ -183,3 +183,58 @@
     <app-shell-footer></app-shell-footer>
   </main>
 </div>
+
+<button
+  type="button"
+  class="feedback-tab"
+  (click)="toggleFeedback()"
+  [attr.aria-expanded]="feedbackOpen()"
+  aria-controls="feedback-panel">
+  Feedback
+</button>
+
+<section
+  id="feedback-panel"
+  class="feedback-panel glass-surface"
+  *ngIf="feedbackOpen()"
+  aria-label="Send feedback">
+  <header class="feedback-head">
+    <h3>Send Feedback</h3>
+    <button type="button" class="feedback-close" (click)="closeFeedback()" aria-label="Close feedback panel">Close</button>
+  </header>
+
+  <label class="feedback-label" for="feedback-name">Name</label>
+  <input
+    id="feedback-name"
+    class="feedback-input"
+    type="text"
+    [value]="feedbackName()"
+    (input)="feedbackName.set($any($event.target).value)" />
+
+  <label class="feedback-label" for="feedback-email">Email</label>
+  <input
+    id="feedback-email"
+    class="feedback-input"
+    type="email"
+    [value]="feedbackEmail()"
+    (input)="feedbackEmail.set($any($event.target).value)" />
+
+  <label class="feedback-label" for="feedback-issue">Issue</label>
+  <textarea
+    id="feedback-issue"
+    class="feedback-textarea"
+    rows="6"
+    [value]="feedbackIssue()"
+    (input)="feedbackIssue.set($any($event.target).value)"
+    placeholder="Tell us what happened, what you expected, and any steps to reproduce."></textarea>
+
+  <div class="feedback-row">
+    <button type="button" class="feedback-submit" (click)="submitFeedback()" [disabled]="feedbackSending()">
+      {{ feedbackSending() ? 'Sending...' : 'Send' }}
+    </button>
+  </div>
+
+  <p class="feedback-msg success" *ngIf="feedbackStatus()">{{ feedbackStatus() }}</p>
+  <p class="feedback-msg error" *ngIf="feedbackError()">{{ feedbackError() }}</p>
+  <p class="feedback-hint">This sends through your configured Pathflow email provider and includes the current screen link.</p>
+</section>

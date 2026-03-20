@@ -3,8 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const root = process.cwd();
+const apiRoot = path.join(root, 'api');
 const procs = [];
 let shuttingDown = false;
+const REQUIRED_NODE_MAJOR = 18;
 const shouldSeedDemo =
   process.argv.includes('--seed-demo') ||
   process.env.PATHFLOW_SEED_DEMO === '1' ||
@@ -41,6 +43,22 @@ function run(cmd, args, opts = {}) {
   return p;
 }
 
+function nodeMajor(version = process.version) {
+  const v = String(version || '').replace(/^v/, '');
+  const parsed = Number.parseInt(v.split('.')[0], 10);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+function assertFunctionsNodeVersion() {
+  const major = nodeMajor();
+  if (major === REQUIRED_NODE_MAJOR) return;
+
+  console.error(`[dev-local] Node ${process.version} is incompatible with Azure Functions worker in this repo.`);
+  console.error(`[dev-local] Switch to Node ${REQUIRED_NODE_MAJOR} and run npm start again.`);
+  console.error(`[dev-local] If you use nvm: nvm install ${REQUIRED_NODE_MAJOR} && nvm use ${REQUIRED_NODE_MAJOR}`);
+  process.exit(1);
+}
+
 function shutdown(code = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
@@ -67,8 +85,9 @@ if (localEmailMode === 'sendgrid') {
   }
 }
 
+assertFunctionsNodeVersion();
 run('azurite', ['--location', '.azurite', '--debug', '.azurite/debug.log']);
-run('func', ['start'], { cwd: path.join(root, 'api') });
+run('func', ['start'], { cwd: apiRoot });
 
 async function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));

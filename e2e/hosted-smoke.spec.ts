@@ -84,61 +84,76 @@ test.describe('Hosted Smoke', () => {
     expect(pingElapsed, `/api/ping should respond within ${API_HEALTH_MAX_MS}ms`).toBeLessThanOrEqual(API_HEALTH_MAX_MS);
   });
 
-  test('critical public pages render without runtime or network errors', async ({ page, baseURL }) => {
-    const checks: Array<{ route: string; verify: () => Promise<void> }> = [
-      {
-        route: '/',
-        verify: async () => {
-          await expect(page.getByRole('heading', { level: 1, name: /Run Leads, Quotes, Invoices/i })).toBeVisible();
-        }
-      },
-      {
-        route: '/login',
-        verify: async () => {
-          await expect(page.getByRole('heading', { level: 1, name: /sign in/i })).toBeVisible();
-          await expect(page.getByRole('button', { name: /continue with|sign in with|login/i }).first()).toBeVisible();
-        }
-      },
-      {
-        route: '/privacy-policy',
-        verify: async () => {
-          await expect(page.getByRole('heading', { level: 1, name: 'Privacy Policy' })).toBeVisible();
-        }
-      },
-      {
-        route: '/terms-and-conditions',
-        verify: async () => {
-          await expect(page.getByRole('heading', { level: 1, name: 'Terms and Conditions' })).toBeVisible();
-        }
-      },
-      {
-        route: '/sms-opt-in',
-        verify: async () => {
-          await expect(page.getByText(/SMS Opt-In|Pathflow Customer Updates|consent/i).first()).toBeVisible();
-        }
-      }
-    ];
-
-    for (const check of checks) {
-      await gotoAndAssertHealthy(page, check.route, check.verify);
-    }
-
+  test('landing page renders healthy', async ({ page }) => {
+    await gotoAndAssertHealthy(page, '/', async () => {
+      await expect(page.getByRole('heading', { level: 1, name: /Run Leads, Quotes, Invoices/i })).toBeVisible();
+    });
     expect(page.url()).toMatch(/^https?:\/\//);
   });
 
-  test('protected route redirects to login when unauthenticated', async ({ page }) => {
+  test('login page renders healthy', async ({ page }) => {
+    await gotoAndAssertHealthy(page, '/login', async () => {
+      await expect(page.getByRole('heading', { level: 1, name: /sign in/i })).toBeVisible();
+      await expect(page.getByRole('button', { name: /continue with|sign in with|login/i }).first()).toBeVisible();
+    });
+  });
+
+  test('privacy policy page renders healthy', async ({ page }) => {
+    await gotoAndAssertHealthy(page, '/privacy-policy', async () => {
+      await expect(page.getByRole('heading', { level: 1, name: 'Privacy Policy' })).toBeVisible();
+    });
+  });
+
+  test('terms page renders healthy', async ({ page }) => {
+    await gotoAndAssertHealthy(page, '/terms-and-conditions', async () => {
+      await expect(page.getByRole('heading', { level: 1, name: 'Terms and Conditions' })).toBeVisible();
+    });
+  });
+
+  test('sms opt-in page renders healthy', async ({ page }) => {
+    await gotoAndAssertHealthy(page, '/sms-opt-in', async () => {
+      await expect(page.getByText(/SMS Opt-In|Pathflow Customer Updates|consent/i).first()).toBeVisible();
+    });
+  });
+
+  test('protected dashboard route redirects to login when unauthenticated', async ({ page }) => {
     const response = await page.goto('/dashboard');
     expect(response?.status(), '/dashboard response should not be 5xx').toBeLessThan(500);
     await expect(page).toHaveURL(/\/login/);
   });
 
-  test('quote and invoice public fallbacks remain available for broken/missing links', async ({ page }) => {
+  test('protected customers route redirects to login when unauthenticated', async ({ page }) => {
+    const response = await page.goto('/customers');
+    expect(response?.status(), '/customers response should not be 5xx').toBeLessThan(500);
+    await expect(page).toHaveURL(/\/login/);
+  });
+
+  test('protected reports route redirects to login when unauthenticated', async ({ page }) => {
+    const response = await page.goto('/reports');
+    expect(response?.status(), '/reports response should not be 5xx').toBeLessThan(500);
+    await expect(page).toHaveURL(/\/login/);
+  });
+
+  test('quote accepted fallback remains available for missing quote id', async ({ page }) => {
     await page.goto('/quote-accepted?action=accept&tenantId=main&quoteNumber=QTE-TEST', { waitUntil: 'domcontentloaded' });
     await expect(page.getByText('Quote Accepted')).toBeVisible();
     await expect(page.getByText('Quote response captured.')).toBeVisible();
+  });
 
+  test('quote declined fallback remains available for missing quote id', async ({ page }) => {
+    await page.goto('/quote-declined?action=decline&tenantId=main&quoteNumber=QTE-TEST', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByText('Quote Declined')).toBeVisible();
+    await expect(page.getByText('Quote response captured.')).toBeVisible();
+  });
+
+  test('invoice payment fallback blocks checkout when invoice id is missing', async ({ page }) => {
     await page.goto('/invoice-payment?tenantId=main', { waitUntil: 'domcontentloaded' });
     await expect(page.getByText('Invoice is missing.')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Checkout & Pay' })).toBeDisabled();
+  });
+
+  test('hosted base URL remains absolute', async ({ page }) => {
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    expect(page.url()).toMatch(/^https?:\/\//);
   });
 });

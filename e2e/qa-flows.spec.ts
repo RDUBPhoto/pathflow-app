@@ -179,6 +179,24 @@ async function sendDocumentFromWizard(page: Page, type: 'quote' | 'invoice', cus
   return { id, number, customerName, customerEmail: '' };
 }
 
+async function assertDocumentVisibleInBoard(
+  page: Page,
+  options: { tab: 'quotes' | 'invoices'; documentNumber: string; customerName: string }
+): Promise<void> {
+  await page.goto('/quotes-invoices');
+  await expect(page.locator('ion-title', { hasText: 'Quotes & Invoices' })).toBeVisible();
+  if (options.tab === 'invoices') {
+    await page.locator('ion-segment-button[value="invoices"]').click();
+  } else {
+    await page.locator('ion-segment-button[value="quotes"]').click();
+  }
+
+  await page.locator('#invoice-search').fill(options.documentNumber);
+  const card = page.locator('.invoice-card', { hasText: options.documentNumber }).first();
+  await expect(card).toBeVisible();
+  await expect(card).toContainText(options.customerName);
+}
+
 test.beforeEach(async ({ request }) => {
   await cleanupQaArtifacts(request);
 });
@@ -219,6 +237,19 @@ test('core routes load', async ({ page }) => {
   }
 });
 
+test('new customer appears in customer list search', async ({ page }) => {
+  await seedAuthSession(page);
+  const customer = await createCustomerInUi(page, 'List Customer');
+
+  await page.goto('/customers');
+  await expect(page.locator('ion-title', { hasText: 'Customers' })).toBeVisible();
+  await page.locator('ion-item.search-item ion-input input').fill(customer.displayName);
+
+  const row = page.locator('tr.data-row', { hasText: customer.displayName }).first();
+  await expect(row).toBeVisible();
+  await expect(row).toContainText(customer.email);
+});
+
 test('calendar event can be added from schedule page', async ({ page }) => {
   await seedAuthSession(page);
   const customer = await createCustomerInUi(page, 'Calendar Customer');
@@ -252,6 +283,11 @@ test('quote can be sent and accepted from public link', async ({ page }) => {
   await seedAuthSession(page);
   const customer = await createCustomerInUi(page, 'Quote Customer');
   const quote = await sendDocumentFromWizard(page, 'quote', customer.displayName);
+  await assertDocumentVisibleInBoard(page, {
+    tab: 'quotes',
+    documentNumber: quote.number,
+    customerName: customer.displayName
+  });
 
   const quoteAcceptedParams = new URLSearchParams({
     action: 'accept',
@@ -266,12 +302,52 @@ test('quote can be sent and accepted from public link', async ({ page }) => {
   await page.goto(`/quote-accepted?${quoteAcceptedParams.toString()}`);
   await expect(page.getByText('Quote Accepted')).toBeVisible();
   await expect(page.getByText('Quote status updated to Accepted.')).toBeVisible();
+  await assertDocumentVisibleInBoard(page, {
+    tab: 'quotes',
+    documentNumber: quote.number,
+    customerName: customer.displayName
+  });
+});
+
+test('quote can be sent and declined from public link', async ({ page }) => {
+  await seedAuthSession(page);
+  const customer = await createCustomerInUi(page, 'Quote Decline');
+  const quote = await sendDocumentFromWizard(page, 'quote', customer.displayName);
+  await assertDocumentVisibleInBoard(page, {
+    tab: 'quotes',
+    documentNumber: quote.number,
+    customerName: customer.displayName
+  });
+
+  const quoteDeclinedParams = new URLSearchParams({
+    action: 'decline',
+    quoteId: quote.id,
+    tenantId: QA_TENANT_ID,
+    quoteNumber: quote.number,
+    customerName: quote.customerName || 'Customer',
+    vehicle: '2022 Ford Bronco',
+    businessName: 'Your Company'
+  });
+
+  await page.goto(`/quote-declined?${quoteDeclinedParams.toString()}`);
+  await expect(page.getByText('Quote Declined')).toBeVisible();
+  await expect(page.getByText('Quote status updated to Declined.')).toBeVisible();
+  await assertDocumentVisibleInBoard(page, {
+    tab: 'quotes',
+    documentNumber: quote.number,
+    customerName: customer.displayName
+  });
 });
 
 test('invoice can be sent and then marked paid from public payment path', async ({ page }) => {
   await seedAuthSession(page);
   const customer = await createCustomerInUi(page, 'Invoice Customer');
   const invoice = await sendDocumentFromWizard(page, 'invoice', customer.displayName);
+  await assertDocumentVisibleInBoard(page, {
+    tab: 'invoices',
+    documentNumber: invoice.number,
+    customerName: customer.displayName
+  });
 
   const paymentParams = new URLSearchParams({
     invoiceId: invoice.id,
@@ -291,6 +367,11 @@ test('invoice can be sent and then marked paid from public payment path', async 
   await page.getByRole('button', { name: 'Checkout & Pay' }).click();
   await expect(page.getByText(/Payment received|Payment approved/i)).toBeVisible({ timeout: 30000 });
   await expect(page.getByRole('button', { name: 'Paid' })).toBeVisible();
+  await assertDocumentVisibleInBoard(page, {
+    tab: 'invoices',
+    documentNumber: invoice.number,
+    customerName: customer.displayName
+  });
 });
 
 test('notifications panel opens from user menu', async ({ page }) => {

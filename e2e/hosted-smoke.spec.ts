@@ -63,6 +63,10 @@ async function gotoAndAssertHealthy(
 }
 
 test.describe('Hosted Smoke', () => {
+  test.beforeEach(async ({ baseURL }) => {
+    test.skip(!baseURL || /localhost|127\.0\.0\.1/.test(baseURL), 'Hosted smoke tests require a deployed base URL.');
+  });
+
   test('platform health endpoints respond quickly', async ({ request }) => {
     const authStarted = Date.now();
     const authMe = await request.get('/.auth/me');

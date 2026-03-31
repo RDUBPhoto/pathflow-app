@@ -19,6 +19,7 @@ export const environment = {
       isSuperAdmin?: boolean;
       displayName?: string;
       avatarUrl?: string;
+      phone?: string;
     }>
   }
 };

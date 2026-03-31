@@ -64,7 +64,7 @@
     </div>
 
     <div class="hero-actions-wrap">
-      <div class="hero-actions">
+      <div class="hero-actions" *ngIf="!isMobileLayout()">
         <ion-button (click)="saveCustomer()" [disabled]="saving() || loading() || !canSaveCustomer()">
           <ion-spinner *ngIf="saving()" name="crescent" slot="start"></ion-spinner>
           <ion-icon *ngIf="!saving()" name="save-outline" slot="start"></ion-icon>
@@ -298,15 +298,15 @@
           <ion-input [(ngModel)]="vin" (ngModelChange)="onVinInputChange($event)" maxlength="17"></ion-input>
         </ion-item>
         <ion-button class="vin-btn" fill="outline" (click)="lookupVIN()" [disabled]="!canDecodeVin()">Decode VIN</ion-button>
-        <ion-button class="vin-btn" fill="outline" (click)="openVinPhotoPicker()" [disabled]="vinPhotoOcrLoading">
+        <ion-button class="vin-btn" fill="outline" (click)="openVinPhotoPicker()" [disabled]="isVinWorkflowBusy()">
           {{ vinPhotoOcrLoading ? 'Scanning photo...' : 'Scan VIN Photo' }}
         </ion-button>
         <ion-button
           class="vin-btn remove-vehicle-btn"
           color="danger"
           fill="outline"
-          (click)="confirmRemoveVehicle()"
-          [disabled]="!hasVehicleData()">
+          *ngIf="hasVehicleData()"
+          (click)="confirmRemoveVehicle()">
           Remove Vehicle
         </ion-button>
       </div>
@@ -887,6 +887,47 @@
       </div>
     </section>
   </section>
+
+  <div class="mobile-sticky-save" *ngIf="isMobileLayout() && hasCustomerChanges()">
+    <ion-button
+      expand="block"
+      (click)="saveCustomer()"
+      [disabled]="saving() || loading() || !canSaveCustomer()">
+      <ion-spinner *ngIf="saving()" name="crescent" slot="start"></ion-spinner>
+      <ion-icon *ngIf="!saving()" name="save-outline" slot="start"></ion-icon>
+      {{ saving() ? 'Saving...' : 'Save Customer' }}
+    </ion-button>
+  </div>
+
+  <div
+    *ngIf="isVinWorkflowBusy()"
+    style="
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: grid;
+      place-items: center;
+      background: rgba(4, 10, 24, 0.48);
+      backdrop-filter: blur(2px);
+      padding: 20px;
+      text-align: center;">
+    <div
+      class="glass-surface"
+      style="
+        min-width: 220px;
+        max-width: 320px;
+        border-radius: 14px;
+        border: 1px solid var(--app-border-subtle);
+        background: var(--app-surface-bg);
+        padding: 16px;
+        display: grid;
+        gap: 10px;
+        justify-items: center;">
+      <ion-spinner name="crescent"></ion-spinner>
+      <strong>{{ vinWorkflowMessage() }}</strong>
+      <div style="font-size:12px;color:var(--app-text-muted);">Please wait...</div>
+    </div>
+  </div>
 
 </ion-content>
 

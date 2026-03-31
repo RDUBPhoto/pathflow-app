@@ -526,7 +526,7 @@ export class UserMenuComponent implements OnInit, OnDestroy {
     if (cleanName) {
       const words = cleanName.split(/\s+/).filter(Boolean);
       if (words.length >= 2) {
-        return `${words[0][0]}${words[words.length - 1][0]}`.toUpperCase();
+        return `${words[0][0]}${words[1][0]}`.toUpperCase();
       }
 
       const single = words[0] || '';

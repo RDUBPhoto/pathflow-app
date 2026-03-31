@@ -14,6 +14,7 @@ import {
 const DEV_AUTH_STORAGE_KEY = 'pathflow.dev.auth.user';
 const AUTH_PROFILE_STORAGE_KEY = 'pathflow.auth.profile';
 const LOCAL_PASSWORD_ACCOUNTS_KEY = 'pathflow.local.password.accounts';
+const LOCAL_PASSKEYS_KEY = 'pathflow.local.passkeys';
 const DEFAULT_LOCATION_ID = 'primary-location';
 const DEFAULT_LOCATION_NAME = 'Primary Location';
 
@@ -34,6 +35,13 @@ interface LocalPasswordAccount {
   phone?: string;
   avatarUrl?: string;
   registered?: boolean;
+}
+
+interface LocalPasskeyCredential {
+  email: string;
+  credentialId: string;
+  createdAt: string;
+  transports?: AuthenticatorTransport[];
 }
 
 interface RegistrationBillingPayload {
@@ -235,6 +243,182 @@ export class AuthService {
     });
 
     return { ok: true };
+  }
+
+  async signInWithPasskey(emailInput: string): Promise<{ ok: boolean; error?: string }> {
+    if (!this.isLocalAuthEnabled()) {
+      return { ok: false, error: 'Passkey login is only available for email/password workspaces in this build.' };
+    }
+    if (!this.isPasskeySupported()) {
+      return { ok: false, error: 'Passkeys are not supported on this browser/device.' };
+    }
+
+    const email = emailInput.trim().toLowerCase();
+    if (!email) {
+      return { ok: false, error: 'Enter your email to use biometric sign-in.' };
+    }
+
+    const account = this.resolveLocalPasswordAccount(email);
+    if (!account) {
+      return { ok: false, error: 'No account found for this email.' };
+    }
+
+    const passkeys = this.readLocalPasskeys().filter(item => item.email === email);
+    if (!passkeys.length) {
+      return { ok: false, error: 'No passkey is set for this account yet.' };
+    }
+
+    try {
+      const challenge = this.createChallenge();
+      const assertion = await navigator.credentials.get({
+        publicKey: {
+          challenge,
+          allowCredentials: passkeys
+            .map(item => this.base64UrlToBytes(item.credentialId))
+            .filter((id): id is Uint8Array => !!id)
+            .map(id => ({ type: 'public-key' as const, id })),
+          userVerification: 'required',
+          timeout: 60000,
+          rpId: window.location.hostname
+        }
+      });
+
+      const credential = assertion as PublicKeyCredential | null;
+      if (!credential) {
+        return { ok: false, error: 'Biometric sign-in was cancelled.' };
+      }
+
+      const credentialId = this.bytesToBase64Url(new Uint8Array(credential.rawId));
+      const matched = passkeys.some(item => item.credentialId === credentialId);
+      if (!matched) {
+        return { ok: false, error: 'Passkey verification failed. Try again.' };
+      }
+
+      this.setDevUser({
+        role: account.role,
+        email,
+        displayName: account.displayName || undefined,
+        phone: account.phone || undefined,
+        avatarUrl: account.avatarUrl || undefined
+      }, {
+        registered: account.registered !== false,
+        canBootstrap: account.registered === false,
+        isSuperAdmin: !!account.isSuperAdmin,
+        billingStatus: account.isSuperAdmin ? 'active' : undefined,
+        accessLocked: false
+      });
+
+      return { ok: true };
+    } catch {
+      return { ok: false, error: 'Biometric sign-in was cancelled or unavailable.' };
+    }
+  }
+
+  async registerPasskeyForCurrentUser(): Promise<{ ok: boolean; error?: string; message?: string }> {
+    if (!this.isLocalAuthEnabled()) {
+      return { ok: false, error: 'Passkeys are only available for email/password workspaces in this build.' };
+    }
+    if (!this.isPasskeySupported()) {
+      return { ok: false, error: 'Passkeys are not supported on this browser/device.' };
+    }
+
+    const currentEmail = String(this.user()?.email || '').trim().toLowerCase();
+    if (!currentEmail) {
+      return { ok: false, error: 'Sign in first, then enable passkeys.' };
+    }
+    const account = this.resolveLocalPasswordAccount(currentEmail);
+    if (!account) {
+      return { ok: false, error: 'This account does not support local passkeys.' };
+    }
+
+    try {
+      const challenge = this.createChallenge();
+      const userId = this.createUserIdBytes(currentEmail);
+      const displayName = account.displayName || currentEmail;
+      const created = await navigator.credentials.create({
+        publicKey: {
+          challenge,
+          rp: {
+            name: 'Pathflow',
+            id: window.location.hostname
+          },
+          user: {
+            id: userId,
+            name: currentEmail,
+            displayName
+          },
+          pubKeyCredParams: [
+            { type: 'public-key', alg: -7 },
+            { type: 'public-key', alg: -257 }
+          ],
+          authenticatorSelection: {
+            residentKey: 'preferred',
+            userVerification: 'required'
+          },
+          timeout: 60000,
+          attestation: 'none'
+        }
+      });
+
+      const credential = created as PublicKeyCredential | null;
+      if (!credential) {
+        return { ok: false, error: 'Passkey setup was cancelled.' };
+      }
+
+      const credentialId = this.bytesToBase64Url(new Uint8Array(credential.rawId));
+      const transports = this.extractTransports(credential);
+      const existing = this.readLocalPasskeys().filter(
+        item => !(item.email === currentEmail && item.credentialId === credentialId)
+      );
+      existing.push({
+        email: currentEmail,
+        credentialId,
+        createdAt: new Date().toISOString(),
+        transports
+      });
+      this.writeLocalPasskeys(existing);
+
+      return { ok: true, message: 'Passkey enabled. You can now sign in with biometrics.' };
+    } catch {
+      return { ok: false, error: 'Passkey setup was cancelled or unavailable.' };
+    }
+  }
+
+  removePasskeysForCurrentUser(): { ok: boolean; message?: string; error?: string } {
+    const currentEmail = String(this.user()?.email || '').trim().toLowerCase();
+    if (!currentEmail) {
+      return { ok: false, error: 'Sign in first, then manage passkeys.' };
+    }
+    const all = this.readLocalPasskeys();
+    const next = all.filter(item => item.email !== currentEmail);
+    this.writeLocalPasskeys(next);
+    return { ok: true, message: 'Saved passkeys removed for this account.' };
+  }
+
+  hasPasskeyForEmail(emailInput: string): boolean {
+    const email = String(emailInput || '').trim().toLowerCase();
+    if (!email) return false;
+    return this.readLocalPasskeys().some(item => item.email === email);
+  }
+
+  hasPasskeyForCurrentUser(): boolean {
+    const email = String(this.user()?.email || '').trim().toLowerCase();
+    if (!email) return false;
+    return this.hasPasskeyForEmail(email);
+  }
+
+  isPasskeySupported(): boolean {
+    return typeof window !== 'undefined' &&
+      window.isSecureContext &&
+      typeof window.PublicKeyCredential !== 'undefined' &&
+      typeof navigator !== 'undefined' &&
+      !!navigator.credentials &&
+      typeof navigator.credentials.create === 'function' &&
+      typeof navigator.credentials.get === 'function';
+  }
+
+  isLocalPasswordAuthEnabled(): boolean {
+    return this.isLocalAuthEnabled();
   }
 
   createEmailPasswordAccount(
@@ -901,6 +1085,114 @@ export class AuthService {
 
   private writeProfileMap(map: Record<string, { displayName?: string; avatarUrl?: string }>): void {
     localStorage.setItem(AUTH_PROFILE_STORAGE_KEY, JSON.stringify(map));
+  }
+
+  private resolveLocalPasswordAccount(emailInput: string): LocalPasswordAccount | null {
+    const email = String(emailInput || '').trim().toLowerCase();
+    if (!email) return null;
+    const custom = this.readLocalPasswordAccounts().find(user => user.email.trim().toLowerCase() === email);
+    if (custom) return custom;
+    const seeded = environment.auth.localUsers.find(user => user.email.trim().toLowerCase() === email);
+    if (!seeded) return null;
+    return {
+      email: seeded.email.trim().toLowerCase(),
+      password: seeded.password,
+      role: seeded.role,
+      isSuperAdmin: !!seeded.isSuperAdmin,
+      displayName: seeded.displayName || undefined,
+      avatarUrl: seeded.avatarUrl || undefined,
+      phone: seeded.phone || undefined,
+      registered: true
+    };
+  }
+
+  private createChallenge(size = 32): Uint8Array {
+    const bytes = new Uint8Array(size);
+    crypto.getRandomValues(bytes);
+    return bytes;
+  }
+
+  private createUserIdBytes(email: string): Uint8Array {
+    const source = String(email || '').trim().toLowerCase().slice(0, 64);
+    return new TextEncoder().encode(source || crypto.randomUUID());
+  }
+
+  private bytesToBase64Url(bytes: Uint8Array): string {
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 1) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  }
+
+  private base64UrlToBytes(value: string): Uint8Array | null {
+    const normalized = String(value || '').replace(/-/g, '+').replace(/_/g, '/');
+    if (!normalized) return null;
+    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+    try {
+      const binary = atob(padded);
+      const out = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) {
+        out[i] = binary.charCodeAt(i);
+      }
+      return out;
+    } catch {
+      return null;
+    }
+  }
+
+  private readLocalPasskeys(): LocalPasskeyCredential[] {
+    const raw = localStorage.getItem(LOCAL_PASSKEYS_KEY);
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) return [];
+      const out: LocalPasskeyCredential[] = [];
+      for (const item of parsed) {
+        const row = item as Partial<LocalPasskeyCredential>;
+        const email = String(row.email || '').trim().toLowerCase();
+        const credentialId = String(row.credentialId || '').trim();
+        if (!email || !credentialId) continue;
+        const transports = Array.isArray(row.transports)
+          ? row.transports
+            .map(value => this.normalizeAuthenticatorTransport(value))
+            .filter((value): value is AuthenticatorTransport => !!value)
+          : undefined;
+        out.push({
+          email,
+          credentialId,
+          createdAt: String(row.createdAt || '').trim() || new Date().toISOString(),
+          transports
+        });
+      }
+      return out;
+    } catch {
+      return [];
+    }
+  }
+
+  private writeLocalPasskeys(passkeys: LocalPasskeyCredential[]): void {
+    localStorage.setItem(LOCAL_PASSKEYS_KEY, JSON.stringify(passkeys));
+  }
+
+  private extractTransports(credential: PublicKeyCredential): AuthenticatorTransport[] | undefined {
+    const response = credential.response as AuthenticatorAttestationResponse | null;
+    if (!response || typeof response.getTransports !== 'function') return undefined;
+    const transports = response
+      .getTransports()
+      .map(value => this.normalizeAuthenticatorTransport(value))
+      .filter((value): value is AuthenticatorTransport => !!value);
+    return transports.length ? transports : undefined;
+  }
+
+  private normalizeAuthenticatorTransport(value: unknown): AuthenticatorTransport | null {
+    const raw = String(value || '').trim().toLowerCase();
+    if (raw === 'ble') return 'ble';
+    if (raw === 'hybrid') return 'hybrid';
+    if (raw === 'internal') return 'internal';
+    if (raw === 'nfc') return 'nfc';
+    if (raw === 'usb') return 'usb';
+    return null;
   }
 
   private readLocalPasswordAccounts(): LocalPasswordAccount[] {

@@ -313,7 +313,7 @@ async function seedIfEmpty() {
   } else {
     console.error('[dev-local] API did not start in time');
   }
-  run('ng', ['serve', '--no-hmr', '--proxy-config', 'proxy.conf.local.json', '--port', '4200', '--host', 'localhost']);
+  run('ng', ['serve', '--no-hmr', '--proxy-config', 'proxy.conf.local.json', '--port', '4200', '--host', '0.0.0.0']);
 
   const proxyOk = await waitForFrontendApiProxy();
   if (proxyOk) {

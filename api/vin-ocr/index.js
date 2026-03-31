@@ -45,23 +45,62 @@ function decodeBase64Payload(value) {
 function normalizeVinChars(value) {
   return asString(value)
     .toUpperCase()
-    .replace(/[^A-Z0-9]/g, "")
-    .replace(/I/g, "1")
-    .replace(/[OQ]/g, "0");
+    .replace(/[^A-Z0-9]/g, "");
 }
 
 function isVin(value) {
   return /^[A-HJ-NPR-Z0-9]{17}$/.test(asString(value));
 }
 
+const VIN_TRANSLITERATION = {
+  A: 1, B: 2, C: 3, D: 4, E: 5, F: 6, G: 7, H: 8,
+  J: 1, K: 2, L: 3, M: 4, N: 5, P: 7, R: 9,
+  S: 2, T: 3, U: 4, V: 5, W: 6, X: 7, Y: 8, Z: 9,
+  0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8, 9: 9
+};
+const VIN_WEIGHTS = [8, 7, 6, 5, 4, 3, 2, 10, 0, 9, 8, 7, 6, 5, 4, 3, 2];
+
+function vinCheckDigit(vin) {
+  const raw = asString(vin).toUpperCase();
+  if (!isVin(raw)) return "";
+  let sum = 0;
+  for (let i = 0; i < raw.length; i += 1) {
+    const ch = raw[i];
+    const value = VIN_TRANSLITERATION[ch];
+    if (typeof value !== "number") return "";
+    sum += value * VIN_WEIGHTS[i];
+  }
+  const remainder = sum % 11;
+  return remainder === 10 ? "X" : String(remainder);
+}
+
+function hasValidVinChecksum(vin) {
+  const raw = asString(vin).toUpperCase();
+  if (!isVin(raw)) return false;
+  return raw[8] === vinCheckDigit(raw);
+}
+
+function vinVariants(rawCandidate) {
+  const base = normalizeVinChars(rawCandidate);
+  if (base.length !== 17) return [];
+  const variants = new Set([base, base.replace(/I/g, "1").replace(/[OQ]/g, "0")]);
+  return Array.from(variants).filter(isVin);
+}
+
 function collectVinCandidates(text) {
-  const out = [];
+  const strong = [];
+  const weak = [];
   const seen = new Set();
   const pushCandidate = candidate => {
-    const normalized = normalizeVinChars(candidate);
-    if (!isVin(normalized) || seen.has(normalized)) return;
-    seen.add(normalized);
-    out.push(normalized);
+    for (const normalized of vinVariants(candidate)) {
+      if (seen.has(normalized)) continue;
+      seen.add(normalized);
+      if (hasValidVinChecksum(normalized)) {
+        strong.push(normalized);
+      } else {
+        weak.push(normalized);
+      }
+    }
   };
 
   const full = normalizeVinChars(text);
@@ -77,7 +116,7 @@ function collectVinCandidates(text) {
     }
   }
 
-  return out;
+  return { strong, weak };
 }
 
 function delay(ms) {
@@ -197,11 +236,13 @@ module.exports = async function (context, req) {
 
   try {
     const text = await performAzureRead(endpoint, apiKey, bytes);
-    const candidates = collectVinCandidates(text);
+    const { strong, weak } = collectVinCandidates(text);
+    const candidates = strong;
     context.res = json(200, {
       ok: true,
       vin: candidates[0] || "",
-      candidates
+      candidates,
+      weakCandidates: weak.slice(0, 5)
     });
   } catch (err) {
     context.res = json(502, {

@@ -226,6 +226,10 @@
   color: var(--ion-color-danger, #ef4444);
 }
 
+.mobile-sticky-save {
+  display: none;
+}
+
 .customer-layout {
   display: grid;
   grid-template-columns: minmax(380px, 0.85fr) 68px minmax(540px, 1.45fr);
@@ -1140,4 +1144,20 @@
     flex: 1 1 auto;
   }
 
+  .mobile-sticky-save {
+    display: block;
+    position: sticky;
+    bottom: calc(env(safe-area-inset-bottom) + 8px);
+    z-index: 32;
+    padding: 8px 0 2px;
+    background: linear-gradient(
+      to top,
+      color-mix(in srgb, var(--app-bg) 96%, transparent) 55%,
+      transparent
+    );
+  }
+
+  .mobile-sticky-save ion-button {
+    margin: 0;
+  }
 }

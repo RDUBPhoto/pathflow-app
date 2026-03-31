@@ -204,6 +204,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   vin = '';
   vinStatus = '';
   vinPhotoOcrLoading = false;
+  readonly vinDecodeLoading = signal(false);
   private vinDecodeLockedFor = '';
   vinDecoded = signal<Record<string, string>>({});
   vehicleMake = '';
@@ -906,7 +907,15 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     const hydrateFitmentFields = options?.hydrateFitmentFields ?? !silent;
     const lockUntilInputChange = options?.lockUntilInputChange !== false;
     const onSettled = options?.onSettled;
-    const settle = () => onSettled?.();
+    let settled = false;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      if (!silent) {
+        this.vinDecodeLoading.set(false);
+      }
+      onSettled?.();
+    };
     const vin = this.vin.trim().toUpperCase();
     this.vin = vin;
     if (lockUntilInputChange && vin) {
@@ -932,6 +941,9 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     }
 
     this.vinStatus = silent ? '' : 'Decoding VIN...';
+    if (!silent) {
+      this.vinDecodeLoading.set(true);
+    }
     if (!silent) {
       this.clearFitmentFields();
     }
@@ -1055,11 +1067,11 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   canDecodeVin(): boolean {
     const normalized = this.vin.trim().toUpperCase();
     if (!normalized) return false;
-    return normalized !== this.vinDecodeLockedFor && !this.vinPhotoOcrLoading;
+    return normalized !== this.vinDecodeLockedFor && !this.isVinWorkflowBusy();
   }
 
   openVinPhotoPicker(): void {
-    if (this.vinPhotoOcrLoading) return;
+    if (this.isVinWorkflowBusy()) return;
     const input = this.vinPhotoInput?.nativeElement;
     if (!input) return;
     input.value = '';
@@ -1090,7 +1102,9 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
         return;
       }
       this.onVinInputChange(vin);
-      this.lookupVIN({ lockUntilInputChange: false });
+      await new Promise<void>(resolve => {
+        this.lookupVIN({ lockUntilInputChange: false, onSettled: resolve });
+      });
     } catch (err) {
       if (err instanceof HttpErrorResponse) {
         this.vinStatus = this.extractError(err, 'Could not read VIN from photo.');
@@ -1114,6 +1128,14 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
       };
       reader.readAsDataURL(file);
     });
+  }
+
+  isVinWorkflowBusy(): boolean {
+    return this.vinPhotoOcrLoading || this.vinDecodeLoading();
+  }
+
+  vinWorkflowMessage(): string {
+    return this.vinPhotoOcrLoading ? 'Scanning VIN photo...' : 'Decoding VIN...';
   }
 
   loadSmsThread(): void {

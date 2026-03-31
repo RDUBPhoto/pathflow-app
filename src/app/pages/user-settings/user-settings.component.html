@@ -102,5 +102,39 @@
     </ion-card-content>
   </ion-card>
 
+  <ion-card class="glass-surface" *ngIf="canManagePasskeys()">
+    <ion-card-header>
+      <ion-card-title>
+        <ion-icon name="key-outline"></ion-icon>
+        Biometrics / Passkey
+      </ion-card-title>
+    </ion-card-header>
+    <ion-card-content>
+      <div class="help-text" *ngIf="passkeysSupported()">
+        Use Touch ID / Windows Hello to sign in with biometrics on this device.
+      </div>
+      <div class="validation-error" *ngIf="!passkeysSupported()">
+        This browser/device does not support passkeys.
+      </div>
+      <div class="help-text" *ngIf="passkeysSupported()">
+        Status: <strong>{{ hasPasskey() ? 'Enabled' : 'Not enabled' }}</strong>
+      </div>
+
+      <div class="action-row">
+        <ion-button (click)="enablePasskey()" [disabled]="passkeyBusy || !passkeysSupported()">
+          {{ passkeyBusy ? 'Enabling...' : 'Enable Biometrics' }}
+        </ion-button>
+        <ion-button
+          fill="outline"
+          color="danger"
+          (click)="removePasskey()"
+          [disabled]="passkeyBusy || !hasPasskey()">
+          Remove Biometrics
+        </ion-button>
+      </div>
+      <div class="help-text" *ngIf="passkeyMessage">{{ passkeyMessage }}</div>
+    </ion-card-content>
+  </ion-card>
+
   <div class="status" *ngIf="statusMessage">{{ statusMessage }}</div>
 </ion-content>

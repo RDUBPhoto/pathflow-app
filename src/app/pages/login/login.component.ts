@@ -58,6 +58,8 @@ export default class LoginComponent {
 
   readonly localAuthHint = signal('');
   readonly passwordLoginError = signal('');
+  readonly passkeyLoginError = signal('');
+  readonly passkeyLoginBusy = signal(false);
   readonly passwordResetStatus = signal('');
   readonly passwordResetError = signal('');
   readonly passwordResetSending = signal(false);
@@ -146,6 +148,7 @@ export default class LoginComponent {
   signInWithEmailPassword(): void {
     this.localAuthHint.set('');
     this.passwordLoginError.set('');
+    this.passkeyLoginError.set('');
     this.passwordResetStatus.set('');
     this.passwordResetError.set('');
 
@@ -164,6 +167,24 @@ export default class LoginComponent {
 
       this.passwordLoginError.set(result.error || 'Email/Password is not correct. Do you need to create an account?');
       return;
+    }
+  }
+
+  async signInWithPasskey(): Promise<void> {
+    this.localAuthHint.set('');
+    this.passwordLoginError.set('');
+    this.passkeyLoginError.set('');
+    this.passwordResetStatus.set('');
+    this.passwordResetError.set('');
+
+    this.passkeyLoginBusy.set(true);
+    try {
+      const result = await this.auth.signInWithPasskey(this.localLoginEmail);
+      if (!result.ok) {
+        this.passkeyLoginError.set(result.error || 'Could not sign in with biometrics.');
+      }
+    } finally {
+      this.passkeyLoginBusy.set(false);
     }
   }
 

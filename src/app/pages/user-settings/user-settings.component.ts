@@ -69,6 +69,8 @@ export default class UserSettingsComponent {
   confirmPassword = '';
   statusMessage = '';
   avatarUploadMessage = '';
+  passkeyMessage = '';
+  passkeyBusy = false;
 
   constructor() {
     addIcons({
@@ -181,6 +183,39 @@ export default class UserSettingsComponent {
     this.newPassword = '';
     this.confirmPassword = '';
     this.statusMessage = 'Password update queued (static scaffold).';
+  }
+
+  canManagePasskeys(): boolean {
+    return this.auth.isLocalPasswordAuthEnabled();
+  }
+
+  passkeysSupported(): boolean {
+    return this.auth.isPasskeySupported();
+  }
+
+  hasPasskey(): boolean {
+    return this.auth.hasPasskeyForCurrentUser();
+  }
+
+  async enablePasskey(): Promise<void> {
+    this.passkeyMessage = '';
+    this.passkeyBusy = true;
+    try {
+      const res = await this.auth.registerPasskeyForCurrentUser();
+      this.passkeyMessage = res.ok
+        ? (res.message || 'Passkey enabled.')
+        : (res.error || 'Could not enable passkey.');
+    } finally {
+      this.passkeyBusy = false;
+    }
+  }
+
+  removePasskey(): void {
+    this.passkeyMessage = '';
+    const res = this.auth.removePasskeysForCurrentUser();
+    this.passkeyMessage = res.ok
+      ? (res.message || 'Passkey removed.')
+      : (res.error || 'Could not remove passkey.');
   }
 
   isEmailValid(): boolean {

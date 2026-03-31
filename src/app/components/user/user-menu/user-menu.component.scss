@@ -76,6 +76,13 @@
 .avatar {
   width: 30px;
   height: 30px;
+  min-width: 30px;
+  min-height: 30px;
+  max-width: 30px;
+  max-height: 30px;
+  flex: 0 0 30px;
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
   background: var(--avatar-bg, #334155);
   color: #ffffff;
   display: grid;
@@ -114,6 +121,13 @@
 .menu-avatar {
   width: 36px;
   height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  max-width: 36px;
+  max-height: 36px;
+  flex: 0 0 36px;
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
   font-size: 12px;
 }
 

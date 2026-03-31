@@ -138,16 +138,8 @@
   text-underline-offset: 2px;
 }
 
-.phone-link-btn:hover {
-  color: #c8ebff;
-}
-
 .secondary-phone-link {
   color: var(--app-text-muted);
-}
-
-.secondary-phone-link:hover {
-  color: #b9dcf5;
 }
 
 .hero-actions {
@@ -1157,7 +1149,4 @@
     );
   }
 
-  .mobile-sticky-save ion-button {
-    margin: 0;
-  }
 }

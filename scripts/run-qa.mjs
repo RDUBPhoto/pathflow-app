@@ -5,6 +5,7 @@ import path from 'node:path';
 const root = process.cwd();
 const qaDir = path.join(root, 'qa-reports');
 fs.mkdirSync(qaDir, { recursive: true });
+const hostedBaseUrl = asText(process.env.PLAYWRIGHT_BASE_URL || 'https://www.pathflow-app.com');
 
 const now = new Date();
 const stamp = now.toISOString().replace(/[:.]/g, '-');
@@ -106,6 +107,7 @@ async function sendQaEmailReport({ checks, reportPath, now }) {
     `QA status: ${statusText}`,
     `Generated: ${now.toISOString()}`,
     `Workspace: ${root}`,
+    `Hosted URL: ${hostedBaseUrl}`,
     '',
     'Results:',
     ...summaryLines,
@@ -142,7 +144,7 @@ async function sendQaEmailReport({ checks, reportPath, now }) {
 
 const checks = [
   runAndCapture('unit', 'npm', ['run', 'test:unit:ci']),
-  runAndCapture('e2e', 'npm', ['run', 'test:e2e'])
+  runAndCapture('hosted-e2e', 'npm', ['run', 'test:e2e:hosted'])
 ];
 
 const coverage = readCoverageSummary();
@@ -153,6 +155,7 @@ lines.push(`# Daily QA Report`);
 lines.push('');
 lines.push(`- Generated: ${now.toISOString()}`);
 lines.push(`- Workspace: ${root}`);
+lines.push(`- Hosted URL: ${hostedBaseUrl}`);
 lines.push('');
 lines.push('## Results');
 
@@ -174,8 +177,8 @@ if (coverage) {
 lines.push('');
 lines.push('## Artifacts');
 lines.push('- Unit coverage HTML: coverage/web/index.html');
-lines.push('- Playwright HTML: playwright-report/index.html');
-lines.push('- Playwright JUnit XML: test-results/playwright/junit.xml');
+lines.push('- Hosted Playwright HTML: playwright-report-hosted/index.html');
+lines.push('- Hosted Playwright JUnit XML: test-results/playwright/hosted-junit.xml');
 
 fs.writeFileSync(reportPath, `${lines.join('\n')}\n`, 'utf8');
 

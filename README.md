@@ -79,7 +79,7 @@ npm run test:unit:ci
 
 ## Running end-to-end tests
 
-For Playwright E2E smoke flows:
+For local Playwright flows against your local dev stack:
 
 ```bash
 npm run test:e2e
@@ -93,7 +93,10 @@ PLAYWRIGHT_BASE_URL=https://www.pathflow-app.com npm run test:e2e:hosted
 
 ## Daily QA report
 
-To run the full QA suite (unit + E2E) and generate a report:
+To run the full QA suite and generate a report:
+
+- Unit tests run locally.
+- Browser smoke tests run against the hosted deployment, not `localhost`.
 
 ```bash
 npm run test:qa
@@ -102,8 +105,11 @@ npm run test:qa
 Artifacts:
 1. QA markdown report: `qa-reports/<timestamp>-report.md`
 2. Unit test coverage: `coverage/web/index.html`
-3. Playwright HTML report: `playwright-report/index.html`
-4. Playwright JUnit XML: `test-results/playwright/junit.xml`
+3. Hosted Playwright HTML report: `playwright-report-hosted/index.html`
+4. Hosted Playwright JUnit XML: `test-results/playwright/hosted-junit.xml`
+
+Optional:
+1. Set `PLAYWRIGHT_BASE_URL` if production is not `https://www.pathflow-app.com`.
 
 Optional nightly email summary:
 1. Set `QA_REPORT_EMAIL_TO` to one or more recipient emails (comma-separated).

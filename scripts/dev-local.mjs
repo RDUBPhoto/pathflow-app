@@ -1,9 +1,11 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
 const root = process.cwd();
 const apiRoot = path.join(root, 'api');
+const scriptPath = path.resolve(process.argv[1] || path.join(root, 'scripts', 'dev-local.mjs'));
+const repoNode18Path = path.join(root, 'node_modules', 'node', 'bin', 'node');
 const procs = [];
 let shuttingDown = false;
 const REQUIRED_NODE_MAJOR = 18;
@@ -52,6 +54,19 @@ function nodeMajor(version = process.version) {
 function assertFunctionsNodeVersion() {
   const major = nodeMajor();
   if (major === REQUIRED_NODE_MAJOR) return;
+
+  // Re-run under the repo-managed Node 18 runtime when the global Node is incompatible.
+  if (process.env.PATHFLOW_DEV_LOCAL_REEXEC !== '1' && fs.existsSync(repoNode18Path)) {
+    const result = spawnSync(repoNode18Path, [scriptPath, ...process.argv.slice(2)], {
+      cwd: root,
+      stdio: 'inherit',
+      env: {
+        ...process.env,
+        PATHFLOW_DEV_LOCAL_REEXEC: '1'
+      }
+    });
+    process.exit(result.status ?? 1);
+  }
 
   console.error(`[dev-local] Node ${process.version} is incompatible with Azure Functions worker in this repo.`);
   console.error(`[dev-local] Switch to Node ${REQUIRED_NODE_MAJOR} and run npm start again.`);

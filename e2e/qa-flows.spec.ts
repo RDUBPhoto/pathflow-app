@@ -21,6 +21,7 @@ type SentDocument = {
 
 const QA_TENANT_ID = 'qa-automation';
 const QA_EMAIL_DOMAIN = '@example.com';
+const QA_TENANT_CLEANUP_IDS = [QA_TENANT_ID, 'primary-location', 'main', 'tenant-unassigned'];
 
 async function seedAuthSession(
   page: Page,
@@ -70,6 +71,55 @@ async function createCustomerInUi(page: Page, namePrefix = 'Lead'): Promise<Cust
   return { id, name, displayName, email, phone };
 }
 
+async function assertCustomerNotVisibleInUi(page: Page, displayName: string): Promise<void> {
+  await page.goto('/customers');
+  await expect(page.locator('ion-title', { hasText: 'Customers' })).toBeVisible();
+  await page.locator('ion-item.search-item ion-input input').fill(displayName);
+  await expect(page.locator('tr.data-row', { hasText: displayName })).toHaveCount(0);
+}
+
+async function deleteCustomerInUi(page: Page, customerId: string): Promise<void> {
+  await page.goto(`/customers/${encodeURIComponent(customerId)}`);
+  await expect(page.getByRole('button', { name: 'Delete Customer' })).toBeVisible();
+  await page.getByRole('button', { name: 'Delete Customer' }).click();
+  const deleteModal = page.locator('ion-modal').filter({ has: page.locator('ion-title', { hasText: 'Delete Customer' }) }).last();
+  await expect(deleteModal).toBeVisible();
+  await deleteModal.getByRole('button', { name: 'Delete' }).click({ force: true });
+  await expect(page).toHaveURL(/\/customers$/);
+}
+
+async function createScheduleAppointmentInUi(page: Page, customerId: string, noteText: string): Promise<void> {
+  await page.goto(`/schedule?customerId=${encodeURIComponent(customerId)}`);
+  await expect(page.locator('ion-title', { hasText: 'Appointment' })).toBeVisible();
+  await page.locator('ion-item', { hasText: 'Notes' }).locator('textarea').fill(noteText);
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('Appointment saved.')).toBeVisible();
+}
+
+async function deleteScheduleAppointmentsForCustomer(request: APIRequestContext, customerId: string): Promise<void> {
+  const tenantHeaders = { 'x-tenant-id': QA_TENANT_ID };
+  const scheduleRes = await request.get('/api/schedule', { headers: tenantHeaders });
+  const schedulePayload = scheduleRes.ok() ? await scheduleRes.json() : [];
+  const scheduleItems = Array.isArray(schedulePayload) ? schedulePayload : [];
+  const matchingIds = scheduleItems
+    .filter((row: any) => String(row?.customerId || '').trim() === customerId)
+    .map((row: any) => String(row?.id || '').trim())
+    .filter(Boolean);
+
+  for (const id of matchingIds) {
+    await request.delete(`/api/schedule/${encodeURIComponent(id)}`, { headers: tenantHeaders });
+  }
+}
+
+async function expectNoScheduleAppointmentsForCustomer(request: APIRequestContext, customerId: string): Promise<void> {
+  const tenantHeaders = { 'x-tenant-id': QA_TENANT_ID };
+  const scheduleRes = await request.get('/api/schedule', { headers: tenantHeaders });
+  const schedulePayload = scheduleRes.ok() ? await scheduleRes.json() : [];
+  const scheduleItems = Array.isArray(schedulePayload) ? schedulePayload : [];
+  const remaining = scheduleItems.filter((row: any) => String(row?.customerId || '').trim() === customerId);
+  expect(remaining).toHaveLength(0);
+}
+
 function isQaCustomerRecord(record: any): boolean {
   const name = String(record?.name || '').trim().toLowerCase();
   const email = String(record?.email || '').trim().toLowerCase();
@@ -92,8 +142,8 @@ function isQaWorkItemRecord(record: any, qaCustomerIds: Set<string>): boolean {
   return title.startsWith('qa ');
 }
 
-async function cleanupQaArtifacts(request: APIRequestContext): Promise<void> {
-  const tenantHeaders = { 'x-tenant-id': QA_TENANT_ID };
+async function cleanupQaArtifactsForTenant(request: APIRequestContext, tenantId: string): Promise<void> {
+  const tenantHeaders = { 'x-tenant-id': tenantId };
 
   const customersRes = await request.get('/api/customers', { headers: tenantHeaders });
   const customersPayload = customersRes.ok() ? await customersRes.json() : [];
@@ -128,8 +178,14 @@ async function cleanupQaArtifacts(request: APIRequestContext): Promise<void> {
     if (!id) continue;
     await request.post('/api/customers', {
       headers: tenantHeaders,
-      data: { op: 'delete', id, tenantId: QA_TENANT_ID }
+      data: { op: 'delete', id, tenantId }
     });
+  }
+}
+
+async function cleanupQaArtifacts(request: APIRequestContext): Promise<void> {
+  for (const tenantId of QA_TENANT_CLEANUP_IDS) {
+    await cleanupQaArtifactsForTenant(request, tenantId);
   }
 }
 
@@ -237,7 +293,7 @@ test('core routes load', async ({ page }) => {
   }
 });
 
-test('new customer appears in customer list search', async ({ page }) => {
+test('new customer can be created then deleted without remaining in the customer list', async ({ page }) => {
   await seedAuthSession(page);
   const customer = await createCustomerInUi(page, 'List Customer');
 
@@ -248,18 +304,21 @@ test('new customer appears in customer list search', async ({ page }) => {
   const row = page.locator('tr.data-row', { hasText: customer.displayName }).first();
   await expect(row).toBeVisible();
   await expect(row).toContainText(customer.email);
+
+  await deleteCustomerInUi(page, customer.id);
+  await assertCustomerNotVisibleInUi(page, customer.displayName);
 });
 
-test('calendar event can be added from schedule page', async ({ page }) => {
+test('calendar event can be added then removed and the QA customer can be deleted from the UI', async ({ page, request }) => {
   await seedAuthSession(page);
   const customer = await createCustomerInUi(page, 'Calendar Customer');
+  const noteText = `QA calendar cleanup ${Date.now()}`;
 
-  await page.goto(`/schedule?customerId=${encodeURIComponent(customer.id)}`);
-  await expect(page.locator('ion-title', { hasText: 'Appointment' })).toBeVisible();
-
-  await page.locator('ion-item', { hasText: 'Notes' }).locator('textarea').fill('QA calendar event');
-  await page.getByRole('button', { name: 'Save' }).click();
-  await expect(page.getByText('Appointment saved.')).toBeVisible();
+  await createScheduleAppointmentInUi(page, customer.id, noteText);
+  await deleteScheduleAppointmentsForCustomer(request, customer.id);
+  await expectNoScheduleAppointmentsForCustomer(request, customer.id);
+  await deleteCustomerInUi(page, customer.id);
+  await assertCustomerNotVisibleInUi(page, customer.displayName);
 });
 
 test('customer profile supports SMS and Email actions', async ({ page }) => {

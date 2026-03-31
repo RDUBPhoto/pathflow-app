@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, OnInit, OnChanges, OnDestroy, SimpleChanges, signal, computed } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnInit, OnChanges, OnDestroy, SimpleChanges, signal, computed, ElementRef, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
@@ -8,7 +8,7 @@ import {
 import { HttpClient } from '@angular/common/http';
 import { CustomersApi, Customer } from '../../../services/customers-api.service';
 import { AddressLookupService, AddressSuggestion } from '../../../services/address-lookup.service';
-import { Subscription, finalize } from 'rxjs';
+import { Subscription, finalize, firstValueFrom } from 'rxjs';
 import { formatUsPhoneInput } from '../../../utils/phone-format';
 
 type ColorOpt = { label: string; hex: string };
@@ -45,6 +45,7 @@ type UICustomer = Customer & {
   styleUrls: ['./customer-modal.component.scss']
 })
 export default class CustomerModalComponent implements OnInit, OnChanges, OnDestroy {
+  @ViewChild('vinPhotoInput') private vinPhotoInput?: ElementRef<HTMLInputElement>;
   @Input() isOpen: boolean = false;
   @Input() mode: Mode = 'add';
   @Input() customerId: string | null = null;
@@ -78,6 +79,7 @@ export default class CustomerModalComponent implements OnInit, OnChanges, OnDest
 
   vin = signal<string>('');
   vinStatus = signal<string>('');
+  vinOcrLoading = signal(false);
   vinDecoded = signal<Record<string, string>>({});
 
   vehicleMake = signal<string>('');
@@ -203,6 +205,58 @@ export default class CustomerModalComponent implements OnInit, OnChanges, OnDest
     this.addressNoMatches.set(false);
   }
   onVinChange(v: string) { this.vin.set((v || '').toUpperCase().replace(/[^A-Z0-9]/g, '')); }
+
+  openVinPhotoPicker(): void {
+    if (this.vinOcrLoading()) return;
+    const input = this.vinPhotoInput?.nativeElement;
+    if (!input) return;
+    input.value = '';
+    input.click();
+  }
+
+  async onVinPhotoSelected(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement | null;
+    const file = input?.files?.[0];
+    if (!file) return;
+    await this.scanVinFromPhoto(file);
+    if (input) input.value = '';
+  }
+
+  private async scanVinFromPhoto(file: File): Promise<void> {
+    this.vinOcrLoading.set(true);
+    this.vinStatus.set('Scanning photo for VIN…');
+    try {
+      const imageBase64 = await this.fileToBase64(file);
+      const res = await firstValueFrom(
+        this.http.post<{ ok?: boolean; vin?: string; error?: string }>('/api/vin-ocr', { imageBase64 })
+      );
+      const vin = String(res?.vin || '').trim().toUpperCase();
+      if (!vin) {
+        this.vinStatus.set('Could not find a valid 17-character VIN in the photo.');
+        return;
+      }
+      this.onVinChange(vin);
+      this.lookupVIN();
+    } catch {
+      this.vinStatus.set('Could not read VIN from photo.');
+    } finally {
+      this.vinOcrLoading.set(false);
+    }
+  }
+
+  private fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('Could not read image file.'));
+      reader.onload = () => {
+        const result = String(reader.result || '');
+        const marker = ';base64,';
+        const idx = result.indexOf(marker);
+        resolve(idx >= 0 ? result.slice(idx + marker.length) : result);
+      };
+      reader.readAsDataURL(file);
+    });
+  }
 
   lookupVIN() {
     const vin = this.vin().trim().toUpperCase();

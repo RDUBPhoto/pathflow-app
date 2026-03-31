@@ -145,6 +145,7 @@ type CustomerNoteHistoryEntry = {
 })
 export default class CustomerProfileComponent implements OnInit, OnDestroy {
   @ViewChild('smsThreadContainer') private smsThreadContainer?: ElementRef<HTMLDivElement>;
+  @ViewChild('vinPhotoInput') private vinPhotoInput?: ElementRef<HTMLInputElement>;
   private readonly customerMessagesFetchLimit = 300;
 
   private readonly route = inject(ActivatedRoute);
@@ -200,6 +201,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
 
   vin = '';
   vinStatus = '';
+  vinPhotoOcrLoading = false;
   private vinDecodeLockedFor = '';
   vinDecoded = signal<Record<string, string>>({});
   vehicleMake = '';
@@ -1026,7 +1028,65 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   canDecodeVin(): boolean {
     const normalized = this.vin.trim().toUpperCase();
     if (!normalized) return false;
-    return normalized !== this.vinDecodeLockedFor;
+    return normalized !== this.vinDecodeLockedFor && !this.vinPhotoOcrLoading;
+  }
+
+  openVinPhotoPicker(): void {
+    if (this.vinPhotoOcrLoading) return;
+    const input = this.vinPhotoInput?.nativeElement;
+    if (!input) return;
+    input.value = '';
+    input.click();
+  }
+
+  async onVinPhotoSelected(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement | null;
+    const file = input?.files?.[0];
+    if (!file) return;
+    await this.scanVinFromPhoto(file);
+    if (input) input.value = '';
+  }
+
+  private async scanVinFromPhoto(file: File): Promise<void> {
+    this.vinPhotoOcrLoading = true;
+    this.status.set('');
+    this.error.set('');
+    this.vinStatus = 'Scanning photo for VIN...';
+    try {
+      const imageBase64 = await this.fileToBase64(file);
+      const res = await firstValueFrom(
+        this.http.post<{ ok?: boolean; vin?: string; error?: string }>('/api/vin-ocr', { imageBase64 })
+      );
+      const vin = String(res?.vin || '').trim().toUpperCase();
+      if (!vin) {
+        this.vinStatus = 'Could not find a valid 17-character VIN in the photo.';
+        return;
+      }
+      this.onVinInputChange(vin);
+      this.lookupVIN({ lockUntilInputChange: false });
+    } catch (err) {
+      if (err instanceof HttpErrorResponse) {
+        this.vinStatus = this.extractError(err, 'Could not read VIN from photo.');
+      } else {
+        this.vinStatus = 'Could not read VIN from photo.';
+      }
+    } finally {
+      this.vinPhotoOcrLoading = false;
+    }
+  }
+
+  private fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('Could not read image file.'));
+      reader.onload = () => {
+        const result = String(reader.result || '');
+        const marker = ';base64,';
+        const idx = result.indexOf(marker);
+        resolve(idx >= 0 ? result.slice(idx + marker.length) : result);
+      };
+      reader.readAsDataURL(file);
+    });
   }
 
   loadSmsThread(): void {

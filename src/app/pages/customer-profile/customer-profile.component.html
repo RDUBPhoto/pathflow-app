@@ -302,6 +302,9 @@
           <ion-input [(ngModel)]="vin" (ngModelChange)="onVinInputChange($event)" maxlength="17"></ion-input>
         </ion-item>
         <ion-button class="vin-btn" fill="outline" (click)="lookupVIN()" [disabled]="!canDecodeVin()">Decode VIN</ion-button>
+        <ion-button class="vin-btn" fill="outline" (click)="openVinPhotoPicker()" [disabled]="vinPhotoOcrLoading">
+          {{ vinPhotoOcrLoading ? 'Scanning photo...' : 'Scan VIN Photo' }}
+        </ion-button>
         <ion-button
           class="vin-btn remove-vehicle-btn"
           color="danger"
@@ -311,6 +314,13 @@
           Remove Vehicle
         </ion-button>
       </div>
+      <input
+        #vinPhotoInput
+        type="file"
+        accept="image/*"
+        capture="environment"
+        style="display:none"
+        (change)="onVinPhotoSelected($event)" />
 
       <div class="vin-status" *ngIf="vinStatus">{{ vinStatus }}</div>
 

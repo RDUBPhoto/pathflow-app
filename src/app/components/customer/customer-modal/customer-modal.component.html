@@ -88,7 +88,17 @@
           <div style="display:flex; gap:8px; width:100%; align-items:center;">
             <ion-input style="flex:1" maxlength="17" [ngModel]="vin()" (ngModelChange)="onVinChange($event)"></ion-input>
             <ion-button size="small" (click)="lookupVIN()">Decode VIN</ion-button>
+            <ion-button size="small" fill="outline" (click)="openVinPhotoPicker()" [disabled]="vinOcrLoading()">
+              {{ vinOcrLoading() ? 'Scanning...' : 'Scan VIN Photo' }}
+            </ion-button>
           </div>
+          <input
+            #vinPhotoInput
+            type="file"
+            accept="image/*"
+            capture="environment"
+            style="display:none"
+            (change)="onVinPhotoSelected($event)" />
           <ion-note slot="helper" color="danger" *ngIf="showErrors() && !vinValid()">VIN must be 17 characters and cannot contain I, O, or Q</ion-note>
           <ion-note slot="helper" *ngIf="vinValid() && vinStatus()">{{ vinStatus() }}</ion-note>
         </ion-item>

@@ -78,9 +78,6 @@
 
 .hero-overflow-trigger {
   margin: 0;
-  --padding-start: 4px;
-  --padding-end: 4px;
-  min-height: 30px;
 }
 
 .hero-overflow-menu {
@@ -107,14 +104,6 @@
   text-align: left;
   font-size: 13px;
   cursor: pointer;
-}
-
-.hero-overflow-item:hover {
-  background: var(--app-control-bg-hover);
-}
-
-.hero-overflow-item.danger {
-  color: var(--ion-color-danger, #ef4444);
 }
 
 .hero-meta {

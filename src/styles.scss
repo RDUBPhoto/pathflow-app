@@ -150,6 +150,20 @@ ion-toolbar ion-title {
   color: var(--app-title);
 }
 
+@media (max-width: 980px) {
+  .glass-header ion-toolbar ion-title {
+    position: static;
+    text-align: left;
+    left: auto;
+    right: auto;
+    transform: none;
+    width: auto;
+    padding-inline-start: 6px;
+    padding-inline-end: 0;
+    margin-inline-start: 0;
+  }
+}
+
 a {
   color: var(--app-link);
 }

@@ -34,7 +34,8 @@ import {
   arrowBackOutline,
   saveOutline,
   cashOutline,
-  trashOutline
+  trashOutline,
+  ellipsisVerticalOutline
 } from 'ionicons/icons';
 import { Subscription, finalize, firstValueFrom } from 'rxjs';
 import { CustomersApi, Customer, DuplicateCandidate, DuplicateReason } from '../../services/customers-api.service';
@@ -184,6 +185,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   readonly activeTab = signal<CustomerTab>('vehicle');
   readonly isMobileLayout = signal(false);
   readonly mobileTab = signal<CustomerMobileTab>('profile');
+  readonly heroMenuOpen = signal(false);
 
   firstName = '';
   lastName = '';
@@ -507,7 +509,8 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
       'arrow-back-outline': arrowBackOutline,
       'save-outline': saveOutline,
       'cash-outline': cashOutline,
-      'trash-outline': trashOutline
+      'trash-outline': trashOutline,
+      'ellipsis-vertical-outline': ellipsisVerticalOutline
     });
   }
 
@@ -577,6 +580,14 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     this.updateMobileLayoutState();
   }
 
+  @HostListener('document:click', ['$event'])
+  onDocumentClick(event: Event): void {
+    const target = event.target as HTMLElement | null;
+    if (!target?.closest('.hero-overflow')) {
+      this.heroMenuOpen.set(false);
+    }
+  }
+
   selectTab(tab: CustomerTab): void {
     this.activeTab.set(tab);
     if (this.isMobileLayout()) {
@@ -605,6 +616,26 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     this.mobileTab.set(tab);
     if (tab === 'profile') return;
     this.selectTab(tab);
+  }
+
+  onMobileTabSelect(value: string | null | undefined): void {
+    const next = String(value || '').trim().toLowerCase();
+    if (this.isMobileTab(next)) {
+      this.selectMobileTab(next);
+    }
+  }
+
+  toggleHeroMenu(event?: Event): void {
+    event?.preventDefault();
+    event?.stopPropagation();
+    this.heroMenuOpen.update(open => !open);
+  }
+
+  openDeleteCustomerModalFromMenu(event?: Event): void {
+    event?.preventDefault();
+    event?.stopPropagation();
+    this.heroMenuOpen.set(false);
+    this.openDeleteCustomerModal();
   }
 
   onPrimaryPhoneInput(value: string | null | undefined): void {
@@ -744,10 +775,6 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     } finally {
       this.saving.set(false);
     }
-  }
-
-  goBack(): void {
-    this.router.navigate(['/customers']);
   }
 
   canDeleteCustomer(): boolean {
@@ -2777,6 +2804,10 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
 
   private isTab(value: string): value is CustomerTab {
     return value === 'vehicle' || value === 'schedule' || value === 'sms' || value === 'invoices' || value === 'email';
+  }
+
+  private isMobileTab(value: string): value is CustomerMobileTab {
+    return value === 'profile' || this.isTab(value);
   }
 
   private normalizeTab(value: string): CustomerTab | null {

@@ -3,6 +3,16 @@
   align-items: center;
 }
 
+:host ::ng-deep ion-popover.user-menu-popover {
+  --width: min(320px, calc(100vw - 20px));
+  --max-width: calc(100vw - 20px);
+}
+
+:host ::ng-deep ion-popover.user-menu-popover::part(content) {
+  width: var(--width);
+  max-width: var(--max-width);
+}
+
 .menu-actions {
   display: inline-flex;
   align-items: center;
@@ -120,19 +130,32 @@
 
 .theme-menu-item {
   --min-height: 56px;
+  --inner-padding-end: 8px;
+}
+
+.theme-menu-item ion-label {
+  white-space: nowrap;
+  margin-right: 10px;
+  flex: 0 0 auto;
 }
 
 .theme-direction-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--app-border-subtle, rgba(255, 255, 255, 0.2));
+  background: color-mix(in srgb, var(--app-control-bg, rgba(255, 255, 255, 0.5)) 88%, transparent);
+  margin-left: auto;
 }
 
 .theme-side {
   font-size: 12px;
   color: var(--app-text-muted, #64748b);
-  min-width: 34px;
+  min-width: 36px;
   text-align: center;
+  white-space: nowrap;
 }
 
 .theme-side.active {
@@ -151,6 +174,11 @@
 }
 
 @media (max-width: 640px) {
+  :host ::ng-deep ion-popover.user-menu-popover {
+    --width: min(304px, calc(100vw - 16px));
+    --max-width: calc(100vw - 16px);
+  }
+
   .user-name {
     display: none;
   }
@@ -381,10 +409,27 @@
 }
 
 @media (max-width: 720px) {
+  :host ::ng-deep ion-popover.notifications-popover {
+    --offset-x: 0px;
+    --offset-y: 4px;
+    --width: calc(100vw - 12px);
+    --max-width: calc(100vw - 12px);
+  }
+
+  :host ::ng-deep ion-popover.notifications-popover::part(content) {
+    width: calc(100vw - 12px);
+    max-width: calc(100vw - 12px);
+    max-height: calc(100dvh - 84px);
+    margin: 0;
+    left: 6px !important;
+    right: 6px !important;
+  }
+
   .notifications-panel {
-    width: calc(100vw - 20px);
-    height: min(72dvh, 520px);
-    min-height: 260px;
-    max-height: calc(100dvh - 20px);
+    width: 100%;
+    height: auto;
+    min-height: 220px;
+    max-height: calc(100dvh - 84px);
+    border-radius: 14px;
   }
 }

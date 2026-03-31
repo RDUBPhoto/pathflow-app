@@ -21,7 +21,7 @@
   </ion-button>
 </div>
 
-<ion-popover [isOpen]="menuOpen()" [event]="menuEvent()" (didDismiss)="closeMenu()">
+<ion-popover class="user-menu-popover" [isOpen]="menuOpen()" [event]="menuEvent()" (didDismiss)="closeMenu()">
   <ng-template>
     <ion-content>
       <div class="menu-profile">

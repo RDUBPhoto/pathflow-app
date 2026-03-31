@@ -16,7 +16,30 @@
     <div class="hero-main">
       <div class="hero-avatar" [style.--avatar-color]="avatarColor()">{{ avatarInitials() }}</div>
       <div class="hero-copy">
-        <h1>{{ displayName() }}</h1>
+        <div class="hero-name-row">
+          <h1>{{ displayName() }}</h1>
+          <div class="hero-overflow" *ngIf="canDeleteCustomer()">
+            <ion-button
+              fill="clear"
+              size="small"
+              class="hero-overflow-trigger"
+              (click)="toggleHeroMenu($event)"
+              [disabled]="saving() || loading()"
+              aria-label="More customer actions">
+              <ion-icon name="ellipsis-vertical-outline"></ion-icon>
+            </ion-button>
+            <div class="hero-overflow-menu glass-surface" *ngIf="heroMenuOpen()">
+              <button
+                type="button"
+                class="hero-overflow-item danger"
+                (click)="openDeleteCustomerModalFromMenu($event)"
+                [disabled]="saving() || loading()">
+                <ion-icon name="trash-outline"></ion-icon>
+                <span>Delete Customer</span>
+              </button>
+            </div>
+          </div>
+        </div>
         <div class="hero-since" *ngIf="customerCreatedAt">Customer since {{ customerSinceLabel() }}</div>
         <div class="hero-meta">
           <span>{{ email || 'No email set' }}</span>
@@ -42,16 +65,6 @@
 
     <div class="hero-actions-wrap">
       <div class="hero-actions">
-        <ion-button fill="outline" (click)="goBack()">Back to Customers</ion-button>
-        <ion-button
-          *ngIf="canDeleteCustomer()"
-          fill="outline"
-          color="danger"
-          (click)="openDeleteCustomerModal()"
-          [disabled]="saving() || loading()">
-          <ion-icon name="trash-outline" slot="start"></ion-icon>
-          Delete Customer
-        </ion-button>
         <ion-button (click)="saveCustomer()" [disabled]="saving() || loading() || !canSaveCustomer()">
           <ion-spinner *ngIf="saving()" name="crescent" slot="start"></ion-spinner>
           <ion-icon *ngIf="!saving()" name="save-outline" slot="start"></ion-icon>
@@ -117,23 +130,6 @@
       <ion-button size="small" fill="clear" (click)="ignoreDuplicateForCurrent()">Ignore Match</ion-button>
     </div>
   </section>
-
-  <nav class="mobile-tabs glass-surface" *ngIf="isMobileLayout()" aria-label="Customer profile tabs">
-    <button
-      type="button"
-      class="mobile-tab-btn"
-      *ngFor="let tab of mobileTabs"
-      [class.active]="mobileTab() === tab.key"
-      [attr.title]="tab.label"
-      [attr.aria-label]="tab.label"
-      (click)="selectMobileTab(tab.key)">
-      <ion-icon [name]="tab.icon"></ion-icon>
-      <span>{{ tab.label }}</span>
-      <span class="mobile-tab-badge" *ngIf="mobileTabActivityCount(tab.key) > 0">
-        {{ mobileTabActivityCount(tab.key) > 9 ? '9+' : mobileTabActivityCount(tab.key) }}
-      </span>
-    </button>
-  </nav>
 
   <section class="customer-layout">
     <ng-template #contactPanelTemplate>
@@ -476,27 +472,38 @@
       </button>
     </nav>
 
-    <section class="mobile-profile-column" *ngIf="isMobileLayout() && mobileTab() === 'profile'">
-      <ng-container *ngTemplateOutlet="contactPanelTemplate"></ng-container>
-    </section>
-
     <section
       class="right-column glass-surface"
       [class.sms-active]="activeTab() === 'sms'"
-      [class.email-active]="activeTab() === 'email'"
-      *ngIf="!isMobileLayout() || mobileTab() !== 'profile'">
+      [class.email-active]="activeTab() === 'email'">
       <div class="right-header">
-        <div class="right-header-title" style="display:flex;align-items:center;gap:8px;min-width:0;">
+        <div class="right-header-title" style="display:flex;align-items:center;gap:8px;min-width:0;" *ngIf="!isMobileLayout()">
           <ion-icon [name]="tabIcon(activeTab())"></ion-icon>
           <span>{{ activeTabLabel() }}</span>
           <ion-badge *ngIf="tabActivityCount(activeTab()) > 0" color="primary">
             {{ tabActivityCount(activeTab()) }}
           </ion-badge>
         </div>
-        <div class="right-header-actions" style="display:flex;" *ngIf="activeTab() === 'schedule' || activeTab() === 'invoices'">
+        <div class="mobile-header-select" *ngIf="isMobileLayout()">
+          <ion-item lines="none">
+            <ion-select
+              interface="popover"
+              [value]="mobileTab()"
+              (ionChange)="onMobileTabSelect($event.detail.value)">
+              <ion-select-option *ngFor="let tab of mobileTabs" [value]="tab.key">
+                {{ tab.label }}{{ mobileTabActivityCount(tab.key) > 0 ? ' (' + mobileTabActivityCount(tab.key) + ')' : '' }}
+              </ion-select-option>
+            </ion-select>
+          </ion-item>
+        </div>
+        <div
+          class="right-header-actions"
+          style="display:flex;"
+          *ngIf="(!isMobileLayout() && (activeTab() === 'schedule' || activeTab() === 'invoices'))
+            || (isMobileLayout() && (mobileTab() === 'schedule' || mobileTab() === 'invoices'))">
           <ion-button
             size="small"
-            *ngIf="activeTab() === 'schedule'"
+            *ngIf="(!isMobileLayout() && activeTab() === 'schedule') || (isMobileLayout() && mobileTab() === 'schedule')"
             (click)="openScheduleAppointmentModal()"
             [disabled]="!customerId() || scheduleLoading()">
             <ion-icon slot="start" name="add-outline"></ion-icon>
@@ -505,7 +512,7 @@
           <ion-button
             size="small"
             fill="outline"
-            *ngIf="activeTab() === 'invoices'"
+            *ngIf="(!isMobileLayout() && activeTab() === 'invoices') || (isMobileLayout() && mobileTab() === 'invoices')"
             (click)="openCreateInvoice()"
             [disabled]="!customerId()">
             Create Invoice
@@ -517,11 +524,15 @@
         class="right-content"
         [class.sms-active]="activeTab() === 'sms'"
         [class.email-active]="activeTab() === 'email'">
-        <section class="right-panel" *ngIf="activeTab() === 'vehicle'">
+        <section class="right-panel" *ngIf="isMobileLayout() && mobileTab() === 'profile'">
+          <ng-container *ngTemplateOutlet="contactPanelTemplate"></ng-container>
+        </section>
+
+        <section class="right-panel" *ngIf="(!isMobileLayout() && activeTab() === 'vehicle') || (isMobileLayout() && mobileTab() === 'vehicle')">
           <ng-container *ngTemplateOutlet="vehicleDetailsTemplate"></ng-container>
         </section>
 
-        <section class="right-panel schedule-panel" *ngIf="activeTab() === 'schedule'">
+        <section class="right-panel schedule-panel" *ngIf="(!isMobileLayout() && activeTab() === 'schedule') || (isMobileLayout() && mobileTab() === 'schedule')">
           <div class="schedule-toolbar">
             <div class="invoice-date">Upcoming Appointments</div>
           </div>
@@ -619,7 +630,7 @@
           <div class="sms-feedback error" *ngIf="scheduleError()">{{ scheduleError() }}</div>
         </section>
 
-        <section class="right-panel" *ngIf="activeTab() === 'invoices'">
+        <section class="right-panel" *ngIf="(!isMobileLayout() && activeTab() === 'invoices') || (isMobileLayout() && mobileTab() === 'invoices')">
           <div class="invoice-card">
             <div class="invoice-line">
               <strong>Issue Refund</strong>
@@ -702,7 +713,7 @@
           </ng-template>
         </section>
 
-        <section class="right-panel sms-panel" *ngIf="activeTab() === 'sms'">
+        <section class="right-panel sms-panel" *ngIf="(!isMobileLayout() && activeTab() === 'sms') || (isMobileLayout() && mobileTab() === 'sms')">
           <div class="sms-disabled" *ngIf="!canUseSms()">
             Save this customer first to enable SMS history and messaging.
           </div>
@@ -760,7 +771,7 @@
           <div class="sms-feedback error" *ngIf="smsError()">{{ smsError() }}</div>
         </section>
 
-        <section class="right-panel email-panel" *ngIf="activeTab() === 'email'">
+        <section class="right-panel email-panel" *ngIf="(!isMobileLayout() && activeTab() === 'email') || (isMobileLayout() && mobileTab() === 'email')">
           <div class="sms-disabled" *ngIf="!canUseEmail()">
             Save this customer first to enable email history and sending.
           </div>

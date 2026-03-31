@@ -6,12 +6,18 @@ import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { tenantHeaderInterceptor } from './interceptors/tenant-header.interceptor';
 import { authExpiredInterceptor } from './interceptors/auth-expired.interceptor';
 import { actionToastInterceptor } from './interceptors/action-toast.interceptor';
+import { safeApiErrorInterceptor } from './interceptors/safe-api-error.interceptor';
 
 
 export const appConfig: ApplicationConfig = {
   providers: [
     provideRouter(routes, withInMemoryScrolling({ anchorScrolling: 'enabled' })),
     provideIonicAngular(),
-    provideHttpClient(withInterceptors([tenantHeaderInterceptor, authExpiredInterceptor, actionToastInterceptor]))
+    provideHttpClient(withInterceptors([
+      tenantHeaderInterceptor,
+      authExpiredInterceptor,
+      safeApiErrorInterceptor,
+      actionToastInterceptor
+    ]))
   ]
 };

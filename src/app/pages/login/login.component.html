@@ -103,7 +103,12 @@
 
       <div class="secure-note">
         <ion-icon name="key-outline"></ion-icon>
-        <span>Use workspace passkeys above for biometric sign-in, or use your Microsoft/Google provider flow.</span>
+        <span *ngIf="passwordLoginEnabled(); else providerBiometricHint">
+          Use workspace passkeys above for biometric sign-in, or use your Microsoft/Google provider flow.
+        </span>
+        <ng-template #providerBiometricHint>
+          <span>Biometrics are available through Microsoft sign-in when your Entra account has passkey/Windows Hello enabled.</span>
+        </ng-template>
       </div>
 
       <p class="auth-hint" *ngIf="localAuthHint()">{{ localAuthHint() }}</p>

@@ -4,7 +4,9 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
-    "migrate:table-to-sql": "node scripts/migrate-table-storage-to-sql.js"
+    "migrate:table-to-sql": "node scripts/migrate-table-storage-to-sql.js",
+    "provision:tenant-sql": "node scripts/provision-tenant-sql-databases.js",
+    "test": "node --test test/**/*.test.js"
   },
   "engines": {
     "node": ">=18 <20"

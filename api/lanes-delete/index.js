@@ -1,7 +1,6 @@
 const { TableClient } = require("../_shared/table-client");
 
 const TABLE = "lanes";
-const PARTITION = "main";
 function pick(v, d = "") { return typeof v === "string" ? v : (v == null ? d : String(v)); }
 function asBool(v) {
   if (v === true || v === 1 || v === "1") return true;

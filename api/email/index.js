@@ -1,7 +1,7 @@
 const { TableClient } = require("../_shared/table-client");
 const { BlobServiceClient } = require("@azure/storage-blob");
 const { randomUUID } = require("crypto");
-const { resolveTenantId } = require("../_shared/tenant");
+const { resolveTenantId, sanitizeTenantId } = require("../_shared/tenant");
 
 const EMAIL_TABLE = "emailmessages";
 const EMAIL_TEMPLATE_TABLE = "emailtemplates";
@@ -12,7 +12,6 @@ const NOTIFICATIONS_TABLE = "notifications";
 const USERS_TABLE = "useraccess";
 const APP_SETTINGS_TABLE = "appsettings";
 const BRANDING_CONTAINER = "branding";
-const PARTITION = "main";
 const USERS_PARTITION = "v1";
 const SIGNATURE_ROW = "__signature__";
 const SENDER_ROW = "__sender__";
@@ -255,11 +254,11 @@ function getDefaultSender() {
   };
 }
 
-async function getSenderConfig(templateClient) {
+async function getSenderConfig(templateClient, tenantId) {
   const fallback = getDefaultSender();
   let row = null;
   try {
-    row = await templateClient.getEntity(PARTITION, SENDER_ROW);
+    row = await templateClient.getEntity(tenantId, SENDER_ROW);
   } catch (_) {
     row = null;
   }
@@ -278,7 +277,7 @@ async function getSenderConfig(templateClient) {
   return fallback;
 }
 
-async function setSenderConfig(templateClient, payload) {
+async function setSenderConfig(templateClient, tenantId, payload) {
   const fromEmail = normalizeEmail(payload && payload.fromEmail);
   const fromName = asString(payload && payload.fromName);
   const replyTo = normalizeEmail(payload && payload.replyTo);
@@ -291,7 +290,7 @@ async function setSenderConfig(templateClient, payload) {
 
   await templateClient.upsertEntity(
     {
-      partitionKey: PARTITION,
+      partitionKey: tenantId,
       rowKey: SENDER_ROW,
       fromEmail,
       fromName,
@@ -302,16 +301,16 @@ async function setSenderConfig(templateClient, payload) {
   );
 }
 
-async function clearSenderConfig(templateClient) {
+async function clearSenderConfig(templateClient, tenantId) {
   try {
-    await templateClient.deleteEntity(PARTITION, SENDER_ROW);
+    await templateClient.deleteEntity(tenantId, SENDER_ROW);
   } catch (_) {}
 }
 
-async function getConfigStatus(templateClient) {
+async function getConfigStatus(templateClient, tenantId) {
   const mode = getEmailMode();
   const hasApiKey = !!asString(process.env.SENDGRID_API_KEY);
-  const sender = await getSenderConfig(templateClient);
+  const sender = await getSenderConfig(templateClient, tenantId);
   const fromEmail = asString(sender.fromEmail);
   const hasFromEmail = !!fromEmail;
   const readyForLive = mode === "sendgrid" && hasApiKey && hasFromEmail;
@@ -486,21 +485,21 @@ function appendGlobalFooter(message, html, footerTerms) {
   };
 }
 
-async function listAllMessages(client) {
+async function listAllMessages(client, tenantId) {
   const out = [];
-  const iter = client.listEntities({ queryOptions: { filter: `PartitionKey eq '${PARTITION}'` } });
+  const iter = client.listEntities({ queryOptions: { filter: `PartitionKey eq '${escapedFilterValue(tenantId)}'` } });
   for await (const entity of iter) {
     out.push(toEmailMessage(entity));
   }
   return out;
 }
 
-async function saveEmailMessage(client, payload) {
+async function saveEmailMessage(client, tenantId, payload) {
   const now = new Date().toISOString();
   const id = randomUUID();
   await client.upsertEntity(
     {
-      partitionKey: PARTITION,
+      partitionKey: tenantId,
       rowKey: id,
       customerId: asString(payload.customerId),
       customerName: asString(payload.customerName),
@@ -522,18 +521,18 @@ async function saveEmailMessage(client, payload) {
   return { id, createdAt: now };
 }
 
-async function markRead(client, id) {
+async function markRead(client, tenantId, id) {
   const itemId = asString(id);
   if (!itemId) return false;
   try {
-    await client.getEntity(PARTITION, itemId);
+    await client.getEntity(tenantId, itemId);
   } catch {
     return false;
   }
 
   await client.upsertEntity(
     {
-      partitionKey: PARTITION,
+      partitionKey: tenantId,
       rowKey: itemId,
       read: true,
       readAt: new Date().toISOString()
@@ -543,10 +542,10 @@ async function markRead(client, id) {
   return true;
 }
 
-async function listTemplates(templateClient) {
+async function listTemplates(templateClient, tenantId) {
   const templates = [];
   let signature = "";
-  const iter = templateClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${PARTITION}'` } });
+  const iter = templateClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${escapedFilterValue(tenantId)}'` } });
   for await (const entity of iter) {
     const rowKey = asString(entity.rowKey);
     if (!rowKey) continue;
@@ -578,7 +577,7 @@ async function listTemplates(templateClient) {
   return { templates, signature };
 }
 
-async function upsertTemplate(templateClient, payload) {
+async function upsertTemplate(templateClient, tenantId, payload) {
   const id = asString(payload.id) || randomUUID();
   const name = asString(payload.name);
   const subject = asString(payload.subject);
@@ -589,7 +588,7 @@ async function upsertTemplate(templateClient, payload) {
 
   await templateClient.upsertEntity(
     {
-      partitionKey: PARTITION,
+      partitionKey: tenantId,
       rowKey: id,
       name,
       subject,
@@ -601,21 +600,21 @@ async function upsertTemplate(templateClient, payload) {
   return id;
 }
 
-async function deleteTemplate(templateClient, id) {
+async function deleteTemplate(templateClient, tenantId, id) {
   const templateId = asString(id);
   if (!templateId || templateId === SIGNATURE_ROW) return false;
   try {
-    await templateClient.deleteEntity(PARTITION, templateId);
+    await templateClient.deleteEntity(tenantId, templateId);
     return true;
   } catch {
     return false;
   }
 }
 
-async function setDefaultSignature(templateClient, signature) {
+async function setDefaultSignature(templateClient, tenantId, signature) {
   await templateClient.upsertEntity(
     {
-      partitionKey: PARTITION,
+      partitionKey: tenantId,
       rowKey: SIGNATURE_ROW,
       body: asString(signature),
       updatedAt: new Date().toISOString()
@@ -624,10 +623,10 @@ async function setDefaultSignature(templateClient, signature) {
   );
 }
 
-async function findCustomerByEmail(customersClient, email) {
+async function findCustomerByEmail(customersClient, tenantId, email) {
   const target = normalizeEmail(email);
   if (!target) return null;
-  const iter = customersClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${PARTITION}'` } });
+  const iter = customersClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${escapedFilterValue(tenantId)}'` } });
   for await (const entity of iter) {
     const itemEmail = normalizeEmail(entity.email);
     if (!itemEmail || itemEmail !== target) continue;
@@ -642,7 +641,7 @@ async function findCustomerByEmail(customersClient, email) {
   return null;
 }
 
-async function createCustomerFromInbound(customersClient, senderEmail, senderName) {
+async function createCustomerFromInbound(customersClient, tenantId, senderEmail, senderName) {
   const email = normalizeEmail(senderEmail);
   if (!email) return null;
   const now = new Date().toISOString();
@@ -651,7 +650,7 @@ async function createCustomerFromInbound(customersClient, senderEmail, senderNam
 
   await customersClient.upsertEntity(
     {
-      partitionKey: PARTITION,
+      partitionKey: tenantId,
       rowKey: id,
       name: parsed.fullName,
       firstName: parsed.firstName,
@@ -675,8 +674,8 @@ async function createCustomerFromInbound(customersClient, senderEmail, senderNam
   };
 }
 
-async function ensureLeadsLane(lanesClient) {
-  const iter = lanesClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${PARTITION}'` } });
+async function ensureLeadsLane(lanesClient, tenantId) {
+  const iter = lanesClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${escapedFilterValue(tenantId)}'` } });
   let maxSort = 0;
   let existing = null;
   for await (const entity of iter) {
@@ -695,7 +694,7 @@ async function ensureLeadsLane(lanesClient) {
   const id = randomUUID();
   await lanesClient.upsertEntity(
     {
-      partitionKey: PARTITION,
+      partitionKey: tenantId,
       rowKey: id,
       name: "Leads",
       sort: maxSort + 10
@@ -705,10 +704,11 @@ async function ensureLeadsLane(lanesClient) {
   return { id, name: "Leads" };
 }
 
-async function createLeadWorkItem(workItemsClient, laneId, customer, subject) {
+async function createLeadWorkItem(workItemsClient, tenantId, laneId, customer, subject) {
   const safeLane = escapedFilterValue(laneId);
+  const safeTenant = escapedFilterValue(tenantId);
   const iter = workItemsClient.listEntities({
-    queryOptions: { filter: `PartitionKey eq '${PARTITION}' and laneId eq '${safeLane}'` }
+    queryOptions: { filter: `PartitionKey eq '${safeTenant}' and laneId eq '${safeLane}'` }
   });
   let maxSort = 0;
   for await (const entity of iter) {
@@ -724,7 +724,7 @@ async function createLeadWorkItem(workItemsClient, laneId, customer, subject) {
   const id = randomUUID();
   await workItemsClient.upsertEntity(
     {
-      partitionKey: PARTITION,
+      partitionKey: tenantId,
       rowKey: id,
       title,
       laneId: asString(laneId),
@@ -880,22 +880,47 @@ async function buildInlineBrandingAttachments(html) {
   };
 }
 
-async function listActiveWorkspaceUsers(userClient) {
+function parseUserLocationIds(userEntity) {
+  const raw = asString(userEntity && userEntity.locationIdsJson);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(value => sanitizeTenantId(value)).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function parseLegacyTenantIds(userEntity) {
+  const raw = asString(userEntity && userEntity.tenants);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(value => sanitizeTenantId(value)).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+async function listActiveWorkspaceUsers(userClient, tenantId) {
   const out = [];
   const iter = userClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${USERS_PARTITION}'` } });
+  const safeTenantId = sanitizeTenantId(tenantId);
   for await (const entity of iter) {
     const email = normalizeEmail(entity.email || entity.rowKey);
     if (!email) continue;
     if (asBool(entity.accessRevoked) || asBool(entity.disabled)) continue;
-    const tenants = (() => {
-      try {
-        return JSON.parse(asString(entity.tenants || "[]"));
-      } catch {
-        return [];
-      }
-    })();
-    const tenantList = Array.isArray(tenants) ? tenants.map(value => asString(value)) : [];
-    if (tenantList.length && !tenantList.includes(PARTITION)) continue;
+
+    const hasGlobalAccess = asBool(entity.allLocations) || asBool(entity.isSuperAdmin);
+    if (!hasGlobalAccess) {
+      const locationIds = parseUserLocationIds(entity);
+      const legacyTenantIds = parseLegacyTenantIds(entity);
+      const allowed = locationIds.length ? locationIds : legacyTenantIds;
+      if (allowed.length && !allowed.includes(safeTenantId)) continue;
+    }
+
     out.push({
       userId: asString(entity.userId || email),
       email,
@@ -905,8 +930,8 @@ async function listActiveWorkspaceUsers(userClient) {
   return out;
 }
 
-async function createInboundEmailNotifications(notificationClient, userClient, inbound) {
-  const users = await listActiveWorkspaceUsers(userClient);
+async function createInboundEmailNotifications(notificationClient, userClient, tenantId, inbound) {
+  const users = await listActiveWorkspaceUsers(userClient, tenantId);
   if (!users.length) return 0;
   const now = new Date().toISOString();
   let created = 0;
@@ -914,7 +939,7 @@ async function createInboundEmailNotifications(notificationClient, userClient, i
     const rowKey = randomUUID();
     await notificationClient.upsertEntity(
       {
-        partitionKey: PARTITION,
+        partitionKey: tenantId,
         rowKey,
         type: "inboundEmail",
         title: "New Email Received",
@@ -961,7 +986,7 @@ module.exports = async function (context, req) {
       const scope = readQueryParam(req, "scope").toLowerCase();
       const templateClient = await getTableClient(EMAIL_TEMPLATE_TABLE);
       if (!scope) {
-        const config = await getConfigStatus(templateClient);
+        const config = await getConfigStatus(templateClient, tenantId);
         context.res = json(200, {
           ok: true,
           ...config
@@ -970,7 +995,7 @@ module.exports = async function (context, req) {
       }
 
       if (scope === "sender") {
-        const sender = await getSenderConfig(templateClient);
+        const sender = await getSenderConfig(templateClient, tenantId);
         context.res = json(200, {
           ok: true,
           sender
@@ -979,7 +1004,7 @@ module.exports = async function (context, req) {
       }
 
       if (scope === "templates") {
-        const data = await listTemplates(templateClient);
+        const data = await listTemplates(templateClient, tenantId);
         context.res = json(200, {
           ok: true,
           scope,
@@ -990,7 +1015,7 @@ module.exports = async function (context, req) {
       }
 
       const messageClient = await getTableClient(EMAIL_TABLE);
-      const all = await listAllMessages(messageClient);
+      const all = await listAllMessages(messageClient, tenantId);
       const rawLimit = Number(readQueryParam(req, "limit"));
       const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : 0;
 
@@ -1043,7 +1068,7 @@ module.exports = async function (context, req) {
       }
 
       const messageClient = await getTableClient(EMAIL_TABLE);
-      const ok = await markRead(messageClient, id);
+      const ok = await markRead(messageClient, tenantId, id);
       if (!ok) {
         context.res = json(404, { error: "Email message not found." });
         return;
@@ -1064,7 +1089,7 @@ module.exports = async function (context, req) {
       let updated = 0;
       for (const id of ids) {
         try {
-          const ok = await markRead(messageClient, id);
+          const ok = await markRead(messageClient, tenantId, id);
           if (ok) updated += 1;
         } catch (_) {}
       }
@@ -1075,8 +1100,8 @@ module.exports = async function (context, req) {
 
     if (op === "upserttemplate" || op === "upsert-template") {
       const templateClient = await getTableClient(EMAIL_TEMPLATE_TABLE);
-      const id = await upsertTemplate(templateClient, body);
-      const data = await listTemplates(templateClient);
+      const id = await upsertTemplate(templateClient, tenantId, body);
+      const data = await listTemplates(templateClient, tenantId);
       context.res = json(200, {
         ok: true,
         id,
@@ -1094,13 +1119,13 @@ module.exports = async function (context, req) {
       }
 
       const templateClient = await getTableClient(EMAIL_TEMPLATE_TABLE);
-      const ok = await deleteTemplate(templateClient, id);
+      const ok = await deleteTemplate(templateClient, tenantId, id);
       if (!ok) {
         context.res = json(404, { error: "Template not found." });
         return;
       }
 
-      const data = await listTemplates(templateClient);
+      const data = await listTemplates(templateClient, tenantId);
       context.res = json(200, {
         ok: true,
         templates: data.templates,
@@ -1112,8 +1137,8 @@ module.exports = async function (context, req) {
     if (op === "setsignature" || op === "set-signature") {
       const signature = asString(body.signature);
       const templateClient = await getTableClient(EMAIL_TEMPLATE_TABLE);
-      await setDefaultSignature(templateClient, signature);
-      const data = await listTemplates(templateClient);
+      await setDefaultSignature(templateClient, tenantId, signature);
+      const data = await listTemplates(templateClient, tenantId);
       context.res = json(200, {
         ok: true,
         templates: data.templates,
@@ -1124,8 +1149,8 @@ module.exports = async function (context, req) {
 
     if (op === "setsenderconfig" || op === "set-sender-config") {
       const templateClient = await getTableClient(EMAIL_TEMPLATE_TABLE);
-      await setSenderConfig(templateClient, body);
-      const sender = await getSenderConfig(templateClient);
+      await setSenderConfig(templateClient, tenantId, body);
+      const sender = await getSenderConfig(templateClient, tenantId);
       context.res = json(200, {
         ok: true,
         sender
@@ -1135,8 +1160,8 @@ module.exports = async function (context, req) {
 
     if (op === "clearsenderconfig" || op === "clear-sender-config") {
       const templateClient = await getTableClient(EMAIL_TEMPLATE_TABLE);
-      await clearSenderConfig(templateClient);
-      const sender = await getSenderConfig(templateClient);
+      await clearSenderConfig(templateClient, tenantId);
+      const sender = await getSenderConfig(templateClient, tenantId);
       context.res = json(200, {
         ok: true,
         sender
@@ -1180,29 +1205,29 @@ module.exports = async function (context, req) {
       let leadCreated = false;
 
       if (!resolvedCustomerId && requestFrom) {
-        const existing = await findCustomerByEmail(customersClient, requestFrom);
+        const existing = await findCustomerByEmail(customersClient, tenantId, requestFrom);
         if (existing) {
           resolvedCustomerId = existing.id;
           resolvedCustomerName = existing.name || resolvedCustomerName;
         } else {
-          const created = await createCustomerFromInbound(customersClient, requestFrom, requestFromName);
+          const created = await createCustomerFromInbound(customersClient, tenantId, requestFrom, requestFromName);
           if (created) {
             resolvedCustomerId = created.id;
             resolvedCustomerName = created.name;
             customerCreated = true;
 
-            const leadsLane = await ensureLeadsLane(lanesClient);
-            await createLeadWorkItem(workItemsClient, leadsLane.id, created, requestSubject);
+            const leadsLane = await ensureLeadsLane(lanesClient, tenantId);
+            await createLeadWorkItem(workItemsClient, tenantId, leadsLane.id, created, requestSubject);
             leadCreated = true;
           }
         }
       }
 
       const templateClient = await getTableClient(EMAIL_TEMPLATE_TABLE);
-      const sender = await getSenderConfig(templateClient);
-      const config = await getConfigStatus(templateClient);
+      const sender = await getSenderConfig(templateClient, tenantId);
+      const config = await getConfigStatus(templateClient, tenantId);
       const messageClient = await getTableClient(EMAIL_TABLE);
-      const saved = await saveEmailMessage(messageClient, {
+      const saved = await saveEmailMessage(messageClient, tenantId, {
         customerId: resolvedCustomerId,
         customerName: resolvedCustomerName,
         direction: "inbound",
@@ -1221,7 +1246,7 @@ module.exports = async function (context, req) {
       try {
         const notificationClient = await getTableClient(NOTIFICATIONS_TABLE);
         const userClient = await getTableClient(USERS_TABLE);
-        await createInboundEmailNotifications(notificationClient, userClient, {
+        await createInboundEmailNotifications(notificationClient, userClient, tenantId, {
           id: saved.id,
           customerId: resolvedCustomerId,
           customerName: resolvedCustomerName,
@@ -1253,8 +1278,8 @@ module.exports = async function (context, req) {
     }
 
     const templateClient = await getTableClient(EMAIL_TEMPLATE_TABLE);
-    const sender = await getSenderConfig(templateClient);
-    const config = await getConfigStatus(templateClient);
+    const sender = await getSenderConfig(templateClient, tenantId);
+    const config = await getConfigStatus(templateClient, tenantId);
     const composed = skipFooterTerms
       ? { message: requestMessage, html: requestHtml || "" }
       : appendGlobalFooter(
@@ -1284,7 +1309,7 @@ module.exports = async function (context, req) {
     }
 
     const messageClient = await getTableClient(EMAIL_TABLE);
-    const saved = await saveEmailMessage(messageClient, {
+    const saved = await saveEmailMessage(messageClient, tenantId, {
       customerId: requestedCustomerId,
       customerName: requestedCustomerName,
       direction: "outbound",

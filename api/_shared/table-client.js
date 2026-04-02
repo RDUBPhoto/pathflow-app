@@ -8,8 +8,18 @@ try {
 }
 
 const SQL_ENTITY_TABLE = "PathflowEntities";
-let sqlPoolPromise = null;
-let sqlSchemaPromise = null;
+const SQL_TENANT_MAP_TABLE = asString(process.env.SQL_TENANT_MAP_TABLE || "TenantSqlDatabases") || "TenantSqlDatabases";
+const GLOBAL_SQL_TABLES = new Set([
+  "useraccess",
+  "tenants",
+  "emailverifications",
+  SQL_TENANT_MAP_TABLE.toLowerCase()
+]);
+
+const poolByKey = new Map();
+const schemaByPoolKey = new Map();
+const tenantDatabaseCache = new Map();
+let tenantMapSchemaPromise = null;
 
 function asString(value) {
   return value == null ? "" : String(value).trim();
@@ -39,6 +49,16 @@ function backendPreference() {
   return "auto";
 }
 
+function tenantRoutingEnabled() {
+  const raw = asString(process.env.SQL_TENANT_ROUTING_ENABLED);
+  if (!raw) return true;
+  return toBool(raw);
+}
+
+function tenantRoutingStrict() {
+  return toBool(process.env.SQL_TENANT_ROUTING_STRICT);
+}
+
 function sqlConnectionString() {
   return asString(process.env.SQL_CONNECTION_STRING || process.env.AZURE_SQL_CONNECTION_STRING);
 }
@@ -58,6 +78,8 @@ function sqlConfigFromEnv() {
     database,
     user,
     password,
+    requestTimeout: Number(process.env.SQL_REQUEST_TIMEOUT_MS || 120000),
+    connectionTimeout: Number(process.env.SQL_CONNECTION_TIMEOUT_MS || 30000),
     options: {
       encrypt: true,
       trustServerCertificate: false
@@ -81,28 +103,147 @@ function shouldUseSqlBackend() {
   return sqlReady();
 }
 
-async function getSqlPool() {
+function sanitizeTenantId(value) {
+  const cleaned = asString(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9._:-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+  return cleaned;
+}
+
+function sanitizeDatabaseName(value) {
+  const cleaned = asString(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return cleaned;
+}
+
+function tenantDbPrefix() {
+  const fromEnv = sanitizeDatabaseName(asString(process.env.SQL_TENANT_DB_PREFIX || ""));
+  return fromEnv || "pathflow_tenant";
+}
+
+function buildTenantDatabaseName(tenantId) {
+  const safeTenant = sanitizeDatabaseName(tenantId);
+  if (!safeTenant) return "";
+  const base = `${tenantDbPrefix()}_${safeTenant}`;
+  return base.slice(0, 120);
+}
+
+function extractConnectionStringField(connectionString, keyPattern) {
+  const rx = new RegExp(`(?:^|;)\\s*${keyPattern}\\s*=\\s*([^;]+)`, "i");
+  const match = String(connectionString || "").match(rx);
+  return asString(match && match[1]);
+}
+
+function getConnectionStringDatabase(connectionString) {
+  return (
+    extractConnectionStringField(connectionString, "Initial\\s+Catalog") ||
+    extractConnectionStringField(connectionString, "Database")
+  );
+}
+
+function setConnectionStringDatabase(connectionString, databaseName) {
+  const input = asString(connectionString);
+  const targetDb = asString(databaseName);
+  if (!input || !targetDb) return input;
+
+  const initialCatalogRx = /(^|;)\s*Initial\s+Catalog\s*=\s*([^;]*)/i;
+  if (initialCatalogRx.test(input)) {
+    return input.replace(initialCatalogRx, `$1Initial Catalog=${targetDb}`);
+  }
+
+  const databaseRx = /(^|;)\s*Database\s*=\s*([^;]*)/i;
+  if (databaseRx.test(input)) {
+    return input.replace(databaseRx, `$1Database=${targetDb}`);
+  }
+
+  return `${input.replace(/;*$/, "")};Initial Catalog=${targetDb};`;
+}
+
+function getSqlConfigDatabaseName(config) {
+  if (typeof config === "string") {
+    return getConnectionStringDatabase(config);
+  }
+  if (config && typeof config === "object") {
+    return asString(config.database);
+  }
+  return "";
+}
+
+function cloneSqlConfigWithDatabase(config, databaseName) {
+  const dbName = asString(databaseName);
+  if (!dbName) return config;
+  if (typeof config === "string") {
+    return setConnectionStringDatabase(config, dbName);
+  }
+  if (!config || typeof config !== "object") return config;
+  return {
+    ...config,
+    database: dbName
+  };
+}
+
+function catalogDatabaseName() {
+  const explicit = asString(process.env.SQL_CATALOG_DATABASE || process.env.AZURE_SQL_CATALOG_DATABASE);
+  if (explicit) return explicit;
+  const base = sqlConfigFromEnv();
+  return getSqlConfigDatabaseName(base);
+}
+
+function poolKeyForConfig(config, keyHint = "") {
+  if (keyHint) return keyHint;
+  if (typeof config === "string") return `conn:${config}`;
+  const server = asString(config && config.server);
+  const db = asString(config && config.database);
+  const user = asString(config && config.user);
+  return `cfg:${server}|${db}|${user}`;
+}
+
+async function getPoolForConfig(config, keyHint = "") {
   if (!sql) {
     throw new Error("SQL backend selected but 'mssql' package is not installed in api dependencies.");
   }
-
-  if (!sqlPoolPromise) {
-    const config = sqlConfigFromEnv();
-    if (!config) {
-      throw new Error(
-        "SQL backend selected but SQL connection is not configured. Set SQL_CONNECTION_STRING (or SQL_SERVER/SQL_DATABASE/SQL_USER/SQL_PASSWORD)."
-      );
-    }
-    sqlPoolPromise = new sql.ConnectionPool(config).connect();
+  if (!config) {
+    throw new Error(
+      "SQL backend selected but SQL connection is not configured. Set SQL_CONNECTION_STRING (or SQL_SERVER/SQL_DATABASE/SQL_USER/SQL_PASSWORD)."
+    );
   }
-  return sqlPoolPromise;
+
+  const poolKey = poolKeyForConfig(config, keyHint);
+  if (!poolByKey.has(poolKey)) {
+    const promise = new sql.ConnectionPool(config).connect().then((pool) => {
+      Object.defineProperty(pool, "__pathflowPoolKey", { value: poolKey, enumerable: false, configurable: true });
+      return pool;
+    });
+    poolByKey.set(poolKey, promise);
+  }
+  return poolByKey.get(poolKey);
 }
 
-async function ensureSqlSchema() {
-  if (!sqlSchemaPromise) {
-    sqlSchemaPromise = (async () => {
-      const pool = await getSqlPool();
-      await pool.request().query(`
+async function getCatalogPool() {
+  const config = sqlConfigFromEnv();
+  return getPoolForConfig(config, "catalog");
+}
+
+async function getMasterPool() {
+  const config = cloneSqlConfigWithDatabase(sqlConfigFromEnv(), "master");
+  return getPoolForConfig(config, "master");
+}
+
+async function getDatabasePool(databaseName) {
+  const db = asString(databaseName);
+  if (!db) return getCatalogPool();
+  const config = cloneSqlConfigWithDatabase(sqlConfigFromEnv(), db);
+  return getPoolForConfig(config, `db:${db.toLowerCase()}`);
+}
+
+async function ensureSqlSchemaForPool(pool, poolKey) {
+  const key = asString(poolKey) || asString(pool && pool.__pathflowPoolKey) || "default";
+  if (!schemaByPoolKey.has(key)) {
+    const schemaPromise = pool.request().query(`
 IF OBJECT_ID(N'dbo.${SQL_ENTITY_TABLE}', N'U') IS NULL
 BEGIN
   CREATE TABLE dbo.${SQL_ENTITY_TABLE} (
@@ -115,13 +256,173 @@ BEGIN
   );
   CREATE INDEX IX_${SQL_ENTITY_TABLE}_table_partition ON dbo.${SQL_ENTITY_TABLE}(table_name, partition_key);
 END
+    `).catch((err) => {
+      schemaByPoolKey.delete(key);
+      throw err;
+    });
+    schemaByPoolKey.set(key, schemaPromise);
+  }
+  return schemaByPoolKey.get(key);
+}
+
+async function ensureTenantMapSchema() {
+  if (!tenantMapSchemaPromise) {
+    tenantMapSchemaPromise = (async () => {
+      const catalogPool = await getCatalogPool();
+      await catalogPool.request().query(`
+IF OBJECT_ID(N'dbo.${SQL_TENANT_MAP_TABLE}', N'U') IS NULL
+BEGIN
+  CREATE TABLE dbo.${SQL_TENANT_MAP_TABLE} (
+    tenant_id NVARCHAR(128) NOT NULL,
+    database_name NVARCHAR(128) NOT NULL,
+    status NVARCHAR(32) NOT NULL CONSTRAINT DF_${SQL_TENANT_MAP_TABLE}_status DEFAULT N'active',
+    created_at DATETIME2(3) NOT NULL CONSTRAINT DF_${SQL_TENANT_MAP_TABLE}_created DEFAULT SYSUTCDATETIME(),
+    updated_at DATETIME2(3) NOT NULL CONSTRAINT DF_${SQL_TENANT_MAP_TABLE}_updated DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT PK_${SQL_TENANT_MAP_TABLE} PRIMARY KEY (tenant_id)
+  );
+  CREATE UNIQUE INDEX IX_${SQL_TENANT_MAP_TABLE}_database_name ON dbo.${SQL_TENANT_MAP_TABLE}(database_name);
+END
       `);
     })().catch((err) => {
-      sqlSchemaPromise = null;
+      tenantMapSchemaPromise = null;
       throw err;
     });
   }
-  return sqlSchemaPromise;
+  return tenantMapSchemaPromise;
+}
+
+async function getTenantMappedDatabaseName(tenantId) {
+  const tenant = sanitizeTenantId(tenantId);
+  if (!tenant || !tenantRoutingEnabled() || !shouldUseSqlBackend()) return "";
+  if (tenantDatabaseCache.has(tenant)) return tenantDatabaseCache.get(tenant) || "";
+
+  await ensureTenantMapSchema();
+  const catalogPool = await getCatalogPool();
+  const request = catalogPool.request();
+  request.input("tenantId", sql.NVarChar(128), tenant);
+  const result = await request.query(`
+SELECT TOP 1 database_name
+FROM dbo.${SQL_TENANT_MAP_TABLE}
+WHERE tenant_id = @tenantId
+  AND status = N'active'
+  `);
+  const databaseName = asString(result.recordset && result.recordset[0] && result.recordset[0].database_name);
+  tenantDatabaseCache.set(tenant, databaseName || "");
+  return databaseName;
+}
+
+async function listTenantMappedDatabases() {
+  if (!tenantRoutingEnabled() || !shouldUseSqlBackend()) return [];
+  await ensureTenantMapSchema();
+  const catalogPool = await getCatalogPool();
+  const result = await catalogPool.request().query(`
+SELECT tenant_id, database_name
+FROM dbo.${SQL_TENANT_MAP_TABLE}
+WHERE status = N'active'
+  `);
+  return (result.recordset || [])
+    .map((row) => ({
+      tenantId: sanitizeTenantId(row.tenant_id),
+      databaseName: asString(row.database_name)
+    }))
+    .filter((item) => !!item.tenantId && !!item.databaseName);
+}
+
+async function upsertTenantDatabaseMapping(tenantId, databaseName) {
+  const tenant = sanitizeTenantId(tenantId);
+  const dbName = asString(databaseName);
+  if (!tenant || !dbName) {
+    throw new Error("Both tenantId and databaseName are required for tenant database mapping.");
+  }
+
+  await ensureTenantMapSchema();
+  const catalogPool = await getCatalogPool();
+  const request = catalogPool.request();
+  request.input("tenantId", sql.NVarChar(128), tenant);
+  request.input("databaseName", sql.NVarChar(128), dbName);
+  await request.query(`
+MERGE dbo.${SQL_TENANT_MAP_TABLE} AS target
+USING (SELECT @tenantId AS tenant_id, @databaseName AS database_name) AS src
+ON target.tenant_id = src.tenant_id
+WHEN MATCHED THEN
+  UPDATE SET database_name = src.database_name, status = N'active', updated_at = SYSUTCDATETIME()
+WHEN NOT MATCHED THEN
+  INSERT (tenant_id, database_name, status, created_at, updated_at)
+  VALUES (src.tenant_id, src.database_name, N'active', SYSUTCDATETIME(), SYSUTCDATETIME());
+  `);
+
+  tenantDatabaseCache.set(tenant, dbName);
+}
+
+async function createDatabaseIfMissing(databaseName) {
+  const dbName = asString(databaseName);
+  if (!dbName) {
+    throw new Error("databaseName is required.");
+  }
+
+  const masterPool = await getMasterPool();
+  const request = masterPool.request();
+  request.input("dbName", sql.NVarChar(128), dbName);
+  await request.query(`
+IF DB_ID(@dbName) IS NULL
+BEGIN
+  DECLARE @sql NVARCHAR(MAX) = N'CREATE DATABASE [' + REPLACE(@dbName, N']', N']]') + N']';
+  EXEC(@sql);
+END
+  `).catch((err) => {
+    const message = asString(err && err.message).toLowerCase();
+    if (message.includes("already exists")) return;
+    throw err;
+  });
+}
+
+async function waitForDatabaseOnline(databaseName, maxAttempts = 30, delayMs = 1000) {
+  const dbName = asString(databaseName);
+  if (!dbName) return false;
+  const masterPool = await getMasterPool();
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const request = masterPool.request();
+    request.input("dbName", sql.NVarChar(128), dbName);
+    const result = await request.query(`
+SELECT TOP 1 state_desc
+FROM sys.databases
+WHERE name = @dbName
+    `);
+    const stateDesc = asString(result.recordset && result.recordset[0] && result.recordset[0].state_desc).toUpperCase();
+    if (stateDesc === "ONLINE") return true;
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+  return false;
+}
+
+async function ensureTenantSqlDatabase(tenantId, options = {}) {
+  if (!shouldUseSqlBackend() || !tenantRoutingEnabled()) return null;
+
+  const tenant = sanitizeTenantId(tenantId);
+  if (!tenant) {
+    throw new Error("A valid tenant id is required to provision SQL tenant database.");
+  }
+
+  const existing = await getTenantMappedDatabaseName(tenant);
+  if (existing) {
+    return { tenantId: tenant, databaseName: existing, created: false };
+  }
+
+  const preferred = sanitizeDatabaseName(asString(options.databaseName));
+  const nextDbName = preferred || buildTenantDatabaseName(tenant);
+  if (!nextDbName) {
+    throw new Error(`Could not derive database name for tenant '${tenant}'.`);
+  }
+
+  await createDatabaseIfMissing(nextDbName);
+  await waitForDatabaseOnline(nextDbName);
+
+  const tenantPool = await getDatabasePool(nextDbName);
+  await ensureSqlSchemaForPool(tenantPool, `db:${nextDbName.toLowerCase()}`);
+
+  await upsertTenantDatabaseMapping(tenant, nextDbName);
+  return { tenantId: tenant, databaseName: nextDbName, created: true };
 }
 
 function stripUndefined(input) {
@@ -344,11 +645,40 @@ function evalFilterAst(ast, entity) {
   return true;
 }
 
-function applyFilter(entities, filter) {
-  const raw = asString(filter);
-  if (!raw) return entities;
-  const ast = parseFilter(raw);
-  return entities.filter((entity) => evalFilterAst(ast, entity));
+function intersectionSet(a, b) {
+  const out = new Set();
+  for (const value of a) {
+    if (b.has(value)) out.add(value);
+  }
+  return out;
+}
+
+function extractPartitionKeysFromAst(ast) {
+  if (!ast) return null;
+
+  if (ast.type === "cmp") {
+    if (/^PartitionKey$/i.test(ast.field) && ast.op === "eq" && typeof ast.value === "string") {
+      const tenant = sanitizeTenantId(ast.value);
+      return tenant ? new Set([tenant]) : new Set();
+    }
+    return null;
+  }
+
+  if (ast.type === "and") {
+    const left = extractPartitionKeysFromAst(ast.left);
+    const right = extractPartitionKeysFromAst(ast.right);
+    if (left && right) return intersectionSet(left, right);
+    return left || right || null;
+  }
+
+  if (ast.type === "or") {
+    const left = extractPartitionKeysFromAst(ast.left);
+    const right = extractPartitionKeysFromAst(ast.right);
+    if (left && right) return new Set([...left, ...right]);
+    return null;
+  }
+
+  return null;
 }
 
 class SqlEntityTableClient {
@@ -360,13 +690,87 @@ class SqlEntityTableClient {
     return new SqlEntityTableClient(tableName);
   }
 
+  isGlobalTable() {
+    return GLOBAL_SQL_TABLES.has(this.tableName);
+  }
+
   async createTable() {
-    await ensureSqlSchema();
+    const pool = await getCatalogPool();
+    await ensureSqlSchemaForPool(pool, "catalog");
+  }
+
+  async resolvePoolForPartitionKey(partitionKey) {
+    const catalogPool = await getCatalogPool();
+    if (this.isGlobalTable() || !tenantRoutingEnabled()) {
+      await ensureSqlSchemaForPool(catalogPool, "catalog");
+      return catalogPool;
+    }
+
+    const tenant = sanitizeTenantId(partitionKey);
+    if (!tenant) {
+      await ensureSqlSchemaForPool(catalogPool, "catalog");
+      return catalogPool;
+    }
+
+    const mappedDatabase = await getTenantMappedDatabaseName(tenant);
+    if (!mappedDatabase) {
+      if (tenantRoutingStrict()) {
+        throw new Error(`No SQL database mapping exists for tenant '${tenant}'.`);
+      }
+      await ensureSqlSchemaForPool(catalogPool, "catalog");
+      return catalogPool;
+    }
+
+    const tenantPool = await getDatabasePool(mappedDatabase);
+    await ensureSqlSchemaForPool(tenantPool, `db:${mappedDatabase.toLowerCase()}`);
+    return tenantPool;
+  }
+
+  async resolvePoolsForList(partitionCandidates) {
+    const catalogPool = await getCatalogPool();
+    await ensureSqlSchemaForPool(catalogPool, "catalog");
+
+    if (this.isGlobalTable() || !tenantRoutingEnabled()) return [catalogPool];
+
+    const poolMap = new Map();
+    const addPool = (pool) => {
+      const key = asString(pool && pool.__pathflowPoolKey) || `pool:${poolMap.size + 1}`;
+      if (!poolMap.has(key)) poolMap.set(key, pool);
+    };
+
+    if (partitionCandidates instanceof Set) {
+      if (!partitionCandidates.size) return [];
+      for (const tenant of partitionCandidates) {
+        const mappedDatabase = await getTenantMappedDatabaseName(tenant);
+        if (!mappedDatabase) {
+          if (tenantRoutingStrict()) {
+            throw new Error(`No SQL database mapping exists for tenant '${tenant}'.`);
+          }
+          addPool(catalogPool);
+          continue;
+        }
+        const tenantPool = await getDatabasePool(mappedDatabase);
+        await ensureSqlSchemaForPool(tenantPool, `db:${mappedDatabase.toLowerCase()}`);
+        addPool(tenantPool);
+      }
+      return Array.from(poolMap.values());
+    }
+
+    // Unconstrained query: query mapped tenant DBs first so tenant data wins over any legacy catalog duplicates.
+    const mappings = await listTenantMappedDatabases();
+    for (const mapping of mappings) {
+      const dbName = asString(mapping.databaseName);
+      if (!dbName) continue;
+      const tenantPool = await getDatabasePool(dbName);
+      await ensureSqlSchemaForPool(tenantPool, `db:${dbName.toLowerCase()}`);
+      addPool(tenantPool);
+    }
+    addPool(catalogPool);
+    return Array.from(poolMap.values());
   }
 
   async getEntity(partitionKey, rowKey) {
-    await ensureSqlSchema();
-    const pool = await getSqlPool();
+    const pool = await this.resolvePoolForPartitionKey(partitionKey);
     const request = pool.request();
     request.input("tableName", sql.NVarChar(128), this.tableName);
     request.input("partitionKey", sql.NVarChar(128), asString(partitionKey));
@@ -388,7 +792,6 @@ WHERE table_name = @tableName
   }
 
   async upsertEntity(entity, mode = "Merge") {
-    await ensureSqlSchema();
     const normalized = stripUndefined(entity || {});
     const partitionKey = asString(normalized.partitionKey || normalized.PartitionKey);
     const rowKey = asString(normalized.rowKey || normalized.RowKey);
@@ -414,7 +817,7 @@ WHERE table_name = @tableName
       } catch (_) {}
     }
 
-    const pool = await getSqlPool();
+    const pool = await this.resolvePoolForPartitionKey(partitionKey);
     const request = pool.request();
     request.input("tableName", sql.NVarChar(128), this.tableName);
     request.input("partitionKey", sql.NVarChar(128), partitionKey);
@@ -435,8 +838,7 @@ WHEN NOT MATCHED THEN
   }
 
   async deleteEntity(partitionKey, rowKey) {
-    await ensureSqlSchema();
-    const pool = await getSqlPool();
+    const pool = await this.resolvePoolForPartitionKey(partitionKey);
     const request = pool.request();
     request.input("tableName", sql.NVarChar(128), this.tableName);
     request.input("partitionKey", sql.NVarChar(128), asString(partitionKey));
@@ -450,18 +852,29 @@ WHERE table_name = @tableName
   }
 
   async *_iterEntities(filter) {
-    await ensureSqlSchema();
-    const pool = await getSqlPool();
-    const request = pool.request();
-    request.input("tableName", sql.NVarChar(128), this.tableName);
-    const result = await request.query(`
+    const rawFilter = asString(filter);
+    const ast = rawFilter ? parseFilter(rawFilter) : null;
+    const partitionCandidates = extractPartitionKeysFromAst(ast);
+    const pools = await this.resolvePoolsForList(partitionCandidates);
+    const seen = new Set();
+
+    for (const pool of pools) {
+      const request = pool.request();
+      request.input("tableName", sql.NVarChar(128), this.tableName);
+      const result = await request.query(`
 SELECT partition_key, row_key, entity_json, updated_at
 FROM dbo.${SQL_ENTITY_TABLE}
 WHERE table_name = @tableName
-    `);
-    let entities = (result.recordset || []).map(buildEntity);
-    entities = applyFilter(entities, filter);
-    for (const entity of entities) yield entity;
+      `);
+      const entities = (result.recordset || []).map(buildEntity);
+      for (const entity of entities) {
+        if (ast && !evalFilterAst(ast, entity)) continue;
+        const key = `${asString(entity.partitionKey)}\t${asString(entity.rowKey)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        yield entity;
+      }
+    }
   }
 
   listEntities(options = {}) {
@@ -481,5 +894,23 @@ class TableClientProxy {
 
 module.exports = {
   TableClient: TableClientProxy,
-  isSqlBackendEnabled: shouldUseSqlBackend
+  isSqlBackendEnabled: shouldUseSqlBackend,
+  ensureTenantSqlDatabase,
+  getTenantSqlDatabase: getTenantMappedDatabaseName,
+  listTenantSqlDatabases: listTenantMappedDatabases,
+  buildTenantSqlDatabaseName: buildTenantDatabaseName,
+  sqlCatalogDatabaseName: catalogDatabaseName,
+  _internals: {
+    asString,
+    toBool,
+    sanitizeTenantId,
+    sanitizeDatabaseName,
+    tenantDbPrefix,
+    buildTenantDatabaseName,
+    extractConnectionStringField,
+    getConnectionStringDatabase,
+    setConnectionStringDatabase,
+    cloneSqlConfigWithDatabase,
+    catalogDatabaseName
+  }
 };

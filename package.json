@@ -13,6 +13,7 @@
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
+    "test:api": "npm --prefix api test",
     "test:unit:ci": "ng test --watch=false --browsers=ChromeHeadless --code-coverage --progress=false",
     "test:e2e": "playwright test",
     "test:e2e:hosted": "playwright test -c playwright.hosted.config.ts",

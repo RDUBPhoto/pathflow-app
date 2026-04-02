@@ -21,7 +21,6 @@ const DUPLICATE_REASON_WEIGHTS = Object.freeze({
   name: 10
 });
 const DUPLICATE_MAX_SCORE = Object.values(DUPLICATE_REASON_WEIGHTS).reduce((sum, value) => sum + Number(value || 0), 0) || 100;
-const LEGACY_PARTITION = "main";
 
 function asString(value) {
   return value == null ? "" : String(value).trim();
@@ -433,12 +432,6 @@ function shouldForceReuseExistingCustomer(match) {
   return false;
 }
 
-function shouldRespectTenantPartition() {
-  const raw = asString(process.env.WIDGET_RESPECT_TENANT_PARTITION).toLowerCase();
-  if (!raw) return true;
-  return raw === "true" || raw === "1" || raw === "yes";
-}
-
 function isLocalRuntime() {
   const websiteHostname = asString(process.env.WEBSITE_HOSTNAME).toLowerCase();
   if (!websiteHostname) return true;
@@ -452,12 +445,7 @@ function notificationsScope() {
 }
 
 function scopedTenantPartition(tenantId) {
-  return `${asString(tenantId) || "main"}${TENANT_SCOPE_DELIMITER}${notificationsScope()}`;
-}
-
-function widgetPartitionTenant(req, body) {
-  if (!shouldRespectTenantPartition()) return LEGACY_PARTITION;
-  return resolveTenantId(req, body);
+  return `${asString(tenantId) || "tenant-unassigned"}${TENANT_SCOPE_DELIMITER}${notificationsScope()}`;
 }
 
 function mergeNotes(existingNotes, message, sourceName) {
@@ -961,7 +949,7 @@ module.exports = async function (context, req) {
   const method = asString(req.method || "GET").toUpperCase();
   const body = parseRequestBody(req);
   const requestedTenantId = resolveTenantId(req, body);
-  const tenantId = widgetPartitionTenant(req, body);
+  const tenantId = requestedTenantId;
 
   if (method === "OPTIONS") {
     context.res = { status: 204, headers: corsHeaders(req) };

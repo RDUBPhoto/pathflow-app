@@ -1,7 +1,7 @@
 const { TableClient } = require("../_shared/table-client");
 const { randomUUID } = require("crypto");
+const { resolveTenantId } = require("../_shared/tenant");
 
-const PARTITION = "main";
 const PURCHASE_ORDER_TABLE = "purchaseorders";
 const INVENTORY_TABLE = "inventoryitems";
 const NEEDS_TABLE = "inventoryneeds";
@@ -55,6 +55,10 @@ function queryParam(req, key) {
   } catch {
     return "";
   }
+}
+
+function escapedFilterValue(value) {
+  return asString(value).replace(/'/g, "''");
 }
 
 function normalizeOrderStatus(raw) {
@@ -158,13 +162,13 @@ function needIdsFromLines(lines) {
   return Array.from(set);
 }
 
-async function fetchNeedsByIds(needsClient, ids) {
+async function fetchNeedsByIds(needsClient, tenantId, ids) {
   const out = [];
   for (const id of ids) {
     const needId = asString(id);
     if (!needId) continue;
     try {
-      const entity = await needsClient.getEntity(PARTITION, needId);
+      const entity = await needsClient.getEntity(tenantId, needId);
       out.push(entity);
     } catch (_) {}
   }
@@ -188,14 +192,14 @@ function lineFromNeed(need, index) {
   };
 }
 
-async function updateNeedStates(needsClient, ids, status, purchaseOrderId) {
+async function updateNeedStates(needsClient, tenantId, ids, status, purchaseOrderId) {
   const now = new Date().toISOString();
   for (const id of ids) {
     const needId = asString(id);
     if (!needId) continue;
     await needsClient.upsertEntity(
       {
-        partitionKey: PARTITION,
+        partitionKey: tenantId,
         rowKey: needId,
         status: normalizeNeedStatus(status),
         purchaseOrderId: asString(purchaseOrderId),
@@ -206,9 +210,9 @@ async function updateNeedStates(needsClient, ids, status, purchaseOrderId) {
   }
 }
 
-async function listInventoryItems(inventoryClient) {
+async function listInventoryItems(inventoryClient, tenantId) {
   const out = [];
-  const iter = inventoryClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${PARTITION}'` } });
+  const iter = inventoryClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${escapedFilterValue(tenantId)}'` } });
   for await (const entity of iter) out.push(entity);
   return out;
 }
@@ -217,8 +221,8 @@ function skuKey(value) {
   return asString(value).toLowerCase();
 }
 
-async function applyInventoryAdjustments(inventoryClient, lines, mode) {
-  const allItems = await listInventoryItems(inventoryClient);
+async function applyInventoryAdjustments(inventoryClient, tenantId, lines, mode) {
+  const allItems = await listInventoryItems(inventoryClient, tenantId);
   const byId = new Map();
   const bySku = new Map();
   for (const item of allItems) {
@@ -243,7 +247,7 @@ async function applyInventoryAdjustments(inventoryClient, lines, mode) {
     if (!item) {
       const newId = randomUUID();
       const entity = {
-        partitionKey: PARTITION,
+        partitionKey: tenantId,
         rowKey: newId,
         name: asString(line.partName) || asString(line.sku) || "New Part",
         sku: lineSku,
@@ -284,7 +288,7 @@ async function applyInventoryAdjustments(inventoryClient, lines, mode) {
 
     await inventoryClient.upsertEntity(
       {
-        partitionKey: PARTITION,
+        partitionKey: tenantId,
         rowKey: asString(item.rowKey),
         onHand: nextOnHand,
         onOrder: nextOnOrder,
@@ -309,6 +313,7 @@ function byUpdatedDesc(a, b) {
 module.exports = async function (context, req) {
   const method = asString(req.method || "GET").toUpperCase();
   const body = asObject(req.body);
+  const tenantId = resolveTenantId(req, body);
   if (method === "OPTIONS") {
     context.res = { status: 204 };
     return;
@@ -324,7 +329,7 @@ module.exports = async function (context, req) {
       const status = asString(queryParam(req, "status")).toLowerCase();
       if (id) {
         try {
-          const entity = await purchaseClient.getEntity(PARTITION, id);
+          const entity = await purchaseClient.getEntity(tenantId, id);
           context.res = json(200, { ok: true, order: toPurchaseOrder(entity) });
         } catch (_) {
           context.res = json(404, { error: "Purchase order not found." });
@@ -333,7 +338,7 @@ module.exports = async function (context, req) {
       }
 
       const out = [];
-      const iter = purchaseClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${PARTITION}'` } });
+      const iter = purchaseClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${escapedFilterValue(tenantId)}'` } });
       for await (const entity of iter) {
         const order = toPurchaseOrder(entity);
         if (status && order.status !== status) continue;
@@ -356,7 +361,7 @@ module.exports = async function (context, req) {
       let lines = parseLines(body.lines);
 
       if (!lines.length && requestedNeedIds.length) {
-        const needs = await fetchNeedsByIds(needsClient, requestedNeedIds);
+        const needs = await fetchNeedsByIds(needsClient, tenantId, requestedNeedIds);
         lines = needs.map((need, index) => lineFromNeed(need, index));
       }
       if (!lines.length) {
@@ -372,7 +377,7 @@ module.exports = async function (context, req) {
       const summary = summarizeLines(lines);
       await purchaseClient.upsertEntity(
         {
-          partitionKey: PARTITION,
+          partitionKey: tenantId,
           rowKey: id,
           supplier,
           status: "draft",
@@ -388,10 +393,10 @@ module.exports = async function (context, req) {
 
       const allNeedIds = Array.from(new Set([...requestedNeedIds, ...needIdsFromLines(lines)]));
       if (allNeedIds.length) {
-        await updateNeedStates(needsClient, allNeedIds, "po-draft", id);
+        await updateNeedStates(needsClient, tenantId, allNeedIds, "po-draft", id);
       }
 
-      const entity = await purchaseClient.getEntity(PARTITION, id);
+      const entity = await purchaseClient.getEntity(tenantId, id);
       context.res = json(200, { ok: true, order: toPurchaseOrder(entity) });
       return;
     }
@@ -405,7 +410,7 @@ module.exports = async function (context, req) {
 
       let existing;
       try {
-        existing = await purchaseClient.getEntity(PARTITION, id);
+        existing = await purchaseClient.getEntity(tenantId, id);
       } catch (_) {
         context.res = json(404, { error: "Purchase order not found." });
         return;
@@ -430,7 +435,7 @@ module.exports = async function (context, req) {
       const summary = summarizeLines(lines);
       await purchaseClient.upsertEntity(
         {
-          partitionKey: PARTITION,
+          partitionKey: tenantId,
           rowKey: id,
           supplier,
           note,
@@ -447,13 +452,13 @@ module.exports = async function (context, req) {
       const removed = Array.from(oldNeedIds).filter(needId => !nextNeedIds.has(needId));
       const added = Array.from(nextNeedIds);
       if (removed.length) {
-        await updateNeedStates(needsClient, removed, "needs-order", "");
+        await updateNeedStates(needsClient, tenantId, removed, "needs-order", "");
       }
       if (added.length) {
-        await updateNeedStates(needsClient, added, "po-draft", id);
+        await updateNeedStates(needsClient, tenantId, added, "po-draft", id);
       }
 
-      const saved = await purchaseClient.getEntity(PARTITION, id);
+      const saved = await purchaseClient.getEntity(tenantId, id);
       context.res = json(200, { ok: true, order: toPurchaseOrder(saved) });
       return;
     }
@@ -466,7 +471,7 @@ module.exports = async function (context, req) {
       }
       let existing;
       try {
-        existing = await purchaseClient.getEntity(PARTITION, id);
+        existing = await purchaseClient.getEntity(tenantId, id);
       } catch (_) {
         context.res = json(404, { error: "Purchase order not found." });
         return;
@@ -481,7 +486,7 @@ module.exports = async function (context, req) {
       const now = new Date().toISOString();
       await purchaseClient.upsertEntity(
         {
-          partitionKey: PARTITION,
+          partitionKey: tenantId,
           rowKey: id,
           status: "ordered",
           submittedAt: now,
@@ -492,11 +497,11 @@ module.exports = async function (context, req) {
 
       const needIds = needIdsFromLines(order.lines);
       if (needIds.length) {
-        await updateNeedStates(needsClient, needIds, "ordered", id);
+        await updateNeedStates(needsClient, tenantId, needIds, "ordered", id);
       }
-      await applyInventoryAdjustments(inventoryClient, order.lines, "submit");
+      await applyInventoryAdjustments(inventoryClient, tenantId, order.lines, "submit");
 
-      const saved = await purchaseClient.getEntity(PARTITION, id);
+      const saved = await purchaseClient.getEntity(tenantId, id);
       context.res = json(200, { ok: true, order: toPurchaseOrder(saved) });
       return;
     }
@@ -509,7 +514,7 @@ module.exports = async function (context, req) {
       }
       let existing;
       try {
-        existing = await purchaseClient.getEntity(PARTITION, id);
+        existing = await purchaseClient.getEntity(tenantId, id);
       } catch (_) {
         context.res = json(404, { error: "Purchase order not found." });
         return;
@@ -524,7 +529,7 @@ module.exports = async function (context, req) {
       const now = new Date().toISOString();
       await purchaseClient.upsertEntity(
         {
-          partitionKey: PARTITION,
+          partitionKey: tenantId,
           rowKey: id,
           status: "received",
           receivedAt: now,
@@ -535,11 +540,11 @@ module.exports = async function (context, req) {
 
       const needIds = needIdsFromLines(order.lines);
       if (needIds.length) {
-        await updateNeedStates(needsClient, needIds, "received", id);
+        await updateNeedStates(needsClient, tenantId, needIds, "received", id);
       }
-      await applyInventoryAdjustments(inventoryClient, order.lines, "receive");
+      await applyInventoryAdjustments(inventoryClient, tenantId, order.lines, "receive");
 
-      const saved = await purchaseClient.getEntity(PARTITION, id);
+      const saved = await purchaseClient.getEntity(tenantId, id);
       context.res = json(200, { ok: true, order: toPurchaseOrder(saved) });
       return;
     }
@@ -552,7 +557,7 @@ module.exports = async function (context, req) {
       }
       let existing;
       try {
-        existing = await purchaseClient.getEntity(PARTITION, id);
+        existing = await purchaseClient.getEntity(tenantId, id);
       } catch (_) {
         context.res = json(404, { error: "Purchase order not found." });
         return;
@@ -565,10 +570,10 @@ module.exports = async function (context, req) {
 
       const needIds = needIdsFromLines(order.lines);
       if (needIds.length) {
-        await updateNeedStates(needsClient, needIds, "needs-order", "");
+        await updateNeedStates(needsClient, tenantId, needIds, "needs-order", "");
       }
 
-      await purchaseClient.deleteEntity(PARTITION, id);
+      await purchaseClient.deleteEntity(tenantId, id);
       context.res = json(200, { ok: true, id });
       return;
     }

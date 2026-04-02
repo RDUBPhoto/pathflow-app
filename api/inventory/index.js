@@ -1,7 +1,7 @@
 const { TableClient } = require("../_shared/table-client");
 const { randomUUID } = require("crypto");
+const { resolveTenantId } = require("../_shared/tenant");
 
-const PARTITION = "main";
 const INVENTORY_TABLE = "inventoryitems";
 const NEEDS_TABLE = "inventoryneeds";
 const CONNECTORS_TABLE = "inventoryconnectors";
@@ -346,10 +346,10 @@ function buildSummary(items, needs) {
   };
 }
 
-async function ensureDefaultConnectors(client) {
+async function ensureDefaultConnectors(client, tenantId) {
   const existing = [];
   const existingById = new Map();
-  const iter = client.listEntities({ queryOptions: { filter: `PartitionKey eq '${PARTITION}'` } });
+  const iter = client.listEntities({ queryOptions: { filter: `PartitionKey eq '${escapedFilterValue(tenantId)}'` } });
   for await (const entity of iter) {
     const connector = toConnector(entity);
     if (!connector.id) continue;
@@ -362,7 +362,7 @@ async function ensureDefaultConnectors(client) {
     if (existingById.has(seed.id)) continue;
     await client.upsertEntity(
       {
-        partitionKey: PARTITION,
+        partitionKey: tenantId,
         rowKey: seed.id,
         provider: seed.provider,
         segment: seed.segment,
@@ -390,6 +390,7 @@ async function ensureDefaultConnectors(client) {
 module.exports = async function (context, req) {
   const method = asString(req.method || "GET").toUpperCase();
   const body = asObject(req.body);
+  const tenantId = resolveTenantId(req, body);
   if (method === "OPTIONS") {
     context.res = { status: 204 };
     return;
@@ -407,7 +408,7 @@ module.exports = async function (context, req) {
 
       const listItems = async () => {
         const out = [];
-        const iter = inventoryClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${PARTITION}'` } });
+        const iter = inventoryClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${escapedFilterValue(tenantId)}'` } });
         for await (const entity of iter) out.push(toInventoryItem(entity));
         out.sort((a, b) => asString(a.name).localeCompare(asString(b.name)));
         return out;
@@ -416,8 +417,8 @@ module.exports = async function (context, req) {
       const listNeeds = async () => {
         const out = [];
         const filter = statusFilter
-          ? `PartitionKey eq '${PARTITION}' and status eq '${escapedFilterValue(statusFilter)}'`
-          : `PartitionKey eq '${PARTITION}'`;
+          ? `PartitionKey eq '${escapedFilterValue(tenantId)}' and status eq '${escapedFilterValue(statusFilter)}'`
+          : `PartitionKey eq '${escapedFilterValue(tenantId)}'`;
         const iter = needsClient.listEntities({ queryOptions: { filter } });
         for await (const entity of iter) out.push(toNeed(entity));
         out.sort(byScheduleStartAsc);
@@ -433,7 +434,7 @@ module.exports = async function (context, req) {
         return;
       }
       if (scope === "connectors") {
-        const connectors = await ensureDefaultConnectors(connectorsClient);
+        const connectors = await ensureDefaultConnectors(connectorsClient, tenantId);
         context.res = json(200, {
           ok: true,
           scope,
@@ -461,7 +462,7 @@ module.exports = async function (context, req) {
 
       const items = await listItems();
       const needs = await listNeeds();
-      const connectors = await ensureDefaultConnectors(connectorsClient);
+      const connectors = await ensureDefaultConnectors(connectorsClient, tenantId);
       context.res = json(200, {
         ok: true,
         items,
@@ -495,7 +496,7 @@ module.exports = async function (context, req) {
       }
 
       const entity = {
-        partitionKey: PARTITION,
+        partitionKey: tenantId,
         rowKey: id,
         name,
         sku,
@@ -525,7 +526,7 @@ module.exports = async function (context, req) {
         context.res = json(400, { error: "id is required." });
         return;
       }
-      await inventoryClient.deleteEntity(PARTITION, id);
+      await inventoryClient.deleteEntity(tenantId, id);
       context.res = json(200, { ok: true, id });
       return;
     }
@@ -540,7 +541,7 @@ module.exports = async function (context, req) {
       const now = new Date().toISOString();
       await needsClient.upsertEntity(
         {
-          partitionKey: PARTITION,
+          partitionKey: tenantId,
           rowKey: id,
           sourceType: asString(body.sourceType) || "manual",
           sourceId: asString(body.sourceId),
@@ -562,7 +563,7 @@ module.exports = async function (context, req) {
         },
         "Merge"
       );
-      const saved = await needsClient.getEntity(PARTITION, id);
+      const saved = await needsClient.getEntity(tenantId, id);
       context.res = json(200, { ok: true, need: toNeed(saved) });
       return;
     }
@@ -575,7 +576,7 @@ module.exports = async function (context, req) {
       }
       await needsClient.upsertEntity(
         {
-          partitionKey: PARTITION,
+          partitionKey: tenantId,
           rowKey: id,
           status: normalizeNeedStatus(body.status),
           purchaseOrderId: asString(body.purchaseOrderId),
@@ -583,7 +584,7 @@ module.exports = async function (context, req) {
         },
         "Merge"
       );
-      const saved = await needsClient.getEntity(PARTITION, id);
+      const saved = await needsClient.getEntity(tenantId, id);
       context.res = json(200, { ok: true, need: toNeed(saved) });
       return;
     }
@@ -597,7 +598,7 @@ module.exports = async function (context, req) {
       const now = new Date().toISOString();
       await connectorsClient.upsertEntity(
         {
-          partitionKey: PARTITION,
+          partitionKey: tenantId,
           rowKey: id,
           provider: asString(body.provider),
           segment: asString(body.segment),
@@ -609,7 +610,7 @@ module.exports = async function (context, req) {
         },
         "Merge"
       );
-      const saved = await connectorsClient.getEntity(PARTITION, id);
+      const saved = await connectorsClient.getEntity(tenantId, id);
       context.res = json(200, { ok: true, connector: toConnector(saved) });
       return;
     }
@@ -623,7 +624,7 @@ module.exports = async function (context, req) {
         });
         await connectorsClient.upsertEntity(
           {
-            partitionKey: PARTITION,
+            partitionKey: tenantId,
             rowKey: "nexpart",
             configured: true,
             enabled: true,
@@ -644,7 +645,7 @@ module.exports = async function (context, req) {
       } catch (err) {
         await connectorsClient.upsertEntity(
           {
-            partitionKey: PARTITION,
+            partitionKey: tenantId,
             rowKey: "nexpart",
             configured: nexpart.configured,
             enabled: nexpart.enabled,

@@ -1,7 +1,6 @@
 const { TableClient } = require("../_shared/table-client");
 const { resolveTenantId } = require("../_shared/tenant");
 
-const PARTITION = "main";
 const SETTINGS_TABLE = "appsettings";
 const TABLES = {
   lanes: "lanes",
@@ -39,6 +38,10 @@ function asNumber(value, fallback = 0) {
 
 function asBool(value) {
   return value === true || value === "true" || value === 1 || value === "1";
+}
+
+function escapedFilterValue(value) {
+  return asString(value).replace(/'/g, "''");
 }
 
 function demoSeedingEnabled() {
@@ -142,10 +145,7 @@ async function readPowerBiConfigFromSettings(tenantId) {
 
   const output = {};
   for (const key of keys) {
-    let value = await readKey(tenantId, key);
-    if (!value && tenantId !== PARTITION) {
-      value = await readKey(PARTITION, key);
-    }
+    const value = await readKey(tenantId, key);
     output[key] = value;
   }
 
@@ -386,9 +386,9 @@ async function getTableClient(tableName) {
   return client;
 }
 
-async function listPartition(client) {
+async function listPartition(client, tenantId) {
   const out = [];
-  const iter = client.listEntities({ queryOptions: { filter: `PartitionKey eq '${PARTITION}'` } });
+  const iter = client.listEntities({ queryOptions: { filter: `PartitionKey eq '${escapedFilterValue(tenantId)}'` } });
   for await (const entity of iter) out.push(entity);
   return out;
 }
@@ -411,13 +411,13 @@ function seedAt(now, dayOffset, hour = 9, minute = 0) {
   );
 }
 
-async function upsertPartitionEntities(client, rows) {
+async function upsertPartitionEntities(client, tenantId, rows) {
   for (const row of rows) {
-    await client.upsertEntity({ partitionKey: PARTITION, ...row }, "Merge");
+    await client.upsertEntity({ partitionKey: tenantId, ...row }, "Merge");
   }
 }
 
-async function seedDemoReportData() {
+async function seedDemoReportData(tenantId) {
   const workItemsClient = await getTableClient(TABLES.workItems);
   const now = new Date();
   const stamped = isoDateTime(now);
@@ -589,7 +589,7 @@ async function seedDemoReportData() {
     }
   ];
 
-  await upsertPartitionEntities(workItemsClient, rows);
+  await upsertPartitionEntities(workItemsClient, tenantId, rows);
 
   const invoicesSeeded = rows.filter(item => item.laneName === stageLabel.invoiced).length;
   return {
@@ -1424,6 +1424,7 @@ function responseByScope(scope, payload) {
 module.exports = async function (context, req) {
   const method = asString(req.method || "GET").toUpperCase();
   const scope = readScope(context, req);
+  const tenantId = resolveTenantId(req, req && typeof req.body === "object" ? req.body : null);
   if (method === "OPTIONS") {
     context.res = { status: 204 };
     return;
@@ -1440,7 +1441,7 @@ module.exports = async function (context, req) {
         return;
       }
 
-      const seedSummary = await seedDemoReportData();
+      const seedSummary = await seedDemoReportData(tenantId);
       context.res = json(200, {
         ok: true,
         scope,
@@ -1522,16 +1523,16 @@ module.exports = async function (context, req) {
       inventoryNeeds,
       inventoryItems
     ] = await Promise.all([
-      listPartition(lanesClient),
-      listPartition(workItemsClient),
-      listPartition(eventsClient),
-      listPartition(customersClient),
-      listPartition(emailClient),
-      listPartition(smsClient),
-      listPartition(purchaseOrdersClient),
-      listPartition(scheduleClient),
-      listPartition(inventoryNeedsClient),
-      listPartition(inventoryItemsClient)
+      listPartition(lanesClient, tenantId),
+      listPartition(workItemsClient, tenantId),
+      listPartition(eventsClient, tenantId),
+      listPartition(customersClient, tenantId),
+      listPartition(emailClient, tenantId),
+      listPartition(smsClient, tenantId),
+      listPartition(purchaseOrdersClient, tenantId),
+      listPartition(scheduleClient, tenantId),
+      listPartition(inventoryNeedsClient, tenantId),
+      listPartition(inventoryItemsClient, tenantId)
     ]);
 
     const model = buildModel({

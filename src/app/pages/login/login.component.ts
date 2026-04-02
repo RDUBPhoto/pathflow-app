@@ -42,13 +42,14 @@ export default class LoginComponent {
   private readonly isLikelySwaCli = this.isLocalHost && window.location.port === '4280';
 
   readonly redirectTo = signal('/dashboard');
-  readonly googleEnabled = computed(() => environment.auth.providers.includes('google'));
+  readonly googleEnabled = computed(() => this.auth.isProviderEnabled('google'));
+  readonly primaryProviderLabel = computed(() => this.providerLabel(this.auth.primaryAuthProvider()));
   readonly hostedEmailEnabled = computed(
-    () => !this.localServerMode && !!environment.auth.hostedEmailEnabled && !!String(environment.auth.hostedEmailProvider || '').trim()
+    () => !this.localServerMode && this.auth.isHostedEmailEnabled()
   );
   readonly devBypassEnabled = environment.auth.devBypass || this.isLocalHost;
   readonly localServerMode = this.isLocalHost && !this.isLikelySwaCli;
-  readonly passwordLoginEnabled = computed(() => environment.auth.localPasswordEnabled || this.localServerMode);
+  readonly passwordLoginEnabled = computed(() => this.auth.isLocalPasswordAuthEnabled() || this.localServerMode);
   readonly localCredentialHints = environment.auth.localUsers.map(user => ({
     email: user.email,
     password: user.password,
@@ -75,6 +76,10 @@ export default class LoginComponent {
 
     this.route.queryParamMap.subscribe(params => {
       this.redirectTo.set(this.normalizeRedirect(params.get('redirect')));
+      const inviteEmail = String(params.get('email') || '').trim();
+      if (inviteEmail && !this.localLoginEmail) {
+        this.localLoginEmail = inviteEmail;
+      }
     });
 
     effect(() => {
@@ -97,7 +102,7 @@ export default class LoginComponent {
       this.localAuthHint.set('Microsoft/Google sign-in requires Azure Static Web Apps runtime. Use local quick access below or run with SWA CLI.');
       return;
     }
-    this.auth.signIn(environment.auth.primaryProvider, this.redirectTo());
+    this.auth.signIn(this.auth.primaryAuthProvider(), this.redirectTo());
   }
 
   signInGoogle(): void {
@@ -112,7 +117,7 @@ export default class LoginComponent {
   signInHostedEmail(): void {
     this.passwordLoginError.set('');
     if (!this.hostedEmailEnabled()) return;
-    const provider = String(environment.auth.hostedEmailProvider || '').trim();
+    const provider = this.auth.hostedEmailProvider();
     if (!provider) return;
     this.auth.signIn(provider, this.redirectTo());
   }
@@ -216,5 +221,15 @@ export default class LoginComponent {
     if (!value.startsWith('/')) return '/dashboard';
     if (value.startsWith('/.auth/')) return '/dashboard';
     return value;
+  }
+
+  private providerLabel(provider: string): string {
+    const normalized = String(provider || '').trim().toLowerCase();
+    if (normalized === 'aad') return 'Microsoft';
+    if (normalized === 'google') return 'Google';
+    if (normalized === 'github') return 'GitHub';
+    if (normalized === 'twitter') return 'X';
+    if (!normalized) return 'Provider';
+    return normalized.charAt(0).toUpperCase() + normalized.slice(1);
   }
 }

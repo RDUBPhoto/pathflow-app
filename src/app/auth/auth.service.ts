@@ -73,9 +73,18 @@ interface AccessHydrationResult {
   state: AuthAccessState;
 }
 
+interface AuthRuntimeConfig {
+  primaryProvider: string;
+  providers: string[];
+  hostedEmailEnabled: boolean;
+  hostedEmailProvider: string;
+  localPasswordEnabled: boolean;
+}
+
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private readonly isLocalHost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+  private readonly authConfigSignal = signal<AuthRuntimeConfig>(this.buildAuthRuntimeConfigFromEnvironment());
   private readonly stateSignal = signal<AuthState>({
     initialized: false,
     loading: true,
@@ -99,6 +108,7 @@ export class AuthService {
   readonly billingStatus = computed(() => this.accessSignal().billingStatus);
   readonly trialEndsAt = computed(() => this.accessSignal().trialEndsAt);
   readonly planCycle = computed(() => this.accessSignal().planCycle);
+  readonly authConfig = computed(() => this.authConfigSignal());
   readonly canBootstrapRegistration = computed(() => this.accessSignal().canBootstrap);
   readonly isSuperAdmin = computed(() => this.accessSignal().isSuperAdmin);
   readonly locations = computed(() => this.accessSignal().locations);
@@ -119,7 +129,8 @@ export class AuthService {
     this.stateSignal.update(current => ({ ...current, loading: true }));
     this.accessSignal.set(this.emptyAccessState(false));
 
-    this.bootstrapping = this.hydrateAuthState()
+    this.bootstrapping = this.hydrateRuntimeAuthConfig()
+      .then(() => this.hydrateAuthState())
       .catch(() => {
         this.stateSignal.set({
           initialized: true,
@@ -145,16 +156,17 @@ export class AuthService {
   }
 
   signIn(provider?: string, redirectTo?: string): void {
-    const requestedProvider = (provider || environment.auth.primaryProvider || 'aad').trim();
+    const config = this.authConfigSignal();
+    const requestedProvider = (provider || config.primaryProvider || 'aad').trim().toLowerCase();
     const allowedProviders = new Set<string>();
-    const primary = (environment.auth.primaryProvider || 'aad').trim() || 'aad';
+    const primary = (config.primaryProvider || 'aad').trim().toLowerCase() || 'aad';
     allowedProviders.add(primary);
-    for (const item of environment.auth.providers || []) {
+    for (const item of config.providers || []) {
       const normalized = String(item || '').trim();
       if (normalized) allowedProviders.add(normalized);
     }
-    if (environment.auth.hostedEmailEnabled) {
-      const hosted = String(environment.auth.hostedEmailProvider || '').trim();
+    if (config.hostedEmailEnabled) {
+      const hosted = String(config.hostedEmailProvider || '').trim();
       if (hosted) allowedProviders.add(hosted);
     }
     const selectedProvider = allowedProviders.has(requestedProvider) ? requestedProvider : primary;
@@ -419,6 +431,25 @@ export class AuthService {
 
   isLocalPasswordAuthEnabled(): boolean {
     return this.isLocalAuthEnabled();
+  }
+
+  isProviderEnabled(provider: string): boolean {
+    const normalized = String(provider || '').trim().toLowerCase();
+    if (!normalized) return false;
+    return this.authConfigSignal().providers.includes(normalized);
+  }
+
+  primaryAuthProvider(): string {
+    return this.authConfigSignal().primaryProvider;
+  }
+
+  isHostedEmailEnabled(): boolean {
+    const config = this.authConfigSignal();
+    return !!config.hostedEmailEnabled && !!config.hostedEmailProvider;
+  }
+
+  hostedEmailProvider(): string {
+    return this.authConfigSignal().hostedEmailProvider;
   }
 
   createEmailPasswordAccount(
@@ -740,6 +771,32 @@ export class AuthService {
     this.accessSignal.set(this.emptyAccessState(true));
   }
 
+  private async hydrateRuntimeAuthConfig(): Promise<void> {
+    const fallback = this.buildAuthRuntimeConfigFromEnvironment();
+    try {
+      const response = await fetch('/api/access?op=auth-config', {
+        method: 'GET',
+        credentials: 'include',
+        headers: {
+          Accept: 'application/json'
+        }
+      });
+      if (!response.ok) {
+        this.authConfigSignal.set(fallback);
+        return;
+      }
+      const payload = await response.json() as { ok?: boolean; config?: unknown };
+      if (!payload?.ok) {
+        this.authConfigSignal.set(fallback);
+        return;
+      }
+      const runtimeConfig = this.coerceAuthRuntimeConfig(payload.config);
+      this.authConfigSignal.set(runtimeConfig || fallback);
+    } catch {
+      this.authConfigSignal.set(fallback);
+    }
+  }
+
   private normalizeRedirect(path?: string, fallback = '/dashboard'): string {
     const candidate = (path || '').trim();
     if (!candidate.startsWith('/')) return fallback;
@@ -1032,7 +1089,58 @@ export class AuthService {
   }
 
   private isLocalAuthEnabled(): boolean {
-    return environment.auth.devBypass || environment.auth.localPasswordEnabled || this.isLocalHost;
+    return environment.auth.devBypass || this.authConfigSignal().localPasswordEnabled || this.isLocalHost;
+  }
+
+  private buildAuthRuntimeConfigFromEnvironment(): AuthRuntimeConfig {
+    const primaryProvider = String(environment.auth.primaryProvider || 'aad').trim().toLowerCase() || 'aad';
+    const providers = new Set<string>();
+    providers.add(primaryProvider);
+    for (const item of environment.auth.providers || []) {
+      const normalized = String(item || '').trim().toLowerCase();
+      if (!normalized) continue;
+      providers.add(normalized);
+    }
+
+    const hostedEmailProvider = String(environment.auth.hostedEmailProvider || '').trim().toLowerCase();
+    const hostedEmailEnabled = !!environment.auth.hostedEmailEnabled && !!hostedEmailProvider;
+    if (hostedEmailEnabled) {
+      providers.add(hostedEmailProvider);
+    }
+
+    return {
+      primaryProvider,
+      providers: Array.from(providers),
+      hostedEmailEnabled,
+      hostedEmailProvider: hostedEmailEnabled ? hostedEmailProvider : '',
+      localPasswordEnabled: !!environment.auth.localPasswordEnabled
+    };
+  }
+
+  private coerceAuthRuntimeConfig(input: unknown): AuthRuntimeConfig | null {
+    const fallback = this.buildAuthRuntimeConfigFromEnvironment();
+    if (!input || typeof input !== 'object') return null;
+    const raw = input as Partial<AuthRuntimeConfig>;
+    const primaryProvider = String(raw.primaryProvider || fallback.primaryProvider).trim().toLowerCase() || fallback.primaryProvider;
+    const providers = new Set<string>();
+    providers.add(primaryProvider);
+    for (const item of Array.isArray(raw.providers) ? raw.providers : fallback.providers) {
+      const normalized = String(item || '').trim().toLowerCase();
+      if (!normalized) continue;
+      providers.add(normalized);
+    }
+    const hostedEmailProvider = String(raw.hostedEmailProvider || '').trim().toLowerCase();
+    const hostedEmailEnabled = !!raw.hostedEmailEnabled && !!hostedEmailProvider;
+    if (hostedEmailEnabled) {
+      providers.add(hostedEmailProvider);
+    }
+    return {
+      primaryProvider,
+      providers: Array.from(providers),
+      hostedEmailEnabled,
+      hostedEmailProvider: hostedEmailEnabled ? hostedEmailProvider : '',
+      localPasswordEnabled: !!raw.localPasswordEnabled
+    };
   }
 
   private normalizePlanCycle(value: unknown): 'monthly' | 'annual' {

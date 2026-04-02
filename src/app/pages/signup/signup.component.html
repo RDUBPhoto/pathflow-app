@@ -55,7 +55,7 @@
             </button>
             <button type="button" class="method-btn" [class.active]="selectedMethod() === 'aad'" (click)="setMethod('aad')">
               <ion-icon name="shield-checkmark-outline"></ion-icon>
-              <span>Microsoft</span>
+              <span>{{ primaryProviderLabel() }}</span>
             </button>
             <button
               *ngIf="googleEnabled()"
@@ -135,7 +135,7 @@
             <h2>Provider Sign-up</h2>
           </div>
           <p class="provider-note">
-            You selected <strong>{{ selectedMethod() === 'email' ? 'Email' : (selectedMethod() === 'google' ? 'Google' : 'Microsoft') }}</strong>.
+            You selected <strong>{{ selectedMethod() === 'email' ? 'Email' : (selectedMethod() === 'google' ? 'Google' : primaryProviderLabel()) }}</strong>.
             Next, choose a plan. The provider sign-in prompt opens only after you continue.
           </p>
         </section>
@@ -194,7 +194,7 @@
           <div class="review-row">
             <span>Sign-up method</span>
             <strong>
-              {{ selectedMethod() === 'email' ? (localEmailCredentialsEnabled() ? 'Email & Password' : 'Email') : (selectedMethod() === 'google' ? 'Google' : 'Microsoft') }}
+              {{ selectedMethod() === 'email' ? (localEmailCredentialsEnabled() ? 'Email & Password' : 'Email') : (selectedMethod() === 'google' ? 'Google' : primaryProviderLabel()) }}
             </strong>
           </div>
           <div class="review-row">

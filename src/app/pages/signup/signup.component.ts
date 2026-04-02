@@ -13,7 +13,6 @@ import {
 import { ActivatedRoute, Router } from '@angular/router';
 import { addIcons } from 'ionicons';
 import { keyOutline, logoGoogle, shieldCheckmarkOutline } from 'ionicons/icons';
-import { environment } from '../../../environments/environment';
 import { AuthService } from '../../auth/auth.service';
 import { formatUsPhoneInput, phoneDigits } from '../../utils/phone-format';
 
@@ -47,12 +46,13 @@ export default class SignupComponent {
   readonly localServerMode = this.isLocalHost && !this.isLikelySwaCli;
 
   readonly redirectTo = signal('/dashboard');
-  readonly googleEnabled = computed(() => environment.auth.providers.includes('google'));
+  readonly googleEnabled = computed(() => this.auth.isProviderEnabled('google'));
+  readonly primaryProviderLabel = computed(() => this.providerLabel(this.auth.primaryAuthProvider()));
   readonly hostedEmailEnabled = computed(
-    () => !this.localServerMode && !!environment.auth.hostedEmailEnabled && !!String(environment.auth.hostedEmailProvider || '').trim()
+    () => !this.localServerMode && this.auth.isHostedEmailEnabled()
   );
   readonly localEmailCredentialsEnabled = computed(
-    () => environment.auth.localPasswordEnabled || environment.auth.devBypass || this.isLocalHost
+    () => this.auth.isLocalPasswordAuthEnabled()
   );
   readonly emailSignupEnabled = computed(
     () => this.localEmailCredentialsEnabled() || this.hostedEmailEnabled()
@@ -89,7 +89,7 @@ export default class SignupComponent {
     if (this.selectedMethod() === 'google') {
       return 'Continue with Google';
     }
-    return 'Continue with Microsoft';
+    return `Continue with ${this.primaryProviderLabel()}`;
   });
 
   readonly stepOneValid = computed(() => {
@@ -119,6 +119,10 @@ export default class SignupComponent {
 
     this.route.queryParamMap.subscribe(params => {
       this.redirectTo.set(this.normalizeRedirect(params.get('redirect')));
+      const inviteEmail = String(params.get('email') || '').trim();
+      if (inviteEmail && !this.email()) {
+        this.email.set(inviteEmail);
+      }
     });
 
     if (!this.emailSignupEnabled()) {
@@ -252,12 +256,12 @@ export default class SignupComponent {
       }
 
       if (this.hostedEmailEnabled()) {
-        const provider = String(environment.auth.hostedEmailProvider || '').trim();
-        if (!provider) {
+        const runtimeProvider = this.auth.hostedEmailProvider();
+        if (!runtimeProvider) {
           this.error.set('Hosted email sign-in provider is not configured.');
           return;
         }
-        this.auth.signIn(provider, registerRedirect);
+        this.auth.signIn(runtimeProvider, registerRedirect);
         return;
       }
 
@@ -267,12 +271,12 @@ export default class SignupComponent {
 
     if (this.localServerMode) {
       this.hint.set(
-        `${method === 'google' ? 'Google' : 'Microsoft'} sign-in requires Azure Static Web Apps runtime. Use Email & Password signup in local mode.`
+        `${method === 'google' ? 'Google' : this.primaryProviderLabel()} sign-in requires Azure Static Web Apps runtime. Use Email & Password signup in local mode.`
       );
       return;
     }
 
-    this.auth.signIn(method, registerRedirect);
+    this.auth.signIn(this.resolveProviderForMethod(method), registerRedirect);
   }
 
   backToLogin(): void {
@@ -298,5 +302,21 @@ export default class SignupComponent {
 
   private digitsOnly(value: unknown): string {
     return phoneDigits(value);
+  }
+
+  private resolveProviderForMethod(method: SignupMethod): string {
+    if (method === 'google') return 'google';
+    if (method === 'email') return this.auth.hostedEmailProvider() || this.auth.primaryAuthProvider();
+    return this.auth.primaryAuthProvider();
+  }
+
+  private providerLabel(provider: string): string {
+    const normalized = String(provider || '').trim().toLowerCase();
+    if (normalized === 'aad') return 'Microsoft';
+    if (normalized === 'google') return 'Google';
+    if (normalized === 'github') return 'GitHub';
+    if (normalized === 'twitter') return 'X';
+    if (!normalized) return 'Provider';
+    return normalized.charAt(0).toUpperCase() + normalized.slice(1);
   }
 }

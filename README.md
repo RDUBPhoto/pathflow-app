@@ -66,6 +66,24 @@ npm run migrate:table-to-sql
 
 This copies existing data from Azure Table Storage (`STORAGE_CONNECTION_STRING`) into SQL entity storage table `dbo.PathflowEntities`.
 
+## Auth Provider Runtime Config (Prod-friendly)
+
+`/api/access?op=auth-config` now exposes safe auth provider flags so login/signup can be controlled by Azure App Settings (without rebuilding frontend).
+
+Optional app settings:
+
+1. `AUTH_PRIMARY_PROVIDER` (default `aad`)
+2. `AUTH_PROVIDERS` (comma-separated, for example `aad,google`)
+3. `AUTH_GOOGLE_ENABLED` (`true|false`, convenience flag)
+4. `AUTH_HOSTED_EMAIL_ENABLED` (`true|false`)
+5. `AUTH_HOSTED_EMAIL_PROVIDER` (custom SWA provider id for email/password identity flow)
+6. `AUTH_LOCAL_PASSWORD_ENABLED` (`true|false`, keep `false` in production)
+
+Notes:
+
+1. Local dev quick-login still follows `environment.development.ts` and localhost behavior.
+2. Hosted email/password sign-in depends on your configured identity provider in Azure Static Web Apps Authentication.
+
 ## Code scaffolding
 
 Angular CLI includes powerful code scaffolding tools. To generate a new component, run:

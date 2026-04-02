@@ -1,4 +1,9 @@
-const { TableClient } = require("../_shared/table-client");
+const {
+  TableClient,
+  isSqlBackendEnabled,
+  ensureTenantSqlDatabase,
+  listTenantSqlDatabases
+} = require("../_shared/table-client");
 const { randomUUID } = require("crypto");
 const { sanitizeTenantId } = require("../_shared/tenant");
 
@@ -140,6 +145,51 @@ function normalizeRoleList(values) {
   }
   if (!out.has("authenticated")) out.add("authenticated");
   return Array.from(out);
+}
+
+function normalizeProvider(value) {
+  return asString(value).toLowerCase();
+}
+
+function parseProviderList(value) {
+  return asString(value)
+    .split(",")
+    .map(item => normalizeProvider(item))
+    .filter(Boolean);
+}
+
+function readAuthEnvBool(...keys) {
+  for (const key of keys) {
+    const raw = asString(process.env[key]);
+    if (!raw) continue;
+    return asBool(raw);
+  }
+  return false;
+}
+
+function getAuthRuntimeConfig() {
+  const primaryProvider = normalizeProvider(process.env.AUTH_PRIMARY_PROVIDER || "aad") || "aad";
+  const providersFromEnv = parseProviderList(process.env.AUTH_PROVIDERS);
+  const providers = new Set(providersFromEnv.length ? providersFromEnv : [primaryProvider]);
+  providers.add(primaryProvider);
+
+  if (readAuthEnvBool("AUTH_GOOGLE_ENABLED")) {
+    providers.add("google");
+  }
+
+  const hostedEmailEnabled = readAuthEnvBool("AUTH_HOSTED_EMAIL_ENABLED", "HOSTED_EMAIL_ENABLED");
+  const hostedEmailProvider = normalizeProvider(process.env.AUTH_HOSTED_EMAIL_PROVIDER || process.env.HOSTED_EMAIL_PROVIDER);
+  if (hostedEmailEnabled && hostedEmailProvider) {
+    providers.add(hostedEmailProvider);
+  }
+
+  return {
+    primaryProvider,
+    providers: Array.from(providers),
+    hostedEmailEnabled: hostedEmailEnabled && !!hostedEmailProvider,
+    hostedEmailProvider: hostedEmailEnabled && hostedEmailProvider ? hostedEmailProvider : "",
+    localPasswordEnabled: readAuthEnvBool("AUTH_LOCAL_PASSWORD_ENABLED", "LOCAL_PASSWORD_ENABLED")
+  };
 }
 
 function configuredSuperAdminEmails() {
@@ -476,6 +526,17 @@ async function getTableClient(connectionString, tableName) {
 
 async function listTenants(tenantClient) {
   const out = [];
+  let tenantDbById = new Map();
+  if (isSqlBackendEnabled()) {
+    try {
+      const mappings = await listTenantSqlDatabases();
+      tenantDbById = new Map(
+        (Array.isArray(mappings) ? mappings : [])
+          .map((item) => [sanitizeTenantId(item && item.tenantId), asString(item && item.databaseName)])
+          .filter((item) => !!item[0] && !!item[1])
+      );
+    } catch (_) {}
+  }
   const filter = `PartitionKey eq '${escapedFilterValue(TENANTS_PARTITION)}'`;
   const iter = tenantClient.listEntities({ queryOptions: { filter } });
   for await (const entity of iter) {
@@ -491,7 +552,9 @@ async function listTenants(tenantClient) {
       billingUpdatedAt: asString(entity.billingUpdatedAt),
       trialStartsAt: asString(entity.trialStartsAt),
       trialEndsAt: asString(entity.trialEndsAt),
-      planCycle: normalizePlanCycle(entity.planCycle)
+      planCycle: normalizePlanCycle(entity.planCycle),
+      sqlDatabaseName: asString(entity.sqlDatabaseName) || asString(tenantDbById.get(id)),
+      sqlDatabaseProvisionedAt: asString(entity.sqlDatabaseProvisionedAt)
     });
   }
   out.sort((a, b) => String(a.name).localeCompare(String(b.name)) || String(a.id).localeCompare(String(b.id)));
@@ -1079,8 +1142,17 @@ async function handleVerifyEmailRequest(context, req, clients) {
 
 module.exports = async function (context, req) {
   const method = asString(req && req.method).toUpperCase() || "GET";
+  const opFromQuery = asString(readQueryParam(req, "op")).toLowerCase();
   if (method === "OPTIONS") {
     context.res = { status: 204 };
+    return;
+  }
+
+  if (method === "GET" && opFromQuery === "auth-config") {
+    context.res = json(200, {
+      ok: true,
+      config: getAuthRuntimeConfig()
+    });
     return;
   }
 
@@ -1091,7 +1163,6 @@ module.exports = async function (context, req) {
       return;
     }
 
-    const opFromQuery = asString(readQueryParam(req, "op")).toLowerCase();
     if (method === "GET" && opFromQuery === "verify-email") {
       const userClient = await getTableClient(connectionString, USERS_TABLE);
       const tokenClient = await getTableClient(connectionString, EMAIL_VERIFICATIONS_TABLE);
@@ -1484,6 +1555,25 @@ module.exports = async function (context, req) {
         existingTenantIds.add(locationId);
         createdLocations.push({ id: locationId, name: locationName });
 
+        let tenantSqlDatabaseName = "";
+        if (isSqlBackendEnabled()) {
+          try {
+            const provisioned = await ensureTenantSqlDatabase(locationId);
+            tenantSqlDatabaseName = asString(provisioned && provisioned.databaseName);
+          } catch (provisionErr) {
+            context.log.error("Tenant SQL provisioning failed", {
+              locationId,
+              error: String((provisionErr && provisionErr.message) || provisionErr)
+            });
+            context.res = json(500, {
+              ok: false,
+              error:
+                "We couldn't finish setting up your workspace storage. Please try again in a moment."
+            });
+            return;
+          }
+        }
+
         await tenantClient.upsertEntity(
           {
             partitionKey: TENANTS_PARTITION,
@@ -1496,6 +1586,8 @@ module.exports = async function (context, req) {
             trialStartsAt: now,
             trialEndsAt,
             planCycle: normalizePlanCycle(body.planCycle),
+            sqlDatabaseName: tenantSqlDatabaseName,
+            sqlDatabaseProvisionedAt: tenantSqlDatabaseName ? now : "",
             updatedAt: now,
             createdAt: now
           },

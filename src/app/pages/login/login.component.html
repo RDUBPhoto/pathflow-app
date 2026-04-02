@@ -87,7 +87,7 @@
 
       <ion-button expand="block" size="large" (click)="signInPrimary()" [disabled]="auth.loading()">
         <ion-icon slot="start" name="shield-checkmark-outline"></ion-icon>
-        Continue with Microsoft
+        Continue with {{ primaryProviderLabel() }}
       </ion-button>
 
       <ion-button

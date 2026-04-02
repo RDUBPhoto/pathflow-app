@@ -39,6 +39,33 @@ Production:
 
 `/api/access` now rejects localhost origins when running in production, so invite/verification/password-reset links cannot be generated with localhost.
 
+## Data Storage Backend (Table vs SQL)
+
+The API now supports two storage backends for entity data:
+
+1. `table` (Azure Table Storage, legacy/default)
+2. `sql` (Azure SQL, recommended for production hardening)
+
+Backend selection:
+
+1. Set `DATA_BACKEND=sql` to force Azure SQL.
+2. Set `DATA_BACKEND=table` to force Azure Table Storage.
+3. If unset, API uses `sql` when SQL env vars exist, otherwise falls back to `table`.
+
+Required SQL env vars (either form):
+
+1. `SQL_CONNECTION_STRING`
+2. or `SQL_SERVER`, `SQL_DATABASE`, `SQL_USER`, `SQL_PASSWORD`
+
+Migration helper:
+
+```bash
+cd api
+npm run migrate:table-to-sql
+```
+
+This copies existing data from Azure Table Storage (`STORAGE_CONNECTION_STRING`) into SQL entity storage table `dbo.PathflowEntities`.
+
 ## Code scaffolding
 
 Angular CLI includes powerful code scaffolding tools. To generate a new component, run:

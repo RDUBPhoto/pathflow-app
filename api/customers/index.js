@@ -1,5 +1,5 @@
 // api/customers/index.js
-const { TableClient } = require("@azure/data-tables");
+const { TableClient } = require("../_shared/table-client");
 const { randomUUID } = require("crypto");
 const { resolveTenantId } = require("../_shared/tenant");
 

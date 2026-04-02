@@ -1,6 +1,8 @@
-const { TableClient } = require("@azure/data-tables");
+const { TableClient } = require("../_shared/table-client");
+const { resolveTenantId } = require("../_shared/tenant");
 
 const PARTITION = "main";
+const SETTINGS_TABLE = "appsettings";
 const TABLES = {
   lanes: "lanes",
   workItems: "workitems",
@@ -93,6 +95,93 @@ function powerBiConfigFromEnv() {
   };
 }
 
+function parseSettingValue(raw) {
+  if (typeof raw !== "string") return raw;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}
+
+function asPowerBiSettingValue(raw) {
+  const parsed = parseSettingValue(raw);
+  return asString(parsed);
+}
+
+async function getSettingTableClient() {
+  const conn = asString(process.env.STORAGE_CONNECTION_STRING);
+  if (!conn) throw new Error("Missing STORAGE_CONNECTION_STRING");
+  const client = TableClient.fromConnectionString(conn, SETTINGS_TABLE);
+  try {
+    await client.createTable();
+  } catch (_) {}
+  return client;
+}
+
+async function readPowerBiConfigFromSettings(tenantId) {
+  const keys = [
+    "POWERBI_TENANT_ID",
+    "POWERBI_CLIENT_ID",
+    "POWERBI_CLIENT_SECRET",
+    "POWERBI_WORKSPACE_ID",
+    "POWERBI_REPORT_ID",
+    "POWERBI_REPORT_WEB_URL"
+  ];
+
+  const client = await getSettingTableClient();
+
+  async function readKey(partitionKey, rowKey) {
+    try {
+      const entity = await client.getEntity(partitionKey, rowKey);
+      return asPowerBiSettingValue(entity.valueJson);
+    } catch {
+      return "";
+    }
+  }
+
+  const output = {};
+  for (const key of keys) {
+    let value = await readKey(tenantId, key);
+    if (!value && tenantId !== PARTITION) {
+      value = await readKey(PARTITION, key);
+    }
+    output[key] = value;
+  }
+
+  return {
+    tenantId: output.POWERBI_TENANT_ID,
+    clientId: output.POWERBI_CLIENT_ID,
+    clientSecret: output.POWERBI_CLIENT_SECRET,
+    workspaceId: output.POWERBI_WORKSPACE_ID,
+    reportId: output.POWERBI_REPORT_ID,
+    reportWebUrl: output.POWERBI_REPORT_WEB_URL
+  };
+}
+
+async function getPowerBiConfig(req) {
+  const tenantId = resolveTenantId(req, null);
+  let settingConfig = null;
+  try {
+    settingConfig = await readPowerBiConfigFromSettings(tenantId);
+  } catch (_) {}
+
+  const envConfig = powerBiConfigFromEnv();
+  const resolved = {
+    tenantId: asString((settingConfig && settingConfig.tenantId) || envConfig.tenantId),
+    clientId: asString((settingConfig && settingConfig.clientId) || envConfig.clientId),
+    clientSecret: asString((settingConfig && settingConfig.clientSecret) || envConfig.clientSecret),
+    workspaceId: asString((settingConfig && settingConfig.workspaceId) || envConfig.workspaceId),
+    reportId: asString((settingConfig && settingConfig.reportId) || envConfig.reportId),
+    reportWebUrl: asString((settingConfig && settingConfig.reportWebUrl) || envConfig.reportWebUrl)
+  };
+
+  return {
+    tenantId,
+    config: resolved
+  };
+}
+
 function powerBiStatus(config) {
   const missingSecureKeys = [];
   if (!config.tenantId) missingSecureKeys.push("POWERBI_TENANT_ID");
@@ -180,8 +269,7 @@ async function powerBiEmbedToken(config, accessToken) {
   };
 }
 
-async function buildPowerBiEmbedConfig() {
-  const config = powerBiConfigFromEnv();
+async function buildPowerBiEmbedConfig(config) {
   const status = powerBiStatus(config);
   if (!status.secureEmbedReady) {
     return {
@@ -1369,24 +1457,29 @@ module.exports = async function (context, req) {
 
     if (scope === "powerbi-embed" || scope === "powerbi-config") {
       const includeToken = asBool(req && req.query && req.query.includeToken);
-      const status = powerBiStatus(powerBiConfigFromEnv());
+      const powerBiState = await getPowerBiConfig(req);
+      const status = powerBiStatus(powerBiState.config);
       if (!includeToken || !status.secureEmbedReady) {
         context.res = json(200, {
           ok: true,
           scope,
           powerBi: {
             ...status,
+            tenantId: powerBiState.tenantId,
             mode: status.secureEmbedReady ? "secure-embed" : (status.webEmbedReady ? "web" : "unconfigured")
           }
         });
         return;
       }
 
-      const embedConfig = await buildPowerBiEmbedConfig();
+      const embedConfig = await buildPowerBiEmbedConfig(powerBiState.config);
       context.res = json(200, {
         ok: true,
         scope,
-        powerBi: embedConfig
+        powerBi: {
+          ...embedConfig,
+          tenantId: powerBiState.tenantId
+        }
       });
       return;
     }

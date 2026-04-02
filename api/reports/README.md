@@ -60,7 +60,21 @@ Scoped endpoints return `rows` for one table and include shared metadata.
 
 ## Power BI embed config
 
-`/api/reports/powerbi-config` returns wiring status from app settings (safe response, no secrets):
+`/api/reports/powerbi-config` returns wiring status from app settings (safe response, no secrets).
+
+Tenant resolution:
+
+- request header: `x-tenant-id`
+- or query param: `tenantId`
+- or `DEFAULT_TENANT_ID` fallback
+
+Power BI key lookup order:
+
+1. `appsettings` row for the resolved tenant
+2. `appsettings` row in partition `main` (shared default)
+3. environment variables on the Function App
+
+Supported keys:
 
 - `POWERBI_TENANT_ID`
 - `POWERBI_CLIENT_ID`
@@ -91,3 +105,15 @@ Run `api/sql/reporting-schema.sql` in Azure SQL to create the reporting warehous
 - Power BI views (`reporting.v_powerbi_*`)
 
 The current API computes aggregates live from Azure Tables. Next ETL phase should populate `reporting.fact_*` and `reporting.agg_*` on a schedule.
+
+## API Storage Backend
+
+All report endpoints read via the API storage layer used by the app.
+
+- `DATA_BACKEND=table` reads Azure Table Storage entities directly.
+- `DATA_BACKEND=sql` reads entities from SQL-backed table `dbo.PathflowEntities`.
+
+SQL mode env vars:
+
+- `SQL_CONNECTION_STRING`
+- or `SQL_SERVER`, `SQL_DATABASE`, `SQL_USER`, `SQL_PASSWORD`

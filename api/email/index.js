@@ -1,4 +1,4 @@
-const { TableClient } = require("@azure/data-tables");
+const { TableClient } = require("../_shared/table-client");
 const { BlobServiceClient } = require("@azure/storage-blob");
 const { randomUUID } = require("crypto");
 const { resolveTenantId } = require("../_shared/tenant");

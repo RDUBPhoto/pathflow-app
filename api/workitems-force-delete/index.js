@@ -1,4 +1,4 @@
-const { TableClient } = require("@azure/data-tables");
+const { TableClient } = require("../_shared/table-client");
 const { resolveTenantId } = require("../_shared/tenant");
 
 const T_ITEMS = "workitems";

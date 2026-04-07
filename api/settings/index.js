@@ -1,5 +1,12 @@
-const { TableClient } = require("../_shared/table-client");
+const { TableClient, isSqlBackendEnabled } = require("../_shared/table-client");
 const { resolveTenantId } = require("../_shared/tenant");
+const { requirePrincipal } = require("../_shared/auth");
+let AzureTableClient = null;
+try {
+  AzureTableClient = require("@azure/data-tables").TableClient;
+} catch (_) {
+  AzureTableClient = null;
+}
 
 const TABLE = "appsettings";
 
@@ -47,12 +54,35 @@ function keyFromRequest(context, req) {
 
 async function getTableClient() {
   const conn = asString(process.env.STORAGE_CONNECTION_STRING);
-  if (!conn) throw new Error("Missing STORAGE_CONNECTION_STRING");
-  const client = TableClient.fromConnectionString(conn, TABLE);
+  if (!conn && !isSqlBackendEnabled()) throw new Error("Missing STORAGE_CONNECTION_STRING");
+  const client = TableClient.fromConnectionString(conn || "sql-backend", TABLE);
   try {
     await client.createTable();
   } catch (_) {}
   return client;
+}
+
+async function getLegacyTableClient() {
+  if (!isSqlBackendEnabled()) return null;
+  const conn = asString(process.env.STORAGE_CONNECTION_STRING);
+  if (!conn || !AzureTableClient) return null;
+  const client = AzureTableClient.fromConnectionString(conn, TABLE);
+  try {
+    await client.createTable();
+  } catch (_) {}
+  return client;
+}
+
+async function upsertSetting(client, tenantId, key, value, updatedAt) {
+  await client.upsertEntity(
+    {
+      partitionKey: tenantId,
+      rowKey: key,
+      valueJson: serializeValue(value),
+      updatedAt: asString(updatedAt) || new Date().toISOString()
+    },
+    "Merge"
+  );
 }
 
 async function getSetting(client, tenantId, key) {
@@ -94,14 +124,25 @@ module.exports = async function (context, req) {
     context.res = { status: 204 };
     return;
   }
+  const principal = await requirePrincipal(context, req);
+  if (!principal) return;
 
   try {
     const client = await getTableClient();
+    const legacyClient = await getLegacyTableClient();
 
     if (method === "GET") {
       const key = keyFromRequest(context, req);
       if (key) {
-        const setting = await getSetting(client, tenantId, key);
+        let setting = await getSetting(client, tenantId, key);
+        if (!setting && legacyClient) {
+          setting = await getSetting(legacyClient, tenantId, key);
+          if (setting) {
+            try {
+              await upsertSetting(client, tenantId, key, setting.value, setting.updatedAt);
+            } catch (_) {}
+          }
+        }
         if (!setting) {
           context.res = json(200, { ok: true, tenantId, key, value: null, updatedAt: "" });
           return;
@@ -110,7 +151,15 @@ module.exports = async function (context, req) {
         return;
       }
 
-      const items = await listSettings(client, tenantId);
+      let items = await listSettings(client, tenantId);
+      if (!items.length && legacyClient) {
+        items = await listSettings(legacyClient, tenantId);
+        for (const item of items) {
+          try {
+            await upsertSetting(client, tenantId, item.key, item.value, item.updatedAt);
+          } catch (_) {}
+        }
+      }
       context.res = json(200, { ok: true, tenantId, items });
       return;
     }
@@ -131,20 +180,22 @@ module.exports = async function (context, req) {
       try {
         await client.deleteEntity(tenantId, key);
       } catch (_) {}
+      if (legacyClient) {
+        try {
+          await legacyClient.deleteEntity(tenantId, key);
+        } catch (_) {}
+      }
       context.res = json(200, { ok: true, tenantId, key, deleted: true });
       return;
     }
 
     const now = new Date().toISOString();
-    await client.upsertEntity(
-      {
-        partitionKey: tenantId,
-        rowKey: key,
-        valueJson: serializeValue(body.value),
-        updatedAt: now
-      },
-      "Merge"
-    );
+    await upsertSetting(client, tenantId, key, body.value, now);
+    if (legacyClient) {
+      try {
+        await upsertSetting(legacyClient, tenantId, key, body.value, now);
+      } catch (_) {}
+    }
 
     context.res = json(200, {
       ok: true,

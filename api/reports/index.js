@@ -1563,7 +1563,22 @@ module.exports = async function (context, req) {
         return;
       }
 
-      const embedConfig = await buildPowerBiEmbedConfig(powerBiState.config);
+      let embedConfig;
+      try {
+        embedConfig = await buildPowerBiEmbedConfig(powerBiState.config);
+      } catch (err) {
+        context.res = json(200, {
+          ok: true,
+          scope,
+          powerBi: {
+            ...status,
+            tenantId: powerBiState.tenantId,
+            mode: status.webEmbedReady ? "web" : "unconfigured",
+            error: String((err && err.message) || err || "Power BI embed configuration failed.")
+          }
+        });
+        return;
+      }
       context.res = json(200, {
         ok: true,
         scope,

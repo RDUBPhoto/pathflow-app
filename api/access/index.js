@@ -6,13 +6,24 @@ const {
 } = require("../_shared/table-client");
 const { randomUUID } = require("crypto");
 const { sanitizeTenantId } = require("../_shared/tenant");
+const {
+  hashPassword,
+  verifyPassword,
+  resolvePrincipal: resolveAuthPrincipal,
+  issueSession,
+  revokeSession,
+  createSessionCookie,
+  clearSessionCookie
+} = require("../_shared/auth");
 
 const USERS_TABLE = "useraccess";
 const TENANTS_TABLE = "tenants";
 const EMAIL_VERIFICATIONS_TABLE = "emailverifications";
+const LOCAL_ACCOUNTS_TABLE = "authlocalaccounts";
 const USERS_PARTITION = "v1";
 const TENANTS_PARTITION = "v1";
 const EMAIL_VERIFICATIONS_PARTITION = "v1";
+const LOCAL_ACCOUNTS_PARTITION = "v1";
 const VERIFY_TOKEN_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7;
 
 function asString(value) {
@@ -113,7 +124,14 @@ function normalizeBaseUrl(rawValue, fallbackProto = "https") {
 }
 
 function readQueryParam(req, key) {
-  if (req && req.query && req.query[key] != null) return asString(req.query[key]);
+  if (req && req.query && typeof req.query === "object") {
+    if (req.query[key] != null) return asString(req.query[key]);
+    const normalized = asString(key).toLowerCase();
+    for (const [name, value] of Object.entries(req.query)) {
+      if (asString(name).toLowerCase() !== normalized) continue;
+      return asString(value);
+    }
+  }
   const rawUrl = asString(req && req.url);
   if (!rawUrl || !rawUrl.includes("?")) return "";
   try {
@@ -130,6 +148,18 @@ function escapedFilterValue(value) {
 
 function normalizeEmail(value) {
   return asString(value).toLowerCase();
+}
+
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(value));
+}
+
+function normalizePhone(value) {
+  const digits = asString(value).replace(/\D+/g, "");
+  if (!digits) return "";
+  if (digits.length === 11 && digits.startsWith("1")) return digits.slice(1);
+  if (digits.length > 10) return digits.slice(-10);
+  return digits;
 }
 
 function normalizeRole(value) {
@@ -571,6 +601,71 @@ async function getUserEntity(userClient, email) {
   }
 }
 
+async function getLocalAccountEntity(localAccountClient, email) {
+  const rowKey = normalizeEmail(email);
+  if (!rowKey) return null;
+  try {
+    return await localAccountClient.getEntity(LOCAL_ACCOUNTS_PARTITION, rowKey);
+  } catch {
+    return null;
+  }
+}
+
+async function upsertLocalAccount(localAccountClient, account) {
+  const email = normalizeEmail(account && account.email);
+  if (!email) throw new Error("Email is required.");
+  const now = new Date().toISOString();
+  const existing = await getLocalAccountEntity(localAccountClient, email);
+  const displayName = asString(account && account.displayName);
+  const phone = normalizePhone(account && account.phone);
+  const password = asString(account && account.password);
+  if (password.length < 8) {
+    throw new Error("Password must be at least 8 characters.");
+  }
+  const hashed = hashPassword(password);
+  await localAccountClient.upsertEntity(
+    {
+      partitionKey: LOCAL_ACCOUNTS_PARTITION,
+      rowKey: email,
+      email,
+      displayName: displayName || email,
+      phone,
+      passwordHash: hashed.hash,
+      passwordSalt: hashed.salt,
+      passwordIterations: hashed.iterations,
+      passwordDigest: hashed.digest,
+      status: "active",
+      updatedAt: now,
+      createdAt: asString(existing && existing.createdAt) || now
+    },
+    "Merge"
+  );
+  return getLocalAccountEntity(localAccountClient, email);
+}
+
+async function updateLocalAccountPassword(localAccountClient, emailInput, passwordInput) {
+  const email = normalizeEmail(emailInput);
+  const password = asString(passwordInput);
+  if (!email) throw new Error("Email is required.");
+  if (password.length < 8) throw new Error("New password must be at least 8 characters.");
+  const existing = await getLocalAccountEntity(localAccountClient, email);
+  if (!existing) return null;
+  const hashed = hashPassword(password);
+  await localAccountClient.upsertEntity(
+    {
+      partitionKey: LOCAL_ACCOUNTS_PARTITION,
+      rowKey: email,
+      passwordHash: hashed.hash,
+      passwordSalt: hashed.salt,
+      passwordIterations: hashed.iterations,
+      passwordDigest: hashed.digest,
+      updatedAt: new Date().toISOString()
+    },
+    "Merge"
+  );
+  return getLocalAccountEntity(localAccountClient, email);
+}
+
 function parseUserLocationIds(userEntity) {
   const parsed = parseJson(userEntity && userEntity.locationIdsJson, []);
   const out = [];
@@ -869,6 +964,17 @@ function json(status, body) {
   };
 }
 
+function jsonWithHeaders(status, body, extraHeaders) {
+  return {
+    status,
+    headers: {
+      "content-type": "application/json",
+      ...(extraHeaders || {})
+    },
+    body
+  };
+}
+
 async function issueEmailVerificationToken(tokenClient, payload) {
   const token = randomUUID().replace(/-/g, "");
   const now = new Date();
@@ -944,7 +1050,10 @@ async function sendWelcomeEmail(context, payload) {
 function buildPasswordResetUrl(req) {
   const explicit = asString(process.env.PASSWORD_RESET_URL);
   if (explicit) return explicit;
-  return "https://passwordreset.microsoftonline.com/";
+  const base = buildVerifyBaseUrl(req);
+  const login = new URL("/login", `${base}/`);
+  login.searchParams.set("reset", "1");
+  return login.toString();
 }
 
 function buildInviteLoginUrl(req, payload) {
@@ -1143,6 +1252,7 @@ async function handleVerifyEmailRequest(context, req, clients) {
 module.exports = async function (context, req) {
   const method = asString(req && req.method).toUpperCase() || "GET";
   const opFromQuery = asString(readQueryParam(req, "op")).toLowerCase();
+  const scopeFromQuery = asString(readQueryParam(req, "scope")).toLowerCase();
   if (method === "OPTIONS") {
     context.res = { status: 204 };
     return;
@@ -1173,14 +1283,141 @@ module.exports = async function (context, req) {
     if (method === "POST") {
       const anonymousBody = asObject(req && req.body);
       const anonymousOp = asString(anonymousBody.op).toLowerCase();
+
+      if (anonymousOp === "password-signup") {
+        const authConfig = getAuthRuntimeConfig();
+        if (!authConfig.localPasswordEnabled && !isLocalRequest(req)) {
+          context.res = json(403, { ok: false, error: "Email/password authentication is disabled." });
+          return;
+        }
+        const email = normalizeEmail(anonymousBody.email);
+        const password = asString(anonymousBody.password);
+        const displayName = asString(anonymousBody.displayName);
+        const phone = normalizePhone(anonymousBody.phone);
+        if (!isValidEmail(email)) {
+          context.res = json(400, { ok: false, error: "Enter a valid email address." });
+          return;
+        }
+        if (displayName.length < 2) {
+          context.res = json(400, { ok: false, error: "Enter your full name." });
+          return;
+        }
+        if (phone.length < 10) {
+          context.res = json(400, { ok: false, error: "Enter a valid phone number." });
+          return;
+        }
+        if (password.length < 8) {
+          context.res = json(400, { ok: false, error: "Password must be at least 8 characters." });
+          return;
+        }
+
+        const userClient = await getTableClient(connectionString, USERS_TABLE);
+        const localAccountClient = await getTableClient(connectionString, LOCAL_ACCOUNTS_TABLE);
+        const existingAccount = await getLocalAccountEntity(localAccountClient, email);
+        if (existingAccount) {
+          context.res = json(409, { ok: false, error: "An account with this email already exists. Try signing in." });
+          return;
+        }
+
+        await upsertLocalAccount(localAccountClient, {
+          email,
+          password,
+          displayName,
+          phone
+        });
+
+        const userEntity = await getUserEntity(userClient, email);
+        if (userIsRevoked(userEntity)) {
+          context.res = json(403, { ok: false, error: "Your account access has been removed. Contact your workspace admin." });
+          return;
+        }
+        const roles = userEntity ? parseUserRoles(userEntity) : normalizeRoleList(["authenticated"]);
+        const session = await issueSession({
+          userId: asString((userEntity && userEntity.userId) || email),
+          email,
+          displayName: displayName || email,
+          identityProvider: "app-password",
+          userRoles: roles
+        });
+        context.res = jsonWithHeaders(200, {
+          ok: true,
+          session: {
+            expiresAt: session.expiresAt,
+            identityProvider: "app-password"
+          }
+        }, {
+          "set-cookie": createSessionCookie(session.token)
+        });
+        return;
+      }
+
+      if (anonymousOp === "password-login") {
+        const authConfig = getAuthRuntimeConfig();
+        if (!authConfig.localPasswordEnabled && !isLocalRequest(req)) {
+          context.res = json(403, { ok: false, error: "Email/password authentication is disabled." });
+          return;
+        }
+        const email = normalizeEmail(anonymousBody.email);
+        const password = asString(anonymousBody.password);
+        if (!isValidEmail(email) || !password) {
+          context.res = json(400, { ok: false, error: "Email and password are required." });
+          return;
+        }
+        const localAccountClient = await getTableClient(connectionString, LOCAL_ACCOUNTS_TABLE);
+        const account = await getLocalAccountEntity(localAccountClient, email);
+        if (!account || !verifyPassword(password, account)) {
+          context.res = json(401, { ok: false, error: "Invalid email or password." });
+          return;
+        }
+        if (asString(account.status).toLowerCase() === "disabled") {
+          context.res = json(403, { ok: false, error: "This account has been disabled." });
+          return;
+        }
+
+        const userClient = await getTableClient(connectionString, USERS_TABLE);
+        const userEntity = await getUserEntity(userClient, email);
+        if (userIsRevoked(userEntity)) {
+          context.res = json(403, { ok: false, error: "Your account access has been removed. Contact your workspace admin." });
+          return;
+        }
+        const roles = userEntity ? parseUserRoles(userEntity) : normalizeRoleList(["authenticated"]);
+        const session = await issueSession({
+          userId: asString((userEntity && userEntity.userId) || email),
+          email,
+          displayName: asString((account && account.displayName) || email),
+          identityProvider: "app-password",
+          userRoles: roles
+        });
+        context.res = jsonWithHeaders(200, {
+          ok: true,
+          session: {
+            expiresAt: session.expiresAt,
+            identityProvider: "app-password"
+          }
+        }, {
+          "set-cookie": createSessionCookie(session.token)
+        });
+        return;
+      }
+
+      if (anonymousOp === "logout") {
+        await revokeSession(req);
+        context.res = jsonWithHeaders(200, { ok: true }, {
+          "set-cookie": clearSessionCookie()
+        });
+        return;
+      }
+
       if (anonymousOp === "request-password-reset") {
         const userClient = await getTableClient(connectionString, USERS_TABLE);
         const tenantClient = await getTableClient(connectionString, TENANTS_TABLE);
+        const localAccountClient = await getTableClient(connectionString, LOCAL_ACCOUNTS_TABLE);
         const targetEmail = normalizeEmail(anonymousBody.email);
         const targetTenantId = sanitizeTenantId(asString(anonymousBody.tenantId));
         if (targetEmail) {
           const targetUser = await getUserEntity(userClient, targetEmail);
-          if (targetUser) {
+          const localAccount = targetUser ? null : await getLocalAccountEntity(localAccountClient, targetEmail);
+          if (targetUser || localAccount) {
             let workspaceName = "your Pathflow workspace";
             if (targetTenantId) {
               try {
@@ -1190,7 +1427,7 @@ module.exports = async function (context, req) {
             }
             await sendPasswordResetEmail(context, req, {
               email: targetEmail,
-              displayName: asString(targetUser.displayName || targetEmail),
+              displayName: asString((targetUser && targetUser.displayName) || (localAccount && localAccount.displayName) || targetEmail),
               workspaceName
             });
           }
@@ -1203,9 +1440,28 @@ module.exports = async function (context, req) {
       }
     }
 
-    const principal = resolvePrincipal(req);
+    const principal = await resolveAuthPrincipal(req);
     if (!principal) {
-      context.res = json(401, { ok: false, error: "Not authenticated." });
+      const allowAnonymousProfileProbe = method === "GET" && (
+        scopeFromQuery === "me" ||
+        (isLocalRequest(req) && !scopeFromQuery)
+      );
+      if (allowAnonymousProfileProbe) {
+        context.res = jsonWithHeaders(200, {
+          ok: false,
+          error: "Not authenticated.",
+          principal: null,
+          profile: null,
+          roles: [],
+          canBootstrap: false
+        }, {
+          "set-cookie": clearSessionCookie()
+        });
+        return;
+      }
+      context.res = jsonWithHeaders(401, { ok: false, error: "Not authenticated." }, {
+        "set-cookie": clearSessionCookie()
+      });
       return;
     }
 
@@ -1426,6 +1682,26 @@ module.exports = async function (context, req) {
       const newPassword = asString(body.newPassword);
       if (newPassword.length < 8) {
         context.res = json(400, { ok: false, error: "New password must be at least 8 characters." });
+        return;
+      }
+      const identityProvider = asString(principal.identityProvider).toLowerCase();
+      if (identityProvider === "app-password") {
+        const localAccountClient = await getTableClient(connectionString, LOCAL_ACCOUNTS_TABLE);
+        const account = await getLocalAccountEntity(localAccountClient, principal.email);
+        if (!account) {
+          context.res = json(404, { ok: false, error: "No email/password account was found for this user." });
+          return;
+        }
+        const currentPassword = asString(body.currentPassword);
+        if (currentPassword && !verifyPassword(currentPassword, account)) {
+          context.res = json(400, { ok: false, error: "Current password is incorrect." });
+          return;
+        }
+        await updateLocalAccountPassword(localAccountClient, principal.email, newPassword);
+        context.res = json(200, {
+          ok: true,
+          message: "Password updated successfully."
+        });
         return;
       }
       await sendPasswordResetEmail(context, req, {

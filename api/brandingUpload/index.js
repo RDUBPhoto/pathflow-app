@@ -1,5 +1,6 @@
 const { BlobServiceClient } = require("@azure/storage-blob");
 const { resolveTenantId } = require("../_shared/tenant");
+const { requirePrincipal } = require("../_shared/auth");
 
 const CONTAINER = "branding";
 const ORIGIN = process.env.CORS_ORIGIN || "*";
@@ -13,6 +14,47 @@ const cors = {
 
 function asString(value) {
   return value == null ? "" : String(value).trim();
+}
+
+function readHeader(headers, key) {
+  if (!headers || typeof headers !== "object") return "";
+  if (headers[key] != null) return asString(headers[key]);
+  const normalized = asString(key).toLowerCase();
+  for (const [name, value] of Object.entries(headers)) {
+    if (asString(name).toLowerCase() !== normalized) continue;
+    return asString(value);
+  }
+  return "";
+}
+
+function normalizeHost(rawHost) {
+  const first = asString(rawHost).split(",")[0].trim().toLowerCase();
+  if (!first) return "";
+  if (first.startsWith("http://") || first.startsWith("https://")) {
+    try {
+      return asString(new URL(first).host).toLowerCase();
+    } catch {
+      return "";
+    }
+  }
+  return first;
+}
+
+function isLoopbackHost(rawHost) {
+  const host = normalizeHost(rawHost);
+  if (!host) return false;
+  const hostname = host.split(":")[0].toLowerCase();
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "::1" ||
+    hostname.endsWith(".localhost")
+  );
+}
+
+function isLocalRequest(req) {
+  const host = readHeader(req && req.headers, "x-forwarded-host") || readHeader(req && req.headers, "host");
+  return isLoopbackHost(host);
 }
 
 function sanitizeFileName(name) {
@@ -97,6 +139,10 @@ module.exports = async function (context, req) {
     if (method === "OPTIONS") {
       context.res = { status: 204, headers: cors };
       return;
+    }
+    if (method !== "GET" && !isLocalRequest(req)) {
+      const principal = await requirePrincipal(context, req);
+      if (!principal) return;
     }
 
     const body = asObject(req && req.body);

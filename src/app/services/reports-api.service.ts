@@ -145,6 +145,8 @@ export type PowerBiConfigResponse = {
     embedTokenId?: string | null;
     embedTokenExpiration?: string | null;
     workspaceId?: string | null;
+    tenantId?: string | null;
+    error?: string | null;
   };
 };
 
@@ -183,6 +185,11 @@ export class ReportsApiService {
   getPowerBiConfig(includeToken = false): Observable<PowerBiConfigResponse> {
     const params = includeToken ? new HttpParams().set('includeToken', 'true') : undefined;
     return this.http.get<PowerBiConfigResponse>('/api/reports/powerbi-config', { params });
+  }
+
+  getPowerBiEmbedConfig(includeToken = true): Observable<PowerBiConfigResponse> {
+    const params = includeToken ? new HttpParams().set('includeToken', 'true') : undefined;
+    return this.http.get<PowerBiConfigResponse>('/api/reports/powerbi-embed', { params });
   }
 
   seedDemoData(): Observable<ReportsSeedDemoResponse> {

@@ -59,6 +59,14 @@
         Open Power BI
       </ion-button>
       <ion-button
+        size="small"
+        fill="outline"
+        (click)="loadPowerBiConfig()"
+        [disabled]="powerBiLoading()"
+      >
+        {{ powerBiLoading() ? 'Connecting Power BI...' : 'Reconnect Power BI' }}
+      </ion-button>
+      <ion-button
         *ngIf="demoToolsEnabled"
         size="small"
         fill="outline"
@@ -80,6 +88,41 @@
 
   <div class="reports-feedback success" *ngIf="info()">{{ info() }}</div>
   <div class="reports-feedback error" *ngIf="error()">{{ error() }}</div>
+
+  <section class="powerbi-panel glass-surface" *ngIf="powerBi() as pbi">
+    <header class="powerbi-panel-head">
+      <h3>Power BI Report</h3>
+      <ion-badge [color]="pbi.configured ? 'success' : 'warning'">
+        {{ pbi.mode === 'secure-embed' ? 'Secure Embed' : (pbi.mode === 'web' ? 'Web Embed' : 'Unconfigured') }}
+      </ion-badge>
+    </header>
+
+    <div class="powerbi-panel-note" *ngIf="powerBiMissingKeys().length">
+      Missing secure keys: {{ powerBiMissingKeys().join(', ') }}
+    </div>
+    <div class="powerbi-panel-note" *ngIf="pbi.error">{{ pbi.error }}</div>
+
+    <div class="powerbi-iframe-wrap" *ngIf="pbi.mode === 'web' && powerBiWebUrl() as webUrl; else secureOrEmpty">
+      <iframe
+        class="powerbi-iframe"
+        [src]="webUrl"
+        title="Power BI Web Report"
+        loading="lazy"
+        referrerpolicy="strict-origin-when-cross-origin"
+        allowfullscreen>
+      </iframe>
+    </div>
+
+    <ng-template #secureOrEmpty>
+      <div class="powerbi-embed-host" *ngIf="pbi.mode === 'secure-embed'; else powerBiNotReady" #powerBiEmbedHost></div>
+    </ng-template>
+
+    <ng-template #powerBiNotReady>
+      <div class="reports-empty">
+        Power BI is not fully configured yet. Set workspace/report IDs (and optional secure embed keys) in Admin settings.
+      </div>
+    </ng-template>
+  </section>
 
   <div class="reports-stack">
     <section class="kpi-grid" *ngIf="kpi() as kpi">

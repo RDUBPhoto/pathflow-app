@@ -1,6 +1,7 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, OnInit, AfterViewInit, OnDestroy, ElementRef, ViewChild, computed, inject, signal } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
+import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import {
   IonBadge,
   IonButton,
@@ -41,6 +42,7 @@ import {
   ReportsSalesTrendRow
 } from '../../services/reports-api.service';
 import { environment } from '../../../environments/environment';
+import * as powerbi from 'powerbi-client';
 
 @Component({
   selector: 'app-reports',
@@ -66,9 +68,18 @@ import { environment } from '../../../environments/environment';
   templateUrl: './reports.component.html',
   styleUrls: ['./reports.component.scss']
 })
-export default class ReportsComponent implements OnInit {
+export default class ReportsComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly pageSize = 12;
   private readonly reportsApi = inject(ReportsApiService);
+  private readonly sanitizer = inject(DomSanitizer);
+  private readonly powerBiService = new powerbi.service.Service(
+    powerbi.factories.hpmFactory,
+    powerbi.factories.wpmpFactory,
+    powerbi.factories.routerFactory
+  );
+  private powerBiReport: powerbi.Report | null = null;
+  private powerBiHostEl: HTMLDivElement | null = null;
+  private viewInitialized = false;
 
   readonly reportView = signal<
     | 'all'
@@ -88,6 +99,8 @@ export default class ReportsComponent implements OnInit {
   readonly openingCash = signal(0);
   readonly data = signal<ReportsResponse | null>(null);
   readonly powerBi = signal<PowerBiConfigResponse['powerBi'] | null>(null);
+  readonly powerBiLoading = signal(false);
+  readonly powerBiWebUrl = signal<SafeResourceUrl | null>(null);
   readonly seeding = signal(false);
   readonly demoToolsEnabled = !!environment.features?.demoTools;
   readonly trendPage = signal(1);
@@ -128,6 +141,13 @@ export default class ReportsComponent implements OnInit {
     const start = (page - 1) * this.pageSize;
     return this.cashflowForecast().slice(start, start + this.pageSize);
   });
+  readonly powerBiMissingKeys = computed(() => this.powerBi()?.missingSecureKeys || []);
+
+  @ViewChild('powerBiEmbedHost')
+  set powerBiEmbedHost(ref: ElementRef<HTMLDivElement> | undefined) {
+    this.powerBiHostEl = ref?.nativeElement || null;
+    this.renderPowerBiSecureEmbed();
+  }
 
   constructor() {
     addIcons({
@@ -142,6 +162,15 @@ export default class ReportsComponent implements OnInit {
   ngOnInit(): void {
     this.refresh();
     this.loadPowerBiConfig();
+  }
+
+  ngAfterViewInit(): void {
+    this.viewInitialized = true;
+    this.renderPowerBiSecureEmbed();
+  }
+
+  ngOnDestroy(): void {
+    this.resetPowerBiEmbed();
   }
 
   refresh(): void {
@@ -188,11 +217,141 @@ export default class ReportsComponent implements OnInit {
     });
   }
 
-  private loadPowerBiConfig(): void {
+  loadPowerBiConfig(): void {
+    this.powerBiLoading.set(true);
     this.reportsApi.getPowerBiConfig(false).subscribe({
-      next: res => this.powerBi.set(res.powerBi || null),
-      error: () => this.powerBi.set(null)
+      next: res => {
+        this.powerBi.set(res.powerBi || null);
+        this.powerBiWebUrl.set(this.buildPowerBiWebUrl(res.powerBi || null));
+        this.powerBiLoading.set(false);
+        if (res.powerBi?.secureEmbedReady || res.powerBi?.webEmbedReady) {
+          this.loadPowerBiEmbedConfig();
+        } else {
+          this.resetPowerBiEmbed();
+        }
+      },
+      error: () => {
+        this.powerBi.set(null);
+        this.powerBiWebUrl.set(null);
+        this.powerBiLoading.set(false);
+        this.resetPowerBiEmbed();
+      }
     });
+  }
+
+  private loadPowerBiEmbedConfig(): void {
+    this.powerBiLoading.set(true);
+    this.reportsApi.getPowerBiEmbedConfig(true).subscribe({
+      next: res => {
+        this.powerBi.set(res.powerBi || null);
+        this.powerBiWebUrl.set(this.buildPowerBiWebUrl(res.powerBi || null));
+        this.powerBiLoading.set(false);
+        this.renderPowerBiSecureEmbed();
+      },
+      error: err => {
+        this.powerBiLoading.set(false);
+        this.powerBiWebUrl.set(this.buildPowerBiWebUrl(this.powerBi()));
+        this.resetPowerBiEmbed();
+        this.error.set(this.extractError(err, 'Could not load Power BI embed configuration.'));
+      }
+    });
+  }
+
+  private buildPowerBiWebUrl(pbi: PowerBiConfigResponse['powerBi'] | null): SafeResourceUrl | null {
+    if (!pbi) return null;
+    const raw = this.toPowerBiWebEmbedUrl(pbi);
+    if (!raw) return null;
+    return this.sanitizer.bypassSecurityTrustResourceUrl(raw);
+  }
+
+  private toPowerBiWebEmbedUrl(pbi: PowerBiConfigResponse['powerBi'] | null): string {
+    if (!pbi) return '';
+    const reportWebUrl = String(pbi.reportWebUrl || '').trim();
+    const workspaceId = String(pbi.workspaceId || '').trim();
+    const reportId = String(pbi.reportId || '').trim();
+    const tenantId = String(pbi.tenantId || '').trim();
+    const fallbackHost = 'https://app.powerbi.com';
+
+    if (workspaceId && reportId) {
+      const url = new URL('/reportEmbed', fallbackHost);
+      url.searchParams.set('groupId', workspaceId);
+      url.searchParams.set('reportId', reportId);
+      url.searchParams.set('autoAuth', 'true');
+      if (tenantId) url.searchParams.set('ctid', tenantId);
+      url.searchParams.set('navContentPaneEnabled', 'false');
+      return url.toString();
+    }
+
+    if (!reportWebUrl) return '';
+    try {
+      const parsed = new URL(reportWebUrl);
+      const host = String(parsed.hostname || '').toLowerCase();
+      if (!host.endsWith('powerbi.com')) return '';
+      if (parsed.pathname.toLowerCase().includes('/reportembed')) {
+        if (!parsed.searchParams.has('navContentPaneEnabled')) {
+          parsed.searchParams.set('navContentPaneEnabled', 'false');
+        }
+        return parsed.toString();
+      }
+
+      const parts = parsed.pathname.split('/').filter(Boolean);
+      const groupsIndex = parts.findIndex(segment => segment.toLowerCase() === 'groups');
+      const reportsIndex = parts.findIndex(segment => segment.toLowerCase() === 'reports');
+      const groupId = groupsIndex >= 0 ? String(parts[groupsIndex + 1] || '').trim() : '';
+      const inferredReportId = reportsIndex >= 0 ? String(parts[reportsIndex + 1] || '').trim() : '';
+      if (groupId && inferredReportId) {
+        const embed = new URL('/reportEmbed', `${parsed.protocol}//${parsed.host}`);
+        embed.searchParams.set('groupId', groupId);
+        embed.searchParams.set('reportId', inferredReportId);
+        embed.searchParams.set('autoAuth', 'true');
+        if (tenantId) embed.searchParams.set('ctid', tenantId);
+        embed.searchParams.set('navContentPaneEnabled', 'false');
+        return embed.toString();
+      }
+      return '';
+    } catch {
+      return '';
+    }
+  }
+
+  private renderPowerBiSecureEmbed(): void {
+    if (!this.viewInitialized || !this.powerBiHostEl) return;
+    const pbi = this.powerBi();
+    this.resetPowerBiEmbed();
+    if (!pbi || pbi.mode !== 'secure-embed') return;
+    if (!pbi.embedUrl || !pbi.embedToken || !pbi.reportId) return;
+
+    const embedConfig: powerbi.IReportEmbedConfiguration = {
+      type: 'report',
+      tokenType: powerbi.models.TokenType.Embed,
+      accessToken: pbi.embedToken,
+      embedUrl: pbi.embedUrl,
+      id: pbi.reportId,
+      permissions: powerbi.models.Permissions.Read,
+      settings: {
+        panes: {
+          filters: { visible: false },
+          pageNavigation: { visible: true }
+        },
+        background: powerbi.models.BackgroundType.Transparent
+      }
+    };
+
+    this.powerBiReport = this.powerBiService.embed(this.powerBiHostEl, embedConfig) as powerbi.Report;
+    this.powerBiReport.off('error');
+    this.powerBiReport.on('error', (event: any) => {
+      const detail = String(event?.detail?.message || event?.message || '').trim();
+      this.error.set(detail ? `Power BI embed error: ${detail}` : 'Power BI embed error.');
+    });
+  }
+
+  private resetPowerBiEmbed(): void {
+    if (!this.powerBiHostEl) {
+      this.powerBiReport = null;
+      return;
+    }
+    this.powerBiService.reset(this.powerBiHostEl);
+    this.powerBiReport = null;
   }
 
   downloadCurrentReport(): void {

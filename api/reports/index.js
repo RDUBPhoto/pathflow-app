@@ -268,6 +268,7 @@ async function getPowerBiConfig(req) {
 }
 
 function powerBiStatus(config) {
+  const normalizedReportWebUrl = normalizePowerBiReportWebUrl(config && config.reportWebUrl);
   const missingSecureKeys = [];
   if (!config.tenantId) missingSecureKeys.push("POWERBI_TENANT_ID");
   if (!config.clientId) missingSecureKeys.push("POWERBI_CLIENT_ID");
@@ -276,15 +277,28 @@ function powerBiStatus(config) {
   if (!config.reportId) missingSecureKeys.push("POWERBI_REPORT_ID");
 
   const secureEmbedReady = missingSecureKeys.length === 0;
-  const webEmbedReady = !!config.reportWebUrl;
+  const webEmbedReady = !!normalizedReportWebUrl;
 
   return {
     secureEmbedReady,
     webEmbedReady,
     configured: secureEmbedReady || webEmbedReady,
     missingSecureKeys,
-    reportWebUrl: config.reportWebUrl || null
+    reportWebUrl: normalizedReportWebUrl || null
   };
+}
+
+function normalizePowerBiReportWebUrl(rawUrl) {
+  const candidate = asString(rawUrl);
+  if (!candidate) return "";
+  try {
+    const parsed = new URL(candidate);
+    const host = asString(parsed.hostname).toLowerCase();
+    if (!host || !host.endsWith("powerbi.com")) return "";
+    return parsed.toString();
+  } catch {
+    return "";
+  }
 }
 
 async function powerBiServiceToken(config) {

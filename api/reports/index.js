@@ -287,6 +287,24 @@ function mergePowerBiConfig(primary, fallback) {
   };
 }
 
+function replacePowerBiAuthBundle(baseConfig, authConfig) {
+  const base = baseConfig || emptyPowerBiConfig();
+  const auth = authConfig || emptyPowerBiConfig();
+  return {
+    tenantId: asString(auth.tenantId),
+    clientId: asString(auth.clientId),
+    clientSecret: asString(auth.clientSecret),
+    workspaceId: asString(base.workspaceId),
+    reportId: asString(base.reportId),
+    reportWebUrl: asString(base.reportWebUrl)
+  };
+}
+
+function hasPowerBiAuthBundle(config) {
+  const item = config || emptyPowerBiConfig();
+  return !!(asString(item.tenantId) && asString(item.clientId) && asString(item.clientSecret));
+}
+
 function hasAnyPowerBiValue(config) {
   const item = config || emptyPowerBiConfig();
   return !!(
@@ -306,39 +324,54 @@ async function readPowerBiConfigFromSettings(tenantId) {
   const tenantConfig = await readPowerBiConfigFromClient(client, tenantId);
   const mainConfig = await readPowerBiConfigFromClient(client, mainPartitionKey);
   let merged = mergePowerBiConfig(tenantConfig, mainConfig);
+  let legacyTenantConfig = emptyPowerBiConfig();
+  let legacyMainConfig = emptyPowerBiConfig();
 
   if (!hasAnyPowerBiValue(merged)) {
     const legacyClient = await getLegacySettingTableClient();
     if (legacyClient) {
-      const legacyTenantConfig = await readPowerBiConfigFromClient(legacyClient, tenantId);
-      const legacyMainConfig = await readPowerBiConfigFromClient(legacyClient, mainPartitionKey);
+      legacyTenantConfig = await readPowerBiConfigFromClient(legacyClient, tenantId);
+      legacyMainConfig = await readPowerBiConfigFromClient(legacyClient, mainPartitionKey);
       merged = mergePowerBiConfig(legacyTenantConfig, legacyMainConfig);
     }
   }
 
-  return merged;
+  return {
+    merged,
+    tenantConfig,
+    mainConfig,
+    legacyTenantConfig,
+    legacyMainConfig
+  };
 }
 
 async function getPowerBiConfig(req) {
   const tenantId = resolveTenantId(req, null);
-  let settingConfig = null;
+  let settingState = null;
   try {
-    settingConfig = await readPowerBiConfigFromSettings(tenantId);
+    settingState = await readPowerBiConfigFromSettings(tenantId);
   } catch (_) {}
 
   const envConfig = powerBiConfigFromEnv();
   const resolved = {
-    tenantId: asString((settingConfig && settingConfig.tenantId) || envConfig.tenantId),
-    clientId: asString((settingConfig && settingConfig.clientId) || envConfig.clientId),
-    clientSecret: asString((settingConfig && settingConfig.clientSecret) || envConfig.clientSecret),
-    workspaceId: asString((settingConfig && settingConfig.workspaceId) || envConfig.workspaceId),
-    reportId: asString((settingConfig && settingConfig.reportId) || envConfig.reportId),
-    reportWebUrl: asString((settingConfig && settingConfig.reportWebUrl) || envConfig.reportWebUrl)
+    tenantId: asString((settingState && settingState.merged && settingState.merged.tenantId) || envConfig.tenantId),
+    clientId: asString((settingState && settingState.merged && settingState.merged.clientId) || envConfig.clientId),
+    clientSecret: asString((settingState && settingState.merged && settingState.merged.clientSecret) || envConfig.clientSecret),
+    workspaceId: asString((settingState && settingState.merged && settingState.merged.workspaceId) || envConfig.workspaceId),
+    reportId: asString((settingState && settingState.merged && settingState.merged.reportId) || envConfig.reportId),
+    reportWebUrl: asString((settingState && settingState.merged && settingState.merged.reportWebUrl) || envConfig.reportWebUrl)
   };
 
   return {
     tenantId,
-    config: resolved
+    config: resolved,
+    sources: {
+      tenant: (settingState && settingState.tenantConfig) || emptyPowerBiConfig(),
+      main: (settingState && settingState.mainConfig) || emptyPowerBiConfig(),
+      legacyTenant: (settingState && settingState.legacyTenantConfig) || emptyPowerBiConfig(),
+      legacyMain: (settingState && settingState.legacyMainConfig) || emptyPowerBiConfig(),
+      env: envConfig
+    }
   };
 }
 
@@ -383,6 +416,97 @@ function withPowerBiErrorHint(rawError) {
   const invalidClient = lowered.includes("aadsts7000215") || lowered.includes("\"invalid_client\"") || lowered.includes("invalid client secret");
   if (!invalidClient) return base;
   return `${base} Hint: set POWERBI_CLIENT_SECRET to the secret Value (not Secret ID) for the same app as POWERBI_CLIENT_ID, then retry.`;
+}
+
+function maskClientId(value) {
+  const id = asString(value);
+  if (!id) return "";
+  if (id.length <= 8) return id;
+  return `${id.slice(0, 4)}...${id.slice(-4)}`;
+}
+
+function candidateIdentityKey(config) {
+  const item = config || emptyPowerBiConfig();
+  return [
+    asString(item.tenantId),
+    asString(item.clientId),
+    asString(item.clientSecret),
+    asString(item.workspaceId),
+    asString(item.reportId),
+    asString(item.reportWebUrl)
+  ].join("|");
+}
+
+function buildPowerBiConfigCandidates(baseConfig, sources) {
+  const out = [];
+  const seen = new Set();
+  const base = baseConfig || emptyPowerBiConfig();
+  const sourceMap = sources || {};
+
+  function addCandidate(config, label) {
+    const candidate = {
+      tenantId: asString(config && config.tenantId),
+      clientId: asString(config && config.clientId),
+      clientSecret: asString(config && config.clientSecret),
+      workspaceId: asString(config && config.workspaceId),
+      reportId: asString(config && config.reportId),
+      reportWebUrl: asString(config && config.reportWebUrl)
+    };
+    const key = `${label}:${candidateIdentityKey(candidate)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ config: candidate, label });
+  }
+
+  addCandidate(base, "resolved");
+  addCandidate(sourceMap.env, "env-full");
+  addCandidate(sourceMap.tenant, "tenant-full");
+  addCandidate(sourceMap.main, "main-full");
+  addCandidate(sourceMap.legacyTenant, "legacy-tenant-full");
+  addCandidate(sourceMap.legacyMain, "legacy-main-full");
+
+  const authSources = [
+    { label: "env-auth", value: sourceMap.env },
+    { label: "tenant-auth", value: sourceMap.tenant },
+    { label: "main-auth", value: sourceMap.main },
+    { label: "legacy-tenant-auth", value: sourceMap.legacyTenant },
+    { label: "legacy-main-auth", value: sourceMap.legacyMain }
+  ];
+  for (const source of authSources) {
+    if (!hasPowerBiAuthBundle(source.value)) continue;
+    addCandidate(replacePowerBiAuthBundle(base, source.value), source.label);
+  }
+
+  return out;
+}
+
+async function buildPowerBiEmbedConfigWithFallback(state) {
+  const candidates = buildPowerBiConfigCandidates(state && state.config, state && state.sources);
+  let lastError = null;
+  let tried = [];
+
+  for (const candidate of candidates) {
+    const status = powerBiStatus(candidate.config);
+    if (!status.secureEmbedReady) continue;
+    tried.push(`${candidate.label}:${maskClientId(candidate.config.clientId)}`);
+    try {
+      const embed = await buildPowerBiEmbedConfig(candidate.config);
+      return {
+        embed,
+        debug: {
+          source: candidate.label,
+          clientId: maskClientId(candidate.config.clientId),
+          tried
+        }
+      };
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  const fallbackError = lastError || new Error("Power BI embed configuration failed.");
+  fallbackError.powerBiTriedCandidates = tried;
+  throw fallbackError;
 }
 
 async function powerBiServiceToken(config) {
@@ -1662,9 +1786,13 @@ module.exports = async function (context, req) {
       }
 
       let embedConfig;
+      let embedDebug = null;
       try {
-        embedConfig = await buildPowerBiEmbedConfig(powerBiState.config);
+        const outcome = await buildPowerBiEmbedConfigWithFallback(powerBiState);
+        embedConfig = outcome.embed;
+        embedDebug = outcome.debug;
       } catch (err) {
+        const triedCandidates = Array.isArray(err && err.powerBiTriedCandidates) ? err.powerBiTriedCandidates : [];
         context.res = json(200, {
           ok: true,
           scope,
@@ -1672,7 +1800,8 @@ module.exports = async function (context, req) {
             ...status,
             tenantId: powerBiState.tenantId,
             mode: status.webEmbedReady ? "web" : "unconfigured",
-            error: withPowerBiErrorHint(String((err && err.message) || err || "Power BI embed configuration failed."))
+            error: withPowerBiErrorHint(String((err && err.message) || err || "Power BI embed configuration failed.")),
+            debug: triedCandidates.length ? { triedCandidates } : undefined
           }
         });
         return;
@@ -1682,7 +1811,8 @@ module.exports = async function (context, req) {
         scope,
         powerBi: {
           ...embedConfig,
-          tenantId: powerBiState.tenantId
+          tenantId: powerBiState.tenantId,
+          debug: embedDebug || undefined
         }
       });
       return;

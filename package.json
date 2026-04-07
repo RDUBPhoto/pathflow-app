@@ -37,6 +37,7 @@
     "@daypilot/daypilot-lite-angular": "^5.3.1",
     "@ionic/angular": "^8.7.4",
     "ionicons": "^8.0.13",
+    "powerbi-client": "^2.23.10",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0",
     "xlsx": "^0.18.5",

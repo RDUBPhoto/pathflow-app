@@ -1,5 +1,11 @@
-const { TableClient } = require("../_shared/table-client");
+const { TableClient, isSqlBackendEnabled } = require("../_shared/table-client");
 const { resolveTenantId } = require("../_shared/tenant");
+let AzureTableClient = null;
+try {
+  AzureTableClient = require("@azure/data-tables").TableClient;
+} catch (_) {
+  AzureTableClient = null;
+}
 let requirePrincipal = async function defaultRequirePrincipal(context) {
   context.res = {
     status: 401,
@@ -16,6 +22,14 @@ try {
 } catch (_) {}
 
 const SETTINGS_TABLE = "appsettings";
+const POWERBI_SETTING_KEYS = [
+  "POWERBI_TENANT_ID",
+  "POWERBI_CLIENT_ID",
+  "POWERBI_CLIENT_SECRET",
+  "POWERBI_WORKSPACE_ID",
+  "POWERBI_REPORT_ID",
+  "POWERBI_REPORT_WEB_URL"
+];
 const TABLES = {
   lanes: "lanes",
   workItems: "workitems",
@@ -199,27 +213,51 @@ function asPowerBiSettingValue(raw) {
 
 async function getSettingTableClient() {
   const conn = asString(process.env.STORAGE_CONNECTION_STRING);
-  if (!conn) throw new Error("Missing STORAGE_CONNECTION_STRING");
-  const client = TableClient.fromConnectionString(conn, SETTINGS_TABLE);
+  if (!conn && !isSqlBackendEnabled()) throw new Error("Missing STORAGE_CONNECTION_STRING");
+  const client = TableClient.fromConnectionString(conn || "sql-backend", SETTINGS_TABLE);
   try {
     await client.createTable();
   } catch (_) {}
   return client;
 }
 
-async function readPowerBiConfigFromSettings(tenantId) {
-  const keys = [
-    "POWERBI_TENANT_ID",
-    "POWERBI_CLIENT_ID",
-    "POWERBI_CLIENT_SECRET",
-    "POWERBI_WORKSPACE_ID",
-    "POWERBI_REPORT_ID",
-    "POWERBI_REPORT_WEB_URL"
-  ];
+async function getLegacySettingTableClient() {
+  if (!isSqlBackendEnabled()) return null;
+  const conn = asString(process.env.STORAGE_CONNECTION_STRING);
+  if (!conn || !AzureTableClient) return null;
+  const client = AzureTableClient.fromConnectionString(conn, SETTINGS_TABLE);
+  try {
+    await client.createTable();
+  } catch (_) {}
+  return client;
+}
 
-  const client = await getSettingTableClient();
+function emptyPowerBiConfig() {
+  return {
+    tenantId: "",
+    clientId: "",
+    clientSecret: "",
+    workspaceId: "",
+    reportId: "",
+    reportWebUrl: ""
+  };
+}
 
-  async function readKey(partitionKey, rowKey) {
+function mapPowerBiSettingKey(key) {
+  if (key === "POWERBI_TENANT_ID") return "tenantId";
+  if (key === "POWERBI_CLIENT_ID") return "clientId";
+  if (key === "POWERBI_CLIENT_SECRET") return "clientSecret";
+  if (key === "POWERBI_WORKSPACE_ID") return "workspaceId";
+  if (key === "POWERBI_REPORT_ID") return "reportId";
+  if (key === "POWERBI_REPORT_WEB_URL") return "reportWebUrl";
+  return "";
+}
+
+async function readPowerBiConfigFromClient(client, partitionKey) {
+  const output = emptyPowerBiConfig();
+  if (!client || !partitionKey) return output;
+
+  async function readKey(rowKey) {
     try {
       const entity = await client.getEntity(partitionKey, rowKey);
       return asPowerBiSettingValue(entity.valueJson);
@@ -228,20 +266,57 @@ async function readPowerBiConfigFromSettings(tenantId) {
     }
   }
 
-  const output = {};
-  for (const key of keys) {
-    const value = await readKey(tenantId, key);
-    output[key] = value;
+  for (const key of POWERBI_SETTING_KEYS) {
+    const targetField = mapPowerBiSettingKey(key);
+    if (!targetField) continue;
+    output[targetField] = await readKey(key);
+  }
+  return output;
+}
+
+function mergePowerBiConfig(primary, fallback) {
+  const left = primary || emptyPowerBiConfig();
+  const right = fallback || emptyPowerBiConfig();
+  return {
+    tenantId: asString(left.tenantId || right.tenantId),
+    clientId: asString(left.clientId || right.clientId),
+    clientSecret: asString(left.clientSecret || right.clientSecret),
+    workspaceId: asString(left.workspaceId || right.workspaceId),
+    reportId: asString(left.reportId || right.reportId),
+    reportWebUrl: asString(left.reportWebUrl || right.reportWebUrl)
+  };
+}
+
+function hasAnyPowerBiValue(config) {
+  const item = config || emptyPowerBiConfig();
+  return !!(
+    asString(item.tenantId) ||
+    asString(item.clientId) ||
+    asString(item.clientSecret) ||
+    asString(item.workspaceId) ||
+    asString(item.reportId) ||
+    asString(item.reportWebUrl)
+  );
+}
+
+async function readPowerBiConfigFromSettings(tenantId) {
+  const client = await getSettingTableClient();
+  const mainPartitionKey = "main";
+
+  const tenantConfig = await readPowerBiConfigFromClient(client, tenantId);
+  const mainConfig = await readPowerBiConfigFromClient(client, mainPartitionKey);
+  let merged = mergePowerBiConfig(tenantConfig, mainConfig);
+
+  if (!hasAnyPowerBiValue(merged)) {
+    const legacyClient = await getLegacySettingTableClient();
+    if (legacyClient) {
+      const legacyTenantConfig = await readPowerBiConfigFromClient(legacyClient, tenantId);
+      const legacyMainConfig = await readPowerBiConfigFromClient(legacyClient, mainPartitionKey);
+      merged = mergePowerBiConfig(legacyTenantConfig, legacyMainConfig);
+    }
   }
 
-  return {
-    tenantId: output.POWERBI_TENANT_ID,
-    clientId: output.POWERBI_CLIENT_ID,
-    clientSecret: output.POWERBI_CLIENT_SECRET,
-    workspaceId: output.POWERBI_WORKSPACE_ID,
-    reportId: output.POWERBI_REPORT_ID,
-    reportWebUrl: output.POWERBI_REPORT_WEB_URL
-  };
+  return merged;
 }
 
 async function getPowerBiConfig(req) {
@@ -299,6 +374,15 @@ function normalizePowerBiReportWebUrl(rawUrl) {
   } catch {
     return "";
   }
+}
+
+function withPowerBiErrorHint(rawError) {
+  const base = asString(rawError);
+  if (!base) return "Power BI embed configuration failed.";
+  const lowered = base.toLowerCase();
+  const invalidClient = lowered.includes("aadsts7000215") || lowered.includes("\"invalid_client\"") || lowered.includes("invalid client secret");
+  if (!invalidClient) return base;
+  return `${base} Hint: set POWERBI_CLIENT_SECRET to the secret Value (not Secret ID) for the same app as POWERBI_CLIENT_ID, then retry.`;
 }
 
 async function powerBiServiceToken(config) {
@@ -1588,7 +1672,7 @@ module.exports = async function (context, req) {
             ...status,
             tenantId: powerBiState.tenantId,
             mode: status.webEmbedReady ? "web" : "unconfigured",
-            error: String((err && err.message) || err || "Power BI embed configuration failed.")
+            error: withPowerBiErrorHint(String((err && err.message) || err || "Power BI embed configuration failed."))
           }
         });
         return;

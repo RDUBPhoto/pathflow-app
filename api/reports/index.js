@@ -1,5 +1,6 @@
 const { TableClient } = require("../_shared/table-client");
 const { resolveTenantId } = require("../_shared/tenant");
+const { requirePrincipal } = require("../_shared/auth");
 
 const SETTINGS_TABLE = "appsettings";
 const TABLES = {
@@ -38,6 +39,77 @@ function asNumber(value, fallback = 0) {
 
 function asBool(value) {
   return value === true || value === "true" || value === 1 || value === "1";
+}
+
+function constantTimeEqual(left, right) {
+  const a = Buffer.from(asString(left));
+  const b = Buffer.from(asString(right));
+  if (!a.length || !b.length) return false;
+  if (a.length !== b.length) return false;
+  try {
+    return require("crypto").timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
+
+function readHeader(req, key) {
+  if (!req || !req.headers || typeof req.headers !== "object") return "";
+  if (req.headers[key] != null) return asString(req.headers[key]);
+  const normalized = asString(key).toLowerCase();
+  for (const [name, value] of Object.entries(req.headers)) {
+    if (asString(name).toLowerCase() !== normalized) continue;
+    return asString(value);
+  }
+  return "";
+}
+
+function readIngestApiKey(req) {
+  const query = (req && req.query) || {};
+  const fromQuery = asString(query.apiKey || query.apikey || query.key || query.reportsKey);
+  if (fromQuery) return fromQuery;
+  const fromHeader = asString(
+    readHeader(req, "x-reports-api-key") ||
+    readHeader(req, "x-api-key")
+  );
+  if (fromHeader) return fromHeader;
+  const authorization = asString(readHeader(req, "authorization"));
+  const bearerMatch = authorization.match(/^Bearer\s+(.+)$/i);
+  return asString((bearerMatch && bearerMatch[1]) || "");
+}
+
+function allowApiKeyRead(req, method, scope) {
+  if (asString(method).toUpperCase() !== "GET") return false;
+  const normalizedScope = asString(scope).toLowerCase();
+  const allowedScopes = new Set([
+    "",
+    "all",
+    "powerbi",
+    "export",
+    "overview",
+    "summary",
+    "kpis",
+    "funnel",
+    "sales-trend",
+    "trend",
+    "trends",
+    "invoice-aging",
+    "aging",
+    "lead-sources",
+    "sources",
+    "communications",
+    "communication-volume",
+    "production-forecast",
+    "productionforecast",
+    "cashflow-forecast",
+    "cashflowforecast"
+  ]);
+  if (!allowedScopes.has(normalizedScope)) return false;
+
+  const expected = asString(process.env.REPORTS_INGEST_API_KEY || process.env.REPORTS_PUBLIC_API_KEY);
+  if (!expected) return false;
+  const supplied = readIngestApiKey(req);
+  return constantTimeEqual(expected, supplied);
 }
 
 function escapedFilterValue(value) {
@@ -1428,6 +1500,11 @@ module.exports = async function (context, req) {
   if (method === "OPTIONS") {
     context.res = { status: 204 };
     return;
+  }
+  const allowReadWithApiKey = allowApiKeyRead(req, method, scope);
+  if (!allowReadWithApiKey) {
+    const principal = await requirePrincipal(context, req);
+    if (!principal) return;
   }
 
   try {

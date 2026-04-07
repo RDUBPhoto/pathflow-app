@@ -41,6 +41,14 @@
       "allowedRoles": ["anonymous"]
     },
     {
+      "route": "/api/reports",
+      "allowedRoles": ["anonymous"]
+    },
+    {
+      "route": "/api/reports/*",
+      "allowedRoles": ["anonymous"]
+    },
+    {
       "route": "/dashboard",
       "allowedRoles": ["authenticated"]
     },

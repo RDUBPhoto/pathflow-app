@@ -1,6 +1,19 @@
 const { TableClient } = require("../_shared/table-client");
 const { resolveTenantId } = require("../_shared/tenant");
-const { requirePrincipal } = require("../_shared/auth");
+let requirePrincipal = async function defaultRequirePrincipal(context) {
+  context.res = {
+    status: 401,
+    headers: { "content-type": "application/json" },
+    body: { ok: false, error: "Not authenticated." }
+  };
+  return null;
+};
+try {
+  const authShared = require("../_shared/auth");
+  if (authShared && typeof authShared.requirePrincipal === "function") {
+    requirePrincipal = authShared.requirePrincipal;
+  }
+} catch (_) {}
 
 const SETTINGS_TABLE = "appsettings";
 const TABLES = {

@@ -43,7 +43,7 @@
       <div class="reports-powerbi" *ngIf="powerBi() as pbi">
         <span class="label">Power BI</span>
         <span class="value" [class.ok]="pbi.configured" [class.warn]="!pbi.configured">
-          {{ pbi.configured ? (pbi.secureEmbedReady ? 'Secure embed ready' : 'Web report ready') : 'Not configured' }}
+          {{ pbi.configured ? (pbi.webEmbedReady ? 'Web report ready' : 'Secure embed ready') : 'Not configured' }}
         </span>
       </div>
     </div>
@@ -97,10 +97,10 @@
       </ion-badge>
     </header>
 
-    <div class="powerbi-panel-note" *ngIf="powerBiMissingKeys().length">
+    <div class="powerbi-panel-note" *ngIf="pbi.mode !== 'web' && powerBiMissingKeys().length">
       Missing secure keys: {{ powerBiMissingKeys().join(', ') }}
     </div>
-    <div class="powerbi-panel-note" *ngIf="pbi.error">{{ pbi.error }}</div>
+    <div class="powerbi-panel-note" *ngIf="pbi.mode !== 'web' && pbi.error">{{ pbi.error }}</div>
 
     <div class="powerbi-iframe-wrap" *ngIf="pbi.mode === 'web' && powerBiWebUrl() as webUrl; else secureOrEmpty">
       <iframe

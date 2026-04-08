@@ -221,14 +221,21 @@ export default class ReportsComponent implements OnInit, AfterViewInit, OnDestro
     this.powerBiLoading.set(true);
     this.reportsApi.getPowerBiConfig(false).subscribe({
       next: res => {
-        this.powerBi.set(res.powerBi || null);
-        this.powerBiWebUrl.set(this.buildPowerBiWebUrl(res.powerBi || null));
+        const powerBi = res.powerBi || null;
+        this.powerBi.set(powerBi);
+        this.powerBiWebUrl.set(this.buildPowerBiWebUrl(powerBi));
         this.powerBiLoading.set(false);
-        if (res.powerBi?.secureEmbedReady || res.powerBi?.webEmbedReady) {
-          this.loadPowerBiEmbedConfig();
-        } else {
+        // Prefer web embed when available so tenant/service-principal issues in
+        // secure mode do not block report viewing.
+        if (powerBi?.webEmbedReady) {
           this.resetPowerBiEmbed();
+          return;
         }
+        if (powerBi?.secureEmbedReady) {
+          this.loadPowerBiEmbedConfig();
+          return;
+        }
+        this.resetPowerBiEmbed();
       },
       error: () => {
         this.powerBi.set(null);
@@ -250,9 +257,12 @@ export default class ReportsComponent implements OnInit, AfterViewInit, OnDestro
       },
       error: err => {
         this.powerBiLoading.set(false);
-        this.powerBiWebUrl.set(this.buildPowerBiWebUrl(this.powerBi()));
+        const fallbackWebUrl = this.buildPowerBiWebUrl(this.powerBi());
+        this.powerBiWebUrl.set(fallbackWebUrl);
         this.resetPowerBiEmbed();
-        this.error.set(this.extractError(err, 'Could not load Power BI embed configuration.'));
+        if (!fallbackWebUrl) {
+          this.error.set(this.extractError(err, 'Could not load Power BI embed configuration.'));
+        }
       }
     });
   }

@@ -281,8 +281,48 @@ export default class ReportsComponent implements OnInit, AfterViewInit, OnDestro
     const reportId = String(pbi.reportId || '').trim();
     const tenantId = String(pbi.tenantId || '').trim();
     const fallbackHost = 'https://app.powerbi.com';
+    const guidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const isGuid = (value: string): boolean => guidPattern.test(String(value || '').trim());
+    const isWorkspaceRef = (value: string): boolean => isGuid(value) || String(value || '').trim().toLowerCase() === 'me';
 
-    if (workspaceId && reportId) {
+    // Prefer explicit report URL when present; IDs can be stale.
+    if (reportWebUrl) {
+      try {
+        const parsed = new URL(reportWebUrl);
+        const host = String(parsed.hostname || '').toLowerCase();
+        if (host.endsWith('powerbi.com')) {
+          if (parsed.pathname.toLowerCase().includes('/reportembed')) {
+            const qReportId = String(parsed.searchParams.get('reportId') || '').trim();
+            const qGroupId = String(parsed.searchParams.get('groupId') || '').trim();
+            if (isGuid(qReportId) && (!qGroupId || isWorkspaceRef(qGroupId))) {
+              if (!parsed.searchParams.has('navContentPaneEnabled')) {
+                parsed.searchParams.set('navContentPaneEnabled', 'false');
+              }
+              return parsed.toString();
+            }
+          }
+
+          const parts = parsed.pathname.split('/').filter(Boolean);
+          const groupsIndex = parts.findIndex(segment => segment.toLowerCase() === 'groups');
+          const reportsIndex = parts.findIndex(segment => segment.toLowerCase() === 'reports');
+          const groupId = groupsIndex >= 0 ? String(parts[groupsIndex + 1] || '').trim() : '';
+          const inferredReportId = reportsIndex >= 0 ? String(parts[reportsIndex + 1] || '').trim() : '';
+          if (isWorkspaceRef(groupId) && isGuid(inferredReportId)) {
+            const embed = new URL('/reportEmbed', `${parsed.protocol}//${parsed.host}`);
+            embed.searchParams.set('groupId', groupId);
+            embed.searchParams.set('reportId', inferredReportId);
+            embed.searchParams.set('autoAuth', 'true');
+            if (tenantId) embed.searchParams.set('ctid', tenantId);
+            embed.searchParams.set('navContentPaneEnabled', 'false');
+            return embed.toString();
+          }
+        }
+      } catch {
+        // Ignore malformed URL and fall back to explicit IDs below.
+      }
+    }
+
+    if (isWorkspaceRef(workspaceId) && isGuid(reportId)) {
       const url = new URL('/reportEmbed', fallbackHost);
       url.searchParams.set('groupId', workspaceId);
       url.searchParams.set('reportId', reportId);
@@ -292,36 +332,7 @@ export default class ReportsComponent implements OnInit, AfterViewInit, OnDestro
       return url.toString();
     }
 
-    if (!reportWebUrl) return '';
-    try {
-      const parsed = new URL(reportWebUrl);
-      const host = String(parsed.hostname || '').toLowerCase();
-      if (!host.endsWith('powerbi.com')) return '';
-      if (parsed.pathname.toLowerCase().includes('/reportembed')) {
-        if (!parsed.searchParams.has('navContentPaneEnabled')) {
-          parsed.searchParams.set('navContentPaneEnabled', 'false');
-        }
-        return parsed.toString();
-      }
-
-      const parts = parsed.pathname.split('/').filter(Boolean);
-      const groupsIndex = parts.findIndex(segment => segment.toLowerCase() === 'groups');
-      const reportsIndex = parts.findIndex(segment => segment.toLowerCase() === 'reports');
-      const groupId = groupsIndex >= 0 ? String(parts[groupsIndex + 1] || '').trim() : '';
-      const inferredReportId = reportsIndex >= 0 ? String(parts[reportsIndex + 1] || '').trim() : '';
-      if (groupId && inferredReportId) {
-        const embed = new URL('/reportEmbed', `${parsed.protocol}//${parsed.host}`);
-        embed.searchParams.set('groupId', groupId);
-        embed.searchParams.set('reportId', inferredReportId);
-        embed.searchParams.set('autoAuth', 'true');
-        if (tenantId) embed.searchParams.set('ctid', tenantId);
-        embed.searchParams.set('navContentPaneEnabled', 'false');
-        return embed.toString();
-      }
-      return '';
-    } catch {
-      return '';
-    }
+    return '';
   }
 
   private renderPowerBiSecureEmbed(): void {

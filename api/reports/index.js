@@ -415,6 +415,10 @@ function buildPowerBiWebReportUrlFromIds(config) {
   const workspaceId = asString(config && config.workspaceId);
   const reportId = asString(config && config.reportId);
   if (!workspaceId || !reportId) return "";
+  const guidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const isGuid = guidPattern.test(reportId);
+  const isWorkspaceRef = guidPattern.test(workspaceId) || workspaceId.toLowerCase() === "me";
+  if (!isGuid || !isWorkspaceRef) return "";
   try {
     const url = new URL("/reportEmbed", "https://app.powerbi.com");
     url.searchParams.set("groupId", workspaceId);

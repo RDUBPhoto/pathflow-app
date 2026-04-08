@@ -43,7 +43,7 @@
       <div class="reports-powerbi" *ngIf="powerBi() as pbi">
         <span class="label">Power BI</span>
         <span class="value" [class.ok]="pbi.configured" [class.warn]="!pbi.configured">
-          {{ pbi.configured ? (pbi.webEmbedReady ? 'Web report ready' : 'Secure embed ready') : 'Not configured' }}
+          {{ pbi.configured ? (pbi.secureEmbedReady ? 'Secure embed ready' : 'Web report ready') : 'Not configured' }}
         </span>
       </div>
     </div>

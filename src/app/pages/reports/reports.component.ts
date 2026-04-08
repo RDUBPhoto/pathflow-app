@@ -225,14 +225,12 @@ export default class ReportsComponent implements OnInit, AfterViewInit, OnDestro
         this.powerBi.set(powerBi);
         this.powerBiWebUrl.set(this.buildPowerBiWebUrl(powerBi));
         this.powerBiLoading.set(false);
-        // Prefer web embed when available so tenant/service-principal issues in
-        // secure mode do not block report viewing.
-        if (powerBi?.webEmbedReady) {
-          this.resetPowerBiEmbed();
-          return;
-        }
         if (powerBi?.secureEmbedReady) {
           this.loadPowerBiEmbedConfig();
+          return;
+        }
+        if (powerBi?.webEmbedReady) {
+          this.resetPowerBiEmbed();
           return;
         }
         this.resetPowerBiEmbed();

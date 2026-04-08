@@ -1799,7 +1799,9 @@ module.exports = async function (context, req) {
           powerBi: {
             ...status,
             tenantId: powerBiState.tenantId,
-            mode: status.secureEmbedReady ? "secure-embed" : (status.webEmbedReady ? "web" : "unconfigured")
+            // Prefer web mode when available so we don't force secure-embed UX
+            // unless we actually requested and obtained an embed token.
+            mode: status.webEmbedReady ? "web" : (status.secureEmbedReady ? "secure-embed" : "unconfigured")
           }
         });
         return;

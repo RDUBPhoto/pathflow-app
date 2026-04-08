@@ -377,6 +377,8 @@ async function getPowerBiConfig(req) {
 
 function powerBiStatus(config) {
   const normalizedReportWebUrl = normalizePowerBiReportWebUrl(config && config.reportWebUrl);
+  const derivedReportWebUrl = buildPowerBiWebReportUrlFromIds(config);
+  const effectiveReportWebUrl = normalizedReportWebUrl || derivedReportWebUrl;
   const missingSecureKeys = [];
   if (!config.tenantId) missingSecureKeys.push("POWERBI_TENANT_ID");
   if (!config.clientId) missingSecureKeys.push("POWERBI_CLIENT_ID");
@@ -385,14 +387,14 @@ function powerBiStatus(config) {
   if (!config.reportId) missingSecureKeys.push("POWERBI_REPORT_ID");
 
   const secureEmbedReady = missingSecureKeys.length === 0;
-  const webEmbedReady = !!normalizedReportWebUrl;
+  const webEmbedReady = !!effectiveReportWebUrl;
 
   return {
     secureEmbedReady,
     webEmbedReady,
     configured: secureEmbedReady || webEmbedReady,
     missingSecureKeys,
-    reportWebUrl: normalizedReportWebUrl || null
+    reportWebUrl: effectiveReportWebUrl || null
   };
 }
 
@@ -404,6 +406,24 @@ function normalizePowerBiReportWebUrl(rawUrl) {
     const host = asString(parsed.hostname).toLowerCase();
     if (!host || !host.endsWith("powerbi.com")) return "";
     return parsed.toString();
+  } catch {
+    return "";
+  }
+}
+
+function buildPowerBiWebReportUrlFromIds(config) {
+  const workspaceId = asString(config && config.workspaceId);
+  const reportId = asString(config && config.reportId);
+  if (!workspaceId || !reportId) return "";
+  try {
+    const url = new URL("/reportEmbed", "https://app.powerbi.com");
+    url.searchParams.set("groupId", workspaceId);
+    url.searchParams.set("reportId", reportId);
+    url.searchParams.set("autoAuth", "true");
+    const tenantId = asString(config && config.tenantId);
+    if (tenantId) url.searchParams.set("ctid", tenantId);
+    url.searchParams.set("navContentPaneEnabled", "false");
+    return url.toString();
   } catch {
     return "";
   }

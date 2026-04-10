@@ -1,6 +1,7 @@
 const { TableClient } = require("../_shared/table-client");
 const { randomUUID } = require("crypto");
 const { resolveTenantId } = require("../_shared/tenant");
+const { requirePrincipal } = require("../_shared/auth");
 
 const PURCHASE_ORDER_TABLE = "purchaseorders";
 const INVENTORY_TABLE = "inventoryitems";
@@ -318,6 +319,8 @@ module.exports = async function (context, req) {
     context.res = { status: 204 };
     return;
   }
+  const principal = await requirePrincipal(context, req);
+  if (!principal) return;
 
   try {
     const purchaseClient = await getTableClient(PURCHASE_ORDER_TABLE);

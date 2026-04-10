@@ -1603,6 +1603,16 @@ export default class DashboardComponent implements OnDestroy {
                     }
                     for (const id of Object.keys(map)) map[id].sort((a,b) => (a.sort ?? 0) - (b.sort ?? 0));
                     this.items.set(map);
+                    const pruned = this.pruneDuplicateDocumentCards(map, lanes);
+                    if (pruned) {
+                      this.loading.set(false);
+                      return;
+                    }
+                    const seeded = this.ensureDocumentCardsExist(map, lanes);
+                    if (seeded) {
+                      this.loading.set(false);
+                      return;
+                    }
                     this.maybeInitializeSeenLeads(map);
                     this.maybeInitializeSeenCards(map);
                     this.maybeInitializeNotifiedLeads(map);
@@ -1635,6 +1645,16 @@ export default class DashboardComponent implements OnDestroy {
                     }
                     for (const id of Object.keys(map)) map[id].sort((a,b) => (a.sort ?? 0) - (b.sort ?? 0));
                     this.items.set(map);
+                    const pruned = this.pruneDuplicateDocumentCards(map, lanes);
+                    if (pruned) {
+                      this.loading.set(false);
+                      return;
+                    }
+                    const seeded = this.ensureDocumentCardsExist(map, lanes);
+                    if (seeded) {
+                      this.loading.set(false);
+                      return;
+                    }
                     this.maybeInitializeSeenLeads(map);
                     this.maybeInitializeSeenCards(map);
                     this.maybeInitializeNotifiedLeads(map);
@@ -1655,6 +1675,179 @@ export default class DashboardComponent implements OnDestroy {
       },
       error: () => { this.status.set('Load customers error'); this.loading.set(false); }
     });
+  }
+
+  private ensureDocumentCardsExist(map: Record<string, WorkItem[]>, lanes: Lane[]): boolean {
+    const quoteLane = lanes.find(lane => this.laneStageKey(lane) === 'quote') || null;
+    const invoicedLane = lanes.find(lane => this.laneStageKey(lane) === 'invoiced') || null;
+    if (!quoteLane && !invoicedLane) return false;
+
+    const laneById = new Map<string, Lane>((lanes || []).map(lane => [String(lane.id || '').trim(), lane]));
+    const existingByLaneAndDocument = new Set<string>();
+    for (const [laneId, rows] of Object.entries(map || {})) {
+      const lane = laneById.get(String(laneId || '').trim()) || null;
+      if (!lane) continue;
+      for (const row of rows || []) {
+        const docRef = this.resolvedDocumentRefForLaneCard(row, lane);
+        if (!docRef) continue;
+        existingByLaneAndDocument.add(`${laneId.toLowerCase()}::${docRef.toLowerCase()}`);
+      }
+    }
+
+    const toCreate: Array<{ laneId: string; customerId: string; title: string }> = [];
+    const seenCreateKeys = new Set<string>();
+
+    for (const doc of this.invoiceDetails()) {
+      if (doc.stage === 'canceled' || doc.stage === 'expired') continue;
+      const targetLaneId =
+        doc.documentType === 'quote'
+          ? (quoteLane?.id || '')
+          : (invoicedLane?.id || '');
+      if (!targetLaneId) continue;
+
+      const docRef = String(doc.id || doc.invoiceNumber || '').trim();
+      if (!docRef) continue;
+      const laneDocKey = `${targetLaneId.toLowerCase()}::${docRef.toLowerCase()}`;
+      if (existingByLaneAndDocument.has(laneDocKey)) continue;
+      if (seenCreateKeys.has(laneDocKey)) continue;
+
+      seenCreateKeys.add(laneDocKey);
+      toCreate.push({
+        laneId: targetLaneId,
+        customerId: this.customerIdForDocument(doc),
+        title: this.cardTitleForDocument(doc)
+      });
+    }
+
+    if (!toCreate.length) return false;
+    this.createMissingDocumentCards(toCreate);
+    return true;
+  }
+
+  private pruneDuplicateDocumentCards(map: Record<string, WorkItem[]>, lanes: Lane[]): boolean {
+    const duplicatesToDelete = this.pruneDuplicateDocumentCardsInMap(map, lanes);
+    if (!duplicatesToDelete.length) return false;
+    this.deleteDuplicateDocumentCards(Array.from(new Set(duplicatesToDelete)));
+    return true;
+  }
+
+  private pruneDuplicateDocumentCardsInMap(map: Record<string, WorkItem[]>, lanes: Lane[]): string[] {
+    const duplicatesToDelete: string[] = [];
+
+    for (const lane of lanes || []) {
+      const stage = this.laneStageKey(lane);
+      if (stage !== 'quote' && stage !== 'invoiced') continue;
+
+      const rows = [...(map[lane.id] || [])];
+      if (!rows.length) continue;
+      const byDocument = new Map<string, WorkItem[]>();
+      for (const row of rows) {
+        const resolvedRef = String(this.resolvedDocumentRefForLaneCard(row, lane) || '').trim().toLowerCase();
+        if (!resolvedRef) continue;
+        const list = byDocument.get(resolvedRef) || [];
+        list.push(row);
+        byDocument.set(resolvedRef, list);
+      }
+
+      const removeIds = new Set<string>();
+      for (const group of byDocument.values()) {
+        if (group.length <= 1) continue;
+        const ordered = group
+          .slice()
+          .sort((a, b) => this.asMillis(String(b.updatedAt || b.createdAt || '')) - this.asMillis(String(a.updatedAt || a.createdAt || '')));
+        const keepId = String(ordered[0].id || '').trim();
+        for (const row of ordered.slice(1)) {
+          const id = String(row.id || '').trim();
+          if (!id || id === keepId) continue;
+          removeIds.add(id);
+          duplicatesToDelete.push(id);
+        }
+      }
+
+      if (removeIds.size) {
+        map[lane.id] = rows.filter(row => !removeIds.has(String(row.id || '').trim()));
+      }
+    }
+
+    return Array.from(new Set(duplicatesToDelete));
+  }
+
+  private deleteDuplicateDocumentCards(ids: string[]): void {
+    let index = 0;
+    const next = () => {
+      if (index >= ids.length) {
+        this.loadAll();
+        return;
+      }
+      const id = String(ids[index++] || '').trim();
+      if (!id) {
+        next();
+        return;
+      }
+      this.itemsApi.delete(id).subscribe({
+        next: () => next(),
+        error: () => next()
+      });
+    };
+    next();
+  }
+
+  private createMissingDocumentCards(
+    pending: Array<{ laneId: string; customerId: string; title: string }>
+  ): void {
+    let index = 0;
+    const createNext = () => {
+      if (index >= pending.length) {
+        this.loadAll();
+        return;
+      }
+
+      const row = pending[index++];
+      this.itemsApi.create(row.title, row.laneId).subscribe({
+        next: created => {
+          if (!row.customerId) {
+            createNext();
+            return;
+          }
+          this.itemsApi.update({ id: created.id, customerId: row.customerId }).subscribe({
+            next: () => createNext(),
+            error: () => createNext()
+          });
+        },
+        error: () => createNext()
+      });
+    };
+    createNext();
+  }
+
+  private customerIdForDocument(doc: InvoiceDetail): string {
+    const direct = String(doc.customerId || '').trim();
+    if (direct) return direct;
+    const docEmail = String(doc.customerEmail || '').trim().toLowerCase();
+    if (docEmail) {
+      const byEmail = this.allCustomers().find(customer =>
+        String(customer.email || '').trim().toLowerCase() === docEmail
+      );
+      if (byEmail?.id) return String(byEmail.id).trim();
+    }
+    const docName = String(doc.customerName || '').trim().toLowerCase();
+    if (docName) {
+      const byName = this.allCustomers().find(customer =>
+        String(customer.name || '').trim().toLowerCase() === docName
+      );
+      if (byName?.id) return String(byName.id).trim();
+    }
+    return '';
+  }
+
+  private cardTitleForDocument(doc: InvoiceDetail): string {
+    const name = String(doc.customerName || '').trim() || 'Customer';
+    const vehicle = String(doc.vehicle || '').trim();
+    const number = String(doc.invoiceNumber || '').trim() || (doc.documentType === 'invoice' ? 'Invoice' : 'Quote');
+    const ref = String(doc.id || doc.invoiceNumber || '').trim();
+    const kind = doc.documentType === 'invoice' ? 'Invoice' : 'Quote';
+    const base = vehicle ? `${name} (${vehicle})` : name;
+    return `${base} — ${kind} ${number}${ref ? ` [doc=${ref}]` : ''}`;
   }
 
   recentCustomers = computed(() => {
@@ -1752,6 +1945,14 @@ export default class DashboardComponent implements OnDestroy {
   private linkedDocumentForCard(it: WorkItem, lane: Lane): InvoiceDetail | null {
     const stage = this.laneStageKey(lane);
     if (stage !== 'quote' && stage !== 'invoiced') return null;
+    const cardDocRef = this.documentRefFromCard(it);
+    if (cardDocRef) {
+      const exact = this.invoicesData.getInvoiceById(cardDocRef);
+      if (exact) {
+        if (stage === 'quote' && exact.documentType === 'quote') return exact;
+        if (stage === 'invoiced' && exact.documentType === 'invoice') return exact;
+      }
+    }
     const customerId = String(it.customerId || '').trim();
     const customer = this.customersMap()[customerId] || null;
     const email = String(customer?.email || '').trim().toLowerCase();
@@ -1790,6 +1991,29 @@ export default class DashboardComponent implements OnDestroy {
         if (priorityDiff !== 0) return priorityDiff;
         return this.asMillis(b.updatedAt || b.createdAt || '') - this.asMillis(a.updatedAt || a.createdAt || '');
       })[0] || null;
+  }
+
+  private documentRefFromCard(item: WorkItem): string {
+    const title = String(item.title || '');
+    const match = title.match(/\[doc=([^\]]+)\]/i);
+    return String(match?.[1] || '').trim();
+  }
+
+  private resolvedDocumentRefForLaneCard(item: WorkItem, lane: Lane): string {
+    const stage = this.laneStageKey(lane);
+    if (stage !== 'quote' && stage !== 'invoiced') return '';
+
+    const explicitRef = this.documentRefFromCard(item);
+    if (explicitRef) {
+      const explicitDoc = this.invoicesData.getInvoiceById(explicitRef);
+      if (explicitDoc) {
+        if (stage === 'quote' && explicitDoc.documentType === 'quote') return explicitRef;
+        if (stage === 'invoiced' && explicitDoc.documentType === 'invoice') return explicitRef;
+      }
+    }
+
+    const linked = this.linkedDocumentForCard(item, lane);
+    return String(linked?.id || linked?.invoiceNumber || '').trim();
   }
 
   private quoteStagePriority(stage: InvoiceDetail['stage']): number {
@@ -2743,6 +2967,7 @@ export default class DashboardComponent implements OnDestroy {
     }
 
     if (movedToScheduled.length || movedOutOfScheduled.length || removedFromScheduled.length) {
+      const duplicateIds = this.pruneDuplicateDocumentCardsInMap(map, this.lanes());
       this.items.set(map);
       this.maybeInitializeSeenLeads(map);
       this.maybeInitializeSeenCards(map);
@@ -2756,6 +2981,9 @@ export default class DashboardComponent implements OnDestroy {
       }
       for (const it of removedFromScheduled) {
         this.itemsApi.delete(it.id).subscribe({ error: () => {} });
+      }
+      for (const id of duplicateIds) {
+        this.itemsApi.delete(id).subscribe({ error: () => {} });
       }
     }
 
@@ -2836,6 +3064,7 @@ export default class DashboardComponent implements OnDestroy {
     }
     nextMap[inProgressLaneId] = (nextMap[inProgressLaneId] || []).filter(item => !movedIds.has(item.id));
     nextMap[completedLaneId] = [...moves.map(move => move.nextItem), ...(nextMap[completedLaneId] || [])];
+    const duplicateIds = this.pruneDuplicateDocumentCardsInMap(nextMap, this.lanes());
 
     this.items.set(nextMap);
     this.maybeInitializeSeenLeads(nextMap);
@@ -2849,6 +3078,9 @@ export default class DashboardComponent implements OnDestroy {
       if (customerId) {
         this.releaseActiveBayForCustomer(customerId, String(move.nextItem.completedAt || new Date().toISOString()));
       }
+    }
+    for (const id of duplicateIds) {
+      this.itemsApi.delete(id).subscribe({ error: () => {} });
     }
   }
 
@@ -3117,13 +3349,18 @@ export default class DashboardComponent implements OnDestroy {
     this.scheduleModalOpen.set(true);
   }
 
-  private openScheduleModalDeferred(customerId: string): void {
+  private routeToSchedulePlanner(customerId: string): void {
     const id = String(customerId || '').trim();
     if (!id) return;
-    setTimeout(() => {
-      this.clearResidualDragState();
-      this.openScheduleModal(id);
-    }, 220);
+    this.clearResidualDragState();
+    this.router.navigate(['/schedule'], {
+      queryParams: {
+        customerId: id,
+        autoOpen: '0',
+        source: 'dashboard',
+        showSuggestions: '1'
+      }
+    });
   }
 
   closeScheduleModal() {
@@ -3275,10 +3512,8 @@ export default class DashboardComponent implements OnDestroy {
               this.status.set('Added to lane');
             }
             if (isScheduledLane) {
-              if (!this.hasFutureSchedule(c.id)) {
-                this.status.set('Add appointment details for this scheduled customer.');
-              }
-              this.openScheduleModalDeferred(c.id);
+              this.status.set('Opened calendar planner for this scheduled customer.');
+              this.routeToSchedulePlanner(c.id);
             }
           }
         });
@@ -3340,10 +3575,8 @@ export default class DashboardComponent implements OnDestroy {
                 }
                 this.loadAll();
                 if (isScheduledLane) {
-                  if (!this.hasFutureSchedule(cust.id)) {
-                    this.status.set('Add appointment details for this scheduled customer.');
-                  }
-                  this.openScheduleModalDeferred(cust.id);
+                  this.status.set('Opened calendar planner for this scheduled customer.');
+                  this.routeToSchedulePlanner(cust.id);
                 }
               }
             });
@@ -3386,13 +3619,40 @@ export default class DashboardComponent implements OnDestroy {
 
   getLaneCards(laneId: string): WorkItem[] {
     const base = this.items()[laneId] || [];
+    const lane = this.lanes().find(item => item.id === laneId) || null;
+    if (lane) {
+      const stage = this.laneStageKey(lane);
+      if (stage === 'quote' || stage === 'invoiced') {
+        const byDocument = new Map<string, WorkItem>();
+        for (const item of base) {
+          const docRef = String(this.resolvedDocumentRefForLaneCard(item, lane) || '').trim().toLowerCase();
+          if (!docRef) {
+            byDocument.set(`id:${String(item.id || '').trim()}`, item);
+            continue;
+          }
+          const existing = byDocument.get(docRef);
+          if (!existing) {
+            byDocument.set(docRef, item);
+            continue;
+          }
+          const existingTime = this.asMillis(String(existing.updatedAt || existing.createdAt || ''));
+          const itemTime = this.asMillis(String(item.updatedAt || item.createdAt || ''));
+          if (itemTime >= existingTime) {
+            byDocument.set(docRef, item);
+          }
+        }
+        const deduped = Array.from(byDocument.values());
+        deduped.sort((a, b) => this.compareCreatedDesc(a, b));
+        return deduped;
+      }
+    }
     const arr = [...base];
     arr.sort((a, b) => this.compareCreatedDesc(a, b));
     return arr;
   }
 
   laneItemCount(laneId: string): number {
-    return (this.items()[laneId] || []).length;
+    return this.getLaneCards(laneId).length;
   }
 
   onCardsDrop(event: CdkDragDrop<WorkItem[]>, targetLaneId: string) {
@@ -3412,6 +3672,39 @@ export default class DashboardComponent implements OnDestroy {
       const moved = map[sourceId][event.previousIndex];
       const movedCustomerId = (moved?.customerId || '').trim();
       const launchQuoteAfterMove = this.isQuoteLaneById(targetLaneId);
+      const sourceLane = this.lanes().find(lane => lane.id === sourceId) || null;
+      const targetLane = this.lanes().find(lane => lane.id === targetLaneId) || null;
+
+      // Prevent a temporary duplicate flash when a Scheduled card is dragged
+      // back into a document lane that already has a card for the same linked doc.
+      if (
+        moved &&
+        sourceLane &&
+        targetLane &&
+        this.laneStageKey(sourceLane) === 'scheduled' &&
+        (this.laneStageKey(targetLane) === 'quote' || this.laneStageKey(targetLane) === 'invoiced')
+      ) {
+        const movedDocRef = String(this.resolvedDocumentRefForLaneCard(moved, targetLane) || '').trim().toLowerCase();
+        if (movedDocRef) {
+          const targetRows = map[targetLaneId] || [];
+          const alreadyExistsInTarget = targetRows.some(row => {
+            const rowDocRef = String(this.resolvedDocumentRefForLaneCard(row, targetLane) || '').trim().toLowerCase();
+            return !!rowDocRef && rowDocRef === movedDocRef;
+          });
+          if (alreadyExistsInTarget) {
+            map[sourceId] = (map[sourceId] || []).filter(row => String(row.id || '').trim() !== String(moved.id || '').trim());
+            this.items.set(map);
+            this.maybeInitializeSeenLeads(map);
+            this.maybeInitializeSeenCards(map);
+            this.maybeInitializeNotifiedLeads(map);
+            this.maybeNotifyNewLeads(map);
+            this.itemsApi.delete(String(moved.id || '').trim()).subscribe({ error: () => {} });
+            this.status.set('Card already exists in target lane. Removed duplicate.');
+            return;
+          }
+        }
+      }
+
       if (launchQuoteAfterMove && !movedCustomerId) {
         this.status.set('Select a customer before creating a quote.');
         return;
@@ -3430,12 +3723,22 @@ export default class DashboardComponent implements OnDestroy {
       const needsSchedulePrompt = !!(isTargetScheduled && movedCustomerId && !this.hasFutureSchedule(movedCustomerId));
 
       transferArrayItem(map[sourceId], map[targetId], event.previousIndex, event.currentIndex);
+      const duplicateIds = this.pruneDuplicateDocumentCardsInMap(map, this.lanes());
       this.items.set(map);
       this.maybeInitializeSeenLeads(map);
       this.maybeInitializeSeenCards(map);
       this.maybeInitializeNotifiedLeads(map);
       this.maybeNotifyNewLeads(map);
-      const updated = map[targetId][event.currentIndex];
+      for (const id of duplicateIds) {
+        this.itemsApi.delete(id).subscribe({ error: () => {} });
+      }
+      const movedId = String(moved?.id || '').trim();
+      const updated = (map[targetId] || []).find(row => String(row.id || '').trim() === movedId)
+        || map[targetId][event.currentIndex];
+      if (!updated) {
+        this.loadAll();
+        return;
+      }
       const fromInProgress = this.isInProgressLaneById(sourceId);
       const toInProgress = this.isInProgressLaneById(targetLaneId);
       const hasCheckIn = !!(updated.checkedInAt || '').trim();
@@ -3509,8 +3812,8 @@ export default class DashboardComponent implements OnDestroy {
             this.status.set('Moved to Completed. Click "No appointment required" to confirm override.');
           }
           if (needsSchedulePrompt && movedCustomerId) {
-            this.status.set('Add appointment details for this scheduled customer.');
-            this.openScheduleModalDeferred(movedCustomerId);
+            this.status.set('Moved to Scheduled. Select an open calendar slot to place this job.');
+            this.routeToSchedulePlanner(movedCustomerId);
           }
           if (launchQuoteAfterMove && movedCustomerId) {
             this.openQuoteBuilderForCustomer(movedCustomerId);

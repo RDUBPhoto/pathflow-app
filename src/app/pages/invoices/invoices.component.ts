@@ -253,6 +253,19 @@ export default class InvoicesComponent implements OnDestroy {
     void this.router.navigate(this.documentRoute(invoice));
   }
 
+  sendNow(invoice: InvoiceCard, event?: Event): void {
+    event?.preventDefault();
+    event?.stopPropagation();
+    if (invoice.stage !== 'draft') return;
+    this.closeOpenMenu();
+    void this.router.navigate(this.documentRoute(invoice), {
+      queryParams: {
+        sendNow: '1'
+      },
+      queryParamsHandling: 'merge'
+    });
+  }
+
   setSearchQuery(value: string): void {
     this.searchQuery.set(value || '');
   }

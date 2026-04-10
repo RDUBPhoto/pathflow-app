@@ -3,6 +3,57 @@
   height: 100%;
 }
 
+.import-lock-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  background: rgba(5, 10, 20, 0.78);
+  backdrop-filter: blur(2px);
+  display: grid;
+  place-items: center;
+  pointer-events: all;
+}
+
+.import-lock-card {
+  min-width: 280px;
+  max-width: 420px;
+  padding: 20px 22px;
+  border-radius: 14px;
+  border: 1px solid var(--app-border-subtle);
+  background: var(--app-surface-bg);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  text-align: center;
+}
+
+.import-lock-spinner {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 3px solid rgba(255, 255, 255, 0.2);
+  border-top-color: var(--ion-color-primary, #3b82f6);
+  animation: import-spin 0.85s linear infinite;
+}
+
+.import-lock-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--app-text);
+}
+
+.import-lock-subtitle {
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+@keyframes import-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .toolbar-actions {
   display: flex;
   align-items: center;
@@ -213,7 +264,7 @@ ion-card-title {
   padding: 8px;
   background: var(--app-control-bg);
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr) auto auto;
   gap: 8px;
   align-items: end;
 }

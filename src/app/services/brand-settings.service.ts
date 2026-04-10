@@ -1,4 +1,5 @@
-import { Injectable, inject, signal } from '@angular/core';
+import { Injectable, effect, inject, signal } from '@angular/core';
+import { AuthService } from '../auth/auth.service';
 import { AppSettingsApiService } from './app-settings-api.service';
 
 const BRAND_LOGO_SETTING_KEY = 'branding.logoUrl';
@@ -19,22 +20,42 @@ function normalizeLogoUrl(rawUrl: string): string {
 
 @Injectable({ providedIn: 'root' })
 export class BrandSettingsService {
+  private readonly auth = inject(AuthService);
   private readonly settingsApi = inject(AppSettingsApiService);
   readonly defaultLogoUrl = DEFAULT_BRAND_LOGO_URL;
   readonly logoUrl = signal<string>('');
   readonly loaded = signal(false);
   readonly hasCustomLogo = signal(false);
+  private loadToken = 0;
 
   constructor() {
-    this.settingsApi.getValue<string>(BRAND_LOGO_SETTING_KEY).subscribe(value => {
-      const next = normalizeLogoUrl((value || '').trim());
-      this.hasCustomLogo.set(!!next);
-      this.logoUrl.set(next || this.defaultLogoUrl);
-      this.loaded.set(true);
-    }, () => {
-      this.hasCustomLogo.set(false);
-      this.logoUrl.set('');
-      this.loaded.set(true);
+    effect(() => {
+      const initialized = this.auth.initialized();
+      const isAuthenticated = this.auth.isAuthenticated();
+      if (!initialized) return;
+
+      if (!isAuthenticated) {
+        this.loadToken += 1;
+        this.hasCustomLogo.set(false);
+        this.logoUrl.set('');
+        this.loaded.set(true);
+        return;
+      }
+
+      const token = ++this.loadToken;
+      this.loaded.set(false);
+      this.settingsApi.getValue<string>(BRAND_LOGO_SETTING_KEY).subscribe(value => {
+        if (token !== this.loadToken) return;
+        const next = normalizeLogoUrl((value || '').trim());
+        this.hasCustomLogo.set(!!next);
+        this.logoUrl.set(next || this.defaultLogoUrl);
+        this.loaded.set(true);
+      }, () => {
+        if (token !== this.loadToken) return;
+        this.hasCustomLogo.set(false);
+        this.logoUrl.set('');
+        this.loaded.set(true);
+      });
     });
   }
 

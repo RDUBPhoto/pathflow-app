@@ -1,4 +1,4 @@
-const { TableClient } = require("../_shared/table-client");
+const { TableClient, isSqlBackendEnabled } = require("../_shared/table-client");
 const { resolveTenantId } = require("../_shared/tenant");
 
 const TABLE = "invoiceresponses";
@@ -192,7 +192,7 @@ function userCanAccessTenant(userEntity, tenantId) {
 
 async function getTableClient(tableName) {
   const conn = asString(process.env.STORAGE_CONNECTION_STRING);
-  if (!conn) throw new Error("Missing STORAGE_CONNECTION_STRING");
+  if (!conn && !isSqlBackendEnabled()) throw new Error("Missing STORAGE_CONNECTION_STRING");
   const client = TableClient.fromConnectionString(conn, tableName);
   try {
     await client.createTable();

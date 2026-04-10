@@ -72,6 +72,18 @@ export type ReportsCommunicationRow = {
   message_count: number;
 };
 
+export type ReportsJobTimingRow = {
+  work_item_id: string;
+  customer_id: string;
+  customer_name: string;
+  title: string;
+  stage: string;
+  checked_in_at: string;
+  completed_at: string;
+  is_paused: boolean;
+  tracked_hours_business: number;
+};
+
 export type ReportsProductionForecastRow = {
   period_key: string;
   period_start: string;
@@ -109,6 +121,7 @@ export type ReportsTables = {
   invoiceAging: ReportsInvoiceAgingRow[];
   leadSources: ReportsLeadSourceRow[];
   communicationVolume: ReportsCommunicationRow[];
+  jobTiming: ReportsJobTimingRow[];
   productionForecast: ReportsProductionForecastRow[];
   cashflowForecast: ReportsCashflowForecastRow[];
 };

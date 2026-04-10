@@ -1,6 +1,7 @@
 const { TableClient } = require("../_shared/table-client");
 const { randomUUID } = require("crypto");
 const { resolveTenantId } = require("../_shared/tenant");
+const { requirePrincipal } = require("../_shared/auth");
 
 const INVENTORY_TABLE = "inventoryitems";
 const NEEDS_TABLE = "inventoryneeds";
@@ -57,6 +58,7 @@ const DEFAULT_CONNECTORS = [
     note: "Dealer credentials/integration required."
   }
 ];
+const MAX_TABLE_TRANSACTION_ACTIONS = 100;
 
 function asString(value) {
   return value == null ? "" : String(value).trim();
@@ -91,6 +93,33 @@ function asArray(value) {
     } catch (_) {}
   }
   return [];
+}
+
+function isPresent(value) {
+  return asString(value) !== "";
+}
+
+function normalizeKey(value) {
+  return asString(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function normalizedSku(value) {
+  return asString(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+}
+
+function parseNumberInput(value, fallback = 0) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
+  const raw = asString(value);
+  if (!raw) return fallback;
+  const cleaned = raw.replace(/[$,%\s]/g, "").replace(/,/g, "");
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 function json(status, body) {
@@ -134,6 +163,14 @@ function toInventoryItem(entity) {
     sku: asString(entity.sku),
     vendor: asString(entity.vendor),
     category: asString(entity.category),
+    unit: asString(entity.unit),
+    accountCode: asString(entity.accountCode),
+    purchaseAccountCode: asString(entity.purchaseAccountCode),
+    salesTaxCode: asString(entity.salesTaxCode),
+    purchaseTaxCode: asString(entity.purchaseTaxCode),
+    discountPercent: asNumber(entity.discountPercent),
+    cost: asNumber(entity.cost),
+    price: asNumber(entity.price),
     onHand: asNumber(entity.onHand),
     reorderAt: asNumber(entity.reorderAt),
     onOrder: asNumber(entity.onOrder),
@@ -346,6 +383,85 @@ function buildSummary(items, needs) {
   };
 }
 
+function buildInventoryLookup(items) {
+  const bySku = new Map();
+  const byNameVendor = new Map();
+  const byName = new Map();
+  for (const item of Array.isArray(items) ? items : []) {
+    addInventoryLookupItem({ bySku, byNameVendor, byName }, item);
+  }
+  return { bySku, byNameVendor, byName };
+}
+
+function addInventoryLookupItem(lookup, item) {
+  if (!lookup || !item) return;
+  const sku = normalizedSku(item.sku);
+  if (sku) lookup.bySku.set(sku, item);
+  const name = normalizeKey(item.name);
+  if (!name) return;
+  if (!lookup.byName.has(name)) lookup.byName.set(name, item);
+  const vendor = normalizeKey(item.vendor);
+  if (vendor) lookup.byNameVendor.set(`${name}|${vendor}`, item);
+}
+
+function findExistingInventoryItem(lookup, row) {
+  const sku = normalizedSku(row && row.sku);
+  if (sku && lookup && lookup.bySku.has(sku)) {
+    return lookup.bySku.get(sku);
+  }
+
+  const name = normalizeKey(row && row.name);
+  if (!name || !lookup) return null;
+  const vendor = normalizeKey(row && row.vendor);
+  if (vendor) {
+    const byNameVendor = lookup.byNameVendor.get(`${name}|${vendor}`);
+    if (byNameVendor) return byNameVendor;
+  }
+  return lookup.byName.get(name) || null;
+}
+
+async function executeInventoryUpserts(client, operations, errors) {
+  if (!Array.isArray(operations) || !operations.length) {
+    return { created: 0, updated: 0 };
+  }
+
+  let created = 0;
+  let updated = 0;
+
+  for (let i = 0; i < operations.length; i += MAX_TABLE_TRANSACTION_ACTIONS) {
+    const chunk = operations.slice(i, i + MAX_TABLE_TRANSACTION_ACTIONS);
+    const actions = chunk.map(op => ["upsert", op.entity, "Merge"]);
+    try {
+      await client.submitTransaction(actions);
+      for (const op of chunk) {
+        if (op.mode === "create") {
+          created += 1;
+        } else {
+          updated += 1;
+        }
+      }
+    } catch (_) {
+      for (const op of chunk) {
+        try {
+          await client.upsertEntity(op.entity, "Merge");
+          if (op.mode === "create") {
+            created += 1;
+          } else {
+            updated += 1;
+          }
+        } catch (error) {
+          errors.push({
+            index: op.index,
+            error: asString(error && error.message) || "Import row failed."
+          });
+        }
+      }
+    }
+  }
+
+  return { created, updated };
+}
+
 async function ensureDefaultConnectors(client, tenantId) {
   const existing = [];
   const existingById = new Map();
@@ -395,6 +511,8 @@ module.exports = async function (context, req) {
     context.res = { status: 204 };
     return;
   }
+  const principal = await requirePrincipal(context, req);
+  if (!principal) return;
 
   try {
     const inventoryClient = await getTableClient(INVENTORY_TABLE);
@@ -488,24 +606,37 @@ module.exports = async function (context, req) {
     if (op === "upsertitem" || op === "upsert-item") {
       const id = asString(body.id) || randomUUID();
       const now = new Date().toISOString();
-      const name = asString(body.name);
-      const sku = asString(body.sku);
+      const name = asString(body.name || body.description);
+      const sku = asString(body.sku || body.partLaborCode || body.itemCode);
       if (!name && !sku) {
         context.res = json(400, { error: "name or sku is required." });
         return;
       }
+
+      const rawOnHand = body.onHand != null ? body.onHand : body.freeStock;
+      const rawUnitCost = body.unitCost != null
+        ? body.unitCost
+        : (body.price != null ? body.price : body.cost);
 
       const entity = {
         partitionKey: tenantId,
         rowKey: id,
         name,
         sku,
-        vendor: asString(body.vendor),
+        vendor: asString(body.vendor || body.mainSupplier),
         category: asString(body.category),
-        onHand: asNumber(body.onHand),
+        unit: asString(body.unit),
+        accountCode: asString(body.accountCode || body.salesAccountCode),
+        purchaseAccountCode: asString(body.purchaseAccountCode || body.purchasesAccountCode),
+        salesTaxCode: asString(body.salesTaxCode),
+        purchaseTaxCode: asString(body.purchaseTaxCode || body.purchasesTaxCode),
+        discountPercent: asNumber(body.discountPercent),
+        cost: asNumber(body.cost),
+        price: asNumber(body.price),
+        onHand: asNumber(rawOnHand),
         reorderAt: asNumber(body.reorderAt),
         onOrder: asNumber(body.onOrder),
-        unitCost: asNumber(body.unitCost),
+        unitCost: asNumber(rawUnitCost),
         lastUpdated: now,
         updatedAt: now
       };
@@ -517,6 +648,204 @@ module.exports = async function (context, req) {
 
       await inventoryClient.upsertEntity(entity, "Merge");
       context.res = json(200, { ok: true, item: toInventoryItem({ ...entity, rowKey: id }) });
+      return;
+    }
+
+    if (op === "import" || op === "importitems" || op === "import-items") {
+      const rows = asArray(body.rows);
+      if (!rows.length) {
+        context.res = json(400, { error: "rows is required." });
+        return;
+      }
+
+      const existingItems = [];
+      const iter = inventoryClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${escapedFilterValue(tenantId)}'` } });
+      for await (const entity of iter) {
+        existingItems.push(toInventoryItem(entity));
+      }
+      const lookup = buildInventoryLookup(existingItems);
+
+      let skipped = 0;
+      const errors = [];
+      const operationsByRowKey = new Map();
+
+      for (let i = 0; i < rows.length; i += 1) {
+        const source = asObject(rows[i]);
+        try {
+          const name = asString(
+            source.description || source.name || source.partName || source.detailedDescription
+          );
+          const sku = asString(
+            source.partLaborCode ||
+            source.sku ||
+            source.partNumber ||
+            source.partNo ||
+            source.itemCode ||
+            source.baseVariantCode ||
+            source.rawVariantCode ||
+            source.variantCode
+          );
+          const vendor = asString(
+            source.mainSupplier ||
+            source.vendor ||
+            source.supplier ||
+            source.manufacturer ||
+            source.metaProduct
+          );
+          const category = asString(source.category || source.categoryList || source.department || source.type);
+          const unit = asString(source.unit);
+          const accountCode = asString(source.accountCode || source.salesAccountCode);
+          const purchaseAccountCode = asString(source.purchaseAccountCode || source.purchasesAccountCode);
+          const salesTaxCode = asString(source.salesTaxCode);
+          const purchaseTaxCode = asString(source.purchaseTaxCode || source.purchasesTaxCode);
+
+          const rawOnHand = source.freeStock != null
+            ? source.freeStock
+            : (source.onHand != null ? source.onHand : source.current);
+          const rawReorderAt = source.reorderAt != null
+            ? source.reorderAt
+            : (source.minReorder != null ? source.minReorder : (source.reorderLevel != null ? source.reorderLevel : source.reorderPoint));
+          const rawOnOrder = source.onOrder;
+          const rawDiscountPercent = source.discountPercent != null ? source.discountPercent : source.discount;
+          const rawCost = source.cost != null
+            ? source.cost
+            : (source.averageCost != null ? source.averageCost : source.costPrice);
+          const rawPrice = source.price != null
+            ? source.price
+            : (source.unitPrice != null ? source.unitPrice : source.purchasePrice);
+          const rawUnitCost = source.unitCost != null
+            ? source.unitCost
+            : (rawPrice != null ? rawPrice : rawCost);
+
+          const hasOnHand = isPresent(rawOnHand);
+          const hasReorderAt = isPresent(rawReorderAt);
+          const hasOnOrder = isPresent(rawOnOrder);
+          const hasDiscountPercent = isPresent(rawDiscountPercent);
+          const hasCost = isPresent(rawCost);
+          const hasPrice = isPresent(rawPrice);
+          const hasUnitCost = isPresent(rawUnitCost);
+          const onHand = parseNumberInput(rawOnHand, 0);
+          const reorderAt = parseNumberInput(rawReorderAt, 0);
+          const onOrder = parseNumberInput(rawOnOrder, 0);
+          const discountPercent = parseNumberInput(rawDiscountPercent, 0);
+          const cost = parseNumberInput(rawCost, 0);
+          const price = parseNumberInput(rawPrice, 0);
+          const unitCost = parseNumberInput(rawUnitCost, 0);
+
+          if (!name && !sku) {
+            skipped += 1;
+            continue;
+          }
+
+          const now = new Date().toISOString();
+          const existing = findExistingInventoryItem(lookup, {
+            name,
+            sku,
+            vendor
+          });
+
+          if (!existing) {
+            const rowKey = randomUUID();
+            const entity = {
+              partitionKey: tenantId,
+              rowKey,
+              name: name || sku,
+              sku,
+              vendor,
+              category,
+              unit,
+              accountCode,
+              purchaseAccountCode,
+              salesTaxCode,
+              purchaseTaxCode,
+              discountPercent,
+              cost,
+              price,
+              onHand,
+              reorderAt,
+              onOrder,
+              unitCost,
+              lastUpdated: now,
+              createdAt: now,
+              updatedAt: now
+            };
+            const createdItem = toInventoryItem(entity);
+            existingItems.push(createdItem);
+            addInventoryLookupItem(lookup, createdItem);
+            operationsByRowKey.set(rowKey, {
+              index: i,
+              mode: "create",
+              entity
+            });
+            continue;
+          }
+
+          const patch = {
+            partitionKey: tenantId,
+            rowKey: existing.id,
+            updatedAt: now,
+            lastUpdated: now
+          };
+
+          if (name && !asString(existing.name)) patch.name = name;
+          if (sku && !asString(existing.sku)) patch.sku = sku;
+          if (vendor && !asString(existing.vendor)) patch.vendor = vendor;
+          if (category && !asString(existing.category)) patch.category = category;
+          if (unit && !asString(existing.unit)) patch.unit = unit;
+          if (accountCode && !asString(existing.accountCode)) patch.accountCode = accountCode;
+          if (purchaseAccountCode && !asString(existing.purchaseAccountCode)) patch.purchaseAccountCode = purchaseAccountCode;
+          if (salesTaxCode && !asString(existing.salesTaxCode)) patch.salesTaxCode = salesTaxCode;
+          if (purchaseTaxCode && !asString(existing.purchaseTaxCode)) patch.purchaseTaxCode = purchaseTaxCode;
+          if (hasDiscountPercent) patch.discountPercent = discountPercent;
+          if (hasCost) patch.cost = cost;
+          if (hasPrice) patch.price = price;
+          if (hasOnHand) patch.onHand = onHand;
+          if (hasReorderAt) patch.reorderAt = reorderAt;
+          if (hasOnOrder) patch.onOrder = onOrder;
+          if (hasUnitCost) patch.unitCost = unitCost;
+
+          const existingOperation = operationsByRowKey.get(existing.id);
+          if (existingOperation) {
+            existingOperation.entity = {
+              ...existingOperation.entity,
+              ...patch
+            };
+            if (i < existingOperation.index) {
+              existingOperation.index = i;
+            }
+          } else {
+            operationsByRowKey.set(existing.id, {
+              index: i,
+              mode: "update",
+              entity: patch
+            });
+          }
+
+          const mergedItem = toInventoryItem({
+            ...existing,
+            ...patch,
+            rowKey: existing.id
+          });
+          Object.assign(existing, mergedItem);
+          addInventoryLookupItem(lookup, existing);
+        } catch (error) {
+          errors.push({
+            index: i,
+            error: asString(error && error.message) || "Import row failed."
+          });
+        }
+      }
+
+      const operations = Array.from(operationsByRowKey.values());
+      const persisted = await executeInventoryUpserts(inventoryClient, operations, errors);
+
+      context.res = json(200, {
+        ok: true,
+        created: persisted.created,
+        updated: persisted.updated,
+        skipped,
+        errors
+      });
       return;
     }
 

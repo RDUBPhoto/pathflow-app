@@ -1,6 +1,10 @@
+const { requirePrincipal } = require("../_shared/auth");
+
 module.exports = async function (context, req) {
   const m = (req.method || "GET").toUpperCase();
   if (m === "OPTIONS") { context.res = { status: 204 }; return; }
+  const principal = await requirePrincipal(context, req);
+  if (!principal) return;
 
   try {
     context.res = {

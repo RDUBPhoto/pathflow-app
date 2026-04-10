@@ -65,7 +65,7 @@ export class AccessAdminApiService {
     });
   }
 
-  changeMyPassword(payload: { newPassword: string }) {
+  changeMyPassword(payload: { newPassword: string; currentPassword?: string }) {
     return this.http.post<MessageResponse>('/api/access', {
       op: 'change-my-password',
       ...payload

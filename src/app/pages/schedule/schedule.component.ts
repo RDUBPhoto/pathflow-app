@@ -16,6 +16,7 @@ import { AppSettingsApiService } from '../../services/app-settings-api.service';
 import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
 import { formatLocalDateTime, toLocalDateTimeInput, toLocalDateTimeStorage } from '../../utils/datetime-local';
 import { UserScopedSettingsService } from '../../services/user-scoped-settings.service';
+import { InvoicesDataService, InvoiceDetail } from '../../services/invoices-data.service';
 
 type UICustomer = Customer & {
   vehicleYear?: string;
@@ -25,7 +26,9 @@ type UICustomer = Customer & {
 };
 
 type Bay = { id: string; name: string };
+type SuggestedSlot = { start: string; end: string; resource: string; label: string };
 type CalendarViewMode = 'day' | 'week' | 'month';
+type PartRequest = { partName: string; qty: number; vendorHint?: string; sku?: string; note?: string };
 type ScheduleSettings = {
   bays: Bay[];
   openHour: number;
@@ -99,6 +102,7 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
   editorTitle = signal('');
   editorNotes = signal('');
   editorParts = signal('');
+  editorPartsSourceHint = signal('');
   editorRepeatEvery = signal(0);
   editorRepeatCount = signal(1);
   editorError = signal('');
@@ -120,6 +124,7 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
   nowLineTop = signal(0);
   nowLineHeight = signal(0);
   nowLineLabel = signal('');
+  planningCustomerId = signal<string | null>(null);
   pendingCustomerId: string | null = null;
   viewMode = signal<CalendarViewMode>('day');
   viewAnchor = signal(this.localTodayDatePart().toString());
@@ -180,6 +185,13 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
   });
   readonly monthViewLabel = computed(() => this.currentViewAnchorDate().toString('MMMM yyyy'));
   readonly isMonthView = computed(() => this.viewMode() === 'month');
+  readonly planningCustomerName = computed(() => {
+    const customerId = this.planningCustomerId();
+    if (!customerId) return '';
+    return this.customersById()[customerId]?.name || 'Selected customer';
+  });
+  readonly editorPartRequests = computed(() => this.parsePartRequestsFromEditor(this.editorParts()));
+  readonly suggestedSlots = computed(() => this.buildSuggestedSlots(this.planningCustomerId(), 3));
   readonly editorDirty = computed(() => this.editorSnapshotValue() !== this.editorInitialSnapshot());
   readonly settingsDirty = computed(() => this.settingsSnapshotValue() !== this.settingsInitialSnapshot());
 
@@ -431,6 +443,7 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     private scheduleApi: ScheduleApi,
     private settingsApi: AppSettingsApiService,
     private userSettings: UserScopedSettingsService,
+    private invoicesData: InvoicesDataService,
     private route: ActivatedRoute
   ) {
     this.applySettings(this.defaultSettings());
@@ -439,9 +452,17 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     this.loadAll();
     this.route.queryParamMap.subscribe(params => {
       const id = params.get('customerId');
+      const autoOpenRaw = (params.get('autoOpen') || '').trim().toLowerCase();
+      const shouldAutoOpen = autoOpenRaw !== '0' && autoOpenRaw !== 'false' && autoOpenRaw !== 'no';
       if (id) {
-        this.pendingCustomerId = id;
-        this.tryOpenFromQuery();
+        this.planningCustomerId.set(id);
+        this.pendingCustomerId = shouldAutoOpen ? id : null;
+        if (shouldAutoOpen) {
+          this.tryOpenFromQuery();
+        }
+      } else {
+        this.planningCustomerId.set(null);
+        this.pendingCustomerId = null;
       }
     });
   }
@@ -1014,6 +1035,168 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     this.pendingCustomerId = null;
   }
 
+  clearPlanningCustomer(): void {
+    this.planningCustomerId.set(null);
+  }
+
+  useSuggestedSlot(slot: SuggestedSlot): void {
+    const customerId = this.planningCustomerId();
+    if (!customerId) return;
+    this.openEditor({
+      id: null,
+      start: slot.start,
+      end: slot.end,
+      resource: slot.resource,
+      customerId,
+      isBlocked: false,
+      title: '',
+      notes: ''
+    });
+  }
+
+  private buildSuggestedSlots(customerId: string | null, limit: number): SuggestedSlot[] {
+    if (!customerId) return [];
+    const resources = this.resources();
+    if (!resources.length) return [];
+    const openHour = this.settingsOpenHour();
+    const closeHour = this.settingsCloseHour();
+    if (!Number.isFinite(openHour) || !Number.isFinite(closeHour) || closeHour <= openHour) return [];
+    const intervalMs = 30 * 60 * 1000;
+    const durationMs = this.resolveSuggestedDurationMs(customerId);
+    const maxDayDurationMs = Math.max(intervalMs, (closeHour - openHour) * 60 * 60 * 1000);
+    const effectiveDurationMs = Math.min(durationMs, maxDayDurationMs);
+    const now = new Date();
+    const startSearch = this.roundUpToInterval(now, intervalMs);
+    const dayLimit = 21;
+    const byResource = new Map<string, Array<{ startMs: number; endMs: number }>>();
+
+    for (const resource of resources) byResource.set(String(resource.id), []);
+
+    for (const item of this.items()) {
+      const resourceId = String(item.resource || '').trim();
+      if (!resourceId || !byResource.has(resourceId)) continue;
+      const startMs = this.toMillis(item.start);
+      const endMs = this.toMillis(item.end);
+      if (!startMs || !endMs || endMs <= startMs) continue;
+      byResource.get(resourceId)!.push({ startMs, endMs });
+    }
+
+    for (const rows of byResource.values()) {
+      rows.sort((a, b) => a.startMs - b.startMs);
+    }
+
+    const suggestions: SuggestedSlot[] = [];
+    for (let dayOffset = 0; dayOffset < dayLimit && suggestions.length < limit; dayOffset++) {
+      const day = new Date(startSearch);
+      day.setDate(day.getDate() + dayOffset);
+      const dayPilotDate = DayPilot.Date.fromYearMonthDay(day.getFullYear(), day.getMonth() + 1, day.getDate());
+      if (!this.settingsShowWeekends() && this.isWeekendDay(dayPilotDate)) continue;
+      if (this.isHoliday(dayPilotDate)) continue;
+
+      for (const resource of resources) {
+        if (suggestions.length >= limit) break;
+        const resourceId = String(resource.id);
+        const resourceName = String(resource.name || resource.id || 'Bay');
+        const dayStart = new Date(day);
+        dayStart.setHours(openHour, 0, 0, 0);
+        const dayEnd = new Date(day);
+        dayEnd.setHours(closeHour, 0, 0, 0);
+
+        let cursorMs = Math.max(dayStart.getTime(), startSearch.getTime());
+        if (cursorMs + effectiveDurationMs > dayEnd.getTime()) continue;
+        const busyRows = byResource.get(resourceId) || [];
+
+        while (cursorMs + effectiveDurationMs <= dayEnd.getTime() && suggestions.length < limit) {
+          const nextBusy = this.findConflictingInterval(busyRows, cursorMs, cursorMs + effectiveDurationMs);
+          if (!nextBusy) {
+            const startDate = new Date(cursorMs);
+            const endDate = new Date(cursorMs + effectiveDurationMs);
+            const hoursLabel = this.formatDurationHoursLabel(effectiveDurationMs);
+            const label = `${startDate.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })} · ${startDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} - ${endDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} · ${resourceName} · ${hoursLabel}`;
+            suggestions.push({
+              start: formatLocalDateTime(startDate),
+              end: formatLocalDateTime(endDate),
+              resource: resourceId,
+              label
+            });
+            break;
+          }
+          cursorMs = this.roundUpToInterval(new Date(nextBusy.endMs), intervalMs).getTime();
+        }
+      }
+    }
+
+    return suggestions;
+  }
+
+  private findConflictingInterval(
+    busyRows: Array<{ startMs: number; endMs: number }>,
+    startMs: number,
+    endMs: number
+  ): { startMs: number; endMs: number } | null {
+    for (const row of busyRows) {
+      if (row.endMs <= startMs) continue;
+      if (row.startMs >= endMs) break;
+      return row;
+    }
+    return null;
+  }
+
+  private roundUpToInterval(date: Date, intervalMs: number): Date {
+    const stamp = date.getTime();
+    const rounded = Math.ceil(stamp / intervalMs) * intervalMs;
+    return new Date(rounded);
+  }
+
+  private resolveSuggestedDurationMs(customerId: string): number {
+    const defaultDurationMs = 4 * 60 * 60 * 1000;
+    const minimumDurationMs = 30 * 60 * 1000;
+    const customerKey = String(customerId || '').trim();
+    if (!customerKey) return defaultDurationMs;
+
+    const docs = this.invoicesData.forCustomer({ id: customerKey })
+      .map(card => this.invoicesData.getInvoiceById(card.id))
+      .filter((doc): doc is InvoiceDetail => !!doc)
+      .filter(doc => doc.stage !== 'canceled' && doc.stage !== 'expired' && doc.stage !== 'declined');
+
+    if (!docs.length) return defaultDurationMs;
+
+    docs.sort((a, b) => {
+      const stageDiff = this.invoiceStagePriority(b.stage) - this.invoiceStagePriority(a.stage);
+      if (stageDiff !== 0) return stageDiff;
+      return this.toMillis(b.updatedAt || b.createdAt || '') - this.toMillis(a.updatedAt || a.createdAt || '');
+    });
+
+    const selected = docs[0];
+    const hours = (selected.lineItems || [])
+      .filter(line => line.type === 'labor')
+      .reduce((sum, line) => sum + Math.max(0, Number(line.quantity || 0)), 0);
+
+    if (!Number.isFinite(hours) || hours <= 0) return defaultDurationMs;
+
+    const computedDurationMs = hours * 60 * 60 * 1000;
+    return Math.max(minimumDurationMs, computedDurationMs);
+  }
+
+  private invoiceStagePriority(stage: string | null | undefined): number {
+    const normalized = String(stage || '').trim().toLowerCase();
+    if (normalized === 'completed') return 6;
+    if (normalized === 'accepted') return 5;
+    if (normalized === 'sent') return 4;
+    if (normalized === 'draft') return 3;
+    if (normalized === 'declined') return 2;
+    if (normalized === 'expired') return 1;
+    if (normalized === 'canceled') return 0;
+    return -1;
+  }
+
+  private formatDurationHoursLabel(durationMs: number): string {
+    const hours = durationMs / (60 * 60 * 1000);
+    if (!Number.isFinite(hours) || hours <= 0) return '0h';
+    const hasFraction = Math.abs(hours - Math.round(hours)) > 0.001;
+    return `${hasFraction ? hours.toFixed(1) : Math.round(hours)}h`;
+  }
+
   private defaultSlot(): { start: string; end: string; resource: string } {
     const openHour = this.settingsOpenHour();
     const closeHour = this.settingsCloseHour();
@@ -1049,7 +1232,7 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     isBlocked?: boolean;
     title?: string;
     notes?: string;
-    partRequests?: Array<{ partName: string; qty: number; vendorHint?: string; sku?: string; note?: string }>;
+    partRequests?: PartRequest[];
   }) {
     this.editorId.set(data.id);
     this.editorStart.set(toLocalDateTimeInput(data.start));
@@ -1059,7 +1242,19 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     this.editorBlocked.set(!!data.isBlocked);
     this.editorTitle.set(data.title || '');
     this.editorNotes.set(data.notes || '');
-    this.editorParts.set(this.formatPartRequestsForEditor(data.partRequests || []));
+    const incomingParts = this.normalizePartRequests(data.partRequests || []);
+    const customerId = String(data.customerId || '').trim();
+    let effectiveParts = incomingParts;
+    let sourceHint = '';
+    if (!effectiveParts.length && !data.isBlocked && customerId) {
+      const fallback = this.partsFromLatestPaidInvoice(customerId);
+      effectiveParts = fallback.parts;
+      sourceHint = fallback.invoiceNumber
+        ? `Auto-filled from paid invoice ${fallback.invoiceNumber}.`
+        : '';
+    }
+    this.editorParts.set(this.formatPartRequestsForEditor(effectiveParts));
+    this.editorPartsSourceHint.set(sourceHint);
     this.editorRepeatEvery.set(0);
     this.editorRepeatCount.set(1);
     this.editorError.set('');
@@ -1070,6 +1265,19 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
   closeEditor() {
     this.editorOpen.set(false);
     this.editorError.set('');
+    this.editorPartsSourceHint.set('');
+  }
+
+  onEditorCustomerChange(value: string | null | undefined): void {
+    const nextCustomerId = String(value || '').trim() || null;
+    this.editorCustomerId.set(nextCustomerId);
+    if (this.editorBlocked() || !nextCustomerId) return;
+    if (String(this.editorParts() || '').trim()) return;
+    const fallback = this.partsFromLatestPaidInvoice(nextCustomerId);
+    this.editorParts.set(this.formatPartRequestsForEditor(fallback.parts));
+    this.editorPartsSourceHint.set(
+      fallback.invoiceNumber ? `Auto-filled from paid invoice ${fallback.invoiceNumber}.` : ''
+    );
   }
 
   saveEditor() {
@@ -1088,7 +1296,10 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     const customerId = isBlocked ? '' : (this.editorCustomerId() || '');
     const title = isBlocked ? this.editorTitle().trim() : '';
     const notes = this.editorNotes().trim();
-    const partRequests = isBlocked ? [] : this.parsePartRequestsFromEditor(this.editorParts());
+    let partRequests = isBlocked ? [] : this.parsePartRequestsFromEditor(this.editorParts());
+    if (!isBlocked && customerId && !partRequests.length) {
+      partRequests = this.partsFromLatestPaidInvoice(customerId).parts;
+    }
     const repeatEvery = Math.max(0, Number(this.editorRepeatEvery()) || 0);
     const repeatCount = Math.max(1, Number(this.editorRepeatCount()) || 1);
 
@@ -1133,6 +1344,7 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     }
 
     this.editorOpen.set(false);
+    this.editorPartsSourceHint.set('');
     this.setStatusSuccess('Appointment saved.');
   }
 
@@ -1297,7 +1509,10 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
   }
 
   canSaveEditor(): boolean {
-    return !this.editorValidationError() && this.editorDirty();
+    if (this.editorValidationError()) return false;
+    // New appointments (no existing id) should be saveable immediately after selecting a suggested slot.
+    if (!this.editorId()) return true;
+    return this.editorDirty();
   }
 
   settingsValidationError(): string {
@@ -1435,7 +1650,7 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     this.updateSchedulerHeight();
   }
 
-  private formatPartRequestsForEditor(parts: Array<{ partName: string; qty: number; vendorHint?: string; sku?: string; note?: string }>): string {
+  private formatPartRequestsForEditor(parts: PartRequest[]): string {
     return (Array.isArray(parts) ? parts : [])
       .map(part => {
         const qty = Math.max(1, Number(part.qty) || 1);
@@ -1451,12 +1666,12 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
       .join('\n');
   }
 
-  private parsePartRequestsFromEditor(text: string): Array<{ partName: string; qty: number; vendorHint?: string; sku?: string; note?: string }> {
+  private parsePartRequestsFromEditor(text: string): PartRequest[] {
     const rows = String(text || '')
       .split(/\r?\n/)
       .map(line => line.trim())
       .filter(Boolean);
-    const out: Array<{ partName: string; qty: number; vendorHint?: string; sku?: string; note?: string }> = [];
+    const out: PartRequest[] = [];
 
     for (const line of rows) {
       const match = line.match(/^\s*(\d+)\s*[xX]\s+(.+?)(?:\s*\|\s*([^|]+))?(?:\s*\|\s*([^|]+))?(?:\s*\|\s*(.+))?$/);
@@ -1483,6 +1698,57 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     }
 
     return out.slice(0, 40);
+  }
+
+  private normalizePartRequests(parts: PartRequest[]): PartRequest[] {
+    if (!Array.isArray(parts)) return [];
+    return parts
+      .map(part => ({
+        partName: String(part?.partName || '').trim(),
+        qty: Math.max(1, Math.floor(Number(part?.qty || 1))),
+        vendorHint: String(part?.vendorHint || '').trim(),
+        sku: String(part?.sku || '').trim(),
+        note: String(part?.note || '').trim()
+      }))
+      .filter(part => !!part.partName)
+      .slice(0, 40);
+  }
+
+  private partsFromLatestPaidInvoice(customerId: string): { invoiceNumber: string; parts: PartRequest[] } {
+    const lookupId = String(customerId || '').trim();
+    if (!lookupId) return { invoiceNumber: '', parts: [] };
+
+    const matches = this.invoicesData.forCustomer({ id: lookupId })
+      .map(card => this.invoicesData.getInvoiceById(card.id))
+      .filter((doc): doc is InvoiceDetail => !!doc)
+      .filter(doc => doc.documentType === 'invoice')
+      .filter(doc => doc.stage === 'accepted' || doc.stage === 'completed');
+
+    if (!matches.length) return { invoiceNumber: '', parts: [] };
+
+    matches.sort((a, b) => {
+      const aMs = this.toMillis(a.updatedAt || a.createdAt || '');
+      const bMs = this.toMillis(b.updatedAt || b.createdAt || '');
+      return bMs - aMs;
+    });
+
+    const latest = matches[0];
+    const parts = this.normalizePartRequests(
+      (latest.lineItems || [])
+        .filter(item => String(item.type || '').trim().toLowerCase() === 'part')
+        .map(item => ({
+          partName: String(item.description || '').trim() || String(item.code || '').trim(),
+          qty: Math.max(1, Number(item.quantity || 1)),
+          sku: String(item.code || '').trim(),
+          vendorHint: '',
+          note: ''
+        }))
+    );
+
+    return {
+      invoiceNumber: String(latest.invoiceNumber || '').trim(),
+      parts
+    };
   }
 
   private resolveBayColor(resourceId: string): string {

@@ -5,10 +5,8 @@ import {
   AccessProfileResponse,
   AuthAccessState,
   AuthLocation,
-  AuthMeResponse,
   AuthState,
-  AuthUser,
-  ClientPrincipal
+  AuthUser
 } from './auth.models';
 
 const DEV_AUTH_STORAGE_KEY = 'pathflow.dev.auth.user';
@@ -71,6 +69,12 @@ interface DevSessionOptions {
 interface AccessHydrationResult {
   roles: string[];
   state: AuthAccessState;
+  principal: {
+    userId: string;
+    email: string;
+    displayName: string;
+    identityProvider: string;
+  } | null;
 }
 
 interface AuthRuntimeConfig {
@@ -187,12 +191,25 @@ export class AuthService {
     this.accessSignal.set(this.emptyAccessState(false));
 
     const target = this.normalizeRedirect(redirectTo, '/login');
-    if (source === 'dev') {
-      window.location.assign(target);
-      return;
-    }
+    const finalizeRedirect = () => {
+      if (source !== 'swa') {
+        window.location.assign(target);
+        return;
+      }
+      window.location.assign(`/.auth/logout?post_logout_redirect_uri=${encodeURIComponent(target)}`);
+    };
 
-    window.location.assign(`/.auth/logout?post_logout_redirect_uri=${encodeURIComponent(target)}`);
+    void fetch('/api/access', {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ op: 'logout' })
+    })
+      .catch(() => undefined)
+      .finally(finalizeRedirect);
   }
 
   signInDev(role: 'admin' | 'user', email?: string): void {
@@ -221,7 +238,7 @@ export class AuthService {
     });
   }
 
-  signInWithEmailPassword(emailInput: string, passwordInput: string): { ok: boolean; error?: string } {
+  async signInWithEmailPassword(emailInput: string, passwordInput: string): Promise<{ ok: boolean; error?: string }> {
     if (!this.isLocalAuthEnabled()) {
       return { ok: false, error: 'Email/password login is not enabled for this environment.' };
     }
@@ -230,6 +247,32 @@ export class AuthService {
     const password = passwordInput;
     if (!email || !password) {
       return { ok: false, error: 'Email and password are required.' };
+    }
+
+    if (!this.isLocalHost || this.authConfigSignal().localPasswordEnabled) {
+      try {
+        const response = await fetch('/api/access', {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            op: 'password-login',
+            email,
+            password
+          })
+        });
+        const payload = await response.json() as { ok?: boolean; error?: string };
+        if (!response.ok || !payload?.ok) {
+          return { ok: false, error: String(payload?.error || 'Invalid email or password.') };
+        }
+        await this.bootstrap(true);
+        return { ok: true };
+      } catch {
+        return { ok: false, error: 'Unable to sign in right now. Please try again.' };
+      }
     }
 
     const seededAccount = environment.auth.localUsers.find(user => user.email.trim().toLowerCase() === email);
@@ -420,6 +463,9 @@ export class AuthService {
   }
 
   isPasskeySupported(): boolean {
+    if (!this.isLocalHost && !environment.auth.devBypass) {
+      return false;
+    }
     return typeof window !== 'undefined' &&
       window.isSecureContext &&
       typeof window.PublicKeyCredential !== 'undefined' &&
@@ -445,19 +491,19 @@ export class AuthService {
 
   isHostedEmailEnabled(): boolean {
     const config = this.authConfigSignal();
-    return !!config.hostedEmailEnabled && !!config.hostedEmailProvider;
+    return !config.localPasswordEnabled && !!config.hostedEmailEnabled && !!config.hostedEmailProvider;
   }
 
   hostedEmailProvider(): string {
     return this.authConfigSignal().hostedEmailProvider;
   }
 
-  createEmailPasswordAccount(
+  async createEmailPasswordAccount(
     emailInput: string,
     passwordInput: string,
     displayNameInput = '',
     phoneInput = ''
-  ): { ok: boolean; error?: string } {
+  ): Promise<{ ok: boolean; error?: string }> {
     if (!this.isLocalAuthEnabled()) {
       return { ok: false, error: 'Email/password account creation is not enabled for this environment yet. Use Microsoft or Google sign-in.' };
     }
@@ -479,6 +525,34 @@ export class AuthService {
     }
     if (password.length < 8) {
       return { ok: false, error: 'Password must be at least 8 characters.' };
+    }
+
+    if (!this.isLocalHost || this.authConfigSignal().localPasswordEnabled) {
+      try {
+        const response = await fetch('/api/access', {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            op: 'password-signup',
+            email,
+            password,
+            displayName,
+            phone
+          })
+        });
+        const payload = await response.json() as { ok?: boolean; error?: string };
+        if (!response.ok || !payload?.ok) {
+          return { ok: false, error: String(payload?.error || 'Unable to create your account right now.') };
+        }
+        await this.bootstrap(true);
+        return { ok: true };
+      } catch {
+        return { ok: false, error: 'Unable to create your account right now.' };
+      }
     }
 
     const seededExists = environment.auth.localUsers.some(user => user.email.trim().toLowerCase() === email);
@@ -734,21 +808,14 @@ export class AuthService {
   }
 
   private async hydrateAuthState(): Promise<void> {
-    const principal = await this.fetchClientPrincipal();
-
-    if (principal) {
-      const principalUser = this.principalToUser(principal);
-      const access = await this.fetchAccessState();
-      const user: AuthUser = this.applyProfileOverrides({
-        ...principalUser,
-        roles: this.mergeRoleLists(principalUser.roles, access.roles)
-      });
-
+    const access = await this.fetchAccessState();
+    if (access.principal) {
+      const principalUser = this.accessPrincipalToUser(access.principal, access.roles);
       this.stateSignal.set({
         initialized: true,
         loading: false,
-        source: 'swa',
-        user
+        source: this.resolveSourceFromIdentityProvider(access.principal.identityProvider),
+        user: this.applyProfileOverrides(principalUser)
       });
       this.accessSignal.set(access.state);
       return;
@@ -804,41 +871,6 @@ export class AuthService {
     return candidate;
   }
 
-  private async fetchClientPrincipal(): Promise<ClientPrincipal | null> {
-    // Static Web Apps auth endpoint isn't available during local Angular dev.
-    if (this.isLocalHost) {
-      return null;
-    }
-
-    try {
-      const response = await fetch('/.auth/me', {
-        method: 'GET',
-        credentials: 'include',
-        headers: {
-          Accept: 'application/json'
-        }
-      });
-
-      if (!response.ok) return null;
-
-      const payload = (await response.json()) as unknown;
-      if (!payload) return null;
-
-      if (this.isAuthMeResponse(payload)) {
-        return payload.clientPrincipal ?? null;
-      }
-
-      if (Array.isArray(payload)) {
-        const maybe = payload[0] as unknown;
-        if (this.isAuthMeResponse(maybe)) return maybe.clientPrincipal ?? null;
-      }
-
-      return null;
-    } catch {
-      return null;
-    }
-  }
-
   private async fetchAccessState(): Promise<AccessHydrationResult> {
     try {
       const response = await fetch('/api/access?scope=me', {
@@ -853,10 +885,12 @@ export class AuthService {
       if (!response.ok || !payload || !payload.ok) {
         return {
           roles: [],
-          state: this.emptyAccessState(true, { registered: false, canBootstrap: false })
+          state: this.emptyAccessState(true, { registered: false, canBootstrap: false }),
+          principal: null
         };
       }
 
+      const principal = this.normalizeAccessPrincipal(payload.principal);
       const profile = payload.profile || null;
       if (!profile) {
         return {
@@ -864,7 +898,8 @@ export class AuthService {
           state: this.emptyAccessState(true, {
             registered: false,
             canBootstrap: !!payload.canBootstrap
-          })
+          }),
+          principal
         };
       }
 
@@ -885,58 +920,58 @@ export class AuthService {
           accessLocked: !!profile.accessLocked,
           accessLockReason: String(profile.accessLockReason || '').trim(),
           planCycle: this.normalizePlanCycle(profile.planCycle)
-        }
+        },
+        principal
       };
     } catch {
       return {
         roles: [],
-        state: this.emptyAccessState(true, { registered: false, canBootstrap: false })
+        state: this.emptyAccessState(true, { registered: false, canBootstrap: false }),
+        principal: null
       };
     }
   }
 
-  private principalToUser(principal: ClientPrincipal): AuthUser {
-    const claims = Array.isArray(principal.claims) ? principal.claims : [];
-    const emailClaim = claims.find(c => (c.typ || '').toLowerCase() === 'emails')?.val ||
-      claims.find(c => (c.typ || '').toLowerCase() === 'email')?.val ||
-      claims.find(c => (c.typ || '').toLowerCase() === 'preferred_username')?.val;
-
-    const rawDetails = String(principal.userDetails || '').trim();
-    const email = String(emailClaim || rawDetails).trim().toLowerCase();
-    const displayName = rawDetails || email || 'Signed-in user';
-    const roles = this.normalizeRoles(principal.userRoles || [], email);
-
-    const baseUser: AuthUser = {
-      id: String(principal.userId || email || crypto.randomUUID()),
-      displayName,
+  private normalizeAccessPrincipal(input: AccessProfileResponse['principal']): AccessHydrationResult['principal'] {
+    if (!input || typeof input !== 'object') return null;
+    const userId = String(input.userId || '').trim();
+    const email = String(input.email || '').trim().toLowerCase();
+    const displayName = String(input.displayName || '').trim();
+    const identityProvider = String(input.identityProvider || '').trim();
+    if (!userId && !email) return null;
+    return {
+      userId: userId || email,
       email,
-      identityProvider: String(principal.identityProvider || 'unknown'),
-      roles
+      displayName: displayName || email || userId || 'Signed-in user',
+      identityProvider: identityProvider || 'unknown'
     };
-
-    return this.applyProfileOverrides(baseUser);
   }
 
-  private normalizeRoles(input: string[], email: string): string[] {
-    const out = new Set<string>();
-    input
-      .map(v => String(v || '').trim().toLowerCase())
-      .filter(Boolean)
-      .forEach(v => out.add(v));
+  private accessPrincipalToUser(
+    principal: NonNullable<AccessHydrationResult['principal']>,
+    roles: string[]
+  ): AuthUser {
+    return {
+      id: principal.userId || principal.email || crypto.randomUUID(),
+      displayName: principal.displayName || principal.email || 'Signed-in user',
+      email: principal.email,
+      identityProvider: principal.identityProvider || 'unknown',
+      roles: this.normalizeRoleList(Array.isArray(roles) ? roles : [])
+    };
+  }
 
-    if (!out.has('authenticated')) {
-      out.add('authenticated');
+  private resolveSourceFromIdentityProvider(identityProviderInput: string): AuthState['source'] {
+    const identityProvider = String(identityProviderInput || '').trim().toLowerCase();
+    if (identityProvider === 'dev-local') return 'dev';
+    if (!identityProvider) return 'session';
+    if (
+      identityProvider.startsWith('app-') ||
+      identityProvider === 'session' ||
+      identityProvider === 'local'
+    ) {
+      return 'session';
     }
-
-    const adminEmails = environment.auth.adminEmails
-      .map(v => v.trim().toLowerCase())
-      .filter(Boolean);
-
-    if (email && adminEmails.includes(email)) {
-      out.add('admin');
-    }
-
-    return [...out];
+    return 'swa';
   }
 
   private normalizeRoleList(input: string[]): string[] {
@@ -1353,8 +1388,4 @@ export class AuthService {
     }
   }
 
-  private isAuthMeResponse(payload: unknown): payload is AuthMeResponse {
-    if (!payload || typeof payload !== 'object') return false;
-    return Object.prototype.hasOwnProperty.call(payload, 'clientPrincipal');
-  }
 }

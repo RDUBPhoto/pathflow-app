@@ -22,6 +22,9 @@ import {
   InvoiceDetail,
   InvoiceDocumentType,
   InvoiceLineItem,
+  InvoicePartStatus,
+  InvoicePaymentTransaction,
+  InvoiceRefundTransaction,
   InvoiceLineType,
   InvoiceStage,
   InvoiceTimelineEntry,
@@ -36,9 +39,16 @@ import { NotificationsApiService } from '../../services/notifications-api.servic
 import { EmailApiService } from '../../services/email-api.service';
 import { SmsApiService } from '../../services/sms-api.service';
 import { TenantContextService } from '../../services/tenant-context.service';
+import { PaymentRefundApiService, PaymentRefundResponse } from '../../services/payment-refund-api.service';
 import { environment } from '../../../environments/environment';
 
 type StatusTone = 'neutral' | 'success' | 'error';
+type RefundAllocation = {
+  provider: string;
+  originalTransactionId: string;
+  accountNumber: string;
+  refundableAmount: number;
+};
 
 @Component({
   selector: 'app-invoice-detail',
@@ -78,6 +88,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
   private readonly emailApi = inject(EmailApiService);
   private readonly smsApi = inject(SmsApiService);
   private readonly tenantContext = inject(TenantContextService);
+  private readonly paymentRefundApi = inject(PaymentRefundApiService);
   private readonly toastController = inject(ToastController);
 
   readonly loading = signal(true);
@@ -87,6 +98,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
   readonly statusTone = signal<StatusTone>('neutral');
   readonly lineItemsPage = signal(1);
   readonly sendingInvoice = signal(false);
+  readonly refundingCustomer = signal(false);
   readonly sendInvoiceModalOpen = signal(false);
   readonly sendInvoiceModalError = signal('');
   readonly sendInvoiceViaEmail = signal(true);
@@ -106,15 +118,19 @@ export default class InvoiceDetailComponent implements OnDestroy {
   private lastToastKey = '';
   private lastToastAt = 0;
   private pendingOpenSendModal = false;
+  private pendingSendNow = false;
   private autoOpenSendModalTimer: ReturnType<typeof setTimeout> | null = null;
+  private autoSendNowTimer: ReturnType<typeof setTimeout> | null = null;
 
   readonly invoice = signal<InvoiceDetail | null>(null);
   private readonly baselineSnapshot = signal('');
+  readonly partStatusOptions: Array<{ value: InvoicePartStatus; label: string }> = [
+    { value: 'in-stock', label: 'In-stock' },
+    { value: 'ordered', label: 'Ordered' },
+    { value: 'backordered', label: 'Backordered' },
+    { value: 'received', label: 'Received' }
+  ];
 
-  readonly stageOptions = computed<InvoiceBoardStage[]>(() => {
-    const type = this.invoice()?.documentType || 'invoice';
-    return type === 'quote' ? this.quoteStageOptionsList : this.invoiceStageOptionsList;
-  });
   readonly paymentAvailability = this.paymentSettings.paymentLinkAvailability;
   readonly documentTypeLabel = computed(() => this.documentTypeLabelFor(this.invoice()?.documentType || 'invoice'));
   readonly invoiceEmailTarget = computed(() => String(this.invoice()?.customerEmail || '').trim());
@@ -135,10 +151,10 @@ export default class InvoiceDetailComponent implements OnDestroy {
     return { subtotal, taxTotal, total };
   });
   readonly paidAmount = computed(() => {
-    const detail = this.invoice();
-    return this.clampPaidAmount(detail?.paidAmount, this.totals().total);
+    return this.normalizePaidAmount(this.invoice()?.paidAmount);
   });
   readonly amountDue = computed(() => this.roundCurrency(Math.max(0, this.totals().total - this.paidAmount())));
+  readonly overpaymentAmount = computed(() => this.roundCurrency(Math.max(0, this.paidAmount() - this.totals().total)));
   readonly sendInvoiceLabel = computed(() => {
     const detail = this.invoice();
     if (!detail || detail.documentType !== 'invoice') return 'Send Invoice';
@@ -194,6 +210,9 @@ export default class InvoiceDetailComponent implements OnDestroy {
       const raw = String(params.get('openSendModal') || '').trim().toLowerCase();
       this.pendingOpenSendModal = raw === '1' || raw === 'true' || raw === 'yes';
       if (this.pendingOpenSendModal) this.scheduleAutoOpenSendModal();
+      const sendNowRaw = String(params.get('sendNow') || '').trim().toLowerCase();
+      this.pendingSendNow = sendNowRaw === '1' || sendNowRaw === 'true' || sendNowRaw === 'yes';
+      if (this.pendingSendNow) this.scheduleAutoSendNow();
     });
   }
 
@@ -212,9 +231,13 @@ export default class InvoiceDetailComponent implements OnDestroy {
       clearTimeout(this.autoOpenSendModalTimer);
       this.autoOpenSendModalTimer = null;
     }
+    if (this.autoSendNowTimer) {
+      clearTimeout(this.autoSendNowTimer);
+      this.autoSendNowTimer = null;
+    }
   }
 
-  setStage(value: string): void {
+  async setStage(value: string): Promise<void> {
     if (!this.isStage(value)) return;
     const current = this.invoice();
     if (current?.documentType === 'invoice' && (value === 'accepted' || value === 'completed')) {
@@ -229,6 +252,16 @@ export default class InvoiceDetailComponent implements OnDestroy {
       this.clearStatus();
       return;
     }
+    if (current && current.stage === 'draft' && value === 'sent') {
+      const wantsEmail = !!String(current.customerEmail || '').trim();
+      const wantsSms = !!String(current.customerPhone || '').trim();
+      if (current.documentType === 'invoice') {
+        await this.sendInvoiceForPayment({ email: wantsEmail, sms: wantsSms });
+      } else {
+        await this.sendQuoteNow({ email: wantsEmail, sms: wantsSms });
+      }
+      return;
+    }
     this.updateField('stage', value);
   }
 
@@ -240,6 +273,17 @@ export default class InvoiceDetailComponent implements OnDestroy {
       if (stage === 'completed') return 'Completed';
     }
     return stage.charAt(0).toUpperCase() + stage.slice(1);
+  }
+
+  stageOptions(): InvoiceBoardStage[] {
+    const type = this.invoice()?.documentType || 'invoice';
+    const base = type === 'quote' ? this.quoteStageOptionsList : this.invoiceStageOptionsList;
+    const selected = this.selectedStageValue();
+    return base.includes(selected) ? base : [...base, selected];
+  }
+
+  selectedStageValue(): InvoiceBoardStage {
+    return this.normalizeBoardStage(this.invoice()?.stage);
   }
 
   updateField<K extends keyof InvoiceDetail>(field: K, value: InvoiceDetail[K]): void {
@@ -325,6 +369,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
       const line: InvoiceLineItem = this.recalculateLine({
         id: `li-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
         type,
+        partStatus: type === 'part' ? 'ordered' : undefined,
         code: '',
         description: '',
         quantity: 1,
@@ -370,10 +415,18 @@ export default class InvoiceDetailComponent implements OnDestroy {
 
         const nextLine: InvoiceLineItem = { ...line };
         if (field === 'type') {
-          nextLine.type = rawValue === 'labor' ? 'labor' : 'part';
+          const nextType: InvoiceLineType = rawValue === 'labor' ? 'labor' : 'part';
+          nextLine.type = nextType;
+          if (nextType === 'labor') {
+            nextLine.partStatus = undefined;
+          } else {
+            nextLine.partStatus = this.normalizePartStatus(nextLine.partStatus);
+          }
         } else if (field === 'quantity' || field === 'unitPrice' || field === 'taxRate') {
           const value = this.safeNumber(rawValue);
           (nextLine[field] as number) = value < 0 ? 0 : value;
+        } else if (field === 'partStatus') {
+          nextLine.partStatus = this.normalizePartStatus(rawValue);
         } else if (field === 'code' || field === 'description') {
           (nextLine[field] as string) = String(rawValue || '');
         }
@@ -665,6 +718,103 @@ export default class InvoiceDetailComponent implements OnDestroy {
     }
   }
 
+  async sendQuoteNow(options?: { email: boolean; sms: boolean }): Promise<void> {
+    const detail = this.invoice();
+    if (!detail || detail.documentType !== 'quote' || this.sendingInvoice()) return;
+
+    const emailTarget = String(detail.customerEmail || '').trim();
+    const phoneTarget = String(detail.customerPhone || '').trim();
+    const wantsEmail = options ? !!options.email : !!emailTarget;
+    const wantsSms = options ? !!options.sms : !!phoneTarget;
+    if (!wantsEmail && !wantsSms) {
+      this.setStatus('Customer email or phone is required to send this quote.', 'error');
+      return;
+    }
+    if (wantsEmail && !emailTarget) {
+      this.setStatus('Customer email is required to send quote by email.', 'error');
+      return;
+    }
+    if (wantsSms && !phoneTarget) {
+      this.setStatus('Customer phone is required to send quote by SMS.', 'error');
+      return;
+    }
+
+    this.sendingInvoice.set(true);
+    this.clearStatus();
+    try {
+      const business = String(detail.businessName || '').trim() || 'Our team';
+      const quoteNumber = String(detail.invoiceNumber || 'Quote').trim();
+      const subject = `Quote ${quoteNumber} is ready`;
+      const viewUrl = this.quoteResponseUrl(detail, 'view');
+      const acceptUrl = this.quoteResponseUrl(detail, 'accept');
+      const declineUrl = this.quoteResponseUrl(detail, 'decline');
+      const plainMessage = `Hi ${detail.customerName || 'Customer'}, your quote ${quoteNumber} is ready. View: ${viewUrl} Accept: ${acceptUrl} Decline: ${declineUrl}`;
+      const html = this.buildQuoteEmailHtml(detail, business, viewUrl, acceptUrl, declineUrl);
+
+      const sends: Array<{ channel: 'email' | 'sms'; promise: Promise<unknown> }> = [];
+      if (wantsEmail && emailTarget) {
+        sends.push({
+          channel: 'email',
+          promise: firstValueFrom(
+            this.emailApi.sendToCustomer({
+              customerId: String(detail.customerId || detail.id || '').trim(),
+              customerName: String(detail.customerName || '').trim(),
+              to: emailTarget,
+              subject,
+              message: plainMessage,
+              html
+            })
+          )
+        });
+      }
+      if (wantsSms && phoneTarget) {
+        sends.push({
+          channel: 'sms',
+          promise: firstValueFrom(
+            this.smsApi.sendToCustomer({
+              customerId: String(detail.customerId || detail.id || '').trim(),
+              customerName: String(detail.customerName || '').trim(),
+              to: phoneTarget,
+              message: `${business}: Quote ${quoteNumber}. View: ${viewUrl} Accept: ${acceptUrl} Decline: ${declineUrl}`
+            })
+          )
+        });
+      }
+
+      const settled = await Promise.allSettled(sends.map(row => row.promise));
+      const results = sends.map((row, index) => ({ channel: row.channel, result: settled[index] }));
+      const emailSuccess = !wantsEmail || results.some(row => row.channel === 'email' && row.result.status === 'fulfilled');
+      const smsSuccess = !wantsSms || results.some(row => row.channel === 'sms' && row.result.status === 'fulfilled');
+      const anySuccess = emailSuccess || smsSuccess;
+
+      if (!anySuccess) {
+        this.setStatus('Quote send failed. Email/SMS could not be delivered.', 'error');
+        return;
+      }
+
+      const sent = this.invoicesData.saveInvoice({
+        ...detail,
+        stage: 'sent'
+      });
+      this.invoice.set(sent);
+      this.baselineSnapshot.set(this.snapshot(sent));
+
+      if (wantsEmail && wantsSms) {
+        if (emailSuccess && smsSuccess) this.setStatus('Quote sent by email and SMS.', 'success');
+        else if (emailSuccess) this.setStatus('Quote sent by email. SMS delivery failed.', 'error');
+        else if (smsSuccess) this.setStatus('Quote sent by SMS. Email delivery failed.', 'error');
+      } else if (wantsEmail) {
+        this.setStatus(emailSuccess ? 'Quote sent by email.' : 'Quote send failed. Email could not be delivered.', emailSuccess ? 'success' : 'error');
+      } else if (wantsSms) {
+        this.setStatus(smsSuccess ? 'Quote sent by SMS.' : 'Quote send failed. SMS could not be delivered.', smsSuccess ? 'success' : 'error');
+      }
+    } catch {
+      this.setStatus('Could not send quote.', 'error');
+    } finally {
+      this.sendingInvoice.set(false);
+    }
+  }
+
   async emailPaidReceipt(): Promise<void> {
     const detail = this.invoice();
     if (!detail || detail.documentType !== 'invoice' || detail.stage !== 'accepted' || this.emailingPaidReceipt()) return;
@@ -722,6 +872,97 @@ export default class InvoiceDetailComponent implements OnDestroy {
       this.setStatus('Could not send paid receipt SMS.', 'error');
     } finally {
       this.textingPaidReceipt.set(false);
+    }
+  }
+
+  async refundCustomerOverpayment(): Promise<void> {
+    const detail = this.invoice();
+    if (!detail || detail.documentType !== 'invoice' || this.refundingCustomer()) return;
+
+    const overpayment = this.overpaymentAmount();
+    if (overpayment <= 0) {
+      this.setStatus('No overpayment found on this invoice.', 'neutral');
+      return;
+    }
+
+    const allocations = this.buildRefundAllocations(detail, overpayment);
+    const refundableTotal = this.roundCurrency(allocations.reduce((sum, item) => sum + item.refundableAmount, 0));
+    if (!allocations.length || refundableTotal + 0.009 < overpayment) {
+      this.setStatus('Overpayment exists, but no eligible processor transactions are available for automatic refund.', 'error');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Refund ${this.formatUsd(overpayment)} to ${detail.customerName || 'customer'} for invoice ${detail.invoiceNumber}?`
+    );
+    if (!confirmed) return;
+
+    const tenantId = String(this.tenantContext.tenantId() || 'main').trim().toLowerCase() || 'main';
+    const reason = 'Overpayment refunded after invoice update.';
+    let remaining = overpayment;
+    let refundedTotal = 0;
+    let latest = detail;
+
+    this.refundingCustomer.set(true);
+    this.clearStatus();
+    try {
+      for (const allocation of allocations) {
+        if (remaining <= 0) break;
+        const amountToRefund = this.roundCurrency(Math.min(allocation.refundableAmount, remaining));
+        if (amountToRefund <= 0) continue;
+
+        const response = await firstValueFrom(this.paymentRefundApi.refund({
+          invoiceId: detail.id,
+          tenantId,
+          provider: allocation.provider,
+          amount: amountToRefund.toFixed(2),
+          invoiceNumber: detail.invoiceNumber,
+          originalTransactionId: allocation.originalTransactionId,
+          accountNumber: allocation.accountNumber,
+          reason
+        }));
+
+        const settled = this.normalizeRefundResponse(response, allocation, amountToRefund);
+        const updated = this.invoicesData.recordProcessorRefund(detail.id, {
+          provider: settled.provider,
+          amount: amountToRefund,
+          transactionId: settled.transactionId,
+          originalTransactionId: settled.originalTransactionId,
+          reason
+        });
+        if (updated) latest = updated;
+
+        refundedTotal = this.roundCurrency(refundedTotal + amountToRefund);
+        remaining = this.roundCurrency(Math.max(0, remaining - amountToRefund));
+      }
+
+      if (refundedTotal > 0) {
+        this.invoice.set(latest);
+        this.baselineSnapshot.set(this.snapshot(latest));
+      }
+
+      if (remaining <= 0) {
+        this.setStatus(`Refunded ${this.formatUsd(refundedTotal)} back to customer.`, 'success');
+        return;
+      }
+
+      this.setStatus(
+        `Partial refund issued (${this.formatUsd(refundedTotal)}). ${this.formatUsd(remaining)} remains to refund.`,
+        'error'
+      );
+    } catch (err: any) {
+      if (refundedTotal > 0) {
+        this.invoice.set(latest);
+        this.baselineSnapshot.set(this.snapshot(latest));
+        this.setStatus(
+          `Partial refund issued (${this.formatUsd(refundedTotal)}). Remaining refund failed: ${this.refundErrorMessage(err)}`,
+          'error'
+        );
+      } else {
+        this.setStatus(this.refundErrorMessage(err), 'error');
+      }
+    } finally {
+      this.refundingCustomer.set(false);
     }
   }
 
@@ -815,6 +1056,92 @@ export default class InvoiceDetailComponent implements OnDestroy {
     return String(user?.displayName || user?.email || 'System').trim();
   }
 
+  private buildRefundAllocations(detail: InvoiceDetail, targetAmount: number): RefundAllocation[] {
+    const wanted = this.roundCurrency(Math.max(0, Number(targetAmount || 0)));
+    if (wanted <= 0) return [];
+
+    const refundsByOriginal = new Map<string, number>();
+    for (const refund of detail.refundTransactions || []) {
+      const originalTransactionId = this.safeText((refund as InvoiceRefundTransaction).originalTransactionId);
+      if (!originalTransactionId) continue;
+      const refunded = this.roundCurrency(Math.max(0, Number((refund as InvoiceRefundTransaction).amount || 0)));
+      const next = this.roundCurrency((refundsByOriginal.get(originalTransactionId) || 0) + refunded);
+      refundsByOriginal.set(originalTransactionId, next);
+    }
+
+    const payments = [...(detail.paymentTransactions || [])]
+      .sort((a, b) => Date.parse(String(b.createdAt || '').trim()) - Date.parse(String(a.createdAt || '').trim()));
+
+    let remainingTarget = wanted;
+    const allocations: RefundAllocation[] = [];
+
+    for (const payment of payments) {
+      if (remainingTarget <= 0) break;
+      const provider = this.safeText((payment as InvoicePaymentTransaction).provider).toLowerCase();
+      if (!this.supportsAutomatedRefund(provider)) continue;
+
+      const transactionId = this.safeText((payment as InvoicePaymentTransaction).transactionId);
+      if (!transactionId) continue;
+
+      const accountNumber = this.maskedAccountForRefund(this.safeText((payment as InvoicePaymentTransaction).accountNumber));
+      if (!accountNumber) continue;
+
+      const paid = this.roundCurrency(Math.max(0, Number((payment as InvoicePaymentTransaction).amount || 0)));
+      const refunded = this.roundCurrency(Math.max(0, Number(refundsByOriginal.get(transactionId) || 0)));
+      const available = this.roundCurrency(Math.max(0, paid - refunded));
+      if (available <= 0) continue;
+
+      const portion = this.roundCurrency(Math.min(available, remainingTarget));
+      allocations.push({
+        provider,
+        originalTransactionId: transactionId,
+        accountNumber,
+        refundableAmount: portion
+      });
+      remainingTarget = this.roundCurrency(Math.max(0, remainingTarget - portion));
+    }
+
+    return allocations;
+  }
+
+  private normalizeRefundResponse(
+    response: PaymentRefundResponse,
+    fallback: RefundAllocation,
+    amount: number
+  ): { provider: string; transactionId: string; originalTransactionId: string; amount: number } {
+    const provider = this.safeText(response?.provider || fallback.provider).toLowerCase() || fallback.provider;
+    const originalTransactionId = this.safeText(response?.originalTransactionId || fallback.originalTransactionId) || fallback.originalTransactionId;
+    const transactionId = this.safeText(response?.refundTransactionId || (response as any)?.transactionId)
+      || `manual-refund-${Date.now()}`;
+    return {
+      provider,
+      transactionId,
+      originalTransactionId,
+      amount: this.roundCurrency(Math.max(0, Number(amount || 0)))
+    };
+  }
+
+  private refundErrorMessage(err: any): string {
+    const error = String(err?.error?.error || '').trim();
+    const detail = String(err?.error?.detail || '').trim();
+    const fallback = String(err?.message || '').trim();
+    if (error && detail) return `${error} (${detail})`;
+    if (error) return error;
+    if (detail) return detail;
+    if (fallback) return fallback;
+    return 'Refund failed. Verify processor settings and try again.';
+  }
+
+  private supportsAutomatedRefund(provider: string): boolean {
+    return this.safeText(provider).toLowerCase() === 'authorize-net';
+  }
+
+  private maskedAccountForRefund(raw: string): string {
+    const digits = String(raw || '').replace(/\D+/g, '');
+    if (digits.length < 4) return '';
+    return `XXXX${digits.slice(-4)}`;
+  }
+
   private loadInvoice(id: string): void {
     this.loading.set(true);
     this.error.set('');
@@ -830,7 +1157,8 @@ export default class InvoiceDetailComponent implements OnDestroy {
       return;
     }
 
-    const found = this.invoicesData.getInvoiceById(id);
+    const expectedType = this.expectedDocumentTypeFromRoute();
+    const found = this.findBestInvoiceForRoute(id, expectedType);
     if (!found) {
       if (!this.invoice() || this.invoice()!.id !== id) {
         this.invoice.set(null);
@@ -854,6 +1182,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
     this.error.set('');
     this.loading.set(false);
     this.scheduleAutoOpenSendModal();
+    this.scheduleAutoSendNow();
   }
 
   private maybeOpenSendModalFromQuery(): void {
@@ -879,6 +1208,78 @@ export default class InvoiceDetailComponent implements OnDestroy {
     }, 0);
   }
 
+  private maybeSendNowFromQuery(): void {
+    if (!this.pendingSendNow) return;
+    const detail = this.invoice();
+    if (!detail || detail.stage !== 'draft') return;
+    this.pendingSendNow = false;
+    const wantsEmail = !!String(detail.customerEmail || '').trim();
+    const wantsSms = !!String(detail.customerPhone || '').trim();
+    if (detail.documentType === 'invoice') {
+      void this.sendInvoiceForPayment({ email: wantsEmail, sms: wantsSms });
+    } else {
+      void this.sendQuoteNow({ email: wantsEmail, sms: wantsSms });
+    }
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { sendNow: null },
+      queryParamsHandling: 'merge',
+      replaceUrl: true
+    });
+  }
+
+  private scheduleAutoSendNow(): void {
+    if (!this.pendingSendNow) return;
+    if (this.autoSendNowTimer) clearTimeout(this.autoSendNowTimer);
+    this.autoSendNowTimer = setTimeout(() => {
+      this.autoSendNowTimer = null;
+      this.maybeSendNowFromQuery();
+    }, 0);
+  }
+
+  private expectedDocumentTypeFromRoute(): InvoiceDocumentType {
+    const path = String(this.route.snapshot.routeConfig?.path || '').trim().toLowerCase();
+    if (path.startsWith('quotes')) return 'quote';
+    return 'invoice';
+  }
+
+  private findBestInvoiceForRoute(id: string, expectedType: InvoiceDocumentType): InvoiceDetail | null {
+    const key = String(id || '').trim();
+    if (!key) return null;
+    const lookup = key.toLowerCase();
+    const details = this.invoicesData.invoiceDetails();
+    const matches = details.filter(item => {
+      if (item.documentType !== expectedType) return false;
+      const itemId = String(item.id || '').trim();
+      const number = String(item.invoiceNumber || '').trim().toLowerCase();
+      return itemId === key || itemId.toLowerCase() === lookup || number === lookup;
+    });
+
+    if (matches.length) {
+      const ranked = matches.slice().sort((a, b) => {
+        const stageDiff = this.stagePriorityForRoute(b.stage) - this.stagePriorityForRoute(a.stage);
+        if (stageDiff !== 0) return stageDiff;
+        const updatedDiff = Date.parse(String(b.updatedAt || b.createdAt || '').trim()) - Date.parse(String(a.updatedAt || a.createdAt || '').trim());
+        if (Number.isFinite(updatedDiff) && updatedDiff !== 0) return updatedDiff;
+        return Date.parse(String(b.createdAt || '').trim()) - Date.parse(String(a.createdAt || '').trim());
+      });
+      return ranked[0];
+    }
+    return this.invoicesData.getInvoiceById(key);
+  }
+
+  private stagePriorityForRoute(stage: InvoiceStage): number {
+    const normalized = String(stage || '').trim().toLowerCase();
+    if (normalized === 'completed' || normalized === 'complete') return 7;
+    if (normalized === 'accepted' || normalized === 'paid') return 6;
+    if (normalized === 'sent') return 5;
+    if (normalized === 'draft') return 4;
+    if (normalized === 'declined') return 3;
+    if (normalized === 'expired') return 2;
+    if (normalized === 'canceled') return 1;
+    return 0;
+  }
+
   private snapshot(invoice: InvoiceDetail): string {
     return JSON.stringify(invoice);
   }
@@ -887,7 +1288,9 @@ export default class InvoiceDetailComponent implements OnDestroy {
     return {
       ...invoice,
       lineItems: invoice.lineItems.map(line => ({ ...line })),
-      timeline: invoice.timeline.map(entry => ({ ...entry }))
+      timeline: invoice.timeline.map(entry => ({ ...entry })),
+      paymentTransactions: (invoice.paymentTransactions || []).map(item => ({ ...item })),
+      refundTransactions: (invoice.refundTransactions || []).map(item => ({ ...item }))
     };
   }
 
@@ -1086,6 +1489,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
     const lineTotal = this.roundCurrency(lineSubtotal + taxAmount);
     return {
       ...line,
+      partStatus: line.type === 'part' ? this.normalizePartStatus(line.partStatus) : undefined,
       quantity,
       unitPrice,
       taxRate,
@@ -1109,6 +1513,24 @@ export default class InvoiceDetailComponent implements OnDestroy {
     return value === 'draft' || value === 'sent' || value === 'accepted' || value === 'completed' || value === 'declined';
   }
 
+  private normalizeBoardStage(value: unknown): InvoiceBoardStage {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (normalized === 'draft') return 'draft';
+    if (normalized === 'sent') return 'sent';
+    if (normalized === 'accepted' || normalized === 'paid') return 'accepted';
+    if (normalized === 'completed' || normalized === 'complete') return 'completed';
+    if (normalized === 'declined') return 'declined';
+    return 'draft';
+  }
+
+  private normalizePartStatus(value: unknown): InvoicePartStatus {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (normalized === 'in-stock' || normalized === 'in stock' || normalized === 'instock') return 'in-stock';
+    if (normalized === 'backordered' || normalized === 'back-order' || normalized === 'back order') return 'backordered';
+    if (normalized === 'received') return 'received';
+    return 'ordered';
+  }
+
   private invoicePaymentPublicUrl(detail: InvoiceDetail, paymentLink: string, amountDue: number): string {
     const query = new URLSearchParams();
     query.set('invoiceId', detail.id);
@@ -1125,12 +1547,196 @@ export default class InvoiceDetailComponent implements OnDestroy {
     return this.publicRouteUrl('/invoice-payment', query);
   }
 
+  private quoteResponseUrl(detail: InvoiceDetail, action: 'view' | 'accept' | 'decline'): string {
+    const path = action === 'accept' ? '/quote-accepted' : action === 'decline' ? '/quote-declined' : '/quote-response';
+    const query = new URLSearchParams();
+    query.set('action', action);
+    query.set('quoteId', String(detail.id || '').trim());
+    query.set('tenantId', String(this.tenantContext.tenantId() || 'main').trim().toLowerCase() || 'main');
+    query.set('quoteNumber', String(detail.invoiceNumber || '').trim());
+    query.set('customerName', String(detail.customerName || 'Customer').trim());
+    query.set('vehicle', String(detail.vehicle || 'Vehicle details pending').trim());
+    query.set('businessName', String(detail.businessName || 'Our team').trim());
+    const quotePayload = this.buildPublicQuotePayload(detail);
+    if (quotePayload) query.set('quoteData', quotePayload);
+    return this.publicRouteUrl(path, query);
+  }
+
+  private buildQuoteEmailHtml(
+    detail: InvoiceDetail,
+    business: string,
+    viewUrl: string,
+    acceptUrl: string,
+    declineUrl: string
+  ): string {
+    const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+    const quoteNumber = String(detail.invoiceNumber || 'Quote').trim();
+    const issueDate = String(detail.issueDate || '').trim();
+    const dueDate = String(detail.dueDate || '').trim();
+    const subtotal = Number(detail.subtotal || 0);
+    const taxTotal = Number(detail.taxTotal || 0);
+    const total = Number(detail.total || 0);
+    const logoUrl = this.resolveEmailLogoUrl(detail.businessLogoUrl || '');
+    const itemRows = (detail.lineItems || [])
+      .map(item => `
+        <tr>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;color:#111827;">${this.escapeHtml(item.type === 'labor' ? 'Labor' : 'Part')}</td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;color:#111827;">${this.escapeHtml(item.code || '')}</td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;color:#111827;">${this.escapeHtml(item.description || '')}</td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;color:#111827;text-align:right;">${this.escapeHtml(String(item.quantity || 0))}</td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;color:#111827;text-align:right;">${this.escapeHtml(money.format(Number(item.unitPrice || 0)))}</td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;color:#111827;text-align:right;">${this.escapeHtml(money.format(Number(item.lineTotal || 0)))}</td>
+        </tr>
+      `)
+      .join('');
+    const customerNote = String(detail.customerNote || '').trim();
+    const staffNote = String(detail.staffNote || '').trim();
+    const description = String(detail.description || '').trim();
+    return `
+      <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.45;color:#0f172a;max-width:960px;margin:0 auto;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:16px;">
+          <tr>
+            <td style="vertical-align:top;padding:8px 0;">
+              ${logoUrl ? `<img src="${this.escapeHtml(logoUrl)}" alt="${this.escapeHtml(business)} logo" style="max-height:72px;max-width:220px;display:block;margin:0 0 10px 0;">` : ''}
+              <div style="font-size:22px;font-weight:800;color:#111827;">${this.escapeHtml(business)}</div>
+              <div style="color:#334155;">${this.escapeHtml(String(detail.businessAddress || '').trim())}</div>
+              <div style="color:#334155;">${this.escapeHtml(String(detail.businessPhone || '').trim())}</div>
+              <div style="color:#334155;">${this.escapeHtml(String(detail.businessEmail || '').trim())}</div>
+            </td>
+            <td style="vertical-align:top;text-align:right;padding:8px 0;">
+              <div style="font-size:34px;letter-spacing:.08em;font-weight:800;color:#1f2937;">QUOTE</div>
+              <div style="margin-top:10px;color:#111827;"><strong>Quote #:</strong> ${this.escapeHtml(quoteNumber)}</div>
+              <div style="color:#111827;"><strong>Issue Date:</strong> ${this.escapeHtml(issueDate)}</div>
+              <div style="color:#111827;"><strong>Due Date:</strong> ${this.escapeHtml(dueDate)}</div>
+            </td>
+          </tr>
+        </table>
+
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:14px;">
+          <tr>
+            <td style="vertical-align:top;">
+              <div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:#64748b;">Prepared For</div>
+              <div style="font-size:18px;font-weight:700;color:#111827;">${this.escapeHtml(detail.customerName || 'Customer')}</div>
+              <div style="color:#334155;">${this.escapeHtml(String(detail.customerAddress || '').trim())}</div>
+              <div style="color:#334155;">${this.escapeHtml(String(detail.customerPhone || '').trim())}</div>
+              <div style="color:#334155;">${this.escapeHtml(String(detail.customerEmail || '').trim())}</div>
+              <div style="color:#334155;"><strong>Vehicle:</strong> ${this.escapeHtml(String(detail.vehicle || 'Vehicle details pending').trim())}</div>
+            </td>
+          </tr>
+        </table>
+
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:14px 0;">
+          <thead>
+            <tr>
+              <th style="background:#d1d5db;color:#111827;text-align:left;padding:10px;">Type</th>
+              <th style="background:#d1d5db;color:#111827;text-align:left;padding:10px;">Code</th>
+              <th style="background:#d1d5db;color:#111827;text-align:left;padding:10px;">Description</th>
+              <th style="background:#d1d5db;color:#111827;text-align:right;padding:10px;">Qty</th>
+              <th style="background:#d1d5db;color:#111827;text-align:right;padding:10px;">Price</th>
+              <th style="background:#d1d5db;color:#111827;text-align:right;padding:10px;">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemRows || '<tr><td colspan="6" style="padding:10px;border-bottom:1px solid #e5e7eb;color:#64748b;">No line items.</td></tr>'}
+          </tbody>
+        </table>
+
+        <table role="presentation" align="right" cellpadding="0" cellspacing="0" border="0" style="width:340px;max-width:100%;border:1px solid #cbd5e1;border-radius:8px;background:#f1f5f9;margin:6px 0 18px;">
+          <tr>
+            <td style="padding:8px 10px;color:#111827;">Subtotal:</td>
+            <td style="padding:8px 10px;color:#111827;text-align:right;font-weight:700;">${this.escapeHtml(money.format(subtotal))}</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 10px;color:#111827;">Tax:</td>
+            <td style="padding:8px 10px;color:#111827;text-align:right;font-weight:700;">${this.escapeHtml(money.format(taxTotal))}</td>
+          </tr>
+          <tr>
+            <td style="padding:10px;background:#e2e8f0;color:#111827;font-weight:800;">Quote Total:</td>
+            <td style="padding:10px;background:#e2e8f0;color:#111827;text-align:right;font-weight:800;">${this.escapeHtml(money.format(total))}</td>
+          </tr>
+        </table>
+
+        <div style="clear:both;"></div>
+        <p style="margin:0 0 14px;">
+          <a href="${this.escapeHtml(viewUrl)}" style="display:inline-block;margin-right:8px;background:#1d4ed8;color:#fff;text-decoration:none;padding:10px 14px;border-radius:8px;font-weight:700;">View Quote</a>
+          <a href="${this.escapeHtml(acceptUrl)}" style="display:inline-block;margin-right:8px;background:#16a34a;color:#fff;text-decoration:none;padding:10px 14px;border-radius:8px;font-weight:700;">Accept Quote</a>
+          <a href="${this.escapeHtml(declineUrl)}" style="display:inline-block;background:#ef4444;color:#fff;text-decoration:none;padding:10px 14px;border-radius:8px;font-weight:700;">Decline Quote</a>
+        </p>
+        ${description ? `<p style="margin:8px 0 0;color:#334155;"><strong>Description:</strong> ${this.escapeHtml(description)}</p>` : ''}
+        ${customerNote ? `<p style="margin:8px 0 0;color:#334155;"><strong>Customer Note:</strong> ${this.escapeHtml(customerNote)}</p>` : ''}
+        ${staffNote ? `<p style="margin:8px 0 0;color:#334155;"><strong>Terms:</strong> ${this.escapeHtml(staffNote)}</p>` : ''}
+        <p style="margin:14px 0 0;color:#334155;">If you have questions, reply to this email and ${this.escapeHtml(business)} will help.</p>
+      </div>
+    `;
+  }
+
+  private buildPublicQuotePayload(detail: InvoiceDetail): string {
+    try {
+      const payload = {
+        quoteId: String(detail.id || '').trim(),
+        quoteNumber: String(detail.invoiceNumber || '').trim(),
+        customerName: String(detail.customerName || '').trim(),
+        customerEmail: String(detail.customerEmail || '').trim(),
+        customerPhone: String(detail.customerPhone || '').trim(),
+        customerAddress: String(detail.customerAddress || '').trim(),
+        vehicle: String(detail.vehicle || '').trim(),
+        businessName: String(detail.businessName || '').trim(),
+        businessEmail: String(detail.businessEmail || '').trim(),
+        businessPhone: String(detail.businessPhone || '').trim(),
+        businessAddress: String(detail.businessAddress || '').trim(),
+        businessLogoUrl: String(detail.businessLogoUrl || '').trim(),
+        issueDate: String(detail.issueDate || '').trim(),
+        dueDate: String(detail.dueDate || '').trim(),
+        description: String(detail.description || '').trim(),
+        customerNote: String(detail.customerNote || '').trim(),
+        staffNote: String(detail.staffNote || '').trim(),
+        subtotal: this.roundCurrency(Number(detail.subtotal || 0)),
+        taxTotal: this.roundCurrency(Number(detail.taxTotal || 0)),
+        total: this.roundCurrency(Number(detail.total || 0)),
+        lineItems: (detail.lineItems || []).map(line => ({
+          type: String(line.type || '').trim().toLowerCase(),
+          code: String(line.code || '').trim(),
+          description: String(line.description || '').trim(),
+          quantity: Number(line.quantity || 0),
+          unitPrice: this.roundCurrency(Number(line.unitPrice || 0)),
+          taxRate: this.roundCurrency(Number(line.taxRate || 0)),
+          lineSubtotal: this.roundCurrency(Number(line.lineSubtotal || 0)),
+          taxAmount: this.roundCurrency(Number(line.taxAmount || 0)),
+          lineTotal: this.roundCurrency(Number(line.lineTotal || 0))
+        }))
+      };
+      return this.encodeQuotePayload(payload);
+    } catch {
+      return '';
+    }
+  }
+
+  private encodeQuotePayload(payload: unknown): string {
+    try {
+      const json = JSON.stringify(payload || {});
+      if (typeof TextEncoder !== 'undefined' && typeof btoa === 'function') {
+        const bytes = new TextEncoder().encode(json);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += 1) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+      }
+      if (typeof btoa === 'function') {
+        return btoa(json).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+      }
+      return '';
+    } catch {
+      return '';
+    }
+  }
+
   private buildInvoiceEmailHtml(detail: InvoiceDetail, publicLink: string, business: string, amountDue: number): string {
     const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
     const subtotal = Number(detail.subtotal || 0);
     const taxTotal = Number(detail.taxTotal || 0);
     const total = Number(detail.total || 0);
-    const paid = this.clampPaidAmount(detail.paidAmount, total);
+    const paid = this.normalizePaidAmount(detail.paidAmount);
     const dueDate = String(detail.dueDate || '').trim();
     const issueDate = String(detail.issueDate || '').trim();
     const logoUrl = this.resolveEmailLogoUrl(detail.businessLogoUrl || '');
@@ -1360,7 +1966,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
   private isFinalInvoiceSendLocked(detail: InvoiceDetail): boolean {
     if (!detail || detail.documentType !== 'invoice') return false;
     const total = this.roundCurrency(Math.max(0, Number(detail.total || 0)));
-    const paid = this.clampPaidAmount(detail.paidAmount, total);
+    const paid = this.normalizePaidAmount(detail.paidAmount);
     const due = this.roundCurrency(Math.max(0, total - paid));
     if (paid <= 0 || due <= 0) return false;
     const sentAt = this.latestTimelineEventAt(detail, 'final invoice sent to customer');
@@ -1382,10 +1988,14 @@ export default class InvoiceDetailComponent implements OnDestroy {
     return latest;
   }
 
-  private clampPaidAmount(value: unknown, total: number): number {
+  private normalizePaidAmount(value: unknown): number {
     const amount = Number(value);
     if (!Number.isFinite(amount) || amount <= 0) return 0;
-    return this.roundCurrency(Math.min(Math.max(0, amount), Math.max(0, total)));
+    return this.roundCurrency(Math.max(0, amount));
+  }
+
+  private safeText(value: unknown): string {
+    return value == null ? '' : String(value).trim();
   }
 
   private resolveEmailLogoUrl(value: string): string {

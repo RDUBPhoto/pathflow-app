@@ -1,6 +1,7 @@
 const { TableClient } = require("../_shared/table-client");
 const { randomUUID } = require("crypto");
 const { resolveTenantId, sanitizeTenantId } = require("../_shared/tenant");
+const { requirePrincipal } = require("../_shared/auth");
 
 const NOTIFICATIONS_TABLE = "notifications";
 const USERS_TABLE = "useraccess";
@@ -156,11 +157,20 @@ function parseFallbackIdentity(req, body) {
   return { userId, email, displayName };
 }
 
-function resolveActor(req, body) {
-  const principal = parsePrincipal(req);
+function principalActor(principal) {
+  if (!principal || typeof principal !== "object") return null;
+  const userId = asString(principal.userId || principal.id);
+  const email = normalizeEmail(principal.email);
+  const displayName = asString(principal.displayName || principal.name || email || userId);
+  if (!userId && !email) return null;
+  return { userId, email, displayName };
+}
+
+function resolveActor(req, body, principal) {
+  const fromPrincipal = principalActor(principal) || parsePrincipal(req);
   const fallback = parseFallbackIdentity(req, body);
   if (isLocalRequest(req) && fallback) return fallback;
-  return principal || fallback;
+  return fromPrincipal || fallback;
 }
 
 function isLocalRequest(req) {
@@ -432,6 +442,8 @@ module.exports = async function notificationsApi(context, req) {
     context.res = json(200, { ok: true });
     return;
   }
+  const principal = await requirePrincipal(context, req);
+  if (!principal) return;
 
   const connectionString = asString(process.env.STORAGE_CONNECTION_STRING);
   if (!connectionString) {
@@ -445,7 +457,7 @@ module.exports = async function notificationsApi(context, req) {
   const body = asObject(req && req.body);
   const tenantId = resolveTenantId(req, body);
   const scopedTenantId = scopedTenantPartition(tenantId);
-  const actor = resolveActor(req, body);
+  const actor = resolveActor(req, body, principal);
 
   try {
     const notificationClient = await getTableClient(connectionString, NOTIFICATIONS_TABLE);

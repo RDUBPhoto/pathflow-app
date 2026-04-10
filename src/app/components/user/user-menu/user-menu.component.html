@@ -1,13 +1,17 @@
 <div class="menu-actions">
   <button
+    id="notifications-trigger"
     type="button"
     class="notification-trigger"
-    aria-label="Open notifications"
+    [class.counter-mode]="showUnreadCounter()"
+    [attr.aria-label]="notificationAriaLabel()"
     (click)="toggleNotifications($event)">
-    <ion-icon name="notifications-outline"></ion-icon>
-    <span class="notification-badge" *ngIf="unreadNotifications() > 0">
+    <span class="notification-count-circle" *ngIf="showUnreadCounter(); else bellIcon">
       {{ unreadBadgeText() }}
     </span>
+    <ng-template #bellIcon>
+      <ion-icon name="notifications-outline"></ion-icon>
+    </ng-template>
   </button>
 
   <ion-button class="user-trigger" fill="clear" (click)="openMenu($event)">
@@ -70,9 +74,11 @@
 </ion-popover>
 
 <ion-popover
+  #notificationsPopover
   class="notifications-popover"
   [isOpen]="notificationsOpen()"
-  [event]="notificationsEvent()"
+  trigger="notifications-trigger"
+  reference="trigger"
   side="bottom"
   alignment="end"
   (didDismiss)="onNotificationsPopoverDismiss()">
@@ -95,23 +101,24 @@
             (click)="viewAllNotifications($event)">
             View all
           </button>
-          <button
-            type="button"
-            class="header-link"
-            *ngIf="unreadNotifications() > 0"
-            (click)="markAllNotificationsRead($event)">
-            <ion-icon name="checkmark-done-outline"></ion-icon>
-            Mark all read
-          </button>
-          <button
-            type="button"
-            class="notifications-close"
-            aria-label="Close notifications"
-            (click)="closeNotifications()">
-            <ion-icon name="close-outline"></ion-icon>
-          </button>
         </div>
+        <button
+          type="button"
+          class="notifications-close"
+          aria-label="Close notifications"
+          (click)="closeNotifications($event)">
+          <ion-icon name="close-outline"></ion-icon>
+        </button>
       </header>
+      <div class="notifications-top-actions" *ngIf="unreadNotifications() > 0">
+        <button
+          type="button"
+          class="header-link"
+          (click)="markAllNotificationsRead($event)">
+          <ion-icon name="checkmark-done-outline"></ion-icon>
+          Mark all read
+        </button>
+      </div>
 
       <div class="notifications-loading" *ngIf="notificationsLoading()">Loading notifications...</div>
       <section class="notifications-body">
@@ -129,7 +136,7 @@
             type="button"
             class="notification-item"
             *ngFor="let notification of visibleNotifications()"
-            [class.unread]="!notification.read"
+            [class.unread]="isNotificationUnread(notification)"
             (click)="openNotification(notification, $event)">
             <div class="notification-item-head">
               <div class="notification-item-title">{{ notification.title }}</div>

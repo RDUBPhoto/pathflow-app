@@ -216,7 +216,7 @@ export default class SignupComponent {
     this.step.set(1);
   }
 
-  submitSignup(): void {
+  async submitSignup(): Promise<void> {
     this.error.set('');
     this.hint.set('');
 
@@ -237,7 +237,7 @@ export default class SignupComponent {
           return;
         }
 
-        const result = this.auth.createEmailPasswordAccount(
+        const result = await this.auth.createEmailPasswordAccount(
           this.email(),
           this.password(),
           this.fullName(),

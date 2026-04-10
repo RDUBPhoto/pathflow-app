@@ -41,6 +41,7 @@ type LaborRate = {
   id: string;
   name: string;
   price: number;
+  cost: number;
   taxable: boolean;
 };
 
@@ -593,6 +594,7 @@ export default class InvoicesNewComponent {
             id: String(item?.id || '').trim() || `labor-${index}`,
             name: String(item?.name || '').trim(),
             price: this.roundCurrency(Math.max(0, Number(item?.price) || 0)),
+            cost: this.roundCurrency(Math.max(0, Number(item?.cost) || 0)),
             taxable: !!item?.taxable
           }))
           .filter(item => !!item.name)
@@ -795,7 +797,10 @@ export default class InvoicesNewComponent {
   }
 
   addInventoryPart(item: InventoryItem): void {
-    const price = this.safeNumber(item?.unitCost, 0);
+    const price = this.safeNumber(
+      item?.price,
+      this.safeNumber(item?.unitCost, this.safeNumber(item?.cost, 0))
+    );
     const line = this.recalculateLine({
       id: `li-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       type: 'part',
@@ -833,7 +838,7 @@ export default class InvoicesNewComponent {
     const line = this.recalculateLine({
       id: `li-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       type: 'labor',
-      code: '',
+      code: String(rate?.id || '').trim(),
       description: String(rate?.name || '').trim() || 'Labor',
       quantity: 1,
       unitPrice: this.safeNumber(rate?.price, 0),
@@ -874,7 +879,7 @@ export default class InvoicesNewComponent {
       lines.push(this.recalculateLine({
         id: `li-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
         type: 'labor',
-        code: '',
+        code: String(rate.id || '').trim(),
         description: String(rate.name || '').trim() || 'Labor',
         quantity: 1,
         unitPrice: this.safeNumber(rate.price, 0),
@@ -1033,22 +1038,36 @@ export default class InvoicesNewComponent {
       const targetLane = this.findLaneByStage(lanes || [], targetStage);
       if (!targetLane) return;
 
+      const docRef = String(detail.id || detail.invoiceNumber || '').trim();
+      const number = String(detail.invoiceNumber || '').trim() || (detail.documentType === 'invoice' ? 'Invoice' : 'Quote');
+      const kind = detail.documentType === 'invoice' ? 'Invoice' : 'Quote';
+      const baseTitle = this.composeWorkItemTitle(customer);
+      const title = `${baseTitle} — ${kind} ${number}${docRef ? ` [doc=${docRef}]` : ''}`;
+
+      const existingDocItem = (items || []).find(item =>
+        String(item.title || '').toLowerCase().includes(`[doc=${docRef.toLowerCase()}]`)
+      ) || null;
+
       const activeCustomerItem = (items || [])
         .filter(item => String(item.customerId || '').trim() === customerId)
         .sort((a, b) => this.asMillis(b.updatedAt || b.createdAt) - this.asMillis(a.updatedAt || a.createdAt))[0];
 
-      const title = this.composeWorkItemTitle(customer);
-      if (!activeCustomerItem) {
+      const itemToPatch = existingDocItem || activeCustomerItem || null;
+
+      if (!itemToPatch) {
         const created = await firstValueFrom(this.workItemsApi.create(title, targetLane.id));
         await firstValueFrom(this.workItemsApi.update({ id: created.id, customerId }));
         return;
       }
 
       const patch: Partial<WorkItem> & { id: string } = {
-        id: activeCustomerItem.id,
+        id: itemToPatch.id,
         laneId: targetLane.id
       };
-      if (String(activeCustomerItem.title || '').trim() !== title) {
+      if (String(itemToPatch.customerId || '').trim() !== customerId) {
+        patch.customerId = customerId;
+      }
+      if (String(itemToPatch.title || '').trim() !== title) {
         patch.title = title;
       }
       await firstValueFrom(this.workItemsApi.update(patch));
@@ -1192,7 +1211,62 @@ export default class InvoicesNewComponent {
     query.set('customerName', this.customerDisplayName(this.selectedCustomer()));
     query.set('vehicle', this.customerVehicleSummary(this.selectedCustomer()) || 'Vehicle details pending');
     query.set('businessName', this.companyName());
+    const quotePayload = this.quotePublicPayloadEncoded();
+    if (quotePayload) query.set('quoteData', quotePayload);
     return this.publicRouteUrl(path, query);
+  }
+
+  private quotePublicPayloadEncoded(): string {
+    try {
+      const payload = {
+        quoteId: String(this.draftId() || 'preview').trim(),
+        quoteNumber: this.quoteNumberDisplay(),
+        customerName: this.customerDisplayName(this.selectedCustomer()),
+        customerEmail: String(this.selectedCustomer()?.email || '').trim(),
+        customerPhone: String(this.selectedCustomer()?.phone || this.selectedCustomer()?.mobile || '').trim(),
+        customerAddress: String(this.selectedCustomer()?.address || '').trim(),
+        vehicle: this.customerVehicleSummary(this.selectedCustomer()) || 'Vehicle details pending',
+        businessName: this.companyName(),
+        businessEmail: this.companyEmail(),
+        businessPhone: this.companyPhone(),
+        businessAddress: this.companyAddress(),
+        businessLogoUrl: this.logoUrl(),
+        issueDate: this.quoteDateDisplay(),
+        dueDate: this.quoteExpirationDisplay(),
+        description: '',
+        customerNote: String(this.customerNote() || '').trim(),
+        staffNote: String(this.staffNote() || '').trim(),
+        subtotal: this.quoteSubtotal(),
+        taxTotal: this.quoteTaxTotal(),
+        total: this.quoteGrandTotal(),
+        lineItems: this.quoteLineItems().map(line => ({
+          type: String(line.type || '').trim().toLowerCase(),
+          code: String(line.code || '').trim(),
+          description: String(line.description || '').trim(),
+          quantity: Number(line.quantity || 0),
+          unitPrice: this.roundCurrency(Number(line.unitPrice || 0)),
+          taxRate: this.roundCurrency(Number(line.taxRate || 0)),
+          lineSubtotal: this.roundCurrency(Number(line.lineSubtotal || 0)),
+          taxAmount: this.roundCurrency(Number(line.taxAmount || 0)),
+          lineTotal: this.roundCurrency(Number(line.lineTotal || 0))
+        }))
+      };
+      const json = JSON.stringify(payload);
+      if (typeof TextEncoder !== 'undefined' && typeof btoa === 'function') {
+        const bytes = new TextEncoder().encode(json);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += 1) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+      }
+      if (typeof btoa === 'function') {
+        return btoa(json).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+      }
+      return '';
+    } catch {
+      return '';
+    }
   }
 
   private invoicePaymentUrl(): string {

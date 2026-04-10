@@ -1,4 +1,5 @@
 const { TableClient } = require("../_shared/table-client");
+const { requirePrincipal } = require("../_shared/auth");
 
 const TABLE = "lanes";
 function pick(v, d = "") { return typeof v === "string" ? v : (v == null ? d : String(v)); }
@@ -31,6 +32,8 @@ function isProtectedLaneEntity(entity) {
 module.exports = async function (context, req) {
   const method = (req.method || "GET").toUpperCase();
   if (method === "OPTIONS") { context.res = { status: 204 }; return; }
+  const principal = await requirePrincipal(context, req);
+  if (!principal) return;
 
   try {
     const conn = process.env.STORAGE_CONNECTION_STRING;

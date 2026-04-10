@@ -103,6 +103,13 @@
                     <div class="invoice-card-menu" *ngIf="openMenuId() === invoice.id">
                       <button
                         type="button"
+                        class="invoice-card-menu-item"
+                        *ngIf="lane.id === 'draft'"
+                        (click)="sendNow(invoice, $event)">
+                        Send Now
+                      </button>
+                      <button
+                        type="button"
                         class="invoice-card-menu-item danger"
                         *ngIf="lane.id === 'draft'"
                         (click)="requestDeleteDraft(invoice, $event)">

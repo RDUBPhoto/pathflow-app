@@ -1,7 +1,8 @@
 const { SmsClient } = require("@azure/communication-sms");
-const { TableClient } = require("../_shared/table-client");
+const { TableClient, isSqlBackendEnabled } = require("../_shared/table-client");
 const { randomUUID } = require("crypto");
 const { resolveTenantId, sanitizeTenantId } = require("../_shared/tenant");
+const { requirePrincipal } = require("../_shared/auth");
 
 const SMS_TABLE = "smsmessages";
 const SENDER_TABLE = "smssenders";
@@ -327,7 +328,7 @@ function toThreadSummaries(messages) {
 
 async function getTableClient(table) {
   const conn = asString(process.env.STORAGE_CONNECTION_STRING);
-  if (!conn) throw new Error("Missing STORAGE_CONNECTION_STRING");
+  if (!conn && !isSqlBackendEnabled()) throw new Error("Missing STORAGE_CONNECTION_STRING");
   const client = TableClient.fromConnectionString(conn, table);
   try {
     await client.createTable();
@@ -1026,6 +1027,8 @@ module.exports = async function (context, req) {
     }
     return;
   }
+  const principal = await requirePrincipal(context, req);
+  if (!principal) return;
 
   const tenantId = resolveTenantId(req, body);
 

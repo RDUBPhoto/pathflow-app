@@ -108,4 +108,74 @@ describe('InvoicesDataService', () => {
     expect(refunded?.total).toBe(50);
     expect(refunded?.timeline.some(item => item.message.includes('Refund issued: $15.00. Damaged item'))).toBeTrue();
   });
+
+  it('preserves overpayment after invoice total is edited down', () => {
+    const invoice = service.createDraftInvoice({
+      documentType: 'invoice',
+      stage: 'accepted',
+      customerName: 'Overpaid Customer',
+      lineItems: [
+        {
+          type: 'labor',
+          description: 'Install',
+          quantity: 1,
+          unitPrice: 500,
+          taxRate: 0
+        }
+      ],
+      paidAmount: 500
+    });
+
+    const saved = service.saveInvoice({
+      ...invoice,
+      lineItems: [
+        {
+          ...invoice.lineItems[0],
+          unitPrice: 400
+        }
+      ]
+    });
+
+    expect(saved.total).toBe(400);
+    expect(saved.paidAmount).toBe(500);
+  });
+
+  it('records processor refund and reduces paid amount', () => {
+    const invoice = service.createDraftInvoice({
+      documentType: 'invoice',
+      stage: 'accepted',
+      customerName: 'Processor Refund Customer',
+      lineItems: [
+        {
+          type: 'part',
+          description: 'Bumper',
+          quantity: 1,
+          unitPrice: 500,
+          taxRate: 0
+        }
+      ],
+      paidAmount: 500
+    });
+
+    const withCharge = service.recordPaymentTransaction(invoice.id, {
+      provider: 'authorize-net',
+      amount: 500,
+      transactionId: '1234567890',
+      accountNumber: 'XXXX1111'
+    });
+    expect(withCharge).not.toBeNull();
+
+    const refunded = service.recordProcessorRefund(invoice.id, {
+      provider: 'authorize-net',
+      amount: 100,
+      transactionId: '2233445566',
+      originalTransactionId: '1234567890',
+      reason: 'Scope reduced'
+    });
+
+    expect(refunded).not.toBeNull();
+    expect(refunded?.paidAmount).toBe(400);
+    expect((refunded?.refundTransactions || []).length).toBe(1);
+    expect(refunded?.timeline.some(item => item.message.includes('Refund issued: $100.00. Scope reduced'))).toBeTrue();
+  });
 });

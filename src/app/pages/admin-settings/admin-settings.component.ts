@@ -58,7 +58,13 @@ import {
   EmailTemplatesResponse,
   EmailSenderConfig
 } from '../../services/email-api.service';
-import { InventoryApiService, InventoryConnector, InventoryItem } from '../../services/inventory-api.service';
+import {
+  InventoryApiService,
+  InventoryConnector,
+  InventoryImportResponse,
+  InventoryImportRow,
+  InventoryItem
+} from '../../services/inventory-api.service';
 import { AppSettingsApiService } from '../../services/app-settings-api.service';
 import { BusinessProfileService } from '../../services/business-profile.service';
 import { AddressLookupService, AddressSuggestion } from '../../services/address-lookup.service';
@@ -102,6 +108,7 @@ type LaborRate = {
   id: string;
   name: string;
   price: number;
+  cost: number;
   taxable: boolean;
 };
 
@@ -333,6 +340,76 @@ const CUSTOMER_IMPORT_HEADER_MAP: Record<string, keyof CustomerImportRow> = {
   lasttaskactivity: 'lastTaskActivity',
   dateleft: 'dateLeft',
   contacttags: 'contactTags'
+};
+
+const INVENTORY_IMPORT_TARGET_FIELDS: Array<{ key: keyof InventoryImportRow; label: string }> = [
+  { key: 'partLaborCode', label: 'Part/Labor Code' },
+  { key: 'category', label: 'Category' },
+  { key: 'description', label: 'Description' },
+  { key: 'unit', label: 'Unit' },
+  { key: 'accountCode', label: 'Acc. Code' },
+  { key: 'purchaseAccountCode', label: 'Purc. Acc. Code' },
+  { key: 'salesTaxCode', label: 'Sales Tax Code' },
+  { key: 'purchaseTaxCode', label: 'Purc. Tax Code' },
+  { key: 'mainSupplier', label: 'Main Supplier' },
+  { key: 'discountPercent', label: 'Discount %' },
+  { key: 'freeStock', label: 'Free Stock' },
+  { key: 'cost', label: 'Cost' },
+  { key: 'price', label: 'Price' }
+];
+
+const INVENTORY_IMPORT_HEADER_MAP: Record<string, keyof InventoryImportRow> = {
+  partlaborcode: 'partLaborCode',
+  itemcode: 'partLaborCode',
+  basevariantcode: 'partLaborCode',
+  rawvariantcode: 'partLaborCode',
+  variantcode: 'partLaborCode',
+  partnumber: 'partLaborCode',
+  partno: 'partLaborCode',
+  sku: 'partLaborCode',
+  itemnumber: 'partLaborCode',
+  description: 'description',
+  detaileddescription: 'description',
+  name: 'description',
+  partname: 'description',
+  productname: 'description',
+  category: 'category',
+  categorylist: 'category',
+  department: 'category',
+  type: 'category',
+  unit: 'unit',
+  acccode: 'accountCode',
+  accountcode: 'accountCode',
+  salesaccountcode: 'accountCode',
+  purcacccode: 'purchaseAccountCode',
+  purchasesaccountcode: 'purchaseAccountCode',
+  purchaseaccountcode: 'purchaseAccountCode',
+  salestaxcode: 'salesTaxCode',
+  purctaxcode: 'purchaseTaxCode',
+  purchasestaxcode: 'purchaseTaxCode',
+  purchasetaxcode: 'purchaseTaxCode',
+  mainsupplier: 'mainSupplier',
+  supplier: 'mainSupplier',
+  vendor: 'mainSupplier',
+  manufacturer: 'mainSupplier',
+  brand: 'mainSupplier',
+  metaproduct: 'mainSupplier',
+  discount: 'discountPercent',
+  discountpercent: 'discountPercent',
+  freestock: 'freeStock',
+  onhand: 'freeStock',
+  current: 'freeStock',
+  qty: 'freeStock',
+  quantity: 'freeStock',
+  quantityonhand: 'freeStock',
+  instock: 'freeStock',
+  cost: 'cost',
+  averagecost: 'cost',
+  costprice: 'cost',
+  unitcost: 'cost',
+  price: 'price',
+  unitprice: 'price',
+  purchaseprice: 'price'
 };
 
 @Component({
@@ -586,6 +663,17 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
   readonly customerImportResult = signal<CustomerImportResponse | null>(null);
   readonly customerImportTargetFields = CUSTOMER_IMPORT_TARGET_FIELDS;
   readonly customerImportExpectedHeaders = [...ZIGAFLOW_EXPECTED_HEADERS];
+  readonly inventoryImporting = signal(false);
+  readonly inventoryImportPreviewPage = signal(1);
+  readonly inventoryImportPreviewPageSize = 5;
+  readonly inventoryImportResult = signal<InventoryImportResponse | null>(null);
+  readonly inventoryImportTargetFields = INVENTORY_IMPORT_TARGET_FIELDS;
+  readonly importOverlayActive = computed(() => this.customerImporting() || this.inventoryImporting());
+  readonly importOverlayMessage = computed(() => {
+    if (this.inventoryImporting()) return 'Importing inventory...';
+    if (this.customerImporting()) return 'Importing customers...';
+    return 'Importing data...';
+  });
   selectedImportType: 'customers' | 'inventory' = 'customers';
   customerImportFileName = '';
   customerImportHeaders: string[] = [];
@@ -593,6 +681,12 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
   customerImportMappings: Array<{ source: string; target: keyof CustomerImportRow | '' }> = [];
   customerImportStatus = '';
   customerImportError = '';
+  inventoryImportFileName = '';
+  inventoryImportHeaders: string[] = [];
+  inventoryImportRows: Array<Record<string, string>> = [];
+  inventoryImportMappings: Array<{ source: string; target: keyof InventoryImportRow | '' }> = [];
+  inventoryImportStatus = '';
+  inventoryImportError = '';
   readonly paymentGatewayDraft = signal<
     Record<PaymentGatewayProviderKey, { accountLabel: string; mode: 'test' | 'live' }>
   >({
@@ -695,6 +789,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
             id: String(rate.id || '').trim() || `labor-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
             name: String(rate.name || '').trim(),
             price: this.roundCurrency(Math.max(0, Number(rate.price) || 0)),
+            cost: this.roundCurrency(Math.max(0, Number(rate.cost) || 0)),
             taxable: !!rate.taxable
           }))
           .filter(rate => !!rate.name)
@@ -727,6 +822,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
         id: `labor-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
         name: '',
         price: 0,
+        cost: 0,
         taxable: false
       }
     ];
@@ -978,7 +1074,10 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
     }
     this.passwordSaving.set(true);
     this.accessAdminApi
-      .changeMyPassword({ newPassword: this.passwordNext.trim() })
+      .changeMyPassword({
+        currentPassword: this.passwordCurrent.trim(),
+        newPassword: this.passwordNext.trim()
+      })
       .pipe(finalize(() => this.passwordSaving.set(false)))
       .subscribe({
         next: res => {
@@ -1370,6 +1469,185 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
 
   private autoMapCustomerImportHeader(header: string): keyof CustomerImportRow | '' {
     return CUSTOMER_IMPORT_HEADER_MAP[this.normalizeImportHeader(header)] || '';
+  }
+
+  async onInventoryImportFileSelected(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    this.inventoryImportError = '';
+    this.inventoryImportStatus = '';
+    this.inventoryImportResult.set(null);
+
+    try {
+      const workbook = XLSX.read(await file.arrayBuffer(), {
+        type: 'array',
+        cellDates: true
+      });
+      const firstSheetName = workbook.SheetNames?.[0];
+      const sheet = firstSheetName ? workbook.Sheets[firstSheetName] : null;
+      if (!sheet) {
+        this.inventoryImportError = 'No worksheet found in this file.';
+        return;
+      }
+
+      const headerMatrix = XLSX.utils.sheet_to_json<(string | number | null)[]>(sheet, {
+        header: 1,
+        raw: false,
+        blankrows: false
+      });
+      const rawHeaders = (headerMatrix[0] || [])
+        .map(value => String(value ?? '').trim())
+        .filter(Boolean);
+      if (!rawHeaders.length) {
+        this.inventoryImportError = 'No header row found. Include a header row in row 1.';
+        return;
+      }
+
+      const records = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+        raw: false,
+        defval: '',
+        blankrows: false
+      });
+      const rows = records.map(record => {
+        const mapped: Record<string, string> = {};
+        for (const header of rawHeaders) {
+          mapped[header] = String(record[header] ?? '').trim();
+        }
+        return mapped;
+      });
+
+      this.inventoryImportFileName = file.name;
+      this.inventoryImportHeaders = rawHeaders;
+      this.inventoryImportRows = rows;
+      this.inventoryImportPreviewPage.set(1);
+      this.inventoryImportMappings = rawHeaders.map(source => ({
+        source,
+        target: this.autoMapInventoryImportHeader(source)
+      }));
+      this.inventoryImportStatus = `Loaded ${rows.length} row(s) from ${file.name}.`;
+    } catch {
+      this.inventoryImportError = 'Could not read this file. Use a valid CSV or Excel file.';
+    }
+  }
+
+  mappedInventoryImportCount(): number {
+    return this.inventoryImportMappings.filter(item => !!item.target).length;
+  }
+
+  inventoryImportPreviewRows(): Array<Record<string, string>> {
+    const page = Math.max(1, Math.min(this.inventoryImportPreviewPage(), this.inventoryImportPreviewTotalPages()));
+    const start = (page - 1) * this.inventoryImportPreviewPageSize;
+    return this.inventoryImportRows.slice(start, start + this.inventoryImportPreviewPageSize);
+  }
+
+  inventoryImportPreviewTotalPages(): number {
+    return Math.max(1, Math.ceil(this.inventoryImportRows.length / this.inventoryImportPreviewPageSize));
+  }
+
+  prevInventoryImportPreviewPage(): void {
+    this.inventoryImportPreviewPage.update(value => Math.max(1, value - 1));
+  }
+
+  nextInventoryImportPreviewPage(): void {
+    this.inventoryImportPreviewPage.update(value => Math.min(this.inventoryImportPreviewTotalPages(), value + 1));
+  }
+
+  canRunInventoryImport(): boolean {
+    if (this.inventoryImporting()) return false;
+    if (!this.inventoryImportRows.length) return false;
+    const hasIdentityField = this.inventoryImportMappings.some(item =>
+      item.target === 'description' ||
+      item.target === 'partLaborCode' ||
+      item.target === 'name' ||
+      item.target === 'sku'
+    );
+    return hasIdentityField;
+  }
+
+  importInventoryFromFile(): void {
+    if (!this.canRunInventoryImport()) {
+      this.inventoryImportError = 'Map at least one identity column (Description or Part/Labor Code) before importing.';
+      return;
+    }
+
+    const rows = this.buildMappedInventoryImportRows();
+    if (!rows.length) {
+      this.inventoryImportError = 'No non-empty rows found after mapping.';
+      return;
+    }
+
+    this.inventoryImporting.set(true);
+    this.inventoryImportError = '';
+    this.inventoryImportStatus = '';
+    this.inventoryImportResult.set(null);
+
+    this.inventoryApi
+      .importRows(rows)
+      .pipe(finalize(() => this.inventoryImporting.set(false)))
+      .subscribe({
+        next: result => {
+          this.inventoryImportResult.set(result);
+          this.inventoryImportStatus =
+            `Import finished. Created ${result.created}, updated ${result.updated}, ` +
+            `skipped ${result.skipped}${result.errors.length ? `, errors ${result.errors.length}` : ''}.`;
+          this.loadInventoryItems();
+        },
+        error: err => {
+          this.inventoryImportError = this.extractApiError(err, 'Inventory import failed.');
+        }
+      });
+  }
+
+  private buildMappedInventoryImportRows(): InventoryImportRow[] {
+    const activeMappings = this.inventoryImportMappings.filter(item => !!item.target) as Array<{
+      source: string;
+      target: keyof InventoryImportRow;
+    }>;
+
+    return this.inventoryImportRows
+      .map(sourceRow => {
+        const out: InventoryImportRow = {};
+        for (const mapping of activeMappings) {
+          const value = String(sourceRow[mapping.source] ?? '').trim();
+          if (!value) continue;
+          if (
+            mapping.target === 'freeStock' ||
+            mapping.target === 'discountPercent' ||
+            mapping.target === 'cost' ||
+            mapping.target === 'price' ||
+            mapping.target === 'onHand' ||
+            mapping.target === 'reorderAt' ||
+            mapping.target === 'onOrder' ||
+            mapping.target === 'unitCost'
+          ) {
+            out[mapping.target] = this.parseInventoryImportNumber(value) as never;
+            continue;
+          }
+          out[mapping.target] = value as never;
+        }
+        return out;
+      })
+      .filter(row => {
+        const name = String((row.description || row.name) || '').trim();
+        const sku = String((row.partLaborCode || row.sku) || '').trim();
+        return !!name || !!sku;
+      });
+  }
+
+  private autoMapInventoryImportHeader(header: string): keyof InventoryImportRow | '' {
+    return INVENTORY_IMPORT_HEADER_MAP[this.normalizeImportHeader(header)] || '';
+  }
+
+  private parseInventoryImportNumber(value: string): number {
+    const cleaned = String(value || '')
+      .replace(/[$,%\s]/g, '')
+      .replace(/,/g, '')
+      .trim();
+    const parsed = Number(cleaned);
+    if (!Number.isFinite(parsed)) return 0;
+    return parsed;
   }
 
   private normalizeImportHeader(value: string): string {
@@ -2716,6 +2994,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
               id: String(item?.id || '').trim() || `labor-${Date.now()}-${index}`,
               name: String(item?.name || '').trim(),
               price: this.roundCurrency(Math.max(0, Number(item?.price) || 0)),
+              cost: this.roundCurrency(Math.max(0, Number(item?.cost) || 0)),
               taxable: !!item?.taxable
             }))
             .filter(item => !!item.name);

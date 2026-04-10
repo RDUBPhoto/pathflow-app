@@ -150,14 +150,14 @@ export default class LoginComponent {
     this.auth.signInDevSuperAdmin();
   }
 
-  signInWithEmailPassword(): void {
+  async signInWithEmailPassword(): Promise<void> {
     this.localAuthHint.set('');
     this.passwordLoginError.set('');
     this.passkeyLoginError.set('');
     this.passwordResetStatus.set('');
     this.passwordResetError.set('');
 
-    const result = this.auth.signInWithEmailPassword(this.localLoginEmail, this.localLoginPassword);
+    const result = await this.auth.signInWithEmailPassword(this.localLoginEmail, this.localLoginPassword);
     if (!result.ok) {
       const errorText = (result.error || '').toLowerCase();
       if (

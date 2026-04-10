@@ -46,8 +46,8 @@
       <div class="invoice-head-actions">
         <label class="field stage-field">
           <span>Stage</span>
-          <select [value]="detail.stage" (change)="setStage($any($event.target).value)">
-            <option *ngFor="let stage of stageOptions()" [value]="stage">
+          <select (change)="setStage($any($event.target).value)">
+            <option *ngFor="let stage of stageOptions()" [value]="stage" [selected]="stage === selectedStageValue()">
               {{ stageDisplayLabel(stage) }}
             </option>
           </select>
@@ -69,6 +69,15 @@
           [disabled]="sendingInvoice() || isFinalInvoiceSendDisabled()"
           (click)="openSendInvoiceModal()">
           {{ sendingInvoice() ? 'Sending...' : sendInvoiceLabel() }}
+        </ion-button>
+        <ion-button
+          size="small"
+          fill="outline"
+          color="warning"
+          *ngIf="detail.documentType === 'invoice' && overpaymentAmount() > 0"
+          [disabled]="refundingCustomer()"
+          (click)="refundCustomerOverpayment()">
+          {{ refundingCustomer() ? 'Refunding...' : 'Refund Customer' }}
         </ion-button>
         <ion-button
           size="small"
@@ -336,6 +345,7 @@
           <thead>
             <tr>
               <th>Type</th>
+              <th>Part Status</th>
               <th>Code</th>
               <th>Description</th>
               <th>Qty</th>
@@ -354,6 +364,19 @@
                   <option value="part">Part</option>
                   <option value="labor">Labor</option>
                 </select>
+              </td>
+              <td>
+                <select
+                  *ngIf="line.type === 'part'; else laborStatus"
+                  [value]="line.partStatus || 'ordered'"
+                  (change)="updateLineItemField(line.id, 'partStatus', $any($event.target).value)">
+                  <option *ngFor="let option of partStatusOptions" [value]="option.value">
+                    {{ option.label }}
+                  </option>
+                </select>
+                <ng-template #laborStatus>
+                  <span class="line-muted">N/A</span>
+                </ng-template>
               </td>
               <td>
                 <input
@@ -469,6 +492,10 @@
         <div class="total-row" *ngIf="detail.documentType === 'invoice'">
           <span>Paid To Date</span>
           <strong>{{ paidAmount() | currency:'USD':'symbol':'1.2-2' }}</strong>
+        </div>
+        <div class="total-row total-overpay" *ngIf="detail.documentType === 'invoice' && overpaymentAmount() > 0">
+          <span>Overpaid</span>
+          <strong>{{ overpaymentAmount() | currency:'USD':'symbol':'1.2-2' }}</strong>
         </div>
         <div class="total-row total-grand" *ngIf="detail.documentType === 'invoice'">
           <span>Amount Due</span>

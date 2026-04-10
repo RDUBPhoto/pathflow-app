@@ -6,6 +6,7 @@ const {
   generateBlobSASQueryParameters
 } = require("@azure/storage-blob");
 const { resolveTenantId } = require("../_shared/tenant");
+const { requirePrincipal } = require("../_shared/auth");
 
 const CONTAINER = "branding";
 const ORIGIN = process.env.CORS_ORIGIN || "*";
@@ -41,6 +42,8 @@ module.exports = async function (context, req) {
       context.res = { status: 204, headers: cors };
       return;
     }
+    const principal = await requirePrincipal(context, req);
+    if (!principal) return;
 
     const body = req.body || {};
     const { fileName, contentType } = body;

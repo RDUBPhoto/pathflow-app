@@ -90,6 +90,22 @@ Supported keys:
 `POST /api/reports/seed-demo` upserts deterministic demo rows into `workitems` for report testing
 without needing live production data.
 
+## Power BI ingestion via API key (optional)
+
+For Power BI Service connectors that cannot carry your app session cookie, you can enable
+read-only report ingestion with an API key.
+
+Set one env var:
+
+- `REPORTS_INGEST_API_KEY` (or `REPORTS_PUBLIC_API_KEY`)
+
+Then call report endpoints with:
+
+- query param: `?apiKey=<your-key>`
+- or header: `x-reports-api-key: <your-key>`
+
+This bypass applies only to read scopes (`powerbi`, `overview`, `funnel`, etc.), not config or seed endpoints.
+
 Example:
 
 ```bash

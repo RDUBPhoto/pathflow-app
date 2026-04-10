@@ -20,6 +20,20 @@ type PendingInvoiceResponse = {
   updatedAt: string;
 };
 
+type PaymentChargeResponse = {
+  ok: boolean;
+  provider: string;
+  mode?: string;
+  invoiceId?: string;
+  invoiceNumber?: string;
+  amount?: string;
+  transactionId?: string;
+  authCode?: string;
+  avsResultCode?: string;
+  accountType?: string;
+  accountNumber?: string;
+};
+
 @Component({
   selector: 'app-invoice-payment',
   standalone: true,
@@ -104,9 +118,10 @@ export default class InvoicePaymentComponent {
     this.statusMessage.set('Processing payment...');
 
     let chargeApproved = false;
+    let authorizeCharge: PaymentChargeResponse | null = null;
     try {
       if (this.isAuthorizeNet()) {
-        await firstValueFrom(this.http.post('/api/payment-charge', {
+        authorizeCharge = await firstValueFrom(this.http.post<PaymentChargeResponse>('/api/payment-charge', {
           invoiceId: this.invoiceId(),
           tenantId: this.tenantId(),
           invoiceNumber: this.invoiceNumber(),
@@ -133,6 +148,9 @@ export default class InvoicePaymentComponent {
     }
 
     const paymentResult = this.markInvoicePaidLocally();
+    if (authorizeCharge?.transactionId) {
+      this.recordSuccessfulCharge(authorizeCharge);
+    }
     const fullPayment = paymentResult.settled;
 
     if (fullPayment) {
@@ -199,6 +217,23 @@ export default class InvoicePaymentComponent {
     if (detail) return detail;
     if (fallback) return fallback;
     return 'We could not confirm payment yet. Please retry or contact the shop.';
+  }
+
+  private recordSuccessfulCharge(charge: PaymentChargeResponse): void {
+    const detail = this.detail() || (this.invoiceNumber() ? this.invoicesData.getInvoiceById(this.invoiceNumber()) : null);
+    const targetId = String(detail?.id || this.invoiceId() || '').trim();
+    if (!targetId) return;
+    const amount = Number(charge.amount || this.normalizedAmount());
+    this.invoicesData.recordPaymentTransaction(targetId, {
+      provider: String(charge.provider || this.paymentProvider() || 'authorize-net').trim().toLowerCase(),
+      amount: Number.isFinite(amount) ? Math.max(0, amount) : 0,
+      transactionId: String(charge.transactionId || '').trim(),
+      mode: String(charge.mode || '').trim().toLowerCase(),
+      authCode: String(charge.authCode || '').trim(),
+      accountType: String(charge.accountType || '').trim(),
+      accountNumber: String(charge.accountNumber || '').trim(),
+      createdAt: new Date().toISOString()
+    });
   }
 
   private markInvoicePaidLocally(): { settled: boolean } {

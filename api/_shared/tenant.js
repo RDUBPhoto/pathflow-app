@@ -27,7 +27,7 @@ function resolveTenantId(req, body) {
   const headerTenant = readHeader(req && req.headers, "x-tenant-id");
   const queryTenant = asString(req && req.query && req.query.tenantId);
   const bodyTenant = asString(body && body.tenantId);
-  const fallback = asString(process.env.DEFAULT_TENANT_ID) || "tenant-unassigned";
+  const fallback = asString(process.env.DEFAULT_TENANT_ID) || "primary-location";
   return sanitizeTenantId(headerTenant || queryTenant || bodyTenant || fallback);
 }
 

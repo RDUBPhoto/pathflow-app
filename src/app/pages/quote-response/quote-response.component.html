@@ -4,11 +4,94 @@
       <p class="status-pill" [class.accepted]="action() === 'accept'" [class.declined]="action() === 'decline'">
         {{ title() }}
       </p>
-      <h1>{{ quoteNumber() }}</h1>
-      <p class="vehicle">{{ vehicle() }}</p>
-      <p class="message">{{ message() }}</p>
-      <p class="tracking" *ngIf="trackingMessage()">{{ trackingMessage() }}</p>
-      <p class="business">Business: {{ businessName() }}</p>
+
+      <ng-container *ngIf="action() === 'view'; else responseOnly">
+        <div class="quote-head">
+          <div>
+            <h1>{{ quoteNumber() }}</h1>
+            <p class="vehicle">{{ vehicle() }}</p>
+            <p class="message">{{ message() }}</p>
+          </div>
+          <img *ngIf="businessLogoUrl()" [src]="businessLogoUrl()" alt="Business logo" class="business-logo" />
+        </div>
+
+        <div class="quote-meta-grid">
+          <div class="meta-card">
+            <h3>Customer</h3>
+            <p>{{ customerName() }}</p>
+            <p *ngIf="customerEmail()">{{ customerEmail() }}</p>
+            <p *ngIf="customerPhone()">{{ customerPhone() }}</p>
+            <p *ngIf="customerAddress()">{{ customerAddress() }}</p>
+          </div>
+          <div class="meta-card">
+            <h3>Business</h3>
+            <p>{{ businessName() }}</p>
+            <p *ngIf="businessEmail()">{{ businessEmail() }}</p>
+            <p *ngIf="businessPhone()">{{ businessPhone() }}</p>
+            <p *ngIf="businessAddress()">{{ businessAddress() }}</p>
+          </div>
+          <div class="meta-card">
+            <h3>Dates</h3>
+            <p>Issue: {{ issueDate() || '—' }}</p>
+            <p>Due: {{ dueDate() || '—' }}</p>
+          </div>
+        </div>
+
+        <div class="line-items-card">
+          <h3>Quote Breakdown</h3>
+          <div class="line-items-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Type</th>
+                  <th>Code</th>
+                  <th>Description</th>
+                  <th class="num">Qty</th>
+                  <th class="num">Price</th>
+                  <th class="num">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr *ngFor="let line of lineItems()">
+                  <td>{{ line.type === 'labor' ? 'Labor' : 'Part' }}</td>
+                  <td>{{ line.code || '—' }}</td>
+                  <td>{{ line.description || '—' }}</td>
+                  <td class="num">{{ line.quantity }}</td>
+                  <td class="num">{{ line.unitPrice | currency:'USD':'symbol':'1.2-2' }}</td>
+                  <td class="num">{{ line.lineTotal | currency:'USD':'symbol':'1.2-2' }}</td>
+                </tr>
+                <tr *ngIf="!lineItems().length">
+                  <td colspan="6" class="empty">No line items provided.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="totals">
+            <div><span>Subtotal</span><strong>{{ subtotal() | currency:'USD':'symbol':'1.2-2' }}</strong></div>
+            <div><span>Tax</span><strong>{{ taxTotal() | currency:'USD':'symbol':'1.2-2' }}</strong></div>
+            <div class="total"><span>Total</span><strong>{{ total() | currency:'USD':'symbol':'1.2-2' }}</strong></div>
+          </div>
+        </div>
+
+        <p class="note" *ngIf="description()"><strong>Description:</strong> {{ description() }}</p>
+        <p class="note" *ngIf="customerNote()"><strong>Customer Note:</strong> {{ customerNote() }}</p>
+        <p class="note" *ngIf="staffNote()"><strong>Terms:</strong> {{ staffNote() }}</p>
+
+        <div class="actions">
+          <a [href]="acceptUrl()" class="action-btn accept">Accept Quote</a>
+          <a [href]="declineUrl()" class="action-btn decline">Decline Quote</a>
+        </div>
+
+        <p class="business">Business: {{ businessName() }}</p>
+      </ng-container>
+
+      <ng-template #responseOnly>
+        <h1>{{ quoteNumber() }}</h1>
+        <p class="vehicle">{{ vehicle() }}</p>
+        <p class="message">{{ message() }}</p>
+        <p class="tracking" *ngIf="trackingMessage()">{{ trackingMessage() }}</p>
+        <p class="business">Business: {{ businessName() }}</p>
+      </ng-template>
     </section>
   </div>
 </ion-content>

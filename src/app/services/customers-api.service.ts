@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, concatMap, from, map, of, reduce } from 'rxjs';
+import { Observable, concatMap, from, map, of, reduce, timeout } from 'rxjs';
 
 export type Customer = {
   id: string;
@@ -148,6 +148,7 @@ export type CustomerImportResponse = {
 @Injectable({ providedIn: 'root' })
 export class CustomersApi {
   private readonly importBatchSize = 100;
+  private readonly importRequestTimeoutMs = 5 * 60 * 1000;
 
   constructor(private http: HttpClient) {}
 
@@ -236,6 +237,7 @@ export class CustomersApi {
           op: 'import',
           rows: batch
         }).pipe(
+          timeout(this.importRequestTimeoutMs),
           map(result => ({
             ok: result?.ok !== false,
             created: Number(result?.created || 0),

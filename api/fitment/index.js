@@ -1,3 +1,5 @@
+const { requirePrincipal } = require("../_shared/auth");
+
 function asString(value) {
   return value == null ? "" : String(value).trim();
 }
@@ -198,6 +200,8 @@ module.exports = async function (context, req) {
     context.res = { status: 204 };
     return;
   }
+  const principal = await requirePrincipal(context, req);
+  if (!principal) return;
   if (method !== "GET") {
     context.res = json(405, { error: "Method not allowed" });
     return;

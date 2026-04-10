@@ -1,6 +1,7 @@
 const { TableClient } = require("../_shared/table-client");
 const { randomUUID } = require("crypto");
 const { resolveTenantId } = require("../_shared/tenant");
+const { requirePrincipal } = require("../_shared/auth");
 
 const TABLE = "schedule";
 const CUSTOMERS_TABLE = "customers";
@@ -395,6 +396,8 @@ module.exports = async function (context, req) {
   const tenantId = resolvedTenantId === "primary-location" ? "main" : resolvedTenantId;
 
   if (method === "OPTIONS") { context.res = { status: 204 }; return; }
+  const principal = await requirePrincipal(context, req);
+  if (!principal) return;
 
   try {
     const conn = process.env.STORAGE_CONNECTION_STRING;

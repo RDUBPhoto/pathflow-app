@@ -1,4 +1,4 @@
-export type AuthSource = 'none' | 'swa' | 'dev';
+export type AuthSource = 'none' | 'swa' | 'session' | 'dev';
 
 export interface AuthUser {
   id: string;
@@ -57,7 +57,15 @@ export interface AuthMeResponse {
 export interface AccessProfileResponse {
   ok: boolean;
   canBootstrap?: boolean;
+  principal?: {
+    userId?: string;
+    email?: string;
+    displayName?: string;
+    identityProvider?: string;
+  } | null;
   profile?: {
+    email?: string;
+    displayName?: string;
     roles?: string[];
     isSuperAdmin?: boolean;
     locations?: Array<{ id?: string; name?: string }>;

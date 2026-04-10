@@ -2,6 +2,7 @@ const { TableClient } = require("../_shared/table-client");
 const { BlobServiceClient } = require("@azure/storage-blob");
 const { randomUUID } = require("crypto");
 const { resolveTenantId, sanitizeTenantId } = require("../_shared/tenant");
+const { requirePrincipal } = require("../_shared/auth");
 
 const EMAIL_TABLE = "emailmessages";
 const EMAIL_TEMPLATE_TABLE = "emailtemplates";
@@ -980,6 +981,8 @@ module.exports = async function (context, req) {
     context.res = { status: 204 };
     return;
   }
+  const principal = await requirePrincipal(context, req);
+  if (!principal) return;
 
   try {
     if (method === "GET") {

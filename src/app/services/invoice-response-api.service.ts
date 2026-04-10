@@ -57,7 +57,7 @@ export class InvoiceResponseApiService {
   }
 
   private buildQuery(): string {
-    const tenantId = String(this.tenantContext.tenantId() || '').trim().toLowerCase() || 'main';
+    const tenantId = String(this.tenantContext.tenantId() || '').trim().toLowerCase() || 'primary-location';
     const user = this.auth.user();
     const params = new URLSearchParams();
     if (tenantId) params.set('tenantId', tenantId);

@@ -19,55 +19,123 @@
       <div class="feedback-row error" *ngIf="!loading() && error()">{{ error() }}</div>
     </section>
 
-    <section class="summary-grid">
-      <article class="summary-card glass-surface">
-        <div class="summary-icon">
-          <ion-icon name="cube-outline"></ion-icon>
-        </div>
-        <div class="summary-copy">
-          <div class="summary-label">Tracked SKUs</div>
-          <div class="summary-value">{{ items().length }}</div>
-        </div>
-      </article>
-
-      <article class="summary-card glass-surface">
-        <div class="summary-icon warning">
-          <ion-icon name="alert-circle-outline"></ion-icon>
-        </div>
-        <div class="summary-copy">
-          <div class="summary-label">Low Stock</div>
-          <div class="summary-value">{{ lowStockCount() }}</div>
-        </div>
-      </article>
-
-      <article class="summary-card glass-surface">
-        <div class="summary-icon accent">
-          <ion-icon name="cart-outline"></ion-icon>
-        </div>
-        <div class="summary-copy">
-          <div class="summary-label">Units On Order</div>
-          <div class="summary-value">{{ totalOnOrder() }}</div>
-        </div>
-      </article>
-
-      <article class="summary-card glass-surface">
-        <div class="summary-icon oem">
-          <ion-icon name="business-outline"></ion-icon>
-        </div>
-        <div class="summary-copy">
-          <div class="summary-label">On-Hand Value</div>
-          <div class="summary-value">{{ formatCurrency(totalInventoryValue()) }}</div>
-        </div>
-      </article>
-    </section>
-
-    <section class="inventory-panel glass-surface">
+    <section class="parts-queue glass-surface">
       <div class="panel-head">
-        <h2>Shop Inventory</h2>
-        <div class="panel-meta">{{ totalOnHand() }} units on-hand</div>
+        <div>
+          <h2>Parts To Order (Paid Jobs)</h2>
+          <div class="panel-meta">
+            {{ partsQueueRows().length }} part(s) · {{ queueTotalQty() }} total qty · {{ queueBackorderedCount() }} backordered
+          </div>
+        </div>
+        <ion-button size="small" fill="outline" (click)="openQueueWorkspace()" [disabled]="!partsQueueRows().length">
+          Open Workspace
+        </ion-button>
       </div>
 
-      <div class="inventory-controls">
+      <div class="queue-list" *ngIf="partsQueueRows().length; else noQueueItems">
+        <article class="queue-row" *ngFor="let row of queuePreviewRows(); trackBy: trackPartsQueueRow">
+          <div class="queue-main">
+            <div class="queue-title">{{ row.label }}</div>
+            <div class="queue-meta">
+              SKU {{ row.sku || 'N/A' }} · {{ row.customerCount }} customer(s) · {{ row.invoiceCount }} invoice(s)
+            </div>
+            <div class="queue-meta">Latest invoice {{ row.sampleInvoiceNumber || 'N/A' }} · {{ formatDateTime(row.latestUpdatedAt) }}</div>
+          </div>
+          <div class="queue-actions">
+            <span class="stock-pill" [ngClass]="partsQueueStatusClass(row.status)">{{ partsQueueStatusLabel(row.status) }}</span>
+            <div class="queue-qty">{{ row.qty }} qty</div>
+            <ion-button size="small" fill="outline" (click)="openInvoiceFromQueue(row)">Open Invoice</ion-button>
+          </div>
+        </article>
+        <div class="queue-more" *ngIf="partsQueueRows().length > queuePreviewRows().length">
+          +{{ partsQueueRows().length - queuePreviewRows().length }} more item(s). Open Workspace to manage all.
+        </div>
+      </div>
+
+      <ng-template #noQueueItems>
+        <div class="empty-state">
+          No outstanding parts from paid invoices. Paid jobs with parts marked <strong>ordered</strong> or <strong>backordered</strong> will show here.
+        </div>
+      </ng-template>
+    </section>
+
+    <section class="queue-workspace glass-surface" *ngIf="queueWorkspaceOpen()">
+      <div class="panel-head">
+        <div>
+          <h2>Parts To Order Workspace</h2>
+          <div class="panel-meta">Select an invoice on the left, then update part statuses on the right.</div>
+        </div>
+        <ion-button size="small" fill="outline" (click)="closeQueueWorkspace()">Close</ion-button>
+      </div>
+
+      <div class="queue-workspace-grid" *ngIf="queueInvoiceGroups().length; else noQueueWorkspaceItems">
+        <aside class="queue-invoice-list">
+          <button
+            type="button"
+            class="queue-invoice-row"
+            *ngFor="let group of queueInvoiceGroups(); trackBy: trackQueueInvoiceGroup"
+            [class.active]="selectedQueueInvoice()?.invoiceId === group.invoiceId"
+            (click)="selectQueueInvoice(group.invoiceId)">
+            <div class="queue-invoice-title">{{ group.invoiceNumber || 'Invoice' }} · {{ group.customerName }}</div>
+            <div class="queue-invoice-meta">
+              {{ group.lines.length }} line(s) · {{ formatDateTime(group.updatedAt) }}
+            </div>
+          </button>
+        </aside>
+
+        <article class="queue-line-editor" *ngIf="selectedQueueInvoice() as selected; else noQueueInvoiceSelected">
+          <div class="queue-selected-head">
+            <div class="queue-selected-title">{{ selected.invoiceNumber }} · {{ selected.customerName }}</div>
+            <ion-button size="small" fill="outline" (click)="openInvoiceById(selected.invoiceId)">
+              Open Invoice
+            </ion-button>
+          </div>
+
+          <div class="queue-line-grid">
+            <div class="queue-line-row" *ngFor="let line of selected.lines">
+              <div class="queue-line-main">
+                <div class="queue-line-title">{{ line.label }}</div>
+                <div class="queue-line-meta">SKU {{ line.sku || 'N/A' }} · {{ line.qty }} qty</div>
+              </div>
+              <label class="queue-line-status">
+                <span>Status</span>
+                <select
+                  [value]="line.status"
+                  [disabled]="isQueueLineSaving(selected.invoiceId, line.id)"
+                  (change)="updateQueueLineStatus(selected.invoiceId, line.id, $any($event.target).value)">
+                  <option value="ordered">Ordered</option>
+                  <option value="backordered">Backordered</option>
+                  <option value="in-stock">In-stock</option>
+                  <option value="received">Received</option>
+                </select>
+              </label>
+            </div>
+          </div>
+        </article>
+      </div>
+
+      <ng-template #noQueueWorkspaceItems>
+        <div class="empty-state">
+          No outstanding paid-invoice part lines to manage right now.
+        </div>
+      </ng-template>
+
+      <ng-template #noQueueInvoiceSelected>
+        <div class="empty-state">
+          Select an invoice to manage its part statuses.
+        </div>
+      </ng-template>
+    </section>
+
+    <section class="inventory-shell glass-surface">
+      <article class="parts-list-pane">
+        <div class="panel-head">
+          <div>
+            <h2>Parts</h2>
+            <div class="panel-meta">{{ filteredItems().length }} result(s) · {{ totalOnHand() }} units on hand</div>
+          </div>
+          <div class="panel-meta">{{ formatCurrency(totalInventoryValue()) }} total value</div>
+        </div>
         <ion-item class="search-item" lines="none">
           <ion-label position="stacked">Search Parts</ion-label>
           <ion-input
@@ -76,104 +144,104 @@
             placeholder="Part name, SKU, category, supplier">
           </ion-input>
         </ion-item>
-        <ion-item class="toggle-item" lines="none">
-          <ion-label>Low stock only</ion-label>
-          <ion-toggle
-            [checked]="showLowStockOnly()"
-            (ionChange)="setShowLowStockOnly($event.detail.checked)">
-          </ion-toggle>
-        </ion-item>
-      </div>
 
-      <div class="table-wrap">
-        <table class="inventory-table">
-          <thead>
-            <tr>
-              <th>Part</th>
-              <th>Supplier</th>
-              <th>On Hand</th>
-              <th>Min</th>
-              <th>On Order</th>
-              <th>Status</th>
-              <th>Unit Cost</th>
-              <th>Last Updated</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr *ngFor="let item of pagedItems(); trackBy: trackInventoryItem">
-              <td>
-                <div class="part-name">{{ item.name }}</div>
-                <div class="part-meta">SKU {{ item.sku }} · {{ item.category }}</div>
-              </td>
-              <td>{{ item.vendor }}</td>
-              <td>{{ item.onHand }}</td>
-              <td>{{ item.reorderAt }}</td>
-              <td>{{ item.onOrder }}</td>
-              <td>
-                <span class="stock-pill" [ngClass]="stockStateClass(item)">
-                  {{ stockStateLabel(item) }}
-                </span>
-              </td>
-              <td>{{ formatCurrency(item.unitCost) }}</td>
-              <td>{{ formatDateTime(item.lastUpdated) }}</td>
-              <td class="row-actions">
-                <ion-button
-                  size="small"
-                  fill="outline"
-                  [disabled]="saving() || stockState(item) === 'ok'"
-                  (click)="createReorderDraft(item)">
-                  Reorder
-                </ion-button>
-              </td>
-            </tr>
-            <tr *ngIf="!pagedItems().length">
-              <td colspan="9" class="empty-row">No inventory matches your search.</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div class="table-pager" *ngIf="filteredItems().length > 0">
-        <ion-button size="small" fill="outline" (click)="prevPage()" [disabled]="page() <= 1">Previous</ion-button>
-        <span>Page {{ page() }} of {{ totalPages() }}</span>
-        <ion-button size="small" fill="outline" (click)="nextPage()" [disabled]="page() >= totalPages()">Next</ion-button>
-        <span>Showing {{ pageStart() }}-{{ pageEnd() }} of {{ filteredItems().length }}</span>
-      </div>
-    </section>
-
-    <section class="inventory-lower-grid">
-      <article class="inventory-panel glass-surface">
-        <div class="panel-head">
-          <h2>Job-Linked Parts Queue</h2>
-          <ion-badge color="primary">{{ pendingJobNeeds().length }} pending</ion-badge>
-        </div>
-        <p class="panel-note">
-          This queue is where scheduled jobs can auto-create part requests and purchase orders.
-        </p>
-        <div class="job-list">
-          <div class="job-row" *ngFor="let need of jobPartNeeds(); trackBy: trackJobNeed">
-            <div class="job-main">
-              <div class="job-top">
-                <strong>{{ need.customerName }}</strong>
-                <span class="job-vehicle">{{ need.vehicle }}</span>
-              </div>
-              <div class="job-part">{{ need.partName }} · Qty {{ need.qty }}</div>
-              <div class="job-meta">
-                <span>{{ formatDateTime(need.scheduleStart) }}</span>
-                <span>Supplier: {{ need.vendorHint }}</span>
-              </div>
+        <div class="parts-list">
+          <button
+            type="button"
+            class="part-row"
+            *ngFor="let item of pagedItems(); trackBy: trackInventoryItem"
+            [class.active]="isSelected(item)"
+            (click)="selectItem(item)">
+            <div class="part-row-top">
+              <div class="part-name">{{ item.name || 'Untitled part' }}</div>
+              <span class="stock-pill" [ngClass]="onHandClass(item)">{{ onHandLabel(item) }}</span>
             </div>
-            <span class="stock-pill" [ngClass]="needStatusClass(need)">
-              {{ needStatusLabel(need) }}
-            </span>
+            <div class="part-meta">SKU {{ item.sku || 'N/A' }} · {{ item.vendor || 'No supplier' }}</div>
+            <div class="part-meta">On order {{ item.onOrder }}</div>
+          </button>
+          <div *ngIf="!pagedItems().length" class="empty-state">No parts match your search.</div>
+        </div>
+
+        <div class="table-pager" *ngIf="filteredItems().length > 0">
+          <ion-button size="small" fill="outline" (click)="prevPage()" [disabled]="page() <= 1">Previous</ion-button>
+          <span>Page {{ page() }} of {{ totalPages() }}</span>
+          <ion-button size="small" fill="outline" (click)="nextPage()" [disabled]="page() >= totalPages()">Next</ion-button>
+          <span>Showing {{ pageStart() }}-{{ pageEnd() }} of {{ filteredItems().length }}</span>
+        </div>
+      </article>
+
+      <article class="part-detail-pane">
+        <ng-container *ngIf="selectedItem() as selected; else noSelection">
+          <div class="panel-head">
+            <div>
+              <h2>{{ selected.name || selected.sku || 'Part' }}</h2>
+              <div class="panel-meta">Last updated {{ formatDateTime(selected.lastUpdated) }}</div>
+            </div>
+            <span class="stock-pill" [ngClass]="onHandClass(selected)">{{ onHandLabel(selected) }}</span>
           </div>
-        </div>
-        <div class="job-actions">
-          <ion-button size="small" [disabled]="saving() || !pendingJobNeeds().length" (click)="createPOBatchFromNeeds()">
-            Create PO Batch
-          </ion-button>
-        </div>
+
+          <div class="detail-grid">
+            <ion-item class="detail-item" lines="none">
+              <ion-label position="stacked">Part Name</ion-label>
+              <ion-input [ngModel]="editor()?.name || ''" (ngModelChange)="setEditorText('name', $event)"></ion-input>
+            </ion-item>
+
+            <ion-item class="detail-item" lines="none">
+              <ion-label position="stacked">SKU / Part Number</ion-label>
+              <ion-input [ngModel]="editor()?.sku || ''" (ngModelChange)="setEditorText('sku', $event)"></ion-input>
+            </ion-item>
+
+            <ion-item class="detail-item" lines="none">
+              <ion-label position="stacked">Supplier</ion-label>
+              <ion-input [ngModel]="editor()?.vendor || ''" (ngModelChange)="setEditorText('vendor', $event)"></ion-input>
+            </ion-item>
+
+            <ion-item class="detail-item" lines="none">
+              <ion-label position="stacked">Category</ion-label>
+              <ion-input [ngModel]="editor()?.category || ''" (ngModelChange)="setEditorText('category', $event)"></ion-input>
+            </ion-item>
+
+            <ion-item class="detail-item" lines="none">
+              <ion-label position="stacked">On Hand</ion-label>
+              <ion-input type="number" [ngModel]="editor()?.onHand ?? 0" (ngModelChange)="setEditorNumber('onHand', $event)"></ion-input>
+            </ion-item>
+
+            <ion-item class="detail-item" lines="none">
+              <ion-label position="stacked">Reorder Threshold</ion-label>
+              <ion-input type="number" [ngModel]="editor()?.reorderAt ?? 0" (ngModelChange)="setEditorNumber('reorderAt', $event)"></ion-input>
+            </ion-item>
+
+            <ion-item class="detail-item" lines="none">
+              <ion-label position="stacked">On Order</ion-label>
+              <ion-input type="number" [ngModel]="editor()?.onOrder ?? 0" (ngModelChange)="setEditorNumber('onOrder', $event)"></ion-input>
+            </ion-item>
+
+            <ion-item class="detail-item" lines="none">
+              <ion-label position="stacked">Unit Cost</ion-label>
+              <ion-input type="number" [ngModel]="editor()?.unitCost ?? 0" (ngModelChange)="setEditorNumber('unitCost', $event)"></ion-input>
+            </ion-item>
+          </div>
+
+          <div class="detail-actions">
+            <ion-button [disabled]="saving() || !hasSelectedChanges()" (click)="saveSelectedItem()">
+              {{ saving() ? 'Saving...' : 'Save Part' }}
+            </ion-button>
+            <ion-button fill="outline" [disabled]="saving() || !hasSelectedChanges()" (click)="resetSelectedEditor()">
+              Reset
+            </ion-button>
+            <ion-button
+              fill="outline"
+              color="medium"
+              [disabled]="saving()"
+              (click)="createReorderDraft(selected)">
+              Create PO Draft
+            </ion-button>
+          </div>
+        </ng-container>
+
+        <ng-template #noSelection>
+          <div class="empty-state">No parts found yet. Import inventory from Admin Settings first.</div>
+        </ng-template>
       </article>
     </section>
   </div>

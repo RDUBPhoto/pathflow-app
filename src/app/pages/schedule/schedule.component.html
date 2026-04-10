@@ -44,6 +44,31 @@
     </div>
   </div>
 
+  <section class="planner-hints glass-surface" *ngIf="planningCustomerId() as planningId">
+    <div class="planner-hints-header">
+      <div>
+        <h4>Suggested Time-slots available</h4>
+        <h3>Scheduling {{ planningCustomerName() }}</h3>
+        <p>Select an open slot below, or click directly on the calendar to choose another time.</p>
+      </div>
+      <button type="button" class="toolbar-chip" (click)="clearPlanningCustomer()">Clear</button>
+    </div>
+    <div class="planner-slot-list" *ngIf="suggestedSlots().length; else noSuggestedSlots">
+      <button
+        type="button"
+        class="planner-slot"
+        *ngFor="let slot of suggestedSlots()"
+        (click)="useSuggestedSlot(slot)">
+        {{ slot.label }}
+      </button>
+    </div>
+    <ng-template #noSuggestedSlots>
+      <div class="planner-empty">
+        No open 4-hour slots found soon. Try changing bays/business hours, or pick a custom range directly on the calendar.
+      </div>
+    </ng-template>
+  </section>
+
   <div class="schedule-shell glass-surface" #scheduleShell>
     <ng-container *ngIf="isMonthView(); else schedulerView">
       <div class="month-legend" *ngIf="bayLegend().length">
@@ -100,7 +125,7 @@
 
       <ion-item *ngIf="!editorBlocked()">
         <ion-label position="stacked">Customer</ion-label>
-        <ion-select interface="popover" [value]="editorCustomerId()" (ionChange)="editorCustomerId.set($event.detail.value || null)">
+        <ion-select interface="popover" [value]="editorCustomerId()" (ionChange)="onEditorCustomerChange($event.detail.value)">
           <ion-select-option [value]="null">Unassigned</ion-select-option>
           <ion-select-option *ngFor="let c of customers()" [value]="c.id">
             {{ c.name || 'Unnamed' }}
@@ -135,14 +160,36 @@
 
       <ion-item *ngIf="!editorBlocked()">
         <ion-label position="stacked">Parts for this job</ion-label>
+        <div class="parts-list" *ngIf="editorPartRequests().length; else noPartsForJob">
+          <ul>
+            <li *ngFor="let part of editorPartRequests()">
+              <span class="parts-qty">{{ part.qty }}x</span>
+              <span class="parts-name">{{ part.partName }}</span>
+              <span class="parts-meta" *ngIf="part.vendorHint || part.sku || part.note">
+                <ng-container *ngIf="part.vendorHint">{{ part.vendorHint }}</ng-container>
+                <ng-container *ngIf="part.sku"> | {{ part.sku }}</ng-container>
+                <ng-container *ngIf="part.note"> | {{ part.note }}</ng-container>
+              </span>
+            </li>
+          </ul>
+        </div>
+        <ng-template #noPartsForJob>
+          <div class="parts-empty">No parts listed for this job yet.</div>
+        </ng-template>
+      </ion-item>
+      <ion-item *ngIf="!editorBlocked()">
+        <ion-label position="stacked">Edit parts (one per line)</ion-label>
         <ion-textarea
           autoGrow
-          rows="4"
+          rows="3"
           [ngModel]="editorParts()"
           (ngModelChange)="editorParts.set($event)"
           placeholder="Examples:&#10;2x Brake Pad Set | NAPA | BP-F150-2018&#10;1x Oil Filter | O'Reilly | OF-5W20-FLT">
         </ion-textarea>
       </ion-item>
+      <div class="hint-text" *ngIf="!editorBlocked() && editorPartsSourceHint()">
+        {{ editorPartsSourceHint() }}
+      </div>
 
       <ion-item>
         <ion-label position="stacked">Start</ion-label>

@@ -43,23 +43,36 @@
   border-color: var(--app-nav-active-border, rgba(59, 130, 246, 0.5));
 }
 
-.notification-badge {
-  position: absolute;
-  top: -6px;
-  right: -6px;
-  min-width: 18px;
-  height: 18px;
+.notification-trigger.counter-mode {
+  width: auto;
+  min-width: 36px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+}
+
+.notification-trigger.counter-mode:hover {
+  background: transparent;
+  border-color: transparent;
+}
+
+.notification-count-circle {
+  min-width: 30px;
+  height: 30px;
   border-radius: 999px;
-  padding: 0 5px;
+  padding: 0 9px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: #ef4444;
-  color: #ffffff;
-  border: 2px solid var(--app-surface-bg, #0f172a);
-  font-size: 10px;
-  font-weight: 800;
+  background: transparent;
+  color: #ff4d4f;
+  border: 2px solid rgba(255, 77, 79, 0.9);
+  box-shadow: 0 0 0 1px rgba(255, 77, 79, 0.2);
+  font-size: 13px;
+  font-weight: 900;
   line-height: 1;
+  letter-spacing: 0;
 }
 
 .user-trigger {
@@ -253,11 +266,12 @@
 }
 
 .notifications-header {
+  position: relative;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
-  padding: 14px 14px 10px;
+  padding: 14px 46px 10px 14px;
   border-bottom: 1px solid var(--app-border-subtle, rgba(255, 255, 255, 0.14));
 }
 
@@ -298,6 +312,9 @@
 }
 
 .notifications-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
   width: 28px;
   height: 28px;
   border-radius: 8px;
@@ -315,6 +332,13 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+}
+
+.notifications-top-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 12px 6px;
+  border-bottom: 1px solid var(--app-border-subtle, rgba(255, 255, 255, 0.1));
 }
 
 .notifications-list {

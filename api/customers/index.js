@@ -1,7 +1,8 @@
 // api/customers/index.js
-const { TableClient } = require("../_shared/table-client");
+const { TableClient, isSqlBackendEnabled } = require("../_shared/table-client");
 const { randomUUID } = require("crypto");
 const { resolveTenantId } = require("../_shared/tenant");
+const { requirePrincipal } = require("../_shared/auth");
 
 const TABLE = "customers";
 const NOT_DUPLICATES_TABLE = "customernotduplicates";
@@ -761,10 +762,12 @@ module.exports = async function (context, req) {
   const method = (req.method || "GET").toUpperCase();
   const tenantId = resolveTenantId(req, req && req.body ? req.body : {});
   if (method === "OPTIONS") { context.res = { status: 204 }; return; }
+  const principal = await requirePrincipal(context, req);
+  if (!principal) return;
 
   try {
-    const conn = process.env.STORAGE_CONNECTION_STRING;
-    if (!conn) { context.res = { status: 500, body: { error: "Missing STORAGE_CONNECTION_STRING" } }; return; }
+    const conn = process.env.STORAGE_CONNECTION_STRING || "";
+    if (!conn && !isSqlBackendEnabled()) { context.res = { status: 500, body: { error: "Missing STORAGE_CONNECTION_STRING" } }; return; }
 
     const client = TableClient.fromConnectionString(conn, TABLE);
     try { await client.createTable(); } catch (_) {}

@@ -331,6 +331,12 @@
   font-weight: 700;
 }
 
+.line-muted {
+  color: var(--app-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .remove-cell {
   width: 90px;
 }
@@ -395,6 +401,10 @@
   color: var(--app-text);
   font-size: 18px;
   font-weight: 800;
+}
+
+.total-row.total-overpay {
+  color: #f59e0b;
 }
 
 .timeline-empty {

@@ -6,6 +6,7 @@ export type InvoiceStage = 'draft' | 'sent' | 'accepted' | 'completed' | 'declin
 export type InvoiceBoardStage = Exclude<InvoiceStage, 'expired' | 'canceled'> | 'completed';
 export type InvoiceDocumentType = 'quote' | 'invoice';
 export type InvoiceLineType = 'part' | 'labor';
+export type InvoicePartStatus = 'in-stock' | 'ordered' | 'backordered' | 'received';
 
 export type InvoiceCard = {
   id: string;
@@ -31,6 +32,7 @@ export type InvoiceLane = {
 export type InvoiceLineItem = {
   id: string;
   type: InvoiceLineType;
+  partStatus?: InvoicePartStatus;
   code: string;
   description: string;
   quantity: number;
@@ -50,6 +52,28 @@ export type InvoiceTimelineEntry = {
   createdBy?: string;
   createdById?: string;
   actorType?: InvoiceTimelineActorType;
+};
+
+export type InvoicePaymentTransaction = {
+  id: string;
+  provider: string;
+  amount: number;
+  transactionId: string;
+  mode?: string;
+  authCode?: string;
+  accountType?: string;
+  accountNumber?: string;
+  createdAt: string;
+};
+
+export type InvoiceRefundTransaction = {
+  id: string;
+  provider: string;
+  amount: number;
+  transactionId: string;
+  originalTransactionId: string;
+  reason?: string;
+  createdAt: string;
 };
 
 export type InvoiceDetail = {
@@ -93,6 +117,8 @@ export type InvoiceDetail = {
   taxTotal: number;
   total: number;
   paidAmount?: number;
+  paymentTransactions?: InvoicePaymentTransaction[];
+  refundTransactions?: InvoiceRefundTransaction[];
 
   createdAt: string;
   updatedAt: string;
@@ -602,6 +628,8 @@ export class InvoicesDataService {
       taxTotal: 0,
       total: 0,
       paidAmount: this.safeNumber(payload.paidAmount, 0),
+      paymentTransactions: [],
+      refundTransactions: [],
 
       createdAt: nowIso,
       updatedAt: nowIso,
@@ -790,6 +818,168 @@ export class InvoicesDataService {
     return updated;
   }
 
+  recordPaymentTransaction(
+    id: string,
+    payment: {
+      provider: string;
+      amount: number;
+      transactionId: string;
+      mode?: string;
+      authCode?: string;
+      accountType?: string;
+      accountNumber?: string;
+      createdAt?: string;
+    }
+  ): InvoiceDetail | null {
+    const key = String(id || '').trim();
+    if (!key) return null;
+
+    const provider = this.safeText(payment.provider).toLowerCase();
+    const transactionId = this.safeText(payment.transactionId);
+    const amount = this.roundCurrency(Math.max(0, Number.isFinite(Number(payment.amount)) ? Number(payment.amount) : 0));
+    if (!provider || !transactionId || amount <= 0) return null;
+
+    const nowIso = this.safeText(payment.createdAt) || new Date().toISOString();
+    let updated: InvoiceDetail | null = null;
+
+    this.updateState(current => {
+      const index = current.findIndex(item => item.id === key);
+      if (index === -1) return current;
+
+      const existing = current[index];
+      const nextTransactions = [...(existing.paymentTransactions || [])];
+      const dedupeKey = `${provider}|${transactionId}`.toLowerCase();
+      const existingIndex = nextTransactions.findIndex(item =>
+        `${this.safeText(item.provider).toLowerCase()}|${this.safeText(item.transactionId)}`.toLowerCase() === dedupeKey
+      );
+
+      const normalizedEntry: InvoicePaymentTransaction = {
+        id: existingIndex >= 0
+          ? nextTransactions[existingIndex].id
+          : `payment-${key}-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        provider,
+        amount,
+        transactionId,
+        mode: this.safeText(payment.mode),
+        authCode: this.safeText(payment.authCode),
+        accountType: this.safeText(payment.accountType),
+        accountNumber: this.safeText(payment.accountNumber),
+        createdAt: nowIso
+      };
+
+      if (existingIndex >= 0) {
+        nextTransactions[existingIndex] = normalizedEntry;
+      } else {
+        nextTransactions.push(normalizedEntry);
+      }
+
+      const nextInvoice = this.normalizeInvoice({
+        ...existing,
+        paymentTransactions: nextTransactions,
+        updatedAt: new Date().toISOString()
+      });
+
+      const next = [...current];
+      next[index] = nextInvoice;
+      updated = this.cloneInvoice(nextInvoice);
+      return next;
+    });
+
+    return updated;
+  }
+
+  recordProcessorRefund(
+    id: string,
+    refund: {
+      provider: string;
+      amount: number;
+      transactionId: string;
+      originalTransactionId: string;
+      reason?: string;
+      createdAt?: string;
+    }
+  ): InvoiceDetail | null {
+    const key = String(id || '').trim();
+    if (!key) return null;
+
+    const provider = this.safeText(refund.provider).toLowerCase();
+    const transactionId = this.safeText(refund.transactionId);
+    const originalTransactionId = this.safeText(refund.originalTransactionId);
+    const amount = this.roundCurrency(Math.max(0, Number.isFinite(Number(refund.amount)) ? Number(refund.amount) : 0));
+    if (!provider || !transactionId || !originalTransactionId || amount <= 0) return null;
+
+    const createdAt = this.safeText(refund.createdAt) || new Date().toISOString();
+    let updated: InvoiceDetail | null = null;
+
+    this.updateState(current => {
+      const index = current.findIndex(item => item.id === key);
+      if (index === -1) return current;
+
+      const existing = current[index];
+      const previousStage = existing.stage;
+      const currentPaid = this.roundCurrency(Math.max(0, Number(existing.paidAmount || 0)));
+      const nextPaid = this.roundCurrency(Math.max(0, currentPaid - amount));
+      const nextStage = this.resolveStageFromBalance(existing, nextPaid);
+
+      const amountLabel = this.formatCurrency(amount);
+      const reason = this.safeText(refund.reason);
+      const timeline = [...existing.timeline];
+      timeline.push(this.createTimelineEntry(
+        `timeline-${key}-${Date.now()}-refund-processor`,
+        createdAt,
+        reason
+          ? `Refund issued: ${amountLabel}. ${reason}`
+          : `Refund issued: ${amountLabel}.`
+      ));
+      if (previousStage !== nextStage) {
+        timeline.push(this.createTimelineEntry(
+          `timeline-${key}-${Date.now()}-refund-stage`,
+          createdAt,
+          this.stageTransitionMessage(previousStage, nextStage)
+        ));
+      }
+
+      const nextRefunds = [...(existing.refundTransactions || [])];
+      const refundDedup = `${provider}|${transactionId}`.toLowerCase();
+      const existingRefundIndex = nextRefunds.findIndex(item =>
+        `${this.safeText(item.provider).toLowerCase()}|${this.safeText(item.transactionId)}`.toLowerCase() === refundDedup
+      );
+      const refundEntry: InvoiceRefundTransaction = {
+        id: existingRefundIndex >= 0
+          ? nextRefunds[existingRefundIndex].id
+          : `refund-${key}-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        provider,
+        amount,
+        transactionId,
+        originalTransactionId,
+        reason,
+        createdAt
+      };
+      if (existingRefundIndex >= 0) {
+        nextRefunds[existingRefundIndex] = refundEntry;
+      } else {
+        nextRefunds.push(refundEntry);
+      }
+
+      const nextInvoice = this.normalizeInvoice({
+        ...existing,
+        stage: nextStage,
+        paidAmount: nextPaid,
+        paymentDate: nextStage === 'accepted' ? this.safeText(existing.paymentDate) || this.formatIsoDate(new Date()) : '',
+        refundTransactions: nextRefunds,
+        updatedAt: new Date().toISOString(),
+        timeline
+      });
+
+      const next = [...current];
+      next[index] = nextInvoice;
+      updated = this.cloneInvoice(nextInvoice);
+      return next;
+    });
+
+    return updated;
+  }
+
   recordRefund(id: string, amount: number, note?: string): InvoiceDetail | null {
     const key = String(id || '').trim();
     if (!key) return null;
@@ -805,6 +995,10 @@ export class InvoicesDataService {
       if (index === -1) return current;
 
       const existing = current[index];
+      const previousStage = existing.stage;
+      const currentPaid = this.roundCurrency(Math.max(0, Number(existing.paidAmount || 0)));
+      const nextPaid = this.roundCurrency(Math.max(0, currentPaid - normalizedAmount));
+      const nextStage = this.resolveStageFromBalance(existing, nextPaid);
       const timeline = [...existing.timeline];
       const amountLabel = this.formatCurrency(normalizedAmount);
       const detail = String(note || '').trim();
@@ -813,9 +1007,19 @@ export class InvoicesDataService {
         nowIso,
         detail ? `Refund issued: ${amountLabel}. ${detail}` : `Refund issued: ${amountLabel}.`
       ));
+      if (previousStage !== nextStage) {
+        timeline.push(this.createTimelineEntry(
+          `timeline-${key}-${Date.now()}-refund-stage`,
+          nowIso,
+          this.stageTransitionMessage(previousStage, nextStage)
+        ));
+      }
 
       const nextInvoice = this.normalizeInvoice({
         ...existing,
+        stage: nextStage,
+        paidAmount: nextPaid,
+        paymentDate: nextStage === 'accepted' ? this.safeText(existing.paymentDate) || this.formatIsoDate(new Date()) : '',
         updatedAt: nowIso,
         timeline
       });
@@ -1020,11 +1224,13 @@ export class InvoicesDataService {
     const requestedStage = this.normalizeStage(invoice.stage);
     const rawPaidAmount = Number((invoice as any).paidAmount);
     const hasExplicitPaidAmount = Number.isFinite(rawPaidAmount);
-    let paidAmount = this.roundCurrency(Math.min(total, Math.max(0, this.safeNumber((invoice as any).paidAmount, 0))));
+    let paidAmount = this.roundCurrency(Math.max(0, this.safeNumber((invoice as any).paidAmount, 0)));
     if (normalizedDocumentType === 'invoice' && requestedStage === 'accepted' && !hasExplicitPaidAmount) {
       // Backfill legacy paid invoices that had stage but no paidAmount persisted.
       paidAmount = total;
     }
+    const paymentTransactions = this.normalizePaymentTransactions((invoice as any).paymentTransactions || []);
+    const refundTransactions = this.normalizeRefundTransactions((invoice as any).refundTransactions || []);
     const normalizedStage = this.resolveStageFromBalance(
       {
         ...invoice,
@@ -1067,6 +1273,8 @@ export class InvoicesDataService {
       taxTotal,
       total,
       paidAmount,
+      paymentTransactions,
+      refundTransactions,
       paymentDate: normalizedStage === 'accepted' ? this.safeText(invoice.paymentDate) : '',
       createdAt: this.safeText(invoice.createdAt) || new Date().toISOString(),
       updatedAt: this.safeText(invoice.updatedAt) || new Date().toISOString(),
@@ -1104,9 +1312,11 @@ export class InvoicesDataService {
       const lineSubtotal = this.roundCurrency(quantity * unitPrice);
       const taxAmount = this.roundCurrency((lineSubtotal * taxRate) / 100);
       const lineTotal = this.roundCurrency(lineSubtotal + taxAmount);
+      const type: InvoiceLineType = line.type === 'labor' ? 'labor' : 'part';
       return {
         id: this.safeText(line.id) || `li-${Date.now()}-${index}`,
-        type: line.type === 'labor' ? 'labor' : 'part',
+        type,
+        partStatus: type === 'part' ? this.normalizePartStatus(line.partStatus) : undefined,
         code: this.safeText(line.code),
         description: this.safeText(line.description),
         quantity,
@@ -1117,6 +1327,14 @@ export class InvoicesDataService {
         lineTotal
       };
     });
+  }
+
+  private normalizePartStatus(value: unknown): InvoicePartStatus {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (normalized === 'in-stock' || normalized === 'in stock' || normalized === 'instock') return 'in-stock';
+    if (normalized === 'backordered' || normalized === 'back-order' || normalized === 'back order') return 'backordered';
+    if (normalized === 'received' || normalized === 'invoiced-received') return 'received';
+    return 'ordered';
   }
 
   private normalizeTimeline(items: InvoiceTimelineEntry[]): InvoiceTimelineEntry[] {
@@ -1133,6 +1351,57 @@ export class InvoicesDataService {
       .filter(entry => !!entry.message);
 
     return normalized.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  }
+
+  private normalizePaymentTransactions(items: InvoicePaymentTransaction[]): InvoicePaymentTransaction[] {
+    const source = Array.isArray(items) ? items : [];
+    const dedupe = new Map<string, InvoicePaymentTransaction>();
+    for (let index = 0; index < source.length; index += 1) {
+      const row = source[index];
+      const provider = this.safeText(row?.provider).toLowerCase();
+      const transactionId = this.safeText(row?.transactionId);
+      const amount = this.roundCurrency(Math.max(0, Number.isFinite(Number(row?.amount)) ? Number(row?.amount) : 0));
+      if (!provider || !transactionId || amount <= 0) continue;
+      const createdAt = this.safeText(row?.createdAt) || new Date().toISOString();
+      const entry: InvoicePaymentTransaction = {
+        id: this.safeText(row?.id) || `payment-${Date.now()}-${index}`,
+        provider,
+        amount,
+        transactionId,
+        mode: this.safeText(row?.mode),
+        authCode: this.safeText(row?.authCode),
+        accountType: this.safeText(row?.accountType),
+        accountNumber: this.safeText(row?.accountNumber),
+        createdAt
+      };
+      dedupe.set(`${provider}|${transactionId}`.toLowerCase(), entry);
+    }
+    return Array.from(dedupe.values()).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  }
+
+  private normalizeRefundTransactions(items: InvoiceRefundTransaction[]): InvoiceRefundTransaction[] {
+    const source = Array.isArray(items) ? items : [];
+    const dedupe = new Map<string, InvoiceRefundTransaction>();
+    for (let index = 0; index < source.length; index += 1) {
+      const row = source[index];
+      const provider = this.safeText(row?.provider).toLowerCase();
+      const transactionId = this.safeText(row?.transactionId);
+      const originalTransactionId = this.safeText(row?.originalTransactionId);
+      const amount = this.roundCurrency(Math.max(0, Number.isFinite(Number(row?.amount)) ? Number(row?.amount) : 0));
+      if (!provider || !transactionId || !originalTransactionId || amount <= 0) continue;
+      const createdAt = this.safeText(row?.createdAt) || new Date().toISOString();
+      const entry: InvoiceRefundTransaction = {
+        id: this.safeText(row?.id) || `refund-${Date.now()}-${index}`,
+        provider,
+        amount,
+        transactionId,
+        originalTransactionId,
+        reason: this.safeText(row?.reason),
+        createdAt
+      };
+      dedupe.set(`${provider}|${transactionId}`.toLowerCase(), entry);
+    }
+    return Array.from(dedupe.values()).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   }
 
   private mergeTimeline(existing: InvoiceTimelineEntry[], incoming: InvoiceTimelineEntry[]): InvoiceTimelineEntry[] {
@@ -1216,7 +1485,9 @@ export class InvoicesDataService {
     return {
       ...invoice,
       lineItems: invoice.lineItems.map(line => ({ ...line })),
-      timeline: invoice.timeline.map(entry => ({ ...entry }))
+      timeline: invoice.timeline.map(entry => ({ ...entry })),
+      paymentTransactions: (invoice.paymentTransactions || []).map(item => ({ ...item })),
+      refundTransactions: (invoice.refundTransactions || []).map(item => ({ ...item }))
     };
   }
 

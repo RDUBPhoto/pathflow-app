@@ -2,6 +2,7 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { AuthService } from '../auth/auth.service';
 
 const TENANT_OVERRIDE_KEY = 'pathflow.tenant.id';
+const DEFAULT_TENANT_ID = 'primary-location';
 
 @Injectable({ providedIn: 'root' })
 export class TenantContextService {
@@ -17,7 +18,7 @@ export class TenantContextService {
     const emailTenant = this.tenantFromEmail(this.auth.user()?.email || '');
     const hostTenant = this.tenantFromHost(window.location.hostname || '');
     const preferredOverride = overrideAllowed ? override : '';
-    return this.sanitizeTenantId(preferredOverride || defaultLocation || emailTenant || hostTenant || 'main');
+    return this.sanitizeTenantId(preferredOverride || defaultLocation || emailTenant || hostTenant || DEFAULT_TENANT_ID);
   });
 
   setTenantOverride(value: string): void {
@@ -75,6 +76,6 @@ export class TenantContextService {
       .replace(/[^a-z0-9._:-]+/g, '-')
       .replace(/^-+|-+$/g, '')
       .slice(0, 80);
-    return cleaned || 'main';
+    return cleaned || DEFAULT_TENANT_ID;
   }
 }

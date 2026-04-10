@@ -2,7 +2,8 @@ export const environment = {
   apiBase: '',
   publicAppUrl: 'https://wonderful-glacier-0f45f5110.6.azurestaticapps.net',
   features: {
-    demoTools: false
+    demoTools: false,
+    powerBiReports: false
   },
   auth: {
     primaryProvider: 'aad',

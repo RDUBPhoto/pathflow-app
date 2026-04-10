@@ -22,6 +22,12 @@ try {
 } catch (_) {}
 
 const SETTINGS_TABLE = "appsettings";
+const SCHEDULE_SETTINGS_KEY = "schedule.settings";
+const DEFAULT_SCHEDULE_SETTINGS = {
+  openHour: 7,
+  closeHour: 16,
+  showWeekends: false
+};
 const POWERBI_SETTING_KEYS = [
   "POWERBI_TENANT_ID",
   "POWERBI_CLIENT_ID",
@@ -126,6 +132,8 @@ function allowApiKeyRead(req, method, scope) {
     "sources",
     "communications",
     "communication-volume",
+    "job-timing",
+    "job-timers",
     "production-forecast",
     "productionforecast",
     "cashflow-forecast",
@@ -211,6 +219,25 @@ function asPowerBiSettingValue(raw) {
   return asString(parsed);
 }
 
+function parseScheduleSettings(raw) {
+  const parsed = raw && typeof raw === "object" ? raw : {};
+  const openHourRaw = asNumber(parsed.openHour, NaN);
+  const closeHourRaw = asNumber(parsed.closeHour, NaN);
+  const fallback = DEFAULT_SCHEDULE_SETTINGS;
+  const openHour = Number.isFinite(openHourRaw)
+    ? clamp(Math.floor(openHourRaw), 0, 23)
+    : fallback.openHour;
+  let closeHour = Number.isFinite(closeHourRaw)
+    ? clamp(Math.floor(closeHourRaw), 1, 24)
+    : fallback.closeHour;
+  if (closeHour <= openHour) closeHour = Math.min(24, openHour + 1);
+  return {
+    openHour,
+    closeHour,
+    showWeekends: typeof parsed.showWeekends === "boolean" ? parsed.showWeekends : fallback.showWeekends
+  };
+}
+
 async function getSettingTableClient() {
   const conn = asString(process.env.STORAGE_CONNECTION_STRING);
   if (!conn && !isSqlBackendEnabled()) throw new Error("Missing STORAGE_CONNECTION_STRING");
@@ -272,6 +299,38 @@ async function readPowerBiConfigFromClient(client, partitionKey) {
     output[targetField] = await readKey(key);
   }
   return output;
+}
+
+async function readSettingValueFromClient(client, partitionKey, rowKey) {
+  if (!client || !partitionKey || !rowKey) return null;
+  try {
+    const entity = await client.getEntity(partitionKey, rowKey);
+    return parseSettingValue(entity.valueJson);
+  } catch {
+    return null;
+  }
+}
+
+async function readScheduleSettings(tenantId) {
+  let resolved = { ...DEFAULT_SCHEDULE_SETTINGS };
+  try {
+    const client = await getSettingTableClient();
+    const tenantValue = await readSettingValueFromClient(client, tenantId, SCHEDULE_SETTINGS_KEY);
+    const mainValue = await readSettingValueFromClient(client, "main", SCHEDULE_SETTINGS_KEY);
+    const merged = tenantValue != null ? tenantValue : mainValue;
+    if (merged != null) {
+      resolved = parseScheduleSettings(merged);
+    } else {
+      const legacyClient = await getLegacySettingTableClient();
+      if (legacyClient) {
+        const legacyTenant = await readSettingValueFromClient(legacyClient, tenantId, SCHEDULE_SETTINGS_KEY);
+        const legacyMain = await readSettingValueFromClient(legacyClient, "main", SCHEDULE_SETTINGS_KEY);
+        const legacyMerged = legacyTenant != null ? legacyTenant : legacyMain;
+        if (legacyMerged != null) resolved = parseScheduleSettings(legacyMerged);
+      }
+    }
+  } catch (_) {}
+  return resolved;
 }
 
 function mergePowerBiConfig(primary, fallback) {
@@ -1154,7 +1213,13 @@ function buildModel(raw) {
       quoteAmount,
       expectedAmount,
       paidAmount,
-      outstandingAmount
+      outstandingAmount,
+      checkedInAt: parseDate(entity.checkedInAt),
+      completedAt: parseDate(entity.completedAt),
+      pausedAt: parseDate(entity.pausedAt),
+      lastWorkResumedAt: parseDate(entity.lastWorkResumedAt),
+      isPaused: asBool(entity.isPaused),
+      workDurationMs: Math.max(0, asNumber(entity.workDurationMs, 0))
     };
   });
 
@@ -1188,6 +1253,7 @@ function buildModel(raw) {
     schedules,
     inventoryNeeds,
     inventoryItems,
+    scheduleSettings: { ...DEFAULT_SCHEDULE_SETTINGS },
     customers,
     communications
   };
@@ -1687,6 +1753,100 @@ function buildCommunicationVolume(model, window) {
   );
 }
 
+function businessWindowElapsedMs(start, end, scheduleSettings) {
+  if (!(start instanceof Date) || !(end instanceof Date)) return 0;
+  const startMs = start.getTime();
+  const endMs = end.getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return 0;
+
+  const schedule = parseScheduleSettings(scheduleSettings || DEFAULT_SCHEDULE_SETTINGS);
+  const includeWeekends = !!schedule.showWeekends;
+  const openHour = schedule.openHour;
+  const closeHour = schedule.closeHour;
+
+  let totalMs = 0;
+  let cursor = new Date(startMs);
+  cursor.setHours(0, 0, 0, 0);
+  let dayCount = 0;
+  const maxDays = 3660;
+
+  while (cursor.getTime() < endMs && dayCount < maxDays) {
+    const day = cursor.getDay();
+    const isWeekend = day === 0 || day === 6;
+    if (includeWeekends || !isWeekend) {
+      const dayStart = new Date(cursor.getTime());
+      dayStart.setHours(openHour, 0, 0, 0);
+      const dayEnd = new Date(cursor.getTime());
+      dayEnd.setHours(closeHour, 0, 0, 0);
+
+      const overlapStart = Math.max(startMs, dayStart.getTime());
+      const overlapEnd = Math.min(endMs, dayEnd.getTime());
+      if (overlapEnd > overlapStart) totalMs += overlapEnd - overlapStart;
+    }
+    cursor.setDate(cursor.getDate() + 1);
+    dayCount += 1;
+  }
+
+  return totalMs;
+}
+
+function computeWorkItemEffectiveMs(item, now, scheduleSettings) {
+  if (!item) return 0;
+  const baseMs = Math.max(0, asNumber(item.workDurationMs, 0));
+  const checkedInAt = item.checkedInAt instanceof Date ? item.checkedInAt : null;
+  const completedAt = item.completedAt instanceof Date ? item.completedAt : null;
+  const pausedAt = item.pausedAt instanceof Date ? item.pausedAt : null;
+  const lastWorkResumedAt = item.lastWorkResumedAt instanceof Date ? item.lastWorkResumedAt : null;
+  const isPaused = !!item.isPaused || !!pausedAt;
+
+  const resumedAt = lastWorkResumedAt || checkedInAt;
+  const inFlightMs = (!completedAt && !isPaused && resumedAt)
+    ? businessWindowElapsedMs(resumedAt, now, scheduleSettings)
+    : 0;
+  const rawTimingMs = baseMs + inFlightMs;
+
+  const spanEnd = completedAt || pausedAt || now;
+  const businessWindowSpanMs = checkedInAt
+    ? businessWindowElapsedMs(checkedInAt, spanEnd, scheduleSettings)
+    : 0;
+
+  if (rawTimingMs > 0 && businessWindowSpanMs > 0) {
+    return Math.min(rawTimingMs, businessWindowSpanMs);
+  }
+  return Math.max(rawTimingMs, businessWindowSpanMs);
+}
+
+function buildJobTiming(model, scheduleSettings, window) {
+  const rows = [];
+  const msPerHour = 60 * 60 * 1000;
+  for (const item of model.workItems) {
+    const anchorDate = item.completedAt || item.updatedAt || item.createdAt;
+    if (!inRange(anchorDate, window.from, window.to)) continue;
+    const effectiveMs = computeWorkItemEffectiveMs(item, window.now, scheduleSettings);
+    if (effectiveMs <= 0) continue;
+    rows.push({
+      work_item_id: item.id,
+      customer_id: item.customerId || "",
+      customer_name: item.customerName || "",
+      title: item.title || "",
+      stage: item.stage || "",
+      checked_in_at: isoDateTime(item.checkedInAt),
+      completed_at: isoDateTime(item.completedAt),
+      is_paused: !!item.isPaused,
+      tracked_hours_business: Number((effectiveMs / msPerHour).toFixed(2))
+    });
+  }
+
+  rows.sort((a, b) => {
+    const aTs = Date.parse(a.completed_at || a.checked_in_at || "");
+    const bTs = Date.parse(b.completed_at || b.checked_in_at || "");
+    if (Number.isFinite(aTs) && Number.isFinite(bTs) && aTs !== bTs) return bTs - aTs;
+    return a.title.localeCompare(b.title);
+  });
+
+  return rows;
+}
+
 function buildPayload(model, window) {
   const kpiSummary = buildOverview(model, window);
   const funnel = buildFunnel(model);
@@ -1694,6 +1854,7 @@ function buildPayload(model, window) {
   const invoiceAging = buildInvoiceAging(model, window);
   const leadSources = buildLeadSources(model, window);
   const communicationVolume = buildCommunicationVolume(model, window);
+  const jobTiming = buildJobTiming(model, model.scheduleSettings, window);
   const productionForecast = buildProductionForecast(model, window);
   const cashflowForecast = buildCashflowForecast(model, window, productionForecast);
 
@@ -1714,6 +1875,7 @@ function buildPayload(model, window) {
       invoiceAging,
       leadSources,
       communicationVolume,
+      jobTiming,
       productionForecast,
       cashflowForecast
     }
@@ -1742,6 +1904,9 @@ function responseByScope(scope, payload) {
   }
   if (normalized === "communications" || normalized === "communication-volume") {
     return { ...payload, table: "communicationVolume", rows: payload.tables.communicationVolume };
+  }
+  if (normalized === "job-timing" || normalized === "job-timers") {
+    return { ...payload, table: "jobTiming", rows: payload.tables.jobTiming };
   }
   if (normalized === "production-forecast" || normalized === "productionforecast") {
     return { ...payload, table: "productionForecast", rows: payload.tables.productionForecast };
@@ -1894,6 +2059,8 @@ module.exports = async function (context, req) {
       listPartition(inventoryItemsClient, tenantId)
     ]);
 
+    const scheduleSettings = await readScheduleSettings(tenantId);
+
     const model = buildModel({
       lanes,
       workItems,
@@ -1906,6 +2073,7 @@ module.exports = async function (context, req) {
       inventoryNeeds,
       inventoryItems
     });
+    model.scheduleSettings = scheduleSettings;
 
     const payload = buildPayload(model, window);
     const scoped = responseByScope(scope, payload);
@@ -1921,6 +2089,7 @@ module.exports = async function (context, req) {
           "invoice-aging",
           "lead-sources",
           "communications",
+          "job-timing",
           "production-forecast",
           "cashflow-forecast",
           "seed-demo",

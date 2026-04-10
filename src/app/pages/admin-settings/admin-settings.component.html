@@ -138,6 +138,10 @@
                   <ion-label position="stacked">Default Price</ion-label>
                   <ion-input type="number" min="0" step="0.01" [(ngModel)]="rate.price" placeholder="150.00"></ion-input>
                 </ion-item>
+                <ion-item>
+                  <ion-label position="stacked">Default Cost</ion-label>
+                  <ion-input type="number" min="0" step="0.01" [(ngModel)]="rate.cost" placeholder="60.00"></ion-input>
+                </ion-item>
                 <ion-item lines="none" class="labor-taxable-item">
                   <ion-checkbox slot="start" [(ngModel)]="rate.taxable"></ion-checkbox>
                   <ion-label>Taxable</ion-label>
@@ -694,11 +698,122 @@
             </div>
           </div>
 
-          <div class="customer-import-results" *ngIf="selectedImportType === 'inventory'">
-            <div class="customer-import-section-title">Inventory Import (Coming soon)</div>
-            <div class="sms-help">
-              Inventory import will support CSV/XLSX upload with field mapping for SKU, supplier, cost, quantity,
-              and reorder thresholds. This tab is now in place so future imports can live under one Data Imports section.
+          <div *ngIf="selectedImportType === 'inventory'">
+            <div class="customer-import-grid">
+              <div class="customer-import-column">
+                <div class="customer-import-section-title">Upload File</div>
+                <div class="sms-help">
+                  Upload a CSV, XLSX, or XLS file and map source headers to Pathflow inventory fields.
+                </div>
+                <input
+                  #inventoryImportFileInput
+                  type="file"
+                  accept=".csv,.xlsx,.xls"
+                  hidden
+                  (change)="onInventoryImportFileSelected($event)" />
+                <div class="sms-actions">
+                  <ion-button (click)="inventoryImportFileInput.click()">
+                    <ion-icon slot="start" name="cloud-upload-outline"></ion-icon>
+                    Choose file
+                  </ion-button>
+                </div>
+
+                <div class="customer-import-summary" *ngIf="inventoryImportFileName">
+                  <div><strong>File:</strong> {{ inventoryImportFileName }}</div>
+                  <div><strong>Rows:</strong> {{ inventoryImportRows.length }}</div>
+                  <div><strong>Mapped columns:</strong> {{ mappedInventoryImportCount() }} / {{ inventoryImportHeaders.length }}</div>
+                </div>
+
+                <div class="sms-feedback success" *ngIf="inventoryImportStatus">{{ inventoryImportStatus }}</div>
+                <div class="sms-feedback error" *ngIf="inventoryImportError">{{ inventoryImportError }}</div>
+              </div>
+
+              <div class="customer-import-column" *ngIf="inventoryImportHeaders.length">
+                <div class="customer-import-section-title">Field Mapping</div>
+                <div class="sms-help">
+                  Map source columns to inventory fields. Keep at least one identity field mapped: Description or Part/Labor Code.
+                </div>
+                <div class="customer-import-mapping-list">
+                  <div class="customer-import-mapping-row" *ngFor="let mapping of inventoryImportMappings; let i = index">
+                    <div class="mapping-source">
+                      <span class="source-label">{{ mapping.source }}</span>
+                    </div>
+                    <ion-item lines="none">
+                      <ion-label position="stacked">Target field</ion-label>
+                      <ion-select
+                        interface="popover"
+                        [(ngModel)]="inventoryImportMappings[i].target">
+                        <ion-select-option value="">Skip</ion-select-option>
+                        <ion-select-option *ngFor="let field of inventoryImportTargetFields" [value]="field.key">
+                          {{ field.label }}
+                        </ion-select-option>
+                      </ion-select>
+                    </ion-item>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="customer-import-preview" *ngIf="inventoryImportRows.length">
+              <div class="customer-import-section-title">Preview</div>
+              <div class="customer-import-table-wrap">
+                <table class="customer-import-table">
+                  <thead>
+                    <tr>
+                      <th *ngFor="let header of inventoryImportHeaders">{{ header }}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr *ngFor="let row of inventoryImportPreviewRows()">
+                      <td *ngFor="let header of inventoryImportHeaders">{{ row[header] }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="table-pager" *ngIf="inventoryImportRows.length > inventoryImportPreviewPageSize">
+                <ion-button
+                  size="small"
+                  fill="outline"
+                  (click)="prevInventoryImportPreviewPage()"
+                  [disabled]="inventoryImportPreviewPage() <= 1">
+                  Previous
+                </ion-button>
+                <span>Page {{ inventoryImportPreviewPage() }} of {{ inventoryImportPreviewTotalPages() }}</span>
+                <ion-button
+                  size="small"
+                  fill="outline"
+                  (click)="nextInventoryImportPreviewPage()"
+                  [disabled]="inventoryImportPreviewPage() >= inventoryImportPreviewTotalPages()">
+                  Next
+                </ion-button>
+              </div>
+            </div>
+
+            <div class="sms-actions" *ngIf="inventoryImportRows.length">
+              <ion-button
+                (click)="importInventoryFromFile()"
+                [disabled]="!canRunInventoryImport()">
+                <ion-icon slot="start" name="save-outline"></ion-icon>
+                {{ inventoryImporting() ? 'Importing...' : 'Import Inventory' }}
+              </ion-button>
+            </div>
+
+            <div class="customer-import-results" *ngIf="inventoryImportResult() as result">
+              <div class="customer-import-section-title">Last Import Result</div>
+              <div class="customer-import-result-badges">
+                <ion-badge color="success">Created {{ result.created }}</ion-badge>
+                <ion-badge color="primary">Updated {{ result.updated }}</ion-badge>
+                <ion-badge color="medium">Skipped {{ result.skipped }}</ion-badge>
+                <ion-badge color="danger" *ngIf="result.errors.length">Errors {{ result.errors.length }}</ion-badge>
+              </div>
+              <div class="customer-import-error-list" *ngIf="result.errors.length">
+                <div class="error-row" *ngFor="let err of result.errors.slice(0, 10)">
+                  Row {{ err.index }}: {{ err.error }}
+                </div>
+                <div class="sms-help" *ngIf="result.errors.length > 10">
+                  Showing first 10 of {{ result.errors.length }} errors.
+                </div>
+              </div>
             </div>
           </div>
         </ion-card-content>
@@ -1328,3 +1443,11 @@
     </section>
   </div>
 </ion-content>
+
+<div class="import-lock-overlay" *ngIf="importOverlayActive()" aria-live="polite" aria-busy="true">
+  <div class="import-lock-card">
+    <div class="import-lock-spinner" aria-hidden="true"></div>
+    <div class="import-lock-title">{{ importOverlayMessage() }}</div>
+    <div class="import-lock-subtitle">Please wait. Do not close or navigate away.</div>
+  </div>
+</div>

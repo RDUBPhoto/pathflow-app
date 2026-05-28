@@ -1,5 +1,6 @@
 const { TableClient } = require("../_shared/table-client");
 const { BlobServiceClient } = require("@azure/storage-blob");
+const { EmailClient } = require("@azure/communication-email");
 const { randomUUID } = require("crypto");
 const { resolveTenantId, sanitizeTenantId } = require("../_shared/tenant");
 const { requirePrincipal } = require("../_shared/auth");
@@ -18,6 +19,7 @@ const SIGNATURE_ROW = "__signature__";
 const SENDER_ROW = "__sender__";
 const EMAIL_FOOTER_TERMS_KEY = "email.footer.terms.html";
 const LEGACY_QUOTE_TERMS_KEY = "quote.terms.html";
+const ORDERS_INBOX_EMAIL_KEY = "orders.inbox.email";
 const FOOTER_TERMS_MARKER = 'data-pathflow-footer-terms="1"';
 const AUTO_CREATED_CREATOR = "Auto-Created Lead";
 
@@ -242,7 +244,12 @@ function splitDisplayName(rawName, fallbackEmail) {
 function getEmailMode() {
   const mode = asString(process.env.EMAIL_MODE).toLowerCase();
   if (mode === "mock") return "mock";
+  if (mode === "azure") return "azure";
   return "sendgrid";
+}
+
+function getAzureEmailConnectionString() {
+  return asString(process.env.ACS_EMAIL_CONNECTION_STRING || process.env.COMMUNICATION_SERVICES_CONNECTION_STRING);
 }
 
 function getDefaultSender() {
@@ -311,15 +318,21 @@ async function clearSenderConfig(templateClient, tenantId) {
 async function getConfigStatus(templateClient, tenantId) {
   const mode = getEmailMode();
   const hasApiKey = !!asString(process.env.SENDGRID_API_KEY);
+  const hasAzureConnection = !!getAzureEmailConnectionString();
   const sender = await getSenderConfig(templateClient, tenantId);
   const fromEmail = asString(sender.fromEmail);
   const hasFromEmail = !!fromEmail;
-  const readyForLive = mode === "sendgrid" && hasApiKey && hasFromEmail;
+  const readyForLive = mode === "sendgrid"
+    ? hasApiKey && hasFromEmail
+    : mode === "azure"
+      ? hasAzureConnection && hasFromEmail
+      : false;
   return {
     mode,
-    provider: mode === "sendgrid" ? "sendgrid" : "mock",
+    provider: mode === "sendgrid" ? "sendgrid" : (mode === "azure" ? "azure" : "mock"),
     configured: {
       apiKey: hasApiKey,
+      azureConnectionString: hasAzureConnection,
       fromEmail: hasFromEmail
     },
     fromEmail: fromEmail || null,
@@ -786,6 +799,39 @@ async function sendViaSendgrid(to, subject, message, sender, html) {
   };
 }
 
+async function sendViaAzureEmail(to, subject, message, sender, html) {
+  const conn = getAzureEmailConnectionString();
+  const from = normalizeEmail(sender && sender.fromEmail);
+  if (!conn || !from) {
+    throw new Error("EMAIL_MODE is azure but ACS_EMAIL_CONNECTION_STRING (or COMMUNICATION_SERVICES_CONNECTION_STRING) or EMAIL_FROM is missing.");
+  }
+
+  const emailClient = new EmailClient(conn);
+  const payload = {
+    senderAddress: from,
+    content: {
+      subject: asString(subject),
+      plainText: asString(message)
+    },
+    recipients: {
+      to: [{ address: asString(to) }]
+    }
+  };
+  const htmlValue = asString(html);
+  if (htmlValue) payload.content.html = htmlValue;
+
+  const poller = await emailClient.beginSend(payload);
+  const result = await poller.pollUntilDone();
+  const status = asString(result && result.status).toLowerCase();
+  if (status && status !== "succeeded") {
+    throw new Error(`Azure Email rejected message (${status}).`);
+  }
+  return {
+    provider: "azure",
+    providerMessageId: asString(result && result.id)
+  };
+}
+
 function inferContentTypeFromBlobName(blobName) {
   const lower = asString(blobName).toLowerCase();
   if (lower.endsWith(".png")) return "image/png";
@@ -1229,13 +1275,17 @@ module.exports = async function (context, req) {
       const templateClient = await getTableClient(EMAIL_TEMPLATE_TABLE);
       const sender = await getSenderConfig(templateClient, tenantId);
       const config = await getConfigStatus(templateClient, tenantId);
+      const settingsClient = await getTableClient(APP_SETTINGS_TABLE);
+      const ordersInboxEmail = normalizeEmail(
+        await getAppSettingValue(settingsClient, tenantId, ORDERS_INBOX_EMAIL_KEY)
+      );
       const messageClient = await getTableClient(EMAIL_TABLE);
       const saved = await saveEmailMessage(messageClient, tenantId, {
         customerId: resolvedCustomerId,
         customerName: resolvedCustomerName,
         direction: "inbound",
         from: requestFrom,
-        to: requestTo || sender.fromEmail || config.fromEmail || "",
+        to: requestTo || ordersInboxEmail || sender.fromEmail || config.fromEmail || "",
         subject: requestSubject || "New email inquiry",
         message: requestMessage || "",
         html: requestHtml,
@@ -1294,14 +1344,18 @@ module.exports = async function (context, req) {
     let provider = config.provider;
     let providerMessageId = "";
 
-    if (config.mode === "sendgrid") {
+    if (config.mode === "sendgrid" || config.mode === "azure") {
       if (!config.readyForLive) {
         context.res = json(500, {
-          error: "EMAIL_MODE is sendgrid but SENDGRID_API_KEY or EMAIL_FROM is missing."
+          error: config.mode === "azure"
+            ? "EMAIL_MODE is azure but ACS_EMAIL_CONNECTION_STRING (or COMMUNICATION_SERVICES_CONNECTION_STRING) or EMAIL_FROM is missing."
+            : "EMAIL_MODE is sendgrid but SENDGRID_API_KEY or EMAIL_FROM is missing."
         });
         return;
       }
-      const sendResult = await sendViaSendgrid(requestTo, requestSubject, composed.message, sender, composed.html);
+      const sendResult = config.mode === "azure"
+        ? await sendViaAzureEmail(requestTo, requestSubject, composed.message, sender, composed.html)
+        : await sendViaSendgrid(requestTo, requestSubject, composed.message, sender, composed.html);
       simulated = false;
       provider = sendResult.provider;
       providerMessageId = sendResult.providerMessageId;

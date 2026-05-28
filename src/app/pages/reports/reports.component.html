@@ -54,7 +54,7 @@
 
   <div class="reports-feedback success" *ngIf="info()">{{ info() }}</div>
   <div class="reports-feedback error" *ngIf="error()">{{ error() }}</div>
-  <div class="reports-feedback warning warning-with-action" *ngFor="let warning of economicsWarnings()">
+  <div class="reports-feedback warning warning-with-action" *ngFor="let warning of visibleEconomicsWarnings()">
     <div class="warning-body">
       <span>{{ warning.message }}</span>
       <ul class="warning-details" *ngIf="warning.details?.length">
@@ -73,12 +73,12 @@
     </a>
   </div>
 
-  <div class="reports-section-heading">
+  <div class="reports-section-heading section-forecast">
     <h3>Forecast Outlook</h3>
     <p>Forward-looking projections driven by schedule load, labor accuracy, and forecast cash movement.</p>
   </div>
 
-  <section class="forecast-insights-grid" *ngIf="forecastCoverageCount() > 0">
+  <section class="forecast-insights-grid section-forecast-cards" *ngIf="forecastCoverageCount() > 0">
     <article class="kpi-card glass-surface">
       <div class="kpi-head">
         <ion-icon name="calendar-outline"></ion-icon>
@@ -150,12 +150,12 @@
     </article>
   </section>
 
-  <div class="reports-section-heading">
+  <div class="reports-section-heading section-sales">
     <h3>Sales Performance</h3>
     <p>Top-level conversion, sold revenue, and margin KPIs for the selected date range.</p>
   </div>
 
-  <section class="kpi-grid" *ngIf="effectiveKpi() as kpi">
+  <section class="kpi-grid section-sales-cards" *ngIf="effectiveKpi() as kpi">
     <article class="kpi-card glass-surface">
       <div class="kpi-head">
         <ion-icon name="bar-chart-outline"></ion-icon>
@@ -253,12 +253,12 @@
     </article>
   </section>
 
-  <div class="reports-section-heading">
+  <div class="reports-section-heading section-pipeline">
     <h3>Pipeline &amp; Cashflow</h3>
     <p>Stage-by-stage demand plus expected cash in and out over the selected forecast horizon.</p>
   </div>
 
-  <section class="reports-grid">
+  <section class="reports-grid section-pipeline-cards">
     <ion-card class="glass-surface">
       <ion-card-header>
         <ion-card-title>Parts &amp; Labor Unit Economics</ion-card-title>
@@ -368,12 +368,12 @@
     </ion-card>
   </section>
 
-  <div class="reports-section-heading">
+  <div class="reports-section-heading section-profitability">
     <h3>Job Profitability &amp; Timeline</h3>
     <p>Per-job margin detail and scheduled production workload by month.</p>
   </div>
 
-  <section class="reports-grid">
+  <section class="reports-grid section-profitability-cards">
     <ion-card class="glass-surface">
       <ion-card-header>
         <ion-card-title>Profit Matrix (Per Job / Sold Invoice)</ion-card-title>
@@ -446,12 +446,12 @@
     </ion-card>
   </section>
 
-  <div class="reports-section-heading">
+  <div class="reports-section-heading section-labor">
     <h3>Labor Accuracy</h3>
     <p>Tracked hours versus billed hours to identify underages, overages, and labor-risk trends.</p>
   </div>
 
-  <ion-card class="glass-surface">
+  <ion-card class="glass-surface section-labor-card">
     <ion-card-header>
       <ion-card-title>
         <ion-icon name="construct-outline"></ion-icon>

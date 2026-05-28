@@ -19,6 +19,19 @@
   gap: 8px;
 }
 
+.setup-reminder-trigger {
+  min-height: 34px;
+  border-radius: 999px;
+  border: 1px solid rgba(249, 115, 22, 0.5);
+  background: rgba(249, 115, 22, 0.12);
+  color: #c2410c;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 0 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
 .notification-trigger {
   position: relative;
   width: 36px;

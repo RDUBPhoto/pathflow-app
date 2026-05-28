@@ -202,6 +202,8 @@ export default class ReportsComponent implements OnInit, AfterViewInit, OnDestro
   readonly workItems = signal<WorkItem[]>([]);
   readonly laborRates = signal<LaborRateSetting[]>([]);
   readonly scheduleSettings = signal<ScheduleSettings>({ ...DEFAULT_SCHEDULE_SETTINGS });
+  readonly economicsSourcesReady = signal(false);
+  private economicsSourcesLoadToken = 0;
 
   readonly kpi = computed<ReportsKpiRow | null>(() => this.data()?.tables?.kpiSummary?.[0] || null);
   readonly localInvoices = computed(() =>
@@ -563,6 +565,9 @@ export default class ReportsComponent implements OnInit, AfterViewInit, OnDestro
     }
     return warnings;
   });
+  readonly visibleEconomicsWarnings = computed<ReportsWarning[]>(() =>
+    this.economicsSourcesReady() ? this.economicsWarnings() : []
+  );
   readonly localInvoiceSummary = computed(() => {
     const invoices = this.localInvoices();
     const quotes = this.localQuotes();
@@ -1085,24 +1090,40 @@ export default class ReportsComponent implements OnInit, AfterViewInit, OnDestro
   }
 
   private loadEconomicsSources(): void {
+    const loadToken = ++this.economicsSourcesLoadToken;
+    this.economicsSourcesReady.set(false);
+    let pendingWarningSources = 2; // inventory + labor rates
+    const markWarningSourceReady = (): void => {
+      if (loadToken !== this.economicsSourcesLoadToken) return;
+      pendingWarningSources = Math.max(0, pendingWarningSources - 1);
+      if (pendingWarningSources === 0) this.economicsSourcesReady.set(true);
+    };
+
     this.inventoryApi.listItems().subscribe({
       next: response => {
+        if (loadToken !== this.economicsSourcesLoadToken) return;
         this.inventoryItems.set(Array.isArray(response?.items) ? response.items : []);
+        markWarningSourceReady();
       },
       error: () => {
+        if (loadToken !== this.economicsSourcesLoadToken) return;
         this.inventoryItems.set([]);
+        markWarningSourceReady();
       }
     });
     this.workItemsApi.list().subscribe({
       next: items => {
+        if (loadToken !== this.economicsSourcesLoadToken) return;
         this.workItems.set(Array.isArray(items) ? items : []);
       },
       error: () => {
+        if (loadToken !== this.economicsSourcesLoadToken) return;
         this.workItems.set([]);
       }
     });
     this.settingsApi.getValue<LaborRateSetting[]>(BUSINESS_LABOR_RATES_SETTING_KEY).subscribe({
       next: value => {
+        if (loadToken !== this.economicsSourcesLoadToken) return;
         const rows = Array.isArray(value) ? value : [];
         this.laborRates.set(
           rows
@@ -1115,16 +1136,21 @@ export default class ReportsComponent implements OnInit, AfterViewInit, OnDestro
             }))
             .filter(item => !!item.name)
         );
+        markWarningSourceReady();
       },
       error: () => {
+        if (loadToken !== this.economicsSourcesLoadToken) return;
         this.laborRates.set([]);
+        markWarningSourceReady();
       }
     });
     this.settingsApi.getValue<ScheduleSettings>(SCHEDULE_SETTINGS_KEY).subscribe({
       next: value => {
+        if (loadToken !== this.economicsSourcesLoadToken) return;
         this.scheduleSettings.set(this.normalizeScheduleSettings(value));
       },
       error: () => {
+        if (loadToken !== this.economicsSourcesLoadToken) return;
         this.scheduleSettings.set({ ...DEFAULT_SCHEDULE_SETTINGS });
       }
     });

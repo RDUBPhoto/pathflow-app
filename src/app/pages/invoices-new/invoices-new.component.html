@@ -43,19 +43,36 @@
           type="text"
           placeholder="Name, email, phone, vehicle"
           [value]="customerQuery()"
+          [disabled]="customerSelectionLoading()"
           (input)="setCustomerQuery($any($event.target).value)" />
 
         <div class="section-subhead" *ngIf="!customerQuery().trim() && !recentLeadsLoading()">Recent Leads</div>
-        <div class="recent-leads-loading" *ngIf="!customerQuery().trim() && recentLeadsLoading()">
+        <div class="recent-leads-loading" *ngIf="!customerQuery().trim() && customerSelectionLoading()">
           <ion-spinner name="crescent"></ion-spinner>
-          <span>Loading recent leads...</span>
+          <span>Loading customers and recent leads...</span>
         </div>
-        <div class="customer-list">
+        <div class="customer-list" [class.is-loading]="customerSelectionLoading()">
+          <div class="customer-skeleton" *ngIf="customerSelectionLoading()">
+            <div class="skeleton-line w-40"></div>
+            <div class="skeleton-line w-70"></div>
+            <div class="skeleton-line w-55"></div>
+          </div>
+          <div class="customer-skeleton" *ngIf="customerSelectionLoading()">
+            <div class="skeleton-line w-46"></div>
+            <div class="skeleton-line w-64"></div>
+            <div class="skeleton-line w-58"></div>
+          </div>
+          <div class="customer-skeleton" *ngIf="customerSelectionLoading()">
+            <div class="skeleton-line w-52"></div>
+            <div class="skeleton-line w-62"></div>
+            <div class="skeleton-line w-48"></div>
+          </div>
           <button
             type="button"
             class="customer-option"
             *ngFor="let customer of filteredCustomers(); trackBy: trackCustomer"
             [class.selected]="isSelectedCustomer(customer)"
+            [disabled]="customerSelectionLoading()"
             (click)="selectCustomer(customer)">
             <div class="customer-name">{{ customerDisplayName(customer) }}</div>
             <div class="customer-detail">{{ customer.email || customer.secondaryEmail || 'No email' }}</div>

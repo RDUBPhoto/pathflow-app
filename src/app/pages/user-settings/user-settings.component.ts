@@ -20,7 +20,7 @@ import {
   IonToolbar
 } from '@ionic/angular/standalone';
 import { addIcons } from 'ionicons';
-import { keyOutline, personCircleOutline } from 'ionicons/icons';
+import { checkmarkCircleOutline, keyOutline, personCircleOutline } from 'ionicons/icons';
 import { AuthService } from '../../auth/auth.service';
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
 import { PageBackButtonComponent } from '../../components/navigation/page-back-button/page-back-button.component';
@@ -75,7 +75,8 @@ export default class UserSettingsComponent {
   constructor() {
     addIcons({
       'person-circle-outline': personCircleOutline,
-      'key-outline': keyOutline
+      'key-outline': keyOutline,
+      'checkmark-circle-outline': checkmarkCircleOutline
     });
 
     effect(() => {

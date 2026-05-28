@@ -164,6 +164,10 @@
   overflow: auto;
 }
 
+.customer-list.is-loading {
+  opacity: 0.82;
+}
+
 .section-subhead {
   font-size: 12px;
   font-weight: 700;
@@ -189,6 +193,42 @@
   display: grid;
   gap: 2px;
   cursor: pointer;
+}
+.customer-option:disabled {
+  opacity: 0.72;
+  cursor: wait;
+}
+
+.customer-skeleton {
+  border: 1px solid var(--app-border-subtle);
+  background: color-mix(in srgb, var(--app-surface-bg) 75%, #8aa0bf 25%);
+  border-radius: 10px;
+  padding: 9px 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.skeleton-line {
+  height: 10px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, rgba(148, 163, 184, 0.22) 0%, rgba(148, 163, 184, 0.44) 50%, rgba(148, 163, 184, 0.22) 100%);
+  background-size: 220% 100%;
+  animation: customerSkeletonPulse 1.2s ease-in-out infinite;
+}
+
+.skeleton-line.w-40 { width: 40%; }
+.skeleton-line.w-46 { width: 46%; }
+.skeleton-line.w-48 { width: 48%; }
+.skeleton-line.w-52 { width: 52%; }
+.skeleton-line.w-55 { width: 55%; }
+.skeleton-line.w-58 { width: 58%; }
+.skeleton-line.w-62 { width: 62%; }
+.skeleton-line.w-64 { width: 64%; }
+.skeleton-line.w-70 { width: 70%; }
+
+@keyframes customerSkeletonPulse {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
 }
 
 .customer-option.selected {

@@ -26,6 +26,7 @@ import {
 import { AuthService } from '../../../auth/auth.service';
 import { AppNotification, NotificationsApiService } from '../../../services/notifications-api.service';
 import { ThemeService } from '../../../services/theme.service';
+import { AdminSetupProgressService } from '../../../services/admin-setup-progress.service';
 
 const NOTIFICATION_OPENED_HINTS_KEY = 'pathflow.notifications.opened.v1';
 const NOTIFICATION_ACK_STATE_KEY = 'pathflow.notifications.ack.v1';
@@ -54,6 +55,8 @@ export class UserMenuComponent implements OnInit, OnDestroy {
   private readonly theme = inject(ThemeService);
   private readonly router = inject(Router);
   private readonly notificationsApi = inject(NotificationsApiService);
+  readonly setupProgress = inject(AdminSetupProgressService);
+  readonly setupNavigating = signal(false);
   @ViewChild('notificationsPopover') private notificationsPopover?: IonPopover;
 
   readonly menuOpen = signal(false);
@@ -150,6 +153,9 @@ export class UserMenuComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    if (this.auth.isAdmin()) {
+      void this.setupProgress.refresh();
+    }
     this.refreshNotifications(false);
     this.refreshTimer = setInterval(() => this.refreshNotifications(true), 15000);
     if (typeof window !== 'undefined') {
@@ -317,7 +323,30 @@ export class UserMenuComponent implements OnInit, OnDestroy {
 
   signOut(): void {
     this.closeMenu();
-    this.auth.signOut('/login');
+    this.auth.signOut('/');
+  }
+
+  async openSetupWizard(event: Event): Promise<void> {
+    event.preventDefault();
+    event.stopPropagation();
+    if (this.setupNavigating()) return;
+    this.setupNavigating.set(true);
+    this.setupProgress.clearDismissed();
+    this.closeMenu();
+    try {
+      await this.setupProgress.refresh();
+      const firstMissing = this.setupProgress.pendingItems()[0];
+      const section = firstMissing?.section || 'branding';
+      await this.router.navigate(['/admin-settings'], {
+        queryParams: {
+          section,
+          setupFocus: '1',
+          setupStartAt: Date.now()
+        }
+      });
+    } finally {
+      this.setupNavigating.set(false);
+    }
   }
 
   onThemeToggle(checked: boolean): void {

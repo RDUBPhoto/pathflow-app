@@ -135,8 +135,20 @@
 }
 
 .reports-section-heading {
-  margin: 12px 2px 10px;
+  margin: 26px 2px 14px;
+  padding-left: 10px;
+  border-left: 2px solid var(--section-accent, var(--app-border-subtle));
 }
+
+.reports-section-heading.section-forecast {
+  margin-top: 12px;
+}
+
+.reports-section-heading.section-forecast { --section-accent: #22d3ee; }
+.reports-section-heading.section-sales { --section-accent: #22c55e; }
+.reports-section-heading.section-pipeline { --section-accent: #3b82f6; }
+.reports-section-heading.section-profitability { --section-accent: #f59e0b; }
+.reports-section-heading.section-labor { --section-accent: #a78bfa; }
 
 .reports-section-heading h3 {
   margin: 0;
@@ -155,22 +167,38 @@
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
-  margin-bottom: 16px;
+  margin-bottom: 30px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
 }
 
 .forecast-insights-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
-  margin-bottom: 16px;
+  margin-bottom: 30px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
 }
 
 .kpi-card {
   border-radius: 14px;
   border: 1px solid var(--app-border-subtle);
+  border-top: 2px solid var(--section-card-accent, var(--app-border-subtle));
   padding: 12px;
   display: grid;
   gap: 8px;
+  position: relative;
+  overflow: visible;
+  z-index: 1;
+}
+
+.section-forecast-cards .kpi-card { --section-card-accent: #22d3ee; }
+.section-sales-cards .kpi-card { --section-card-accent: #22c55e; }
+
+.kpi-card:hover,
+.kpi-card:focus-within {
+  z-index: 8;
 }
 
 .kpi-head {
@@ -231,7 +259,7 @@
   visibility: hidden;
   pointer-events: none;
   transition: opacity 0s linear, visibility 0s linear;
-  z-index: 20;
+  z-index: 40;
 }
 
 .kpi-info:hover::after,
@@ -256,13 +284,26 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
-  margin-bottom: 16px;
+  margin-bottom: 30px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
 }
 
 ion-card {
   border-radius: 14px;
   border: 1px solid var(--app-border-subtle);
+  border-top: 2px solid var(--section-card-accent, var(--app-border-subtle));
   margin: 0;
+}
+
+.section-pipeline-cards ion-card { --section-card-accent: #3b82f6; }
+.section-profitability-cards ion-card { --section-card-accent: #f59e0b; }
+.section-labor-card { --section-card-accent: #a78bfa; }
+
+.section-labor-card {
+  margin-bottom: 30px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
 }
 
 ion-card-title {

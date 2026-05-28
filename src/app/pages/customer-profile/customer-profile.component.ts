@@ -2857,6 +2857,10 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     const companyName = this.activeCompanyName();
     const logoUrl = this.toEmailAssetUrl(String(this.branding.logoUrl() || '').trim());
     const profile = this.businessProfile.profile();
+    const nextAppointment = this.upcomingScheduleEntries()[0] || null;
+    const appointmentDate = nextAppointment ? this.scheduleDateLabel(nextAppointment.startInput) : '';
+    const quoteDoc = this.customerInvoices().find(doc => doc.documentType === 'quote') || null;
+    const invoiceDoc = this.customerInvoices().find(doc => doc.documentType === 'invoice') || null;
     return {
       company_name: companyName,
       company_logo_url: logoUrl,
@@ -2867,6 +2871,9 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
       customer_name: this.displayName(),
       customer_email: this.email.trim() || this.secondaryEmail.trim(),
       customer_phone: this.phone.trim(),
+      appointment_date: appointmentDate,
+      quote_number: String(quoteDoc?.invoiceNumber || quoteDoc?.id || '').trim(),
+      invoice_number: String(invoiceDoc?.invoiceNumber || invoiceDoc?.id || '').trim(),
       lead_message: this.notes.trim()
     };
   }
@@ -2886,8 +2893,11 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   private resolveEmailMergeTags(template: string, values: Record<string, string>): string {
     const source = String(template || '');
     if (!source) return '';
-    return source.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_full, rawKey: string) => {
-      const key = String(rawKey || '').toLowerCase();
+    return source.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_full, rawKey: string) => {
+      const key = String(rawKey || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '');
       if (!key) return '';
       return String(values[key] ?? '').trim();
     });

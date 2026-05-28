@@ -21,6 +21,7 @@
           class="admin-section-btn"
           *ngFor="let section of sections"
           [class.active]="activeSection() === section.key"
+          [class.needs-setup]="sectionHasPending(section.key)"
           (click)="setActiveSection(section.key)">
           <ion-icon [name]="section.icon"></ion-icon>
           <span class="admin-section-copy">
@@ -41,7 +42,7 @@
         </ion-card-header>
         <ion-card-content>
           <div class="branding-grid">
-            <div class="logo-preview-wrap">
+            <div class="logo-preview-wrap" [class.setup-invalid]="showSectionSetupError('branding') && !hasCustomLogo()">
               <img class="logo-preview" *ngIf="hasCustomLogo()" [src]="logoUrl()" alt="Business logo preview" />
               <div class="logo-empty" *ngIf="!hasCustomLogo()">No logo uploaded</div>
             </div>
@@ -74,19 +75,19 @@
               <code>{{ '{{company_location}}' }}</code>.
             </div>
             <div class="sms-form">
-              <ion-item>
+              <ion-item [class.setup-invalid]="showSectionSetupError('branding') && !businessProfileName.trim()">
                 <ion-label position="stacked">Business Name</ion-label>
                 <ion-input [(ngModel)]="businessProfileName" placeholder="Your Company"></ion-input>
               </ion-item>
-              <ion-item>
+              <ion-item [class.setup-invalid]="showSectionSetupError('branding') && !businessProfileEmail.trim()">
                 <ion-label position="stacked">Business Email</ion-label>
                 <ion-input [(ngModel)]="businessProfileEmail" placeholder="service@yourcompany.com"></ion-input>
               </ion-item>
-              <ion-item>
+              <ion-item [class.setup-invalid]="showSectionSetupError('branding') && !businessProfilePhone.trim()">
                 <ion-label position="stacked">Business Phone</ion-label>
                 <ion-input [ngModel]="businessProfilePhone" (ngModelChange)="onBusinessProfilePhoneInput($event)" placeholder="(555) 555-0100"></ion-input>
               </ion-item>
-              <ion-item>
+              <ion-item [class.setup-invalid]="showSectionSetupError('branding') && !businessProfileAddress.trim()">
                 <ion-label position="stacked">Business Address / Location</ion-label>
                 <ion-input
                   [(ngModel)]="businessProfileAddress"
@@ -95,6 +96,9 @@
                   placeholder="123 Main St, Anytown, USA">
                 </ion-input>
               </ion-item>
+              <div class="sms-feedback error" *ngIf="showSectionSetupError('branding') && (!businessProfileName.trim() || !businessProfileEmail.trim() || !businessProfilePhone.trim() || !businessProfileAddress.trim() || !hasCustomLogo())">
+                Complete all required branding fields and upload a logo.
+              </div>
               <ion-item>
                 <ion-label position="stacked">Default Tax Rate (%)</ion-label>
                 <ion-input
@@ -352,6 +356,9 @@
           </ion-card-title>
         </ion-card-header>
         <ion-card-content>
+          <div class="sms-feedback error" *ngIf="showSectionSetupError('payments') && !paymentGatewaySettings.connectedProviders().length">
+            Connect at least one payment gateway to complete setup.
+          </div>
           <div class="sms-help">
             Connect at least one provider to enable invoice payment links. Start in <strong>test</strong> mode with your sandbox credentials.
           </div>
@@ -489,6 +496,9 @@
           <div class="summary-row">
             <ion-badge color="primary">{{ userCount() }} users</ion-badge>
             <span *ngIf="statusMessage">{{ statusMessage }}</span>
+          </div>
+          <div class="sms-feedback error" *ngIf="showSectionSetupError('users') && userCount() <= 0">
+            Add at least one team member to complete setup.
           </div>
           <div class="sms-feedback error" *ngIf="usersError">{{ usersError }}</div>
 
@@ -834,7 +844,7 @@
           <div class="schedule-settings-shell">
             <div class="schedule-settings-grid">
               <div class="schedule-field-card">
-                <ion-item lines="none" class="schedule-field-item">
+                <ion-item lines="none" class="schedule-field-item" [class.setup-invalid]="showSectionSetupError('schedule') && !(scheduleCloseHour > scheduleOpenHour)">
                   <ion-label position="stacked">Open time</ion-label>
                   <ion-select
                     interface="popover"
@@ -848,7 +858,7 @@
               </div>
 
               <div class="schedule-field-card">
-                <ion-item lines="none" class="schedule-field-item">
+                <ion-item lines="none" class="schedule-field-item" [class.setup-invalid]="showSectionSetupError('schedule') && !(scheduleCloseHour > scheduleOpenHour)">
                   <ion-label position="stacked">Close time</ion-label>
                   <ion-select
                     interface="popover"
@@ -883,7 +893,7 @@
 
             <div class="schedule-bays-list">
               <div class="schedule-bay-row" *ngFor="let bay of scheduleBays; let i = index">
-                <ion-item lines="none" class="schedule-bay-item">
+                <ion-item lines="none" class="schedule-bay-item" [class.setup-invalid]="showSectionSetupError('schedule') && !bay.name.trim()">
                   <ion-label position="stacked">Bay {{ i + 1 }}</ion-label>
                   <ion-input [(ngModel)]="bay.name" placeholder="Bay name"></ion-input>
                 </ion-item>
@@ -896,6 +906,9 @@
                   <ion-icon name="trash-outline"></ion-icon>
                 </ion-button>
               </div>
+            </div>
+            <div class="sms-feedback error" *ngIf="showSectionSetupError('schedule') && scheduleSetupInvalid()">
+              Fix schedule hours and ensure each bay has a name.
             </div>
           </div>
 
@@ -1188,13 +1201,119 @@
         <ion-card-header>
           <ion-card-title>
             <ion-icon name="mail-outline"></ion-icon>
-            Email Templates
+            Email Options
           </ion-card-title>
         </ion-card-header>
         <ion-card-content>
           <div class="sms-help">
             Create reusable templates for customer email. These templates are available in Customer Profile and
             Messages Hub when composing email.
+          </div>
+
+          <div class="email-section-title">Orders Inbox Routing</div>
+          <div class="sms-help">
+            Pathflow uses this mailbox to receive forwarded order/shipping emails and auto-map tracking updates into invoices.
+          </div>
+
+          <div class="settings-subsection orders-inbox-box">
+            <div class="email-section-title">System Orders Inbox</div>
+            <div class="orders-inbox-row">
+              <ion-item>
+                <ion-label position="stacked">Generated mailbox</ion-label>
+                <ion-input
+                  [value]="ordersInboxEmail"
+                  [readonly]="true">
+                </ion-input>
+              </ion-item>
+              <div class="orders-inbox-actions">
+                <ion-button fill="outline" (click)="copyOrdersInboxEmail()" [disabled]="!ordersInboxEmail || emailSaving()">
+                  <ion-icon slot="start" name="copy-outline"></ion-icon>
+                  Copy
+                </ion-button>
+                <ion-button fill="outline" (click)="regenerateOrdersInboxEmail()" [disabled]="emailSaving()">
+                  <ion-icon slot="start" name="refresh-outline"></ion-icon>
+                  Regenerate
+                </ion-button>
+              </div>
+            </div>
+            <div class="sms-help" *ngIf="ordersInboxDomain">
+              Domain in use: <code>{{ ordersInboxDomain }}</code>
+            </div>
+            <div class="sms-help" *ngIf="ordersInboxUpdatedAt">
+              Last generated: {{ ordersInboxUpdatedAt | date:'short' }}
+            </div>
+
+            <div class="orders-inbox-provider">
+              <ion-item>
+                <ion-label position="stacked">Purchasing Email Provider</ion-label>
+                <ion-select [(ngModel)]="ordersInboxProvider" interface="popover">
+                  <ion-select-option value="gmail">Gmail (Google Workspace)</ion-select-option>
+                  <ion-select-option value="microsoft365">Microsoft 365 / Outlook</ion-select-option>
+                  <ion-select-option value="other">Other provider</ion-select-option>
+                </ion-select>
+              </ion-item>
+              <div class="sms-help">
+                Select your provider so setup instructions below match your mailbox UI.
+              </div>
+            </div>
+
+            <div class="orders-inbox-steps">
+              <div class="orders-inbox-steps-title">Setup Steps (Simple)</div>
+              <ol *ngIf="ordersInboxProvider === 'gmail'">
+                <li>Click <strong>Copy</strong> above.</li>
+                <li>In Gmail, go to <strong>Settings → See all settings → Filters and blocked addresses → Create new filter</strong>.</li>
+                <li>Use sender/subject keywords (UPS, FedEx, USPS, DHL, supplier names), then click <strong>Create filter</strong>.</li>
+                <li>Check <strong>Forward it to</strong> and choose this orders inbox email.</li>
+                <li>Keep original subject/body unchanged so Pathflow can match tracking details correctly.</li>
+                <li>In Pathflow invoices, set part status to <strong>Ordered</strong> for parts you want tracked.</li>
+              </ol>
+              <ol *ngIf="ordersInboxProvider === 'microsoft365'">
+                <li>Click <strong>Copy</strong> above.</li>
+                <li>In Outlook Web, open <strong>Settings → Mail → Rules → Add new rule</strong>.</li>
+                <li>Set conditions using sender/subject keywords (UPS, FedEx, USPS, DHL, supplier names).</li>
+                <li>Add action: <strong>Forward to</strong> this orders inbox email.</li>
+                <li>Keep original subject/body unchanged so Pathflow can match tracking details correctly.</li>
+                <li>In Pathflow invoices, set part status to <strong>Ordered</strong> for parts you want tracked.</li>
+              </ol>
+              <ol *ngIf="ordersInboxProvider === 'other'">
+                <li>Click <strong>Copy</strong> above.</li>
+                <li>In your provider’s mailbox settings, create a forwarding/filter rule for carrier + supplier emails.</li>
+                <li>Forward matching messages to this orders inbox email (do not rewrite subject/body).</li>
+                <li>In Pathflow invoices, set part status to <strong>Ordered</strong> for parts you want tracked.</li>
+                <li>When updates arrive, Pathflow matches tracking details to ordered part rows automatically.</li>
+              </ol>
+              <div class="orders-inbox-test">
+                <div class="orders-inbox-test-title">Quick Test</div>
+                <ol>
+                  <li>Pick one paid invoice and set at least one part to <strong>Ordered</strong>.</li>
+                  <li>Forward one real shipping/tracking email to this inbox address.</li>
+                  <li>Open the invoice again and verify tracking shows under the ordered parts section.</li>
+                </ol>
+              </div>
+            </div>
+          </div>
+
+          <div class="sms-form">
+            <ion-item>
+              <ion-label position="stacked">Override orders inbox email (optional)</ion-label>
+              <ion-input
+                [(ngModel)]="ordersInboxEmail"
+                placeholder="parts@yourcompany.com"
+                autocomplete="off">
+              </ion-input>
+            </ion-item>
+            <div class="sms-help">
+              Optional: replace the generated mailbox with your own shared inbox.
+            </div>
+          </div>
+          <div class="sms-actions">
+            <ion-button
+              fill="outline"
+              (click)="saveOrdersInboxEmail()"
+              [disabled]="emailSaving() || !canSaveOrdersInboxEmail()">
+              <ion-icon slot="start" name="save-outline"></ion-icon>
+              {{ emailSaving() ? 'Saving...' : 'Save routing settings' }}
+            </ion-button>
           </div>
 
           <div class="email-grid">
@@ -1204,18 +1323,35 @@
                 Write template body in HTML. This content is used as the email HTML when sending from Customer Profile
                 or Messages Hub.
               </div>
+              <div class="merge-tag-tools">
+                <div class="merge-tag-title">Insert Variables</div>
+                <div class="merge-tag-list">
+                  <button
+                    type="button"
+                    class="merge-tag-chip"
+                    *ngFor="let tag of emailMergeTagOptions"
+                    (click)="insertEmailMergeTag(tag.token, 'body')">
+                    {{ tag.label }}
+                  </button>
+                </div>
+              </div>
               <div class="sms-form">
-                <ion-item>
+                <ion-item [class.setup-invalid]="showSectionSetupError('email') && !emailTemplateName.trim()">
                   <ion-label position="stacked">Template name</ion-label>
                   <ion-input [(ngModel)]="emailTemplateName" placeholder="Appointment follow-up"></ion-input>
                 </ion-item>
 
-                <ion-item>
+                <ion-item [class.setup-invalid]="showSectionSetupError('email') && !emailTemplateSubject.trim()">
                   <ion-label position="stacked">Subject</ion-label>
                   <ion-input [(ngModel)]="emailTemplateSubject" placeholder="Your service update"></ion-input>
                 </ion-item>
+                <div class="sms-actions">
+                  <ion-button size="small" fill="outline" (click)="insertEmailMergeTag('{{customer_name}}', 'subject')">
+                    Insert Customer Name In Subject
+                  </ion-button>
+                </div>
 
-                <ion-item>
+                <ion-item [class.setup-invalid]="showSectionSetupError('email') && !emailTemplateBody.trim()">
                   <ion-label position="stacked">HTML body</ion-label>
                   <ion-textarea
                     class="email-template-code"
@@ -1226,6 +1362,9 @@
                     placeholder="<div><img src=&quot;...&quot; alt=&quot;Logo&quot; /><p>Hello customer,</p></div>">
                   </ion-textarea>
                 </ion-item>
+                <div class="sms-feedback error" *ngIf="showSectionSetupError('email') && (!emailTemplateName.trim() || !emailTemplateSubject.trim() || !emailTemplateBody.trim())">
+                  Create at least one complete email template to finish setup.
+                </div>
               </div>
 
               <div class="sms-actions">
@@ -1442,6 +1581,7 @@
       </ion-card>
     </section>
   </div>
+
 </ion-content>
 
 <div class="import-lock-overlay" *ngIf="importOverlayActive()" aria-live="polite" aria-busy="true">

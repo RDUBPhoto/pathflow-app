@@ -26,7 +26,13 @@ type UICustomer = Customer & {
 };
 
 type Bay = { id: string; name: string };
-type SuggestedSlot = { start: string; end: string; resource: string; label: string };
+type SuggestedSlot = {
+  start: string;
+  end: string;
+  resource: string;
+  label: string;
+  segments?: Array<{ start: string; end: string }>;
+};
 type CalendarViewMode = 'day' | 'week' | 'month';
 type PartRequest = { partName: string; qty: number; vendorHint?: string; sku?: string; note?: string };
 type ScheduleSettings = {
@@ -638,10 +644,48 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
 
   private loadPersistedCalendarView(): void {
     const today = this.localTodayDatePart();
-    this.viewMode.set('day');
-    this.viewAnchor.set(today.toString());
-    this.persistCalendarView();
-    this.applyViewConfig(false, today);
+    this.userSettings.getValue<string>(SCHEDULE_VIEW_MODE_KEY).subscribe({
+      next: modeValue => {
+        const parsedMode = this.parseCalendarViewMode(modeValue);
+        this.userSettings.getValue<string>(SCHEDULE_VIEW_ANCHOR_KEY).subscribe({
+          next: anchorValue => {
+            const parsedAnchor = this.parseCalendarViewAnchor(anchorValue, today);
+            this.viewMode.set(parsedMode);
+            this.viewAnchor.set(parsedAnchor.toString());
+            this.applyViewConfig(false, parsedAnchor);
+          },
+          error: () => {
+            this.viewMode.set(parsedMode);
+            this.viewAnchor.set(today.toString());
+            this.applyViewConfig(false, today);
+          }
+        });
+      },
+      error: () => {
+        this.viewMode.set('day');
+        this.viewAnchor.set(today.toString());
+        this.applyViewConfig(false, today);
+      }
+    });
+  }
+
+  private parseCalendarViewMode(value: unknown): CalendarViewMode {
+    const raw = String(value || '').trim().toLowerCase();
+    if (raw === 'week' || raw === 'month' || raw === 'day') return raw;
+    return 'day';
+  }
+
+  private parseCalendarViewAnchor(value: unknown, fallback: DayPilot.Date): DayPilot.Date {
+    const raw = String(value || '').trim();
+    if (!raw) return fallback;
+    try {
+      const parsed = new DayPilot.Date(raw).getDatePart();
+      const token = parsed.toString('yyyy-MM-dd');
+      if (!token || token === 'NaN-NaN-NaN') return fallback;
+      return parsed;
+    } catch {
+      return fallback;
+    }
   }
 
   private normalizeSettings(value: unknown): ScheduleSettings {
@@ -1042,16 +1086,73 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
   useSuggestedSlot(slot: SuggestedSlot): void {
     const customerId = this.planningCustomerId();
     if (!customerId) return;
-    this.openEditor({
-      id: null,
-      start: slot.start,
-      end: slot.end,
-      resource: slot.resource,
+    const minimumDurationMs = 30 * 60 * 1000;
+    const busyRows = (this.items() || [])
+      .filter(item => String(item.resource || '') === String(slot.resource || ''))
+      .map(item => ({
+        startMs: this.toMillis(item.start),
+        endMs: this.toMillis(item.end)
+      }))
+      .filter(row => row.startMs > 0 && row.endMs > row.startMs)
+      .sort((a, b) => a.startMs - b.startMs);
+
+    const slotStartMs = this.toMillis(toLocalDateTimeStorage(slot.start));
+    const slotEndMs = this.toMillis(toLocalDateTimeStorage(slot.end));
+    const slotDurationMs = slotStartMs && slotEndMs && slotEndMs > slotStartMs
+      ? Math.max(minimumDurationMs, slotEndMs - slotStartMs)
+      : minimumDurationMs;
+    const computedSegments = slotStartMs
+      ? this.buildBusinessSegmentsFromStart(slotStartMs, slotDurationMs, slot.resource, busyRows)
+      : null;
+    const segments = (slot.segments && slot.segments.length
+      ? slot.segments
+      : (computedSegments || []).map(segment => ({
+          start: formatLocalDateTime(new Date(segment.startMs)),
+          end: formatLocalDateTime(new Date(segment.endMs))
+        })))
+      .filter(segment => this.toMillis(segment.start) && this.toMillis(segment.end) > this.toMillis(segment.start));
+
+    if (!segments.length) {
+      this.setStatusError('No valid business-hour slot is available for this suggestion. Try another option.');
+      return;
+    }
+
+    const fallback = this.partsFromLatestPaidInvoice(customerId);
+    const partRequests = fallback.parts;
+    const notes = '';
+    const payloads = segments.map(segment => ({
+      start: toLocalDateTimeStorage(segment.start),
+      end: toLocalDateTimeStorage(segment.end),
+      resource: String(slot.resource || ''),
       customerId,
       isBlocked: false,
       title: '',
-      notes: ''
-    });
+      notes,
+      partRequests
+    }));
+
+    let index = 0;
+    const createNext = () => {
+      if (index >= payloads.length) {
+        this.clearPlanningCustomer();
+        this.pendingCustomerId = null;
+        this.editorOpen.set(false);
+        this.loadAll();
+        this.setStatusSuccess('Appointment scheduled from suggested slot.');
+        return;
+      }
+
+      const payload = payloads[index];
+      index += 1;
+      this.scheduleApi.create(payload).subscribe({
+        next: () => createNext(),
+        error: () => {
+          this.setStatusError('Could not schedule from suggested slot. Please try again.');
+        }
+      });
+    };
+
+    createNext();
   }
 
   private buildSuggestedSlots(customerId: string | null, limit: number): SuggestedSlot[] {
@@ -1063,8 +1164,7 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     if (!Number.isFinite(openHour) || !Number.isFinite(closeHour) || closeHour <= openHour) return [];
     const intervalMs = 30 * 60 * 1000;
     const durationMs = this.resolveSuggestedDurationMs(customerId);
-    const maxDayDurationMs = Math.max(intervalMs, (closeHour - openHour) * 60 * 60 * 1000);
-    const effectiveDurationMs = Math.min(durationMs, maxDayDurationMs);
+    const effectiveDurationMs = Math.max(intervalMs, durationMs);
     const now = new Date();
     const startSearch = this.roundUpToInterval(now, intervalMs);
     const dayLimit = 21;
@@ -1103,30 +1203,132 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
         dayEnd.setHours(closeHour, 0, 0, 0);
 
         let cursorMs = Math.max(dayStart.getTime(), startSearch.getTime());
-        if (cursorMs + effectiveDurationMs > dayEnd.getTime()) continue;
         const busyRows = byResource.get(resourceId) || [];
 
-        while (cursorMs + effectiveDurationMs <= dayEnd.getTime() && suggestions.length < limit) {
-          const nextBusy = this.findConflictingInterval(busyRows, cursorMs, cursorMs + effectiveDurationMs);
-          if (!nextBusy) {
-            const startDate = new Date(cursorMs);
-            const endDate = new Date(cursorMs + effectiveDurationMs);
-            const hoursLabel = this.formatDurationHoursLabel(effectiveDurationMs);
-            const label = `${startDate.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })} · ${startDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} - ${endDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} · ${resourceName} · ${hoursLabel}`;
+        while (cursorMs < dayEnd.getTime() && suggestions.length < limit) {
+          const segments = this.buildBusinessSegmentsFromStart(cursorMs, effectiveDurationMs, resourceId, busyRows);
+          if (segments && segments.length) {
+            const firstSegment = segments[0];
+            const lastSegment = segments[segments.length - 1];
+            const startDate = new Date(firstSegment.startMs);
+            const endDate = new Date(lastSegment.endMs);
+            const hoursLabel = this.formatDurationHoursLabel(
+              segments.reduce((sum, segment) => sum + Math.max(0, segment.endMs - segment.startMs), 0)
+            );
+            const spansDays = startDate.toDateString() !== endDate.toDateString();
+            const endLabel = spansDays
+              ? `${endDate.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })} ${endDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+              : endDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+            const label = `${startDate.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })} · ${startDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} - ${endLabel} · ${resourceName} · ${hoursLabel}`;
             suggestions.push({
-              start: formatLocalDateTime(startDate),
-              end: formatLocalDateTime(endDate),
+              start: formatLocalDateTime(new Date(firstSegment.startMs)),
+              end: formatLocalDateTime(new Date(lastSegment.endMs)),
               resource: resourceId,
-              label
+              label,
+              segments: segments.map(segment => ({
+                start: formatLocalDateTime(new Date(segment.startMs)),
+                end: formatLocalDateTime(new Date(segment.endMs))
+              }))
             });
             break;
           }
-          cursorMs = this.roundUpToInterval(new Date(nextBusy.endMs), intervalMs).getTime();
+
+          const nextBusy = this.findConflictingInterval(busyRows, cursorMs, dayEnd.getTime());
+          if (nextBusy) {
+            cursorMs = this.roundUpToInterval(new Date(nextBusy.endMs), intervalMs).getTime();
+          } else {
+            cursorMs += intervalMs;
+          }
         }
       }
     }
 
     return suggestions;
+  }
+
+  private buildBusinessSegmentsFromStart(
+    startMs: number,
+    durationMs: number,
+    resourceId: string,
+    busyRows: Array<{ startMs: number; endMs: number }>
+  ): Array<{ startMs: number; endMs: number }> | null {
+    const openHour = this.settingsOpenHour();
+    const closeHour = this.settingsCloseHour();
+    const totalDurationMs = Math.max(30 * 60 * 1000, Number(durationMs) || 0);
+    if (!Number.isFinite(totalDurationMs) || totalDurationMs <= 0) return null;
+    if (!Number.isFinite(openHour) || !Number.isFinite(closeHour) || closeHour <= openHour) return null;
+
+    const segments: Array<{ startMs: number; endMs: number }> = [];
+    let remainingMs = totalDurationMs;
+    let cursorMs = startMs;
+    let guard = 0;
+
+    while (remainingMs > 0 && guard < 500) {
+      guard += 1;
+      const current = new Date(cursorMs);
+      const currentDay = DayPilot.Date.fromYearMonthDay(current.getFullYear(), current.getMonth() + 1, current.getDate());
+      if (!this.settingsShowWeekends() && this.isWeekendDay(currentDay)) {
+        const nextStart = this.nextBusinessDayStartMs(current);
+        if (!nextStart) return null;
+        cursorMs = nextStart;
+        continue;
+      }
+      if (this.isHoliday(currentDay)) {
+        const nextStart = this.nextBusinessDayStartMs(current);
+        if (!nextStart) return null;
+        cursorMs = nextStart;
+        continue;
+      }
+
+      const dayStart = new Date(current);
+      dayStart.setHours(openHour, 0, 0, 0);
+      const dayEnd = new Date(current);
+      dayEnd.setHours(closeHour, 0, 0, 0);
+
+      if (cursorMs < dayStart.getTime()) cursorMs = dayStart.getTime();
+      if (cursorMs >= dayEnd.getTime()) {
+        const nextStart = this.nextBusinessDayStartMs(current);
+        if (!nextStart) return null;
+        cursorMs = nextStart;
+        continue;
+      }
+
+      const chunkEndMs = Math.min(dayEnd.getTime(), cursorMs + remainingMs);
+      const conflict = this.findConflictingInterval(busyRows, cursorMs, chunkEndMs);
+      if (conflict) return null;
+
+      segments.push({ startMs: cursorMs, endMs: chunkEndMs });
+      remainingMs -= (chunkEndMs - cursorMs);
+      if (remainingMs <= 0) break;
+
+      const nextStart = this.nextBusinessDayStartMs(current);
+      if (!nextStart) return null;
+      cursorMs = nextStart;
+    }
+
+    if (remainingMs > 0) return null;
+    const uniqueResource = String(resourceId || '').trim();
+    if (!uniqueResource) return null;
+    return segments;
+  }
+
+  private nextBusinessDayStartMs(fromDate: Date): number | null {
+    const openHour = this.settingsOpenHour();
+    if (!Number.isFinite(openHour)) return null;
+    const cursor = new Date(fromDate);
+    cursor.setDate(cursor.getDate() + 1);
+    cursor.setHours(openHour, 0, 0, 0);
+
+    for (let i = 0; i < 120; i++) {
+      const day = new Date(cursor);
+      day.setDate(cursor.getDate() + i);
+      day.setHours(openHour, 0, 0, 0);
+      const pilotDay = DayPilot.Date.fromYearMonthDay(day.getFullYear(), day.getMonth() + 1, day.getDate());
+      if (!this.settingsShowWeekends() && this.isWeekendDay(pilotDay)) continue;
+      if (this.isHoliday(pilotDay)) continue;
+      return day.getTime();
+    }
+    return null;
   }
 
   private findConflictingInterval(

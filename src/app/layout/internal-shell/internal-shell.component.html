@@ -238,3 +238,96 @@
   <p class="feedback-msg error" *ngIf="feedbackError()">{{ feedbackError() }}</p>
   <p class="feedback-hint">This sends through your configured Pathflow email provider and includes the current screen link.</p>
 </section>
+
+<div class="setup-welcome-overlay" *ngIf="showSetupPrompt()">
+  <section class="setup-welcome-card glass-surface" aria-label="Setup your account">
+    <h3>Finish account setup</h3>
+    <p>You can go step-by-step through Admin and finish the remaining setup items for your business.</p>
+    <div class="setup-welcome-actions">
+      <button type="button" class="setup-primary-btn" (click)="startSetupWizard()">Start Setup</button>
+      <button type="button" class="setup-secondary-btn" (click)="skipSetupPrompt()">Skip for now</button>
+    </div>
+  </section>
+</div>
+
+<div class="quick-setup-overlay" *ngIf="quickSetupOpen()">
+  <section class="quick-setup-card glass-surface">
+    <div class="quick-setup-head">
+      <h3>Quick Setup</h3>
+      <button type="button" class="quick-close" (click)="closeQuickSetup()">Close</button>
+    </div>
+    <div class="quick-step-meta" *ngIf="quickSetupCurrent() as step">
+      Step {{ quickSetupIndex() + 1 }} of {{ quickSetupItems().length }} · {{ step.label }}
+    </div>
+
+    <div class="quick-form" *ngIf="quickSetupCurrent()?.id === 'business-profile'">
+      <label>Business Name <input [value]="quickBusinessName" (input)="quickBusinessName=$any($event.target).value" /></label>
+      <label>Business Email <input [value]="quickBusinessEmail" (input)="quickBusinessEmail=$any($event.target).value" /></label>
+      <label>Business Phone <input [value]="quickBusinessPhone" (input)="quickBusinessPhone=$any($event.target).value" /></label>
+      <label>Business Address <input [value]="quickBusinessAddress" (input)="quickBusinessAddress=$any($event.target).value" /></label>
+    </div>
+
+    <div class="quick-form" *ngIf="quickSetupCurrent()?.id === 'logo'">
+      <label>Upload Logo <input type="file" accept="image/*" (change)="quickUploadLogo($event)" /></label>
+    </div>
+
+    <div class="quick-form" *ngIf="quickSetupCurrent()?.id === 'business-hours'">
+      <label>Open Hour (0-23) <input type="number" min="0" max="23" [value]="quickOpenHour" (input)="quickOpenHour=+$any($event.target).value || 7" /></label>
+      <label>Close Hour (1-24) <input type="number" min="1" max="24" [value]="quickCloseHour" (input)="quickCloseHour=+$any($event.target).value || 16" /></label>
+    </div>
+
+    <div class="quick-form" *ngIf="quickSetupCurrent()?.id === 'payment-gateway'">
+      <label>Provider
+        <select [value]="quickPaymentProvider" (change)="quickPaymentProvider=$any($event.target).value">
+          <option value="authorize-net">Authorize.net</option>
+          <option value="stripe">Stripe</option>
+          <option value="paypal">PayPal</option>
+          <option value="quickbooks">QuickBooks</option>
+        </select>
+      </label>
+      <label>Account Label <input [value]="quickPaymentAccountLabel" (input)="quickPaymentAccountLabel=$any($event.target).value" /></label>
+      <label>Mode
+        <select [value]="quickPaymentMode" (change)="quickPaymentMode=$any($event.target).value">
+          <option value="test">Test</option>
+          <option value="live">Live</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="quick-form" *ngIf="quickSetupCurrent()?.id === 'email-sender'">
+      <label>From Email <input [value]="quickSenderEmail" (input)="quickSenderEmail=$any($event.target).value" /></label>
+      <label>From Name <input [value]="quickSenderName" (input)="quickSenderName=$any($event.target).value" /></label>
+      <label>Reply-To <input [value]="quickSenderReplyTo" (input)="quickSenderReplyTo=$any($event.target).value" /></label>
+    </div>
+
+    <div class="quick-form" *ngIf="quickSetupCurrent()?.id === 'email-templates'">
+      <label>Template Name <input [value]="quickTemplateName" (input)="quickTemplateName=$any($event.target).value" /></label>
+      <label>Subject <input [value]="quickTemplateSubject" (input)="quickTemplateSubject=$any($event.target).value" /></label>
+      <label>Body <textarea rows="5" [value]="quickTemplateBody" (input)="quickTemplateBody=$any($event.target).value"></textarea></label>
+    </div>
+
+    <div class="quick-form" *ngIf="quickSetupCurrent()?.id === 'user-access'">
+      <label>Name <input [value]="quickUserName" (input)="quickUserName=$any($event.target).value" /></label>
+      <label>Email <input [value]="quickUserEmail" (input)="quickUserEmail=$any($event.target).value" /></label>
+      <label>Role
+        <select [value]="quickUserRole" (change)="quickUserRole=$any($event.target).value">
+          <option value="user">User</option>
+          <option value="admin">Admin</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="quick-form" *ngIf="quickSetupCurrent()?.id === 'subscription' || quickSetupCurrent()?.id === 'data-import'">
+      <p>This step still needs the full Admin screen. You can skip this step here or finish in Admin later.</p>
+    </div>
+
+    <p class="quick-msg success" *ngIf="quickSetupStatus()">{{ quickSetupStatus() }}</p>
+    <p class="quick-msg error" *ngIf="quickSetupError()">{{ quickSetupError() }}</p>
+
+    <div class="quick-actions">
+      <button type="button" (click)="quickSetupBack()" [disabled]="quickSetupIndex()===0 || quickSetupBusy()">Back</button>
+      <button type="button" (click)="quickSetupNext()" [disabled]="quickSetupIndex()+1>=quickSetupItems().length || quickSetupBusy()">Next</button>
+      <button type="button" (click)="quickSetupSaveCurrent()" [disabled]="quickSetupBusy()">Save Step</button>
+    </div>
+  </section>
+</div>

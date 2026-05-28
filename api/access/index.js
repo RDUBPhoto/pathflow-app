@@ -4,6 +4,7 @@ const {
   ensureTenantSqlDatabase,
   listTenantSqlDatabases
 } = require("../_shared/table-client");
+const { EmailClient } = require("@azure/communication-email");
 const { randomUUID } = require("crypto");
 const { sanitizeTenantId } = require("../_shared/tenant");
 const {
@@ -198,7 +199,7 @@ function readAuthEnvBool(...keys) {
 }
 
 function getAuthRuntimeConfig() {
-  const primaryProvider = normalizeProvider(process.env.AUTH_PRIMARY_PROVIDER || "aad") || "aad";
+  const primaryProvider = normalizeProvider(process.env.AUTH_PRIMARY_PROVIDER || "local") || "local";
   const providersFromEnv = parseProviderList(process.env.AUTH_PROVIDERS);
   const providers = new Set(providersFromEnv.length ? providersFromEnv : [primaryProvider]);
   providers.add(primaryProvider);
@@ -218,7 +219,7 @@ function getAuthRuntimeConfig() {
     providers: Array.from(providers),
     hostedEmailEnabled: hostedEmailEnabled && !!hostedEmailProvider,
     hostedEmailProvider: hostedEmailEnabled && hostedEmailProvider ? hostedEmailProvider : "",
-    localPasswordEnabled: readAuthEnvBool("AUTH_LOCAL_PASSWORD_ENABLED", "LOCAL_PASSWORD_ENABLED")
+    localPasswordEnabled: readAuthEnvBool("AUTH_LOCAL_PASSWORD_ENABLED", "LOCAL_PASSWORD_ENABLED") || primaryProvider === "local"
   };
 }
 
@@ -354,7 +355,12 @@ function billingStatusAllowsAccess(status) {
 function getEmailMode() {
   const mode = asString(process.env.EMAIL_MODE).toLowerCase();
   if (mode === "sendgrid") return "sendgrid";
+  if (mode === "azure") return "azure";
   return "mock";
+}
+
+function getAzureEmailConnectionString() {
+  return asString(process.env.ACS_EMAIL_CONNECTION_STRING || process.env.COMMUNICATION_SERVICES_CONNECTION_STRING);
 }
 
 async function sendViaSendgrid(to, subject, text, html) {
@@ -389,6 +395,33 @@ async function sendViaSendgrid(to, subject, text, html) {
   }
 }
 
+async function sendViaAzureEmail(to, subject, text, html) {
+  const conn = getAzureEmailConnectionString();
+  const from = asString(process.env.EMAIL_FROM || process.env.FROM_EMAIL);
+  if (!conn || !from) {
+    throw new Error("EMAIL_MODE is azure but ACS_EMAIL_CONNECTION_STRING (or COMMUNICATION_SERVICES_CONNECTION_STRING) or EMAIL_FROM is missing.");
+  }
+  const client = new EmailClient(conn);
+  const payload = {
+    senderAddress: from,
+    content: {
+      subject: asString(subject),
+      plainText: asString(text)
+    },
+    recipients: {
+      to: [{ address: asString(to) }]
+    }
+  };
+  const htmlValue = asString(html);
+  if (htmlValue) payload.content.html = htmlValue;
+  const poller = await client.beginSend(payload);
+  const result = await poller.pollUntilDone();
+  const status = asString(result && result.status).toLowerCase();
+  if (status && status !== "succeeded") {
+    throw new Error(`Azure Email rejected message (${status}).`);
+  }
+}
+
 async function sendTransactionalEmail(context, payload) {
   const to = normalizeEmail(payload && payload.to);
   if (!to) return false;
@@ -397,9 +430,13 @@ async function sendTransactionalEmail(context, payload) {
   const html = asString(payload && payload.html);
 
   const mode = getEmailMode();
-  if (mode === "sendgrid") {
+  if (mode === "sendgrid" || mode === "azure") {
     try {
-      await sendViaSendgrid(to, subject, text, html);
+      if (mode === "azure") {
+        await sendViaAzureEmail(to, subject, text, html);
+      } else {
+        await sendViaSendgrid(to, subject, text, html);
+      }
       return true;
     } catch (err) {
       context.log.warn(`[access] transactional email failed: ${String((err && err.message) || err)}`);
@@ -1092,19 +1129,19 @@ function inviteEmailMarkup(payload) {
     "",
     `You were invited to join Pathflow for ${workspaceName} as ${role}.`,
     "",
-    `Sign in: ${loginUrl}`,
-    `Create account: ${signupUrl}`,
+    `Set password + join: ${signupUrl}`,
+    `Already set up? Sign in: ${loginUrl}`,
     "",
-    "If your workspace uses Microsoft sign-in, use that option on the login screen.",
-    "If your workspace allows email/password sign-up, choose Email on the sign-up screen."
+    "If your workspace uses Microsoft or Google sign-in, use that option on the login screen.",
+    "If your workspace uses email/password, set your password first, then sign in."
   ];
 
   const html = [
     `<p>Hi ${firstName},</p>`,
     `<p>You were invited to join <strong>Pathflow</strong> for <strong>${workspaceName}</strong> as <strong>${role}</strong>.</p>`,
-    `<p><a href="${loginUrl}" style="display:inline-block;background:#1d4ed8;color:#fff;text-decoration:none;padding:10px 14px;border-radius:6px;font-weight:600;">Sign in to Pathflow</a></p>`,
-    `<p><a href="${signupUrl}" style="display:inline-block;background:#0f172a;color:#fff;text-decoration:none;padding:10px 14px;border-radius:6px;font-weight:600;border:1px solid #334155;">Create account</a></p>`,
-    `<p style="color:#64748b;">If your workspace uses Microsoft sign-in, use that option on the login screen.<br/>If your workspace allows email/password sign-up, choose Email on the sign-up screen.</p>`
+    `<p><a href="${signupUrl}" style="display:inline-block;background:#1d4ed8;color:#fff;text-decoration:none;padding:10px 14px;border-radius:6px;font-weight:600;">Set password & join</a></p>`,
+    `<p><a href="${loginUrl}" style="display:inline-block;background:#0f172a;color:#fff;text-decoration:none;padding:10px 14px;border-radius:6px;font-weight:600;border:1px solid #334155;">Already set up? Sign in</a></p>`,
+    `<p style="color:#64748b;">If your workspace uses Microsoft or Google sign-in, use that option on the login screen.<br/>If your workspace uses email/password, set your password first, then sign in.</p>`
   ].join("");
 
   return {

@@ -1,4 +1,5 @@
 const { TableClient } = require("../_shared/table-client");
+const { EmailClient } = require("@azure/communication-email");
 const { randomUUID } = require("crypto");
 const { resolveTenantId } = require("../_shared/tenant");
 const { requirePrincipal } = require("../_shared/auth");
@@ -70,10 +71,31 @@ async function notify(context, laneName, workItem, customer) {
 }
 
 async function sendEmail(context, to, subject, text) {
-  const key = process.env.SENDGRID_API_KEY;
-  const from = process.env.FROM_EMAIL;
-  if (!key || !from) return;
+  const mode = String(process.env.EMAIL_MODE || "").trim().toLowerCase();
+  const from = process.env.EMAIL_FROM || process.env.FROM_EMAIL;
+  if (!from) return;
   try {
+    if (mode === "azure") {
+      const conn = process.env.ACS_EMAIL_CONNECTION_STRING || process.env.COMMUNICATION_SERVICES_CONNECTION_STRING;
+      if (!conn) return;
+      const client = new EmailClient(conn);
+      const poller = await client.beginSend({
+        senderAddress: String(from).trim(),
+        content: {
+          subject: String(subject || "").trim(),
+          plainText: String(text || "").trim()
+        },
+        recipients: {
+          to: [{ address: String(to || "").trim() }]
+        }
+      });
+      const result = await poller.pollUntilDone();
+      context.log(`azure email ${String(result && result.status) || "unknown"}`);
+      return;
+    }
+
+    const key = process.env.SENDGRID_API_KEY;
+    if (!key) return;
     const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
       method: "POST",
       headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
@@ -81,7 +103,7 @@ async function sendEmail(context, to, subject, text) {
     });
     context.log(`sendgrid ${res.status}`);
   } catch (e) {
-    context.log(`sendgrid error ${String(e)}`);
+    context.log(`email provider error ${String(e)}`);
   }
 }
 

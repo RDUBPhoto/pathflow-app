@@ -1,5 +1,15 @@
 <div class="menu-actions">
   <button
+    type="button"
+    class="setup-reminder-trigger"
+    *ngIf="auth.isAdmin() && setupProgress.pendingCount() > 0 && !setupProgress.setupDone()"
+    (click)="openSetupWizard($event)"
+    [disabled]="setupNavigating()"
+    [attr.aria-label]="'Open setup wizard (' + (setupProgress.totalCount() - setupProgress.pendingCount()) + ' of ' + setupProgress.totalCount() + ' completed)'">
+    {{ setupNavigating() ? 'Opening...' : ('Setup ' + (setupProgress.totalCount() - setupProgress.pendingCount()) + '/' + setupProgress.totalCount()) }}
+  </button>
+
+  <button
     id="notifications-trigger"
     type="button"
     class="notification-trigger"

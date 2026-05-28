@@ -106,6 +106,18 @@
   text-align: left;
 }
 
+.admin-section-btn.needs-setup {
+  border-color: rgba(239, 68, 68, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.2);
+}
+
+.setup-invalid {
+  border: 1px solid rgba(239, 68, 68, 0.65) !important;
+  border-radius: 10px;
+  --border-color: rgba(239, 68, 68, 0.75);
+  --highlight-color-focused: rgba(239, 68, 68, 0.95);
+}
+
 .admin-section-btn ion-icon {
   font-size: 18px;
   color: var(--app-text-muted);
@@ -121,6 +133,7 @@
 .admin-section-copy .label {
   font-size: 13px;
   font-weight: 700;
+  color: var(--app-text);
 }
 
 .admin-section-copy .description {
@@ -142,8 +155,23 @@
   min-width: 0;
 }
 
+.setup-jump-notice {
+  border: 1px solid rgba(59, 130, 246, 0.45);
+  background: rgba(30, 64, 175, 0.16);
+  color: #bfdbfe;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
 .admin-main ion-card {
   margin: 0;
+}
+
+.admin-main ion-label {
+  color: var(--app-text);
 }
 
 ion-card {
@@ -155,6 +183,11 @@ ion-card-title {
   display: flex;
   align-items: center;
   gap: 8px;
+  color: var(--app-title);
+}
+
+ion-card-subtitle {
+  color: var(--app-text-muted);
 }
 
 .branding-grid {
@@ -300,6 +333,7 @@ ion-card-title {
 .template-catalog-title {
   font-size: 13px;
   font-weight: 700;
+  color: var(--app-title);
 }
 
 .template-catalog-grid {
@@ -510,6 +544,7 @@ ion-card-title {
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.01em;
+  color: var(--app-title);
 }
 
 .customer-import-summary {
@@ -708,6 +743,7 @@ ion-card-title {
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.01em;
+  color: var(--app-title);
 }
 
 .schedule-bays-list {
@@ -761,6 +797,7 @@ ion-card-title {
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.01em;
+  color: var(--app-title);
 }
 
 .widget-code-block {
@@ -789,6 +826,7 @@ ion-card-title {
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.01em;
+  color: var(--app-title);
 }
 
 .email-section-title + .sms-form,
@@ -796,9 +834,94 @@ ion-card-title {
   margin-top: 8px;
 }
 
+.orders-inbox-box {
+  margin-top: 10px;
+}
+
+.orders-inbox-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.orders-inbox-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.orders-inbox-provider {
+  margin-top: 10px;
+}
+
+.orders-inbox-steps {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--app-surface-2) 80%, transparent);
+}
+
+.orders-inbox-steps-title,
+.orders-inbox-test-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--app-title);
+}
+
+.orders-inbox-steps ol {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--app-text);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.orders-inbox-test {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--app-border-subtle);
+}
+
+.orders-inbox-test ol {
+  margin-top: 6px;
+}
+
 .email-template-list {
   display: grid;
   gap: 8px;
+}
+
+.merge-tag-tools {
+  margin: 8px 0 10px;
+}
+
+.merge-tag-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--app-text-muted);
+  margin-bottom: 6px;
+}
+
+.merge-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.merge-tag-chip {
+  border-radius: 999px;
+  border: 1px solid var(--app-border-subtle);
+  background: var(--app-control-bg);
+  color: var(--app-text);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  cursor: pointer;
 }
 
 .email-template-item {
@@ -880,6 +1003,7 @@ ion-card-title {
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.01em;
+  color: var(--app-title);
 }
 
 .integration-section-header {
@@ -910,6 +1034,7 @@ ion-card-title {
 
 .name {
   font-weight: 600;
+  color: var(--app-text);
 }
 
 .meta {
@@ -1009,6 +1134,10 @@ ion-card-title {
     grid-template-columns: 1fr;
   }
 
+  .orders-inbox-row {
+    grid-template-columns: 1fr;
+  }
+
   .schedule-weekend-card {
     align-items: flex-start;
     flex-direction: column;
@@ -1044,4 +1173,107 @@ ion-card-title {
   .admin-section-btn {
     flex: 0 0 220px;
   }
+}
+
+.setup-wizard-overlay {
+  position: fixed;
+  top: 86px;
+  right: 18px;
+  z-index: 1200;
+  pointer-events: none;
+}
+
+.setup-wizard-card {
+  width: min(620px, calc(100vw - 36px));
+  max-height: calc(100vh - 120px);
+  overflow: auto;
+  border-radius: 16px;
+  border: 1px solid var(--app-border-subtle, rgba(255, 255, 255, 0.16));
+  background: #0f172a;
+  backdrop-filter: none;
+  padding: 18px;
+  pointer-events: auto;
+  box-shadow: 0 20px 40px rgba(2, 6, 23, 0.45);
+}
+
+.setup-wizard-head h3 {
+  margin: 0;
+}
+
+.setup-wizard-head p {
+  margin: 6px 0 0;
+  color: var(--app-text-muted, #64748b);
+}
+
+.setup-wizard-progress {
+  margin-top: 14px;
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--app-control-bg, rgba(255, 255, 255, 0.5));
+}
+
+.setup-wizard-step {
+  font-size: 12px;
+  color: var(--app-text-muted, #64748b);
+}
+
+.setup-wizard-title {
+  margin-top: 4px;
+  font-weight: 700;
+}
+
+.setup-wizard-checklist {
+  margin-top: 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.setup-wizard-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.setup-wizard-item span {
+  font-size: 12px;
+  min-width: 42px;
+  color: #b45309;
+  font-weight: 700;
+}
+
+.setup-wizard-item span.done {
+  color: #15803d;
+}
+
+.setup-wizard-item button {
+  border: 0;
+  background: transparent;
+  color: var(--ion-color-primary, #2563eb);
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  padding: 0;
+}
+
+.setup-wizard-actions {
+  margin-top: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.setup-wizard-top-actions {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.setup-wizard-compact {
+  margin-top: 10px;
+}
+
+.setup-wizard-actions.compact {
+  justify-content: flex-start;
 }

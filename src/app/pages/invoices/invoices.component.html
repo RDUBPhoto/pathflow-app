@@ -13,18 +13,40 @@
 
 <ion-content class="glass-bg invoices-content ion-padding">
   <div class="invoices-stack">
-    <section class="invoices-kpis">
+    <section class="invoices-kpis" (click)="closeKpiMenu()">
       <article
         class="kpi-card glass-surface"
         *ngFor="let kpi of kpis(); trackBy: trackKpi"
+        [class.menu-open]="isKpiMenuOpen(kpi.id)"
         [class.tone-open]="kpi.tone === 'open'"
         [class.tone-accepted]="kpi.tone === 'accepted'"
         [class.tone-declined]="kpi.tone === 'declined'"
         [class.tone-expired]="kpi.tone === 'expired'">
-        <div class="kpi-label">{{ kpi.label }}</div>
-        <div class="kpi-value" *ngIf="kpi.kind === 'count'">{{ kpi.value }}</div>
-        <div class="kpi-value" *ngIf="kpi.kind === 'currency'">
-          {{ kpi.value | currency:'USD':'symbol':'1.2-2' }}
+        <div class="kpi-head">
+          <div class="kpi-label">{{ kpi.label }}</div>
+          <div class="kpi-menu-wrap" (click)="$event.stopPropagation()">
+            <button type="button" class="kpi-menu-trigger" (click)="toggleKpiMenu(kpi.id, $event)" aria-label="Change KPI timeframe">
+              ⋯
+            </button>
+            <div class="kpi-menu" *ngIf="isKpiMenuOpen(kpi.id)">
+              <button
+                type="button"
+                class="kpi-menu-item"
+                *ngFor="let option of kpiRangeOptions"
+                [class.active]="kpi.range === option.id"
+                (click)="setKpiRangeForCard(kpi.id, option.id)">
+                {{ option.label }}
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="kpi-value-row" *ngIf="kpi.kind === 'count'">
+          <div class="kpi-value">{{ kpi.value }}</div>
+          <span class="kpi-range-text">{{ kpi.rangeLabel }}</span>
+        </div>
+        <div class="kpi-value-row" *ngIf="kpi.kind === 'currency'">
+          <div class="kpi-value">{{ kpi.value | currency:'USD':'symbol':'1.2-2' }}</div>
+          <span class="kpi-range-text">{{ kpi.rangeLabel }}</span>
         </div>
       </article>
     </section>

@@ -10,6 +10,17 @@ type SettingResponse<T> = {
   updatedAt: string;
 };
 
+export type EnsureOrdersInboxEmailResponse = {
+  ok: boolean;
+  tenantId: string;
+  key: string;
+  value: string;
+  updatedAt: string;
+  created?: boolean;
+  regenerated?: boolean;
+  domain?: string;
+};
+
 type SettingsListResponse = {
   ok: boolean;
   tenantId: string;
@@ -39,6 +50,13 @@ export class AppSettingsApiService {
     return this.http.post<{ ok: boolean; tenantId: string; key: string; deleted: boolean }>('/api/settings', {
       op: 'delete',
       key
+    });
+  }
+
+  ensureOrdersInboxEmail(force = false): Observable<EnsureOrdersInboxEmailResponse> {
+    return this.http.post<EnsureOrdersInboxEmailResponse>('/api/settings', {
+      op: 'ensureOrdersInboxEmail',
+      force
     });
   }
 

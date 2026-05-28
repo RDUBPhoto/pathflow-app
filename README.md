@@ -4,17 +4,17 @@ This project was generated using [Angular CLI](https://github.com/angular/angula
 
 ## Node.js version
 
-Local API development uses Azure Functions and requires Node 18.
+Local development and QA checks require Node `20.19+` (or `22.12+`) to match Angular CLI requirements.
 
 ```bash
 nvm use
 ```
 
-If Node 18 is not installed yet:
+If Node `20.19.0` is not installed yet:
 
 ```bash
-nvm install 18
-nvm use 18
+nvm install 20.19.0
+nvm use 20.19.0
 ```
 
 ## Development server

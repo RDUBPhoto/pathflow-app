@@ -9,9 +9,10 @@
     "test": "node --test test/**/*.test.js"
   },
   "engines": {
-    "node": ">=18 <20"
+    "node": "^20.19.0 || ^22.12.0"
   },
   "dependencies": {
+    "@azure/communication-email": "^1.0.0",
     "@azure/communication-sms": "^1.1.0",
     "@azure/data-tables": "^13.3.1",
     "@azure/storage-blob": "12.14.0",

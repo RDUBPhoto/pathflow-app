@@ -20,7 +20,6 @@ import {
   InventoryApiService,
   InventoryItem
 } from '../../services/inventory-api.service';
-import { PurchaseOrdersApiService } from '../../services/purchase-orders-api.service';
 import {
   InvoiceDetail,
   InvoicePartStatus,
@@ -37,6 +36,7 @@ type InventoryEditor = {
   reorderAt: number;
   onOrder: number;
   unitCost: number;
+  price: number;
 };
 
 type PartsQueueRow = {
@@ -54,6 +54,7 @@ type PartsQueueRow = {
 
 type PartsQueueInvoiceLine = {
   id: string;
+  sourceIndex: number;
   label: string;
   sku: string;
   qty: number;
@@ -93,7 +94,6 @@ type PartsQueueInvoiceGroup = {
 export default class InventoryComponent implements OnInit {
   readonly pageSize = 30;
   private readonly inventoryApi = inject(InventoryApiService);
-  private readonly purchaseOrdersApi = inject(PurchaseOrdersApiService);
   private readonly invoicesData = inject(InvoicesDataService);
   private readonly router = inject(Router);
 
@@ -152,7 +152,7 @@ export default class InventoryComponent implements OnInit {
     this.invoicesData.invoiceDetails().filter(item => {
       const invoiceNumber = this.normalizeText(item?.invoiceNumber);
       const looksLikeInvoice = item.documentType === 'invoice' || /^inv[-\s]/i.test(invoiceNumber);
-      return looksLikeInvoice && this.isPaidInvoice(item);
+      return looksLikeInvoice && this.isPaidInvoice(item) && !this.isCompletedJob(item);
     })
   );
   readonly partsQueueRows = computed(() => {
@@ -164,11 +164,11 @@ export default class InventoryComponent implements OnInit {
       invoiceIds: Set<string>;
       latestUpdatedMs: number;
       latestUpdatedAt: string;
-      latestInvoiceId: string;
-      latestInvoiceNumber: string;
-      hasBackordered: boolean;
-      hasOrdered: boolean;
-    }>();
+        latestInvoiceId: string;
+        latestInvoiceNumber: string;
+        hasBackordered: boolean;
+        hasOutOfStock: boolean;
+      }>();
 
     for (const invoice of this.paidInvoices()) {
       const updatedAt = String(invoice.updatedAt || invoice.createdAt || '').trim();
@@ -183,7 +183,7 @@ export default class InventoryComponent implements OnInit {
         const normalizedLineType = this.normalizeText((line as any)?.type).toLowerCase();
         if (normalizedLineType === 'labor') continue;
         const normalizedStatus = this.normalizePartStatus(line.partStatus);
-        if (normalizedStatus === 'received' || normalizedStatus === 'in-stock') continue;
+        if (normalizedStatus === 'ordered' || normalizedStatus === 'received' || normalizedStatus === 'in-stock') continue;
 
         const qty = Math.max(0, this.toNumber(line.quantity, 0));
         if (qty <= 0) continue;
@@ -204,7 +204,7 @@ export default class InventoryComponent implements OnInit {
             latestInvoiceId: String(invoice.id || '').trim(),
             latestInvoiceNumber: String(invoice.invoiceNumber || '').trim(),
             hasBackordered: normalizedStatus === 'backordered',
-            hasOrdered: normalizedStatus === 'ordered'
+            hasOutOfStock: normalizedStatus === 'out-of-stock'
           });
           continue;
         }
@@ -213,7 +213,7 @@ export default class InventoryComponent implements OnInit {
         if (customerId) existing.customerIds.add(customerId);
         existing.invoiceIds.add(invoice.id);
         existing.hasBackordered = existing.hasBackordered || normalizedStatus === 'backordered';
-        existing.hasOrdered = existing.hasOrdered || normalizedStatus === 'ordered';
+        existing.hasOutOfStock = existing.hasOutOfStock || normalizedStatus === 'out-of-stock';
         if (updatedMs >= existing.latestUpdatedMs) {
           existing.latestUpdatedMs = updatedMs;
           existing.latestUpdatedAt = updatedAt;
@@ -231,7 +231,7 @@ export default class InventoryComponent implements OnInit {
         qty: Math.round(value.qty * 100) / 100,
         customerCount: value.customerIds.size,
         invoiceCount: value.invoiceIds.size,
-        status: value.hasBackordered ? 'backordered' : (value.hasOrdered ? 'ordered' : 'ordered'),
+        status: value.hasBackordered ? 'backordered' : (value.hasOutOfStock ? 'out-of-stock' : 'ordered'),
         latestUpdatedAt: value.latestUpdatedAt,
         sampleInvoiceId: value.latestInvoiceId,
         sampleInvoiceNumber: value.latestInvoiceNumber
@@ -257,15 +257,18 @@ export default class InventoryComponent implements OnInit {
       const invoiceId = this.normalizeText(invoice.id);
       if (!invoiceId) continue;
       const lines: PartsQueueInvoiceLine[] = [];
-      for (const line of Array.isArray(invoice.lineItems) ? invoice.lineItems : []) {
+      const sourceLines = Array.isArray(invoice.lineItems) ? invoice.lineItems : [];
+      for (let sourceIndex = 0; sourceIndex < sourceLines.length; sourceIndex += 1) {
+        const line = sourceLines[sourceIndex];
         const normalizedLineType = this.normalizeText((line as any)?.type).toLowerCase();
         if (normalizedLineType === 'labor') continue;
         const status = this.normalizePartStatus(line.partStatus);
-        if (status === 'received' || status === 'in-stock') continue;
+        if (status === 'ordered' || status === 'received' || status === 'in-stock') continue;
         const qty = Math.max(0, this.toNumber(line.quantity, 0));
         if (qty <= 0) continue;
         lines.push({
           id: this.normalizeText(line.id),
+          sourceIndex,
           label: this.normalizeText(line.description || line.code || 'Part'),
           sku: this.normalizeText(line.code),
           qty: Math.round(qty * 100) / 100,
@@ -347,21 +350,13 @@ export default class InventoryComponent implements OnInit {
     });
   }
 
-  setEditorNumber(field: 'onHand' | 'reorderAt' | 'onOrder' | 'unitCost', value: unknown): void {
+  setEditorNumber(field: 'onHand' | 'reorderAt' | 'onOrder' | 'unitCost' | 'price', value: unknown): void {
     const current = this.editor();
     if (!current) return;
     this.editor.set({
       ...current,
       [field]: this.toNumber(value, 0)
     });
-  }
-
-  resetSelectedEditor(): void {
-    const item = this.selectedItem();
-    if (!item) return;
-    this.editor.set(this.toEditor(item));
-    this.status.set('Changes reset.');
-    this.error.set('');
   }
 
   hasSelectedChanges(): boolean {
@@ -376,7 +371,8 @@ export default class InventoryComponent implements OnInit {
       this.toNumber(item.onHand, 0) !== this.toNumber(draft.onHand, 0) ||
       this.toNumber(item.reorderAt, 0) !== this.toNumber(draft.reorderAt, 0) ||
       this.toNumber(item.onOrder, 0) !== this.toNumber(draft.onOrder, 0) ||
-      this.toNumber(item.unitCost, 0) !== this.toNumber(draft.unitCost, 0)
+      this.toNumber(item.unitCost, 0) !== this.toNumber(draft.unitCost, 0) ||
+      this.toNumber(item.price, 0) !== this.toNumber(draft.price, 0)
     );
   }
 
@@ -397,7 +393,8 @@ export default class InventoryComponent implements OnInit {
       onHand: Math.max(0, Math.trunc(this.toNumber(draft.onHand, 0))),
       reorderAt: Math.max(0, Math.trunc(this.toNumber(draft.reorderAt, 0))),
       onOrder: Math.max(0, Math.trunc(this.toNumber(draft.onOrder, 0))),
-      unitCost: Math.max(0, this.toNumber(draft.unitCost, 0))
+      unitCost: Math.max(0, this.toNumber(draft.unitCost, 0)),
+      price: Math.max(0, this.toNumber(draft.price, 0))
     };
 
     if (!payload.name && !payload.sku) {
@@ -427,36 +424,6 @@ export default class InventoryComponent implements OnInit {
       },
       error: err => {
         this.error.set(this.extractError(err, 'Could not save this part.'));
-        this.saving.set(false);
-      }
-    });
-  }
-
-  createReorderDraft(item: InventoryItem): void {
-    const qty = 1;
-    this.saving.set(true);
-    this.error.set('');
-    this.purchaseOrdersApi.createDraft({
-      supplier: item.vendor || 'Unassigned Supplier',
-      note: `PO draft created from catalog item ${item.name}`,
-      lines: [
-        {
-          itemId: item.id,
-          partName: item.name,
-          sku: item.sku,
-          vendor: item.vendor,
-          qty,
-          unitCost: item.unitCost
-        }
-      ]
-    }).subscribe({
-      next: res => {
-        this.status.set(`PO draft ${res.order.id.slice(0, 8)} created for ${item.name}.`);
-        this.saving.set(false);
-        this.loadInventoryItems();
-      },
-      error: err => {
-        this.error.set(this.extractError(err, 'Could not create PO draft.'));
         this.saving.set(false);
       }
     });
@@ -502,13 +469,15 @@ export default class InventoryComponent implements OnInit {
   }
 
   partsQueueStatusLabel(status: InvoicePartStatus): string {
+    if (status === 'out-of-stock') return 'Out of stock';
     if (status === 'backordered') return 'Backordered';
-    if (status === 'ordered') return 'Needs order';
+    if (status === 'ordered') return 'Ordered';
     if (status === 'in-stock') return 'In-stock';
     return 'Received';
   }
 
   partsQueueStatusClass(status: InvoicePartStatus): string {
+    if (status === 'out-of-stock') return 'queue-status-needs-order';
     if (status === 'backordered') return 'queue-status-backordered';
     if (status === 'ordered') return 'queue-status-needs-order';
     if (status === 'in-stock') return 'queue-status-in-stock';
@@ -541,12 +510,14 @@ export default class InventoryComponent implements OnInit {
     this.selectedQueueInvoiceId.set(this.normalizeText(invoiceId));
   }
 
-  updateQueueLineStatus(invoiceId: string, lineId: string, nextStatus: string): void {
+  updateQueueLineStatus(invoiceId: string, lineId: string, sourceIndex: number, nextStatus: string): void {
     const normalizedInvoiceId = this.normalizeText(invoiceId);
     const normalizedLineId = this.normalizeText(lineId);
-    if (!normalizedInvoiceId || !normalizedLineId) return;
+    const normalizedSourceIndex = Number.isInteger(sourceIndex) ? sourceIndex : -1;
+    if (!normalizedInvoiceId || (!normalizedLineId && normalizedSourceIndex < 0)) return;
     const status = this.normalizePartStatus(nextStatus);
-    const savingKey = `${normalizedInvoiceId}::${normalizedLineId}`;
+    const savingIdSegment = normalizedLineId || `idx-${normalizedSourceIndex}`;
+    const savingKey = `${normalizedInvoiceId}::${savingIdSegment}`;
     this.queueSavingKey.set(savingKey);
     this.error.set('');
     this.status.set('');
@@ -560,8 +531,10 @@ export default class InventoryComponent implements OnInit {
 
     const updated = {
       ...detail,
-      lineItems: (detail.lineItems || []).map(line => {
-        if (this.normalizeText(line.id) !== normalizedLineId) return line;
+      lineItems: (detail.lineItems || []).map((line, idx) => {
+        const matchesById = normalizedLineId && this.normalizeText(line.id) === normalizedLineId;
+        const matchesByIndex = normalizedSourceIndex >= 0 && idx === normalizedSourceIndex;
+        if (!matchesById && !matchesByIndex) return line;
         const normalizedLineType = this.normalizeText((line as any)?.type).toLowerCase();
         if (normalizedLineType === 'labor') return line;
         return { ...line, partStatus: status };
@@ -580,8 +553,12 @@ export default class InventoryComponent implements OnInit {
     }
   }
 
-  isQueueLineSaving(invoiceId: string, lineId: string): boolean {
-    return this.queueSavingKey() === `${this.normalizeText(invoiceId)}::${this.normalizeText(lineId)}`;
+  isQueueLineSaving(invoiceId: string, lineId: string, sourceIndex: number): boolean {
+    const normalizedInvoiceId = this.normalizeText(invoiceId);
+    const normalizedLineId = this.normalizeText(lineId);
+    const current = this.queueSavingKey();
+    if (!normalizedLineId) return current === `${normalizedInvoiceId}::idx-${Number.isInteger(sourceIndex) ? sourceIndex : -1}`;
+    return current === `${normalizedInvoiceId}::${normalizedLineId}`;
   }
 
   private syncSelection(items: InventoryItem[]): void {
@@ -611,7 +588,8 @@ export default class InventoryComponent implements OnInit {
       onHand: this.toNumber(item.onHand, 0),
       reorderAt: this.toNumber(item.reorderAt, 0),
       onOrder: this.toNumber(item.onOrder, 0),
-      unitCost: this.toNumber(item.unitCost, 0)
+      unitCost: this.toNumber(item.unitCost, 0),
+      price: this.toNumber(item.price, 0)
     };
   }
 
@@ -655,15 +633,23 @@ export default class InventoryComponent implements OnInit {
     return paid >= total;
   }
 
+  private isCompletedJob(item: InvoiceDetail): boolean {
+    const stage = this.normalizeText(item?.stage).toLowerCase();
+    return stage === 'completed';
+  }
+
   private normalizePartStatus(value: unknown): InvoicePartStatus {
     const normalized = this.normalizeText(value).toLowerCase();
+    if (normalized === 'ordered' || normalized === 'order' || normalized === 'on-order' || normalized === 'on order') return 'ordered';
+    if (normalized === 'out-of-stock' || normalized === 'out of stock' || normalized === 'outofstock') return 'out-of-stock';
     if (normalized === 'backordered' || normalized === 'back-order' || normalized === 'back order') return 'backordered';
     if (normalized === 'received') return 'received';
     if (normalized === 'in-stock' || normalized === 'in stock' || normalized === 'instock') return 'in-stock';
-    return 'ordered';
+    return 'out-of-stock';
   }
 
   private partsQueueStatusPriority(status: InvoicePartStatus): number {
+    if (status === 'out-of-stock') return 0;
     if (status === 'backordered') return 0;
     if (status === 'ordered') return 1;
     if (status === 'in-stock') return 2;

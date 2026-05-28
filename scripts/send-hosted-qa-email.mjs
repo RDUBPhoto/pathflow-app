@@ -48,10 +48,13 @@ function parseHostedJunit(xml) {
 async function main() {
   const sendgridApiKey = asText(process.env.SENDGRID_API_KEY);
   const fromEmail = asText(process.env.QA_REPORT_EMAIL_FROM || process.env.EMAIL_FROM);
-  const recipients = resolveRecipientList(process.env.QA_REPORT_EMAIL_TO || process.env.QA_REPORT_RECIPIENTS);
+  const configuredRecipients = resolveRecipientList(process.env.QA_REPORT_EMAIL_TO || process.env.QA_REPORT_RECIPIENTS);
+  const recipients = configuredRecipients.length
+    ? configuredRecipients
+    : resolveRecipientList(fromEmail);
 
   if (!recipients.length) {
-    console.log('[hosted-qa] Email skipped (QA_REPORT_EMAIL_TO not set).');
+    console.log('[hosted-qa] Email skipped (no recipients resolved from QA_REPORT_EMAIL_TO or EMAIL_FROM).');
     return;
   }
   if (!sendgridApiKey || !fromEmail) {

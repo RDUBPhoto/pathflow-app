@@ -277,7 +277,7 @@ export default class RegisterComponent implements OnDestroy {
   }
 
   useDifferentAccount(): void {
-    this.auth.signOut('/login');
+    this.auth.signOut('/');
   }
 
   setPlanCycle(cycle: 'trial' | 'monthly' | 'annual'): void {

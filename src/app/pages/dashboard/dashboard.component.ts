@@ -1232,13 +1232,30 @@ export default class DashboardComponent implements OnDestroy {
   private shouldSendCancellationEmail(doc: InvoiceDetail): boolean {
     const stage = String(doc?.stage || '').trim().toLowerCase();
     if (!stage || stage === 'draft') return false;
-    if (!this.invoicesData.hasCustomerFacingEmailHistory(doc)) return false;
+    if (!this.hasCustomerFacingEmailHistory(doc)) return false;
     if (doc.documentType === 'invoice') {
       // Only notify invoice cancellation if the invoice had already been sent.
       return stage === 'sent';
     }
     // Quotes may be customer-visible across sent/accepted/declined.
     return stage === 'sent' || stage === 'accepted' || stage === 'declined';
+  }
+
+  private hasCustomerFacingEmailHistory(doc: Pick<InvoiceDetail, 'documentType' | 'timeline'> | null | undefined): boolean {
+    if (!doc) return false;
+    const isQuote = doc.documentType === 'quote';
+    const timeline = Array.isArray(doc.timeline) ? doc.timeline : [];
+    return timeline.some(entry => {
+      const text = String(entry?.message || '').trim().toLowerCase();
+      if (!text) return false;
+      const hasEmailSignal = text.includes('email') || text.includes('e-mail') || text.includes('emailed');
+      const hasSentSignal = text.includes('sent') || text.includes('delivered');
+      const hasDocSignal = isQuote
+        ? text.includes('quote')
+        : (text.includes('invoice') || text.includes('final invoice'));
+      if (hasEmailSignal && hasSentSignal && hasDocSignal) return true;
+      return hasDocSignal && text.includes('sent to customer');
+    });
   }
 
   private escapeHtml(value: string): string {

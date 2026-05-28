@@ -12,8 +12,11 @@ export const authExpiredInterceptor: HttpInterceptorFn = (req, next) => {
       if (!isApiRequest(req.url)) {
         return throwError(() => err);
       }
+      if (isAuthBootstrapRequest(req.url)) {
+        return throwError(() => err);
+      }
       const auth = inject(AuthService);
-      auth.signOut('/login');
+      auth.signOut('/');
       return throwError(() => err);
     })
   );
@@ -25,5 +28,18 @@ function isApiRequest(url: string): boolean {
     return parsed.pathname.startsWith('/api/');
   } catch {
     return String(url || '').startsWith('/api/');
+  }
+}
+
+function isAuthBootstrapRequest(url: string): boolean {
+  try {
+    const parsed = new URL(url, typeof window !== 'undefined' ? window.location.origin : 'https://localhost');
+    if (parsed.pathname !== '/api/access') return false;
+    const op = String(parsed.searchParams.get('op') || '').trim().toLowerCase();
+    const scope = String(parsed.searchParams.get('scope') || '').trim().toLowerCase();
+    return op === 'auth-config' || scope === 'me';
+  } catch {
+    const raw = String(url || '').toLowerCase();
+    return raw.includes('/api/access?op=auth-config') || raw.includes('/api/access?scope=me');
   }
 }

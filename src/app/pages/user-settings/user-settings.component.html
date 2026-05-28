@@ -116,12 +116,14 @@
       <div class="validation-error" *ngIf="!passkeysSupported()">
         This browser/device does not support passkeys.
       </div>
-      <div class="help-text" *ngIf="passkeysSupported()">
-        Status: <strong>{{ hasPasskey() ? 'Enabled' : 'Not enabled' }}</strong>
+      <div class="passkey-enabled-badge" *ngIf="passkeysSupported() && hasPasskey()">
+        <ion-icon name="checkmark-circle-outline"></ion-icon>
+        <span>Enabled</span>
       </div>
+      <div class="help-text" *ngIf="passkeysSupported() && !hasPasskey()">Status: Not enabled</div>
 
       <div class="action-row">
-        <ion-button (click)="enablePasskey()" [disabled]="passkeyBusy || !passkeysSupported()">
+        <ion-button *ngIf="!hasPasskey()" (click)="enablePasskey()" [disabled]="passkeyBusy || !passkeysSupported()">
           {{ passkeyBusy ? 'Enabling...' : 'Enable Biometrics' }}
         </ion-button>
         <ion-button

@@ -251,6 +251,17 @@ ion-content#board-content {
 .card-name-link:hover {
   color: var(--ion-color-primary, #2563eb);
   text-decoration: underline;
+  background: transparent !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.card .activity-link:hover,
+.card .notes-toggle-link:hover,
+.card .doc-link:hover {
+  background: transparent !important;
+  box-shadow: none !important;
+  transform: none !important;
 }
 
 .card-name-link.disabled {
@@ -494,6 +505,17 @@ ion-content#board-content {
   padding: 8px;
   font-size: 12px;
   max-width: 222px;
+}
+
+.notes-list {
+  margin: 0;
+  padding-left: 16px;
+  display: grid;
+  gap: 4px;
+}
+
+.notes-list li {
+  line-height: 1.35;
 }
 
 .lane-dot {

@@ -174,7 +174,11 @@ export default class InvoicePaymentComponent {
           customerName: this.customerName(),
           vehicle: this.vehicle(),
           businessName: this.businessName(),
-          paymentKind: this.displayPaid() > 0 ? 'final' : 'initial'
+          paymentKind: this.displayPaid() > 0 ? 'final' : 'initial',
+          paymentAmount: Number(this.normalizedAmount()),
+          paymentProvider: String(authorizeCharge?.provider || this.paymentProvider() || 'authorize-net').trim().toLowerCase(),
+          paymentTransactionId: String(authorizeCharge?.transactionId || '').trim(),
+          paymentAccountNumber: String(authorizeCharge?.accountNumber || '').trim()
         }));
       }
 

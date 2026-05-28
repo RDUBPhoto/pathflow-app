@@ -192,7 +192,12 @@
                     Create Invoice
                   </button>
                 </div>
-                <div class="notes" *ngIf="isExpanded(it.id)">{{ notesOf(it) || 'No notes yet.' }}</div>
+                <div class="notes" *ngIf="isExpanded(it.id)">
+                  <ul class="notes-list" *ngIf="notesListOf(it).length; else emptyNotes">
+                    <li *ngFor="let note of notesListOf(it)">{{ note }}</li>
+                  </ul>
+                  <ng-template #emptyNotes>No notes yet.</ng-template>
+                </div>
               </div>
               <div class="card-actions" *ngIf="canCheckIn(it, lane) || (canRevertCheckIn(it, lane) && !isInProgressLane(lane)) || needsCalendarOverride(it, lane)">
                 <ion-button

@@ -16,6 +16,10 @@ export type InvoiceResponsePayload = {
   vehicle?: string;
   businessName?: string;
   paymentKind?: 'initial' | 'final';
+  paymentAmount?: number;
+  paymentProvider?: string;
+  paymentTransactionId?: string;
+  paymentAccountNumber?: string;
 };
 
 export type InvoiceResponseRecord = {
@@ -24,6 +28,10 @@ export type InvoiceResponseRecord = {
   stage: InvoiceResponseStage;
   invoiceNumber: string;
   updatedAt: string;
+  paymentAmount?: number;
+  paymentProvider?: string;
+  paymentTransactionId?: string;
+  paymentAccountNumber?: string;
 };
 
 export type InvoiceResponseListResponse = {

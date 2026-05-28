@@ -1,6 +1,6 @@
 const { TableClient } = require("../_shared/table-client");
 const { randomUUID } = require("crypto");
-const { resolveTenantId } = require("../_shared/tenant");
+const { resolveTenantId, sanitizeTenantId } = require("../_shared/tenant");
 const { requirePrincipal } = require("../_shared/auth");
 
 const INVENTORY_TABLE = "inventoryitems";
@@ -158,6 +158,7 @@ async function getTableClient(tableName) {
 
 function toInventoryItem(entity) {
   return {
+    tenantId: asString(entity.partitionKey),
     id: asString(entity.rowKey),
     name: asString(entity.name),
     sku: asString(entity.sku),
@@ -179,6 +180,64 @@ function toInventoryItem(entity) {
     createdAt: asString(entity.createdAt),
     updatedAt: asString(entity.updatedAt)
   };
+}
+
+const LEGACY_TENANT_ALIASES = {
+  "primary-location": ["main", "local-dev", "pathflow-app"],
+  "main": ["primary-location", "local-dev", "pathflow-app"],
+  "local-dev": ["primary-location", "main", "pathflow-app"],
+  "pathflow-app": ["primary-location", "main", "local-dev"]
+};
+
+function readHeaderValue(headers, key) {
+  if (!headers || typeof headers !== "object") return "";
+  const direct = headers[key];
+  if (direct != null) return asString(direct);
+  const lowerKey = String(key || "").toLowerCase();
+  for (const [name, value] of Object.entries(headers)) {
+    if (String(name || "").toLowerCase() !== lowerKey) continue;
+    return asString(value);
+  }
+  return "";
+}
+
+function tenantFromEmail(value) {
+  const email = asString(value).toLowerCase();
+  const at = email.lastIndexOf("@");
+  if (at < 0) return "";
+  const domain = email.slice(at + 1);
+  if (!domain || domain.includes("localhost")) return "";
+  const root = domain.split(".")[0] || "";
+  return sanitizeTenantId(root);
+}
+
+function tenantReadCandidates(req, tenantId) {
+  const primary = asString(tenantId);
+  const defaultTenant = sanitizeTenantId(asString(process.env.DEFAULT_TENANT_ID));
+  const aliases = LEGACY_TENANT_ALIASES[primary] || [];
+  const devEmail = readHeaderValue(req && req.headers, "x-dev-user-email");
+  const principalEmail =
+    readHeaderValue(req && req.headers, "x-ms-client-principal-name")
+    || readHeaderValue(req && req.headers, "x-ms-client-principal-idp")
+    || readHeaderValue(req && req.headers, "x-ms-client-principal-userid");
+  const devEmailTenant = tenantFromEmail(devEmail);
+  const principalEmailTenant = tenantFromEmail(principalEmail);
+
+  return Array.from(
+    new Set([primary, defaultTenant, devEmailTenant, principalEmailTenant, ...aliases].filter(Boolean))
+  );
+}
+
+async function findEntityInAnyTenant(client, tenantIds, rowKey) {
+  const key = asString(rowKey);
+  if (!key) return null;
+  for (const tenantId of tenantIds) {
+    try {
+      const entity = await client.getEntity(tenantId, key);
+      if (entity) return { tenantId, entity };
+    } catch (_) {}
+  }
+  return null;
 }
 
 function normalizeNeedStatus(raw) {
@@ -524,21 +583,50 @@ module.exports = async function (context, req) {
       const scope = queryParam(req, "scope").toLowerCase();
       const statusFilter = queryParam(req, "status").toLowerCase();
 
+      const tenantIds = tenantReadCandidates(req, tenantId);
       const listItems = async () => {
-        const out = [];
-        const iter = inventoryClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${escapedFilterValue(tenantId)}'` } });
-        for await (const entity of iter) out.push(toInventoryItem(entity));
+        const outByKey = new Map();
+        const outByNaturalKey = new Map();
+        for (const activeTenant of tenantIds) {
+          try {
+            const iter = inventoryClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${escapedFilterValue(activeTenant)}'` } });
+            for await (const entity of iter) {
+              const item = toInventoryItem(entity);
+              const key = `${asString(item.tenantId)}\t${asString(item.id)}`;
+              if (outByKey.has(key)) continue;
+              outByKey.set(key, item);
+
+              const naturalKey = `${normalizedSku(item.sku)}::${normalizeKey(item.name)}::${normalizeKey(item.vendor)}`;
+              if (!outByNaturalKey.has(naturalKey)) {
+                outByNaturalKey.set(naturalKey, item);
+              }
+            }
+          } catch (error) {
+            if (context && typeof context.log === "function") {
+              context.log(`[inventory] skipping tenant candidate '${activeTenant}' during listItems: ${error && error.message ? error.message : error}`);
+            }
+          }
+        }
+        const out = Array.from(outByNaturalKey.values());
         out.sort((a, b) => asString(a.name).localeCompare(asString(b.name)));
         return out;
       };
 
       const listNeeds = async () => {
         const out = [];
-        const filter = statusFilter
-          ? `PartitionKey eq '${escapedFilterValue(tenantId)}' and status eq '${escapedFilterValue(statusFilter)}'`
-          : `PartitionKey eq '${escapedFilterValue(tenantId)}'`;
-        const iter = needsClient.listEntities({ queryOptions: { filter } });
-        for await (const entity of iter) out.push(toNeed(entity));
+        for (const activeTenant of tenantIds) {
+          try {
+            const filter = statusFilter
+              ? `PartitionKey eq '${escapedFilterValue(activeTenant)}' and status eq '${escapedFilterValue(statusFilter)}'`
+              : `PartitionKey eq '${escapedFilterValue(activeTenant)}'`;
+            const iter = needsClient.listEntities({ queryOptions: { filter } });
+            for await (const entity of iter) out.push(toNeed(entity));
+          } catch (error) {
+            if (context && typeof context.log === "function") {
+              context.log(`[inventory] skipping tenant candidate '${activeTenant}' during listNeeds: ${error && error.message ? error.message : error}`);
+            }
+          }
+        }
         out.sort(byScheduleStartAsc);
         return out;
       };
@@ -604,7 +692,13 @@ module.exports = async function (context, req) {
     const op = asString(body.op || body.operation || body.action).toLowerCase();
 
     if (op === "upsertitem" || op === "upsert-item") {
-      const id = asString(body.id) || randomUUID();
+      const requestedId = asString(body.id);
+      const id = requestedId || randomUUID();
+      const readTenants = tenantReadCandidates(req, tenantId);
+      const existingInTenant = requestedId
+        ? await findEntityInAnyTenant(inventoryClient, readTenants, requestedId)
+        : null;
+      const writeTenantId = asString(existingInTenant && existingInTenant.tenantId) || tenantId;
       const now = new Date().toISOString();
       const name = asString(body.name || body.description);
       const sku = asString(body.sku || body.partLaborCode || body.itemCode);
@@ -619,7 +713,7 @@ module.exports = async function (context, req) {
         : (body.price != null ? body.price : body.cost);
 
       const entity = {
-        partitionKey: tenantId,
+        partitionKey: writeTenantId,
         rowKey: id,
         name,
         sku,
@@ -659,9 +753,17 @@ module.exports = async function (context, req) {
       }
 
       const existingItems = [];
-      const iter = inventoryClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${escapedFilterValue(tenantId)}'` } });
-      for await (const entity of iter) {
-        existingItems.push(toInventoryItem(entity));
+      for (const activeTenant of tenantReadCandidates(req, tenantId)) {
+        try {
+          const iter = inventoryClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${escapedFilterValue(activeTenant)}'` } });
+          for await (const entity of iter) {
+            existingItems.push(toInventoryItem(entity));
+          }
+        } catch (error) {
+          if (context && typeof context.log === "function") {
+            context.log(`[inventory] skipping tenant candidate '${activeTenant}' during import lookup: ${error && error.message ? error.message : error}`);
+          }
+        }
       }
       const lookup = buildInventoryLookup(existingItems);
 
@@ -781,7 +883,7 @@ module.exports = async function (context, req) {
           }
 
           const patch = {
-            partitionKey: tenantId,
+            partitionKey: asString(existing.tenantId) || tenantId,
             rowKey: existing.id,
             updatedAt: now,
             lastUpdated: now
@@ -855,7 +957,18 @@ module.exports = async function (context, req) {
         context.res = json(400, { error: "id is required." });
         return;
       }
-      await inventoryClient.deleteEntity(tenantId, id);
+      const candidateTenants = tenantReadCandidates(req, tenantId);
+      let deleted = false;
+      for (const activeTenant of candidateTenants) {
+        try {
+          await inventoryClient.deleteEntity(activeTenant, id);
+          deleted = true;
+          break;
+        } catch (_) {}
+      }
+      if (!deleted) {
+        await inventoryClient.deleteEntity(tenantId, id);
+      }
       context.res = json(200, { ok: true, id });
       return;
     }

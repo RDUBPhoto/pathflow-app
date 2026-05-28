@@ -6,7 +6,7 @@ export type InvoiceStage = 'draft' | 'sent' | 'accepted' | 'completed' | 'declin
 export type InvoiceBoardStage = Exclude<InvoiceStage, 'expired' | 'canceled'> | 'completed';
 export type InvoiceDocumentType = 'quote' | 'invoice';
 export type InvoiceLineType = 'part' | 'labor';
-export type InvoicePartStatus = 'in-stock' | 'ordered' | 'backordered' | 'received';
+export type InvoicePartStatus = 'out-of-stock' | 'in-stock' | 'ordered' | 'backordered' | 'received';
 
 export type InvoiceCard = {
   id: string;
@@ -33,6 +33,7 @@ export type InvoiceLineItem = {
   id: string;
   type: InvoiceLineType;
   partStatus?: InvoicePartStatus;
+  trackingNumber?: string;
   code: string;
   description: string;
   quantity: number;
@@ -169,7 +170,7 @@ export type InvoiceDraftPayload = {
 };
 
 export const INVOICE_LANES: InvoiceLane[] = [
-  { id: 'draft', title: 'Draft', color: '#ef4444' },
+  { id: 'draft', title: 'Drafts', color: '#ef4444' },
   { id: 'sent', title: 'Sent', color: '#14b8a6' },
   { id: 'accepted', title: 'Accepted', color: '#22c55e' },
   { id: 'declined', title: 'Declined', color: '#f59e0b' }
@@ -1093,6 +1094,13 @@ export class InvoicesDataService {
     return this.invoices().filter(invoice => invoice.documentType === documentType);
   }
 
+  hasCustomerFacingEmailHistory(invoice: Pick<InvoiceDetail, 'documentType' | 'timeline'> | null | undefined): boolean {
+    if (!invoice) return false;
+    const documentType = invoice.documentType === 'quote' ? 'quote' : 'invoice';
+    const timeline = Array.isArray(invoice.timeline) ? invoice.timeline : [];
+    return timeline.some(entry => this.isCustomerFacingEmailTimelineMessage(entry?.message, documentType));
+  }
+
   createInvoiceFromQuote(quoteId: string): InvoiceDetail | null {
     const quote = this.getInvoiceById(quoteId);
     if (!quote || quote.documentType !== 'quote' || quote.stage !== 'accepted') return null;
@@ -1317,6 +1325,7 @@ export class InvoicesDataService {
         id: this.safeText(line.id) || `li-${Date.now()}-${index}`,
         type,
         partStatus: type === 'part' ? this.normalizePartStatus(line.partStatus) : undefined,
+        trackingNumber: type === 'part' ? this.safeText((line as Partial<InvoiceLineItem>).trackingNumber) : '',
         code: this.safeText(line.code),
         description: this.safeText(line.description),
         quantity,
@@ -1331,10 +1340,12 @@ export class InvoicesDataService {
 
   private normalizePartStatus(value: unknown): InvoicePartStatus {
     const normalized = String(value || '').trim().toLowerCase();
+    if (normalized === 'out-of-stock' || normalized === 'out of stock' || normalized === 'outofstock') return 'out-of-stock';
     if (normalized === 'in-stock' || normalized === 'in stock' || normalized === 'instock') return 'in-stock';
+    if (normalized === 'ordered' || normalized === 'on-order' || normalized === 'on order') return 'ordered';
     if (normalized === 'backordered' || normalized === 'back-order' || normalized === 'back order') return 'backordered';
     if (normalized === 'received' || normalized === 'invoiced-received') return 'received';
-    return 'ordered';
+    return 'out-of-stock';
   }
 
   private normalizeTimeline(items: InvoiceTimelineEntry[]): InvoiceTimelineEntry[] {
@@ -1577,6 +1588,21 @@ export class InvoicesDataService {
 
   private hasFinalInvoiceSentTimeline(timeline: InvoiceTimelineEntry[]): boolean {
     return (timeline || []).some(entry => String(entry?.message || '').trim().toLowerCase().includes('final invoice sent to customer'));
+  }
+
+  private isCustomerFacingEmailTimelineMessage(message: string | null | undefined, documentType: InvoiceDocumentType): boolean {
+    const text = String(message || '').trim().toLowerCase();
+    if (!text) return false;
+
+    const hasEmailSignal = text.includes('email') || text.includes('e-mail') || text.includes('emailed');
+    const hasSentSignal = text.includes('sent') || text.includes('delivered');
+    const hasDocSignal = documentType === 'quote'
+      ? text.includes('quote')
+      : (text.includes('invoice') || text.includes('final invoice'));
+
+    if (hasEmailSignal && hasSentSignal && hasDocSignal) return true;
+    if (hasDocSignal && text.includes('sent to customer')) return true;
+    return false;
   }
 
   private migrateDuplicateActiveQuotes(items: InvoiceDetail[]): InvoiceDetail[] {

@@ -54,7 +54,7 @@
 
       <ng-template #noQueueItems>
         <div class="empty-state">
-          No outstanding parts from paid invoices. Paid jobs with parts marked <strong>ordered</strong> or <strong>backordered</strong> will show here.
+          No outstanding parts from paid invoices. Paid jobs with parts marked <strong>out of stock</strong> or <strong>backordered</strong> will show here until they are moved to ordered/in-stock/received.
         </div>
       </ng-template>
     </section>
@@ -101,8 +101,9 @@
                 <span>Status</span>
                 <select
                   [value]="line.status"
-                  [disabled]="isQueueLineSaving(selected.invoiceId, line.id)"
-                  (change)="updateQueueLineStatus(selected.invoiceId, line.id, $any($event.target).value)">
+                  [disabled]="isQueueLineSaving(selected.invoiceId, line.id, line.sourceIndex)"
+                  (change)="updateQueueLineStatus(selected.invoiceId, line.id, line.sourceIndex, $any($event.target).value)">
+                  <option value="out-of-stock">Out of stock</option>
                   <option value="ordered">Ordered</option>
                   <option value="backordered">Backordered</option>
                   <option value="in-stock">In-stock</option>
@@ -146,6 +147,18 @@
         </ion-item>
 
         <div class="parts-list">
+          <div class="parts-loading" *ngIf="loading()">
+            <div class="parts-loading-label">Loading parts...</div>
+            <div class="part-skeleton-row" *ngFor="let _ of [1,2,3,4,5,6]">
+              <div class="part-skeleton-top">
+                <div class="part-skeleton-line name"></div>
+                <div class="part-skeleton-pill"></div>
+              </div>
+              <div class="part-skeleton-line meta"></div>
+              <div class="part-skeleton-line meta short"></div>
+            </div>
+          </div>
+
           <button
             type="button"
             class="part-row"
@@ -157,9 +170,11 @@
               <span class="stock-pill" [ngClass]="onHandClass(item)">{{ onHandLabel(item) }}</span>
             </div>
             <div class="part-meta">SKU {{ item.sku || 'N/A' }} · {{ item.vendor || 'No supplier' }}</div>
-            <div class="part-meta">On order {{ item.onOrder }}</div>
+            <div class="part-meta">
+              On order {{ item.onOrder }} · Cost {{ formatCurrency(item.unitCost || 0) }} · Price {{ formatCurrency(item.price || 0) }}
+            </div>
           </button>
-          <div *ngIf="!pagedItems().length" class="empty-state">No parts match your search.</div>
+          <div *ngIf="!loading() && !pagedItems().length" class="empty-state">No parts match your search.</div>
         </div>
 
         <div class="table-pager" *ngIf="filteredItems().length > 0">
@@ -220,21 +235,16 @@
               <ion-label position="stacked">Unit Cost</ion-label>
               <ion-input type="number" [ngModel]="editor()?.unitCost ?? 0" (ngModelChange)="setEditorNumber('unitCost', $event)"></ion-input>
             </ion-item>
+
+            <ion-item class="detail-item" lines="none">
+              <ion-label position="stacked">Unit Price (Customer)</ion-label>
+              <ion-input type="number" [ngModel]="editor()?.price ?? 0" (ngModelChange)="setEditorNumber('price', $event)"></ion-input>
+            </ion-item>
           </div>
 
           <div class="detail-actions">
             <ion-button [disabled]="saving() || !hasSelectedChanges()" (click)="saveSelectedItem()">
               {{ saving() ? 'Saving...' : 'Save Part' }}
-            </ion-button>
-            <ion-button fill="outline" [disabled]="saving() || !hasSelectedChanges()" (click)="resetSelectedEditor()">
-              Reset
-            </ion-button>
-            <ion-button
-              fill="outline"
-              color="medium"
-              [disabled]="saving()"
-              (click)="createReorderDraft(selected)">
-              Create PO Draft
             </ion-button>
           </div>
         </ng-container>

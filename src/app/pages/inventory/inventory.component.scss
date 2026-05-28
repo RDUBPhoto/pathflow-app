@@ -279,6 +279,79 @@
   padding-right: 2px;
 }
 
+.parts-loading {
+  display: grid;
+  gap: 8px;
+}
+
+.parts-loading-label {
+  font-size: 12px;
+  color: var(--app-text-muted);
+  margin-bottom: 2px;
+}
+
+.part-skeleton-row {
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 12px;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+  background: var(--app-surface-bg);
+}
+
+.part-skeleton-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.part-skeleton-line,
+.part-skeleton-pill {
+  position: relative;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--app-border-subtle) 70%, transparent);
+}
+
+.part-skeleton-line::after,
+.part-skeleton-pill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.18), transparent);
+  animation: inventorySkeletonShimmer 1.2s infinite;
+}
+
+.part-skeleton-line {
+  height: 12px;
+  border-radius: 6px;
+}
+
+.part-skeleton-line.name {
+  width: 62%;
+}
+
+.part-skeleton-line.meta {
+  width: 92%;
+}
+
+.part-skeleton-line.meta.short {
+  width: 72%;
+}
+
+.part-skeleton-pill {
+  height: 22px;
+  width: 78px;
+  border-radius: 999px;
+}
+
+@keyframes inventorySkeletonShimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
 .part-row {
   appearance: none;
   width: 100%;
@@ -438,6 +511,7 @@
 .detail-actions {
   margin-top: 2px;
   display: flex;
+  justify-content: flex-end;
   flex-wrap: wrap;
   gap: 8px;
 }

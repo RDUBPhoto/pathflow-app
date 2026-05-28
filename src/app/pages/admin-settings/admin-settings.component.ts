@@ -44,7 +44,7 @@ import {
   copyOutline,
   cardOutline
 } from 'ionicons/icons';
-import { Subscription, catchError, finalize, firstValueFrom, forkJoin, of } from 'rxjs';
+import { Observable, Subscription, catchError, finalize, firstValueFrom, forkJoin, of } from 'rxjs';
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
 import { PageBackButtonComponent } from '../../components/navigation/page-back-button/page-back-button.component';
 import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
@@ -65,13 +65,16 @@ import {
   InventoryImportRow,
   InventoryItem
 } from '../../services/inventory-api.service';
-import { AppSettingsApiService } from '../../services/app-settings-api.service';
+import {
+  AppSettingsApiService
+} from '../../services/app-settings-api.service';
 import { BusinessProfileService } from '../../services/business-profile.service';
 import { AddressLookupService, AddressSuggestion } from '../../services/address-lookup.service';
 import { TenantContextService } from '../../services/tenant-context.service';
 import { AuthService } from '../../auth/auth.service';
 import { environment } from '../../../environments/environment';
 import { AccessAdminApiService, WorkspaceUser } from '../../services/access-admin-api.service';
+import { AdminSetupProgressService } from '../../services/admin-setup-progress.service';
 import {
   PaymentGatewayProviderKey,
   PaymentGatewaySettingsService
@@ -127,6 +130,8 @@ const ADMIN_INTEGRATIONS_SETTING_KEY = 'admin.integrations';
 const SCHEDULE_SETTINGS_KEY = 'schedule.settings';
 const EMAIL_FOOTER_TERMS_SETTING_KEY = 'email.footer.terms.html';
 const LEGACY_QUOTE_TERMS_SETTING_KEY = 'quote.terms.html';
+const ORDERS_INBOX_EMAIL_SETTING_KEY = 'orders.inbox.email';
+const ORDERS_INBOX_PROVIDER_SETTING_KEY = 'orders.inbox.provider';
 const BUSINESS_TAX_RATE_SETTING_KEY = 'business.tax.rate';
 const BUSINESS_LABOR_RATES_SETTING_KEY = 'business.labor.rates';
 const BUSINESS_DOCUMENT_TEMPLATES_SETTING_KEY = 'business.document.templates';
@@ -220,6 +225,9 @@ type WidgetLeadResponse = {
     confirmationError: string | null;
   };
 };
+
+type OrdersInboxProvider = 'gmail' | 'microsoft365' | 'other';
+type EmailMergeTagOption = { token: string; label: string };
 
 const ZIGAFLOW_EXPECTED_HEADERS = [
   'Business',
@@ -462,6 +470,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
   private readonly scheduleApi = inject(ScheduleApi);
   private readonly workItemsApi = inject(WorkItemsApi);
   private readonly accessAdminApi = inject(AccessAdminApiService);
+  readonly setupProgress = inject(AdminSetupProgressService);
   readonly paymentGatewaySettings = inject(PaymentGatewaySettingsService);
 
   readonly users = signal<WorkspaceUser[]>(this.cloneDefaultUsers());
@@ -521,8 +530,8 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
     },
     {
       key: 'email',
-      label: 'Email Templates',
-      description: 'Reusable templates for customer email',
+      label: 'Email Options',
+      description: 'Sender settings, orders inbox routing, and templates',
       icon: 'mail-outline'
     },
     {
@@ -536,6 +545,22 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
   readonly userCount = computed(() => this.users().length);
   readonly logoUrl = computed(() => this.branding.logoUrl());
   readonly hasCustomLogo = computed(() => this.branding.hasCustomLogo());
+  readonly setupWizardOpen = signal(false);
+  readonly setupWizardCompact = signal(false);
+  readonly setupWizardIndex = signal(0);
+  readonly setupFocusMode = signal(false);
+  readonly setupJumping = signal(false);
+  readonly setupJumpNotice = signal('');
+  readonly setupWizardItems = computed(() => {
+    const pending = this.setupProgress.pendingItems();
+    return pending.length ? pending : this.setupProgress.items();
+  });
+  readonly setupWizardCurrent = computed(() => {
+    const items = this.setupWizardItems();
+    if (!items.length) return null;
+    const index = Math.max(0, Math.min(this.setupWizardIndex(), items.length - 1));
+    return items[index];
+  });
   readonly widgetTenantId = computed(() => this.tenantContext.tenantId());
   readonly openHourOptions = Array.from({ length: 24 }, (_, hour) => ({
     value: hour,
@@ -578,6 +603,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
   businessAddressSearching = signal(false);
   businessAddressNoMatches = signal(false);
   private businessAddressLookupSub: Subscription | null = null;
+  private routeQuerySub: Subscription | null = null;
   private businessAddressSearchTimer: ReturnType<typeof setTimeout> | null = null;
   subscriptionStatus = '';
   subscriptionError = '';
@@ -616,6 +642,10 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
   emailSenderFrom = '';
   emailSenderName = '';
   emailSenderReplyTo = '';
+  ordersInboxEmail = '';
+  ordersInboxDomain = '';
+  ordersInboxUpdatedAt = '';
+  ordersInboxProvider: OrdersInboxProvider = 'gmail';
   inboundFrom = '';
   inboundFromName = '';
   inboundSubject = '';
@@ -668,6 +698,19 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
   readonly inventoryImportPreviewPageSize = 5;
   readonly inventoryImportResult = signal<InventoryImportResponse | null>(null);
   readonly inventoryImportTargetFields = INVENTORY_IMPORT_TARGET_FIELDS;
+  readonly emailMergeTagOptions: EmailMergeTagOption[] = [
+    { token: '{{customer_name}}', label: 'Customer Name' },
+    { token: '{{customer_email}}', label: 'Customer Email' },
+    { token: '{{customer_phone}}', label: 'Customer Phone' },
+    { token: '{{appointment_date}}', label: 'Appointment Date' },
+    { token: '{{quote_number}}', label: 'Quote Number' },
+    { token: '{{invoice_number}}', label: 'Invoice Number' },
+    { token: '{{company_name}}', label: 'Company Name' },
+    { token: '{{company_email}}', label: 'Company Email' },
+    { token: '{{company_phone}}', label: 'Company Phone' },
+    { token: '{{company_address}}', label: 'Company Address' },
+    { token: '{{company_logo_url}}', label: 'Company Logo URL' }
+  ];
   readonly importOverlayActive = computed(() => this.customerImporting() || this.inventoryImporting());
   readonly importOverlayMessage = computed(() => {
     if (this.inventoryImporting()) return 'Importing inventory...';
@@ -744,11 +787,15 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
-    const sectionParam = (this.route.snapshot.queryParamMap.get('section') || '').trim();
-    const matchingSection = this.sections.find(section => section.key === sectionParam);
-    if (matchingSection) {
-      this.setActiveSection(matchingSection.key);
-    }
+    this.routeQuerySub = this.route.queryParamMap.subscribe(params => {
+      const sectionParam = (params.get('section') || '').trim();
+      const matchingSection = this.sections.find(section => section.key === sectionParam);
+      if (matchingSection) {
+        this.setActiveSection(matchingSection.key);
+      }
+      this.setupFocusMode.set(params.get('setupFocus') === '1');
+    });
+
     this.loadPersistedAdminSettings();
     this.loadSubscriptionState();
     this.loadSmsConfig();
@@ -760,14 +807,111 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
     this.loadLaborRates();
     this.loadInventoryItems();
     this.loadDocumentTemplates();
+    void this.setupProgress.refresh();
   }
 
   ngOnDestroy(): void {
     this.businessAddressLookupSub?.unsubscribe();
+    this.routeQuerySub?.unsubscribe();
     if (this.businessAddressSearchTimer) {
       clearTimeout(this.businessAddressSearchTimer);
       this.businessAddressSearchTimer = null;
     }
+  }
+
+  async openSetupWizard(): Promise<void> {
+    if (this.setupJumping()) return;
+    this.setupJumping.set(true);
+    this.setupJumpNotice.set('');
+    try {
+      const first = await this.goToFirstMissingSection(true);
+      if (!first) {
+        this.setupJumpNotice.set('All setup items are complete.');
+        return;
+      }
+      this.setupJumpNotice.set(`Focused: ${first.label}`);
+    } catch {
+      this.setupJumpNotice.set('Could not open next setup item.');
+    } finally {
+      this.setupJumping.set(false);
+    }
+  }
+
+  skipSetupWizard(): void {
+    this.setupWizardOpen.set(false);
+    this.setupWizardCompact.set(false);
+    this.setupProgress.dismissPrompt();
+  }
+
+  nextSetupWizardStep(): void {
+    const items = this.setupWizardItems();
+    if (!items.length) return;
+    const next = this.setupWizardIndex() + 1;
+    if (next >= items.length) {
+      this.setupWizardOpen.set(false);
+      return;
+    }
+    this.setupWizardIndex.set(next);
+    const item = items[next];
+    this.setActiveSection(item.section);
+  }
+
+  prevSetupWizardStep(): void {
+    const prev = this.setupWizardIndex() - 1;
+    if (prev < 0) return;
+    this.setupWizardIndex.set(prev);
+    const item = this.setupWizardItems()[prev];
+    if (item) this.setActiveSection(item.section);
+  }
+
+  jumpSetupWizardStep(index: number, section: AdminSectionKey): void {
+    this.setupWizardIndex.set(Math.max(0, index));
+    this.setActiveSection(section);
+  }
+
+  markSetupDone(): void {
+    this.setupProgress.markDone();
+    this.setupWizardOpen.set(false);
+    this.setupWizardCompact.set(false);
+  }
+
+  workOnSetupStep(index: number): void {
+    const items = this.setupWizardItems();
+    const target = items[index];
+    if (!target) return;
+    this.setupWizardIndex.set(index);
+    this.setActiveSection(target.section);
+    this.setupWizardCompact.set(true);
+  }
+
+  toggleSetupWizardCompact(): void {
+    this.setupWizardCompact.set(!this.setupWizardCompact());
+  }
+
+  sectionHasPending(section: AdminSectionKey): boolean {
+    return this.setupProgress.pendingItems().some(item => item.section === section);
+  }
+
+  showSectionSetupError(section: AdminSectionKey): boolean {
+    return this.setupFocusMode() && this.activeSection() === section && this.sectionHasPending(section);
+  }
+
+  scheduleSetupInvalid(): boolean {
+    return this.scheduleCloseHour <= this.scheduleOpenHour
+      || !this.scheduleBays.length
+      || this.scheduleBays.some(bay => !String(bay?.name || '').trim());
+  }
+
+  private async goToFirstMissingSection(enableFocus = false): Promise<{ section: AdminSectionKey; label: string } | null> {
+    this.setupProgress.clearDismissed();
+    await this.setupProgress.refresh();
+    const first = this.setupProgress.pendingItems()[0];
+    if (first) {
+      this.setActiveSection(first.section as AdminSectionKey);
+      this.setupFocusMode.set(enableFocus);
+      return { section: first.section as AdminSectionKey, label: first.label };
+    }
+    return null;
   }
 
   saveBusinessProfile(): void {
@@ -803,6 +947,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
         this.businessTaxRate = normalizedTaxRate;
         this.businessProfileStatus = 'Business profile saved.';
         this.businessProfileError = '';
+        void this.setupProgress.refresh();
       },
       error: err => {
         this.businessProfileStatus = '';
@@ -989,6 +1134,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
           this.newUserEmail = '';
           this.newUserRole = 'user';
           this.statusMessage = `Invite sent to ${email}.`;
+          void this.setupProgress.refresh();
         },
         error: err => {
           this.usersError = this.extractApiError(err, 'Could not invite user.');
@@ -1007,6 +1153,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
         next: res => {
           this.users.set(Array.isArray(res.items) ? res.items : []);
           this.statusMessage = `${user.email} access removed.`;
+          void this.setupProgress.refresh();
         },
         error: err => {
           this.usersError = this.extractApiError(err, 'Could not remove user access.');
@@ -1035,6 +1182,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
         next: res => {
           this.users.set(Array.isArray(res.items) ? res.items : []);
           this.statusMessage = `${email} deleted from Pathflow.`;
+          void this.setupProgress.refresh();
         },
         error: err => {
           this.usersError = this.extractApiError(err, 'Could not delete user.');
@@ -1144,6 +1292,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
       this.paymentGatewayStatus = connected
         ? 'Payment gateway connected.'
         : 'Payment gateway disconnected.';
+      void this.setupProgress.refresh();
     } catch {
       this.paymentGatewayError = 'Could not update payment gateway connection.';
     }
@@ -1159,6 +1308,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
         mode: draft.mode
       });
       this.paymentGatewayStatus = 'Payment gateway settings saved.';
+      void this.setupProgress.refresh();
     } catch {
       this.paymentGatewayError = 'Could not save payment gateway settings.';
     }
@@ -1187,6 +1337,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
       .subscribe({
         next: () => {
           this.paymentGatewayStatus = 'Authorize.net credentials saved.';
+          void this.setupProgress.refresh();
         },
         error: err => {
           this.paymentGatewayError = this.extractApiError(err, 'Could not save Authorize.net credentials.');
@@ -1280,6 +1431,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
       }
       this.subscriptionStatus = 'Subscription updated and workspace activated.';
       this.loadSubscriptionState();
+      void this.setupProgress.refresh();
     } finally {
       this.subscriptionSaving.set(false);
     }
@@ -1427,6 +1579,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
           this.customerImportStatus =
             `Import finished. Created ${result.created}, updated ${result.updated}, ` +
             `skipped ${result.skipped}${result.errors.length ? `, errors ${result.errors.length}` : ''}.`;
+          void this.setupProgress.refresh();
         },
         error: err => {
           const message = this.extractApiError(err, 'Customer import failed.');
@@ -1593,6 +1746,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
             `Import finished. Created ${result.created}, updated ${result.updated}, ` +
             `skipped ${result.skipped}${result.errors.length ? `, errors ${result.errors.length}` : ''}.`;
           this.loadInventoryItems();
+          void this.setupProgress.refresh();
         },
         error: err => {
           this.inventoryImportError = this.extractApiError(err, 'Inventory import failed.');
@@ -1884,6 +2038,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
       this.branding.setLogoUrl(result.url);
       this.brandingStatus = 'Business logo updated.';
       this.brandingError = '';
+      void this.setupProgress.refresh();
     } catch {
       this.brandingStatus = '';
       this.brandingError = 'Logo upload failed. Try again.';
@@ -1908,6 +2063,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
     if (!currentUrl || currentUrl === defaultUrl) {
       this.branding.resetLogo();
       this.brandingStatus = 'Business logo reset to default.';
+      void this.setupProgress.refresh();
       return;
     }
 
@@ -1917,6 +2073,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
         this.branding.resetLogo();
         this.brandingStatus = 'Business logo removed. You can upload a new logo now.';
         this.brandingError = '';
+        void this.setupProgress.refresh();
       },
       error: () => {
         this.brandingStatus = '';
@@ -2181,16 +2338,24 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
     forkJoin({
       config: this.emailApi.getConfig(),
       sender: this.emailApi.getSenderConfig().pipe(catchError(() => of(null))),
-      templates: this.emailApi.listTemplates()
+      templates: this.emailApi.listTemplates(),
+      ordersInbox: this.settingsApi
+        .getValue<string>(ORDERS_INBOX_EMAIL_SETTING_KEY)
+        .pipe(catchError(() => of(null))),
+      ordersInboxProvider: this.settingsApi.getValue<string>(ORDERS_INBOX_PROVIDER_SETTING_KEY)
     })
       .pipe(finalize(() => this.emailLoading.set(false)))
       .subscribe({
-        next: ({ config, sender, templates }) => {
+        next: ({ config, sender, templates, ordersInbox, ordersInboxProvider }) => {
           this.emailConfig.set(config);
           this.emailSender.set(sender?.sender || null);
           this.emailSenderFrom = (sender?.sender?.fromEmail || config?.fromEmail || '').trim();
           this.emailSenderName = (sender?.sender?.fromName || '').trim();
           this.emailSenderReplyTo = (sender?.sender?.replyTo || '').trim();
+          this.ordersInboxEmail = String(ordersInbox || '').trim();
+          this.ordersInboxDomain = this.ordersInboxEmail.includes('@') ? this.ordersInboxEmail.split('@')[1] : '';
+          this.ordersInboxUpdatedAt = '';
+          this.ordersInboxProvider = this.normalizeOrdersInboxProvider(ordersInboxProvider);
           this.applyEmailConnectionToIntegration(config);
           this.applyEmailTemplatesResponse(templates, true);
           this.emailStatus = '';
@@ -2235,6 +2400,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
           this.emailSenderName = (sender?.fromName || '').trim();
           this.emailSenderReplyTo = (sender?.replyTo || '').trim();
           this.emailStatus = 'Email sender saved.';
+          void this.setupProgress.refresh();
         },
         error: err => {
           this.emailError = this.extractApiError(err, 'Could not save email sender.');
@@ -2256,11 +2422,90 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
           this.emailSenderName = (sender?.fromName || '').trim();
           this.emailSenderReplyTo = (sender?.replyTo || '').trim();
           this.emailStatus = 'Email sender reset to environment default.';
+          void this.setupProgress.refresh();
         },
         error: err => {
           this.emailError = this.extractApiError(err, 'Could not reset email sender.');
         }
       });
+  }
+
+  canSaveOrdersInboxEmail(): boolean {
+    const email = this.ordersInboxEmail.trim();
+    return !email || this.isValidEmail(email);
+  }
+
+  saveOrdersInboxEmail(): void {
+    const email = this.ordersInboxEmail.trim().toLowerCase();
+    if (email && !this.isValidEmail(email)) {
+      this.emailError = 'Orders inbox email must be a valid email address.';
+      return;
+    }
+
+    this.emailSaving.set(true);
+    this.emailError = '';
+    this.emailStatus = '';
+    const inboxRequest$: Observable<unknown> = email
+      ? this.settingsApi.setValue<string>(ORDERS_INBOX_EMAIL_SETTING_KEY, email)
+      : this.settingsApi.deleteValue(ORDERS_INBOX_EMAIL_SETTING_KEY);
+    const provider = this.normalizeOrdersInboxProvider(this.ordersInboxProvider);
+
+    forkJoin({
+      inbox: inboxRequest$,
+      provider: this.settingsApi.setValue<OrdersInboxProvider>(ORDERS_INBOX_PROVIDER_SETTING_KEY, provider)
+    })
+      .pipe(finalize(() => this.emailSaving.set(false)))
+      .subscribe({
+        next: () => {
+          this.ordersInboxEmail = email;
+          this.ordersInboxProvider = provider;
+          this.emailStatus = email
+            ? 'Orders inbox routing settings saved.'
+            : 'Orders inbox email cleared and provider saved.';
+        },
+        error: (err: unknown) => {
+          this.emailError = this.extractApiError(err, 'Could not save orders inbox routing settings.');
+        }
+      });
+  }
+
+  regenerateOrdersInboxEmail(): void {
+    this.emailSaving.set(true);
+    this.emailError = '';
+    this.emailStatus = '';
+    this.settingsApi.ensureOrdersInboxEmail(true)
+      .pipe(finalize(() => this.emailSaving.set(false)))
+      .subscribe({
+        next: res => {
+          this.ordersInboxEmail = String(res?.value || '').trim().toLowerCase();
+          this.ordersInboxDomain = String(res?.domain || '').trim();
+          this.ordersInboxUpdatedAt = String(res?.updatedAt || '').trim();
+          this.emailStatus = 'Orders inbox email regenerated.';
+        },
+        error: err => {
+          this.emailError = this.extractApiError(err, 'Could not regenerate orders inbox email.');
+        }
+      });
+  }
+
+  async copyOrdersInboxEmail(): Promise<void> {
+    const copied = await this.copyText(this.ordersInboxEmail);
+    this.emailStatus = copied
+      ? 'Orders inbox email copied.'
+      : 'Could not copy orders inbox email.';
+    if (!copied) {
+      this.emailError = 'Copy failed. Please copy the address manually.';
+    } else {
+      this.emailError = '';
+    }
+  }
+
+  private normalizeOrdersInboxProvider(value: unknown): OrdersInboxProvider {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (normalized === 'gmail') return 'gmail';
+    if (normalized === 'microsoft365' || normalized === 'microsoft' || normalized === 'outlook') return 'microsoft365';
+    if (normalized === 'other') return 'other';
+    return 'gmail';
   }
 
   clearEmailTemplateForm(): void {
@@ -2298,6 +2543,20 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
     const imgTag = `<img src="${logo}" alt="Company logo" style="max-width:220px;height:auto;display:block;" />`;
     const current = String(this.emailTemplateBody || '').trim();
     this.emailTemplateBody = current ? `${current}\n\n${imgTag}` : imgTag;
+  }
+
+  insertEmailMergeTag(tag: string, target: 'subject' | 'body' | 'signature' = 'body'): void {
+    const token = String(tag || '').trim();
+    if (!token) return;
+    if (target === 'subject') {
+      this.emailTemplateSubject = `${String(this.emailTemplateSubject || '').trim()} ${token}`.trim();
+      return;
+    }
+    if (target === 'signature') {
+      this.emailSignatureDraft = `${String(this.emailSignatureDraft || '').trim()}\n${token}`.trim();
+      return;
+    }
+    this.emailTemplateBody = `${String(this.emailTemplateBody || '').trim()}\n${token}`.trim();
   }
 
   emailTemplatePreviewHtml(): string {
@@ -2348,6 +2607,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
             this.clearEmailTemplateForm();
           }
           this.emailStatus = editingId ? 'Template updated.' : 'Template created.';
+          void this.setupProgress.refresh();
         },
         error: err => {
           this.emailError = this.extractApiError(err, 'Could not save email template.');
@@ -2374,6 +2634,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
             this.clearEmailTemplateForm();
           }
           this.emailStatus = 'Template deleted.';
+          void this.setupProgress.refresh();
         },
         error: err => {
           this.emailError = this.extractApiError(err, 'Could not delete email template.');
@@ -2788,6 +3049,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
       next: () => {
         this.scheduleStatus = 'Schedule settings saved.';
         this.scheduleError = '';
+        void this.setupProgress.refresh();
       },
       error: () => {
         this.scheduleError = 'Could not save schedule settings.';
@@ -2945,6 +3207,9 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
       customer_name: 'Jamie Customer',
       customer_email: 'jamie.customer@example.com',
       customer_phone: '(555) 410-8822',
+      appointment_date: 'June 12, 2026 9:00 AM',
+      quote_number: 'Q-1024',
+      invoice_number: 'INV-2048',
       lead_message: 'I need a quote for suspension and alignment.',
       quote_terms: String(this.quoteTermsDraft || '').trim()
     };
@@ -3085,8 +3350,11 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
   private resolveEmailMergeTags(template: string, values: Record<string, string>): string {
     const source = String(template || '');
     if (!source) return '';
-    return source.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_full, rawKey: string) => {
-      const key = String(rawKey || '').toLowerCase();
+    return source.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_full, rawKey: string) => {
+      const key = String(rawKey || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '');
       if (!key) return '';
       return String(values[key] ?? '').trim();
     });

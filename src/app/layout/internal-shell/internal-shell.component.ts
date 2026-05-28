@@ -1,8 +1,9 @@
 import { Component, HostListener, OnDestroy, OnInit, computed, effect, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { ToastController } from '@ionic/angular';
 import { IonButton, IonIcon } from '@ionic/angular/standalone';
+import { Subscription, filter, firstValueFrom } from 'rxjs';
 import { addIcons } from 'ionicons';
 import {
   barChartOutline,
@@ -16,14 +17,21 @@ import {
   receiptOutline
 } from 'ionicons/icons';
 import { BrandSettingsService } from '../../services/brand-settings.service';
+import { BrandingApi } from '../../services/branding-api.service';
 import { ShellFooterComponent } from '../../components/layout/shell-footer/shell-footer.component';
 import { SmsApiService, SmsMessage } from '../../services/sms-api.service';
 import { EmailApiService, EmailMessage } from '../../services/email-api.service';
+import { BusinessProfileService } from '../../services/business-profile.service';
+import { AppSettingsApiService } from '../../services/app-settings-api.service';
+import { PaymentGatewayProviderKey, PaymentGatewaySettingsService } from '../../services/payment-gateway-settings.service';
+import { AccessAdminApiService } from '../../services/access-admin-api.service';
 import { UserScopedSettingsService } from '../../services/user-scoped-settings.service';
+import { AdminSetupItem, AdminSetupProgressService } from '../../services/admin-setup-progress.service';
 import { AuthService } from '../../auth/auth.service';
 import { environment } from '../../../environments/environment';
 
 const NAV_COLLAPSED_SETTING_KEY = 'ui.navCollapsed';
+const SCHEDULE_SETTINGS_KEY = 'schedule.settings';
 
 type MessageThread = {
   key: string;
@@ -71,11 +79,17 @@ export class InternalShellComponent implements OnInit, OnDestroy {
   private readonly isLocalHost = typeof window !== 'undefined'
     && ['localhost', '127.0.0.1'].includes(window.location.hostname);
   readonly branding = inject(BrandSettingsService);
+  private readonly brandingApi = inject(BrandingApi);
   private readonly smsApi = inject(SmsApiService);
   private readonly emailApi = inject(EmailApiService);
+  private readonly businessProfile = inject(BusinessProfileService);
+  private readonly settingsApi = inject(AppSettingsApiService);
+  private readonly paymentGatewaySettings = inject(PaymentGatewaySettingsService);
+  private readonly accessApi = inject(AccessAdminApiService);
   private readonly toastController = inject(ToastController);
   private readonly userSettings = inject(UserScopedSettingsService);
   readonly auth = inject(AuthService);
+  readonly setupProgress = inject(AdminSetupProgressService);
   private readonly router = inject(Router);
   readonly collapsed = signal(false);
   readonly isMobile = signal(false);
@@ -125,8 +139,42 @@ export class InternalShellComponent implements OnInit, OnDestroy {
     if (!this.branding.loaded()) return false;
     return !this.branding.hasCustomLogo();
   });
+  readonly showSetupPrompt = signal(false);
+  readonly quickSetupOpen = signal(false);
+  readonly quickSetupBusy = signal(false);
+  readonly quickSetupError = signal('');
+  readonly quickSetupStatus = signal('');
+  readonly quickSetupIndex = signal(0);
+  readonly quickSetupItems = computed(() => this.setupProgress.pendingItems().length
+    ? this.setupProgress.pendingItems()
+    : this.setupProgress.items());
+  readonly quickSetupCurrent = computed(() => {
+    const items = this.quickSetupItems();
+    if (!items.length) return null;
+    return items[Math.max(0, Math.min(this.quickSetupIndex(), items.length - 1))];
+  });
+
+  quickBusinessName = '';
+  quickBusinessEmail = '';
+  quickBusinessPhone = '';
+  quickBusinessAddress = '';
+  quickOpenHour = 7;
+  quickCloseHour = 16;
+  quickPaymentProvider: PaymentGatewayProviderKey = 'authorize-net';
+  quickPaymentAccountLabel = '';
+  quickPaymentMode: 'test' | 'live' = 'test';
+  quickSenderEmail = '';
+  quickSenderName = '';
+  quickSenderReplyTo = '';
+  quickTemplateName = '';
+  quickTemplateSubject = '';
+  quickTemplateBody = '';
+  quickUserName = '';
+  quickUserEmail = '';
+  quickUserRole: 'admin' | 'user' = 'user';
   private hasLoadedInbox = false;
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
+  private routeSub: Subscription | null = null;
   private navLoadToken = 0;
 
   constructor() {
@@ -163,6 +211,26 @@ export class InternalShellComponent implements OnInit, OnDestroy {
     this.updateMobileState();
     this.refreshInbox(false);
     this.refreshTimer = setInterval(() => this.refreshInbox(true), 5000);
+    if (this.auth.isAdmin()) {
+      void this.setupProgress.refresh().then(() => {
+        if (this.setupProgress.shouldPrompt()) {
+          this.showSetupPrompt.set(true);
+        }
+      });
+    }
+    this.routeSub = this.router.events
+      .pipe(filter(event => event instanceof NavigationEnd))
+      .subscribe(() => {
+        const path = this.router.url.split('?')[0] || '';
+        if (!this.auth.isAdmin()) return;
+        if (path !== '/dashboard') return;
+        if (this.showSetupPrompt()) return;
+        void this.setupProgress.refresh().then(() => {
+          if (this.setupProgress.shouldPrompt()) {
+            this.showSetupPrompt.set(true);
+          }
+        });
+      });
   }
 
   ngOnDestroy(): void {
@@ -170,6 +238,7 @@ export class InternalShellComponent implements OnInit, OnDestroy {
       clearInterval(this.refreshTimer);
       this.refreshTimer = null;
     }
+    this.routeSub?.unsubscribe();
   }
 
   toggleCollapsed(): void {
@@ -305,6 +374,175 @@ export class InternalShellComponent implements OnInit, OnDestroy {
 
   openBrandingSettings(): void {
     this.router.navigate(['/admin-settings'], { queryParams: { section: 'branding' } });
+  }
+
+  startSetupWizard(): void {
+    this.showSetupPrompt.set(false);
+    this.setupProgress.clearDismissed();
+    void this.setupProgress.refresh().then(() => {
+      const firstMissing = this.setupProgress.pendingItems()[0];
+      const section = firstMissing?.section || 'branding';
+      this.router.navigate(['/admin-settings'], {
+        queryParams: {
+          section,
+          setupFocus: '1',
+          setupStartAt: Date.now()
+        }
+      });
+    });
+  }
+
+  skipSetupPrompt(): void {
+    this.showSetupPrompt.set(false);
+    this.setupProgress.dismissPrompt();
+  }
+
+  closeQuickSetup(): void {
+    this.quickSetupOpen.set(false);
+  }
+
+  quickSetupNext(): void {
+    const next = this.quickSetupIndex() + 1;
+    if (next >= this.quickSetupItems().length) return;
+    this.quickSetupIndex.set(next);
+    this.quickSetupError.set('');
+    this.quickSetupStatus.set('');
+  }
+
+  quickSetupBack(): void {
+    const prev = this.quickSetupIndex() - 1;
+    if (prev < 0) return;
+    this.quickSetupIndex.set(prev);
+    this.quickSetupError.set('');
+    this.quickSetupStatus.set('');
+  }
+
+  async quickSetupSaveCurrent(): Promise<void> {
+    const item = this.quickSetupCurrent();
+    if (!item) return;
+    this.quickSetupBusy.set(true);
+    this.quickSetupError.set('');
+    this.quickSetupStatus.set('');
+    try {
+      await this.saveQuickSetupItem(item);
+      await this.setupProgress.refresh();
+      this.quickSetupStatus.set('Saved.');
+      if (this.setupProgress.pendingCount() === 0) {
+        this.setupProgress.markDone();
+        this.quickSetupOpen.set(false);
+        return;
+      }
+      this.quickSetupIndex.set(0);
+    } catch (err: any) {
+      this.quickSetupError.set(String(err?.message || 'Could not save setup step.'));
+    } finally {
+      this.quickSetupBusy.set(false);
+    }
+  }
+
+  private async saveQuickSetupItem(item: AdminSetupItem): Promise<void> {
+    if (item.id === 'business-profile') {
+      await firstValueFrom(this.businessProfile.save({
+        companyName: this.quickBusinessName.trim(),
+        companyEmail: this.quickBusinessEmail.trim(),
+        companyPhone: this.quickBusinessPhone.trim(),
+        companyAddress: this.quickBusinessAddress.trim()
+      }));
+      return;
+    }
+    if (item.id === 'business-hours') {
+      const current = await firstValueFrom(this.settingsApi.getValue<any>(SCHEDULE_SETTINGS_KEY));
+      const next = {
+        ...(current && typeof current === 'object' ? current : {}),
+        openHour: this.quickOpenHour,
+        closeHour: this.quickCloseHour,
+        bays: Array.isArray(current?.bays) && current.bays.length ? current.bays : [{ id: 'bay-1', name: 'Bay 1' }]
+      };
+      await firstValueFrom(this.settingsApi.setValue(SCHEDULE_SETTINGS_KEY, next));
+      return;
+    }
+    if (item.id === 'payment-gateway') {
+      await this.paymentGatewaySettings.setConnection(this.quickPaymentProvider, true, {
+        accountLabel: this.quickPaymentAccountLabel.trim(),
+        mode: this.quickPaymentMode,
+        setAsDefault: true
+      });
+      return;
+    }
+    if (item.id === 'email-sender') {
+      await firstValueFrom(this.emailApi.setSenderConfig({
+        fromEmail: this.quickSenderEmail.trim(),
+        fromName: this.quickSenderName.trim() || undefined,
+        replyTo: this.quickSenderReplyTo.trim() || undefined
+      }));
+      return;
+    }
+    if (item.id === 'email-templates') {
+      await firstValueFrom(this.emailApi.upsertTemplate({
+        name: this.quickTemplateName.trim(),
+        subject: this.quickTemplateSubject.trim(),
+        body: this.quickTemplateBody.trim()
+      }));
+      return;
+    }
+    if (item.id === 'user-access') {
+      await firstValueFrom(this.accessApi.inviteUser({
+        name: this.quickUserName.trim(),
+        email: this.quickUserEmail.trim().toLowerCase(),
+        role: this.quickUserRole
+      }));
+      return;
+    }
+    if (item.id === 'logo') {
+      throw new Error('Use the logo upload field below.');
+    }
+  }
+
+  async quickUploadLogo(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    this.quickSetupBusy.set(true);
+    this.quickSetupError.set('');
+    try {
+      const fileDataUrl = await this.readFileAsDataUrl(file);
+      const result = await firstValueFrom(
+        this.brandingApi.uploadLogo(file.name, file.type || 'application/octet-stream', fileDataUrl)
+      );
+      this.branding.setLogoUrl(result.url);
+      await this.setupProgress.refresh();
+      this.quickSetupStatus.set('Logo uploaded.');
+      this.quickSetupIndex.set(0);
+    } catch {
+      this.quickSetupError.set('Could not upload logo.');
+    } finally {
+      this.quickSetupBusy.set(false);
+      input.value = '';
+    }
+  }
+
+  private seedQuickSetupDrafts(): void {
+    const profile = this.businessProfile.profile();
+    this.quickBusinessName = String(profile.companyName || '').trim();
+    this.quickBusinessEmail = String(profile.companyEmail || '').trim();
+    this.quickBusinessPhone = String(profile.companyPhone || '').trim();
+    this.quickBusinessAddress = String(profile.companyAddress || '').trim();
+    this.quickPaymentProvider = this.paymentGatewaySettings.defaultProvider()?.key || 'authorize-net';
+    this.quickPaymentAccountLabel = this.paymentGatewaySettings.providerByKey(this.quickPaymentProvider)?.accountLabel || '';
+    this.quickPaymentMode = this.paymentGatewaySettings.providerByKey(this.quickPaymentProvider)?.mode || 'test';
+    this.quickSenderEmail = String(this.auth.user()?.email || '').trim().toLowerCase();
+    this.quickTemplateName = 'Welcome Template';
+    this.quickTemplateSubject = 'Welcome to our shop';
+    this.quickTemplateBody = '<p>Thanks for choosing us.</p>';
+  }
+
+  private readFileAsDataUrl(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error('Unable to read file.'));
+      reader.readAsDataURL(file);
+    });
   }
 
   toggleFeedback(): void {

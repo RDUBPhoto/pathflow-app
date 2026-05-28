@@ -179,6 +179,7 @@ export default class InvoicesNewComponent {
       })
       .slice(0, 25);
   });
+  readonly customerSelectionLoading = computed(() => this.loading() || this.recentLeadsLoading());
 
   readonly selectedCustomerName = computed(() => this.customerDisplayName(this.selectedCustomer()));
   readonly selectedCustomerVehicle = computed(() => this.customerVehicleSummary(this.selectedCustomer()) || 'Vehicle not set');
@@ -237,7 +238,12 @@ export default class InvoicesNewComponent {
     if (!query) return source.slice(0, 40);
     return source
       .filter(item => {
-        const haystack = [item.name, item.sku, item.vendor, item.category].join(' ').toLowerCase();
+        const haystack = [
+          this.inventoryName(item),
+          this.inventorySku(item),
+          this.inventoryVendor(item),
+          this.inventoryCategory(item)
+        ].join(' ').toLowerCase();
         return haystack.includes(query);
       })
       .slice(0, 40);
@@ -561,7 +567,7 @@ export default class InvoicesNewComponent {
   }
 
   trackInventory(_index: number, item: InventoryItem): string {
-    return String(item.id || '').trim() || `${item.sku}-${item.name}`;
+    return String(item.id || '').trim() || `${this.inventorySku(item)}-${this.inventoryName(item)}`;
   }
 
   trackLineItem(_index: number, line: InvoiceLineItem): string {
@@ -586,7 +592,9 @@ export default class InvoicesNewComponent {
       this.emailTemplates.set(Array.isArray(templatesRes.templates) ? templatesRes.templates : []);
       this.emailSignature.set(String(templatesRes.signature || '').trim());
       this.quoteTerms.set(String(quoteTerms || '').trim());
-      this.inventoryItems.set(Array.isArray(inventoryRes?.items) ? inventoryRes.items : []);
+      this.inventoryItems.set(
+        (Array.isArray(inventoryRes?.items) ? inventoryRes.items : []).map(item => this.normalizeInventoryItem(item))
+      );
       this.businessTaxRate.set(this.normalizeTaxRate(taxRateValue));
       this.laborRates.set(
         (Array.isArray(laborRates) ? laborRates : [])
@@ -804,8 +812,9 @@ export default class InvoicesNewComponent {
     const line = this.recalculateLine({
       id: `li-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       type: 'part',
-      code: String(item?.sku || '').trim(),
-      description: String(item?.name || '').trim() || 'Part',
+      partStatus: 'out-of-stock',
+      code: this.inventorySku(item),
+      description: this.inventoryName(item) || 'Part',
       quantity: 1,
       unitPrice: price,
       taxRate: this.businessTaxRate(),
@@ -862,10 +871,11 @@ export default class InvoicesNewComponent {
       lines.push(this.recalculateLine({
         id: `li-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
         type: 'part',
-        code: String(item.sku || '').trim(),
-        description: String(item.name || '').trim() || 'Part',
+        partStatus: 'out-of-stock',
+        code: this.inventorySku(item),
+        description: this.inventoryName(item) || 'Part',
         quantity: 1,
-        unitPrice: this.safeNumber(item.unitCost, 0),
+        unitPrice: this.safeNumber(item.price, this.safeNumber(item.unitCost, this.safeNumber(item.cost, 0))),
         taxRate: this.businessTaxRate(),
         lineSubtotal: 0,
         taxAmount: 0,
@@ -1480,6 +1490,7 @@ export default class InvoicesNewComponent {
     return {
       ...line,
       type: line.type === 'labor' ? 'labor' : 'part',
+      partStatus: line.type === 'labor' ? undefined : (line.partStatus || 'out-of-stock'),
       quantity,
       unitPrice,
       taxRate,
@@ -1487,6 +1498,52 @@ export default class InvoicesNewComponent {
       taxAmount,
       lineTotal
     };
+  }
+
+  private normalizeInventoryItem(item: InventoryItem): InventoryItem {
+    const raw = item as InventoryItem & Record<string, unknown>;
+    const name = this.text(raw.name, this.text(raw['description'], 'Part'));
+    const sku = this.text(raw.sku, this.text(raw['partLaborCode'], ''));
+    const vendor = this.text(raw.vendor, this.text(raw['mainSupplier'], ''));
+    const category = this.text(raw.category, '');
+    const unitCost = this.safeNumber(raw.unitCost, this.safeNumber(raw.cost, 0));
+    const price = this.safeNumber(raw.price, unitCost);
+    return {
+      ...item,
+      name,
+      sku,
+      vendor,
+      category,
+      unitCost,
+      cost: this.safeNumber(raw.cost, unitCost),
+      price
+    };
+  }
+
+  private inventoryName(item: InventoryItem): string {
+    const raw = item as InventoryItem & Record<string, unknown>;
+    return this.text(raw.name, this.text(raw['description'], 'Part'));
+  }
+
+  private inventorySku(item: InventoryItem): string {
+    const raw = item as InventoryItem & Record<string, unknown>;
+    return this.text(raw.sku, this.text(raw['partLaborCode'], ''));
+  }
+
+  private inventoryVendor(item: InventoryItem): string {
+    const raw = item as InventoryItem & Record<string, unknown>;
+    return this.text(raw.vendor, this.text(raw['mainSupplier'], ''));
+  }
+
+  private inventoryCategory(item: InventoryItem): string {
+    const raw = item as InventoryItem & Record<string, unknown>;
+    return this.text(raw.category, '');
+  }
+
+  private text(primary: unknown, fallback = ''): string {
+    const first = String(primary ?? '').trim();
+    if (first) return first;
+    return String(fallback ?? '').trim();
   }
 
   private safeNumber(value: unknown, fallback: number): number {

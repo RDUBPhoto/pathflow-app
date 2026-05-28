@@ -524,6 +524,43 @@ ion-footer.modal-form-footer ion-button.button-solid {
   --ion-toolbar-background: var(--color);
 }
 
+/* Global full-screen search overlay */
+ion-modal.global-search-modal {
+  --width: 100vw;
+  --min-width: 100vw;
+  --max-width: 100vw;
+  --width: 100dvw;
+  --min-width: 100dvw;
+  --max-width: 100dvw;
+  --height: 100vh;
+  --min-height: 100vh;
+  --max-height: 100vh;
+  --height: 100dvh;
+  --min-height: 100dvh;
+  --max-height: 100dvh;
+  --border-radius: 0;
+  --box-shadow: none;
+  --background: transparent;
+}
+
+ion-modal.global-search-modal::part(content) {
+  width: 100vw;
+  max-width: 100vw;
+  min-width: 100vw;
+  width: 100dvw;
+  max-width: 100dvw;
+  min-width: 100dvw;
+  height: 100vh;
+  max-height: 100vh;
+  min-height: 100vh;
+  height: 100dvh;
+  max-height: 100dvh;
+  min-height: 100dvh;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: hidden;
+}
+
 html:not([data-theme='light']) ion-footer.modal-form-footer ion-button[disabled]:not([fill]),
 html:not([data-theme='light']) ion-footer.modal-form-footer ion-button[disabled][fill='solid'] {
   --background: #3a4556;

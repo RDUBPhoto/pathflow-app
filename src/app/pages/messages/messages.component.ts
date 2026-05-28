@@ -712,6 +712,9 @@ export default class MessagesComponent implements OnInit, OnDestroy {
       customer_name: customerName,
       customer_email: customerEmail,
       customer_phone: customerPhone,
+      appointment_date: '',
+      quote_number: '',
+      invoice_number: '',
       lead_message: ''
     };
   }
@@ -731,8 +734,11 @@ export default class MessagesComponent implements OnInit, OnDestroy {
   private resolveEmailMergeTags(template: string, values: Record<string, string>): string {
     const source = String(template || '');
     if (!source) return '';
-    return source.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_full, rawKey: string) => {
-      const key = String(rawKey || '').toLowerCase();
+    return source.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_full, rawKey: string) => {
+      const key = String(rawKey || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '');
       if (!key) return '';
       return String(values[key] ?? '').trim();
     });

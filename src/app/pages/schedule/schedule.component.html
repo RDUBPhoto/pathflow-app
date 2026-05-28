@@ -177,16 +177,6 @@
           <div class="parts-empty">No parts listed for this job yet.</div>
         </ng-template>
       </ion-item>
-      <ion-item *ngIf="!editorBlocked()">
-        <ion-label position="stacked">Edit parts (one per line)</ion-label>
-        <ion-textarea
-          autoGrow
-          rows="3"
-          [ngModel]="editorParts()"
-          (ngModelChange)="editorParts.set($event)"
-          placeholder="Examples:&#10;2x Brake Pad Set | NAPA | BP-F150-2018&#10;1x Oil Filter | O'Reilly | OF-5W20-FLT">
-        </ion-textarea>
-      </ion-item>
       <div class="hint-text" *ngIf="!editorBlocked() && editorPartsSourceHint()">
         {{ editorPartsSourceHint() }}
       </div>

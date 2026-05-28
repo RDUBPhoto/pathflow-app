@@ -80,17 +80,20 @@ async function sendQaEmailReport({ checks, reportPath, now }) {
     || process.env.EMAIL_FROM
     || localValues.EMAIL_FROM
   );
-  const recipients = resolveRecipientList(
+  const configuredRecipients = resolveRecipientList(
     process.env.QA_REPORT_EMAIL_TO
     || process.env.QA_REPORT_RECIPIENTS
     || localValues.QA_REPORT_EMAIL_TO
   );
+  const recipients = configuredRecipients.length
+    ? configuredRecipients
+    : resolveRecipientList(fromEmail);
   const hasFailures = checks.some(check => !check.ok);
   const statusText = hasFailures ? 'FAIL' : 'PASS';
   const reportRelativePath = path.relative(root, reportPath);
 
   if (!recipients.length) {
-    console.log('[qa] Email report skipped (QA_REPORT_EMAIL_TO not set).');
+    console.log('[qa] Email report skipped (no recipients resolved from QA_REPORT_EMAIL_TO or EMAIL_FROM).');
     return;
   }
   if (!sendgridApiKey || !fromEmail) {

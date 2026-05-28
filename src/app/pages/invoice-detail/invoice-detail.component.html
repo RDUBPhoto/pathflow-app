@@ -70,41 +70,44 @@
           (click)="openSendInvoiceModal()">
           {{ sendingInvoice() ? 'Sending...' : sendInvoiceLabel() }}
         </ion-button>
-        <ion-button
-          size="small"
-          fill="outline"
-          color="warning"
-          *ngIf="detail.documentType === 'invoice' && overpaymentAmount() > 0"
-          [disabled]="refundingCustomer()"
-          (click)="refundCustomerOverpayment()">
-          {{ refundingCustomer() ? 'Refunding...' : 'Refund Customer' }}
-        </ion-button>
-        <ion-button
-          size="small"
-          fill="outline"
-          *ngIf="detail.documentType === 'invoice' && detail.stage === 'accepted' && !isFinalInvoiceMode()"
-          [disabled]="emailingPaidReceipt()"
-          (click)="emailPaidReceipt()">
-          {{ emailingPaidReceipt() ? 'Emailing...' : 'Email Receipt' }}
-        </ion-button>
-        <ion-button
-          size="small"
-          fill="outline"
-          *ngIf="detail.documentType === 'invoice' && detail.stage === 'accepted' && !isFinalInvoiceMode()"
-          [disabled]="textingPaidReceipt()"
-          (click)="sendPaidReceiptSms()">
-          {{ textingPaidReceipt() ? 'Sending SMS...' : 'Send Receipt SMS' }}
-        </ion-button>
-        <ion-button
-          size="small"
-          fill="outline"
-          *ngIf="detail.documentType === 'invoice' && isFinalInvoiceMode()"
-          (click)="printPaidInvoice()">
-          Print Invoice
-        </ion-button>
         <ion-button size="small" (click)="save()" [disabled]="!canSave()">
           {{ saving() ? 'Saving...' : ('Save ' + documentTypeLabel()) }}
         </ion-button>
+        <div
+          class="invoice-actions-menu"
+          *ngIf="detail.documentType === 'invoice'"
+          (click)="$event.stopPropagation()">
+          <button
+            type="button"
+            class="invoice-actions-trigger"
+            aria-label="More invoice actions"
+            (click)="toggleInvoiceActionsMenu($event)">
+            &#8942;
+          </button>
+          <div class="invoice-actions-popover" *ngIf="invoiceActionsMenuOpen()">
+            <button
+              type="button"
+              class="invoice-actions-item"
+              *ngIf="overpaymentAmount() > 0"
+              [disabled]="refundingCustomer()"
+              (click)="refundCustomerOverpayment()">
+              {{ refundingCustomer() ? 'Refunding...' : 'Refund Customer' }}
+            </button>
+            <button
+              type="button"
+              class="invoice-actions-item"
+              (click)="printPaidInvoice()">
+              Print Invoice
+            </button>
+            <button
+              type="button"
+              class="invoice-actions-item danger"
+              [disabled]="!canCancelInvoice()"
+              (click)="cancelInvoice()">
+              Cancel Invoice
+            </button>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -346,10 +349,9 @@
             <tr>
               <th>Type</th>
               <th>Part Status</th>
-              <th>Code</th>
               <th>Description</th>
               <th>Qty</th>
-              <th>Unit</th>
+              <th>Price</th>
               <th>Tax %</th>
               <th>Line Total</th>
               <th></th>
@@ -358,17 +360,12 @@
           <tbody *ngIf="lineItems().length; else noLines">
             <tr *ngFor="let line of pagedLineItems(); trackBy: trackLineItem">
               <td>
-                <select
-                  [value]="line.type"
-                  (change)="updateLineItemField(line.id, 'type', $any($event.target).value)">
-                  <option value="part">Part</option>
-                  <option value="labor">Labor</option>
-                </select>
+                <span class="line-muted">{{ line.type === 'labor' ? 'Labor' : 'Part' }}</span>
               </td>
               <td>
                 <select
                   *ngIf="line.type === 'part'; else laborStatus"
-                  [value]="line.partStatus || 'ordered'"
+                  [value]="line.partStatus || 'out-of-stock'"
                   (change)="updateLineItemField(line.id, 'partStatus', $any($event.target).value)">
                   <option *ngFor="let option of partStatusOptions" [value]="option.value">
                     {{ option.label }}
@@ -379,16 +376,29 @@
                 </ng-template>
               </td>
               <td>
-                <input
-                  type="text"
-                  [value]="line.code"
-                  (input)="updateLineItemField(line.id, 'code', $any($event.target).value)" />
-              </td>
-              <td>
-                <input
-                  type="text"
-                  [value]="line.description"
-                  (input)="updateLineItemField(line.id, 'description', $any($event.target).value)" />
+                <div class="line-search">
+                  <input
+                    type="text"
+                    [placeholder]="line.type === 'part' ? 'Search parts...' : 'Search labor...'"
+                    [value]="lineItemSearchValue(line)"
+                    (focus)="onLineItemSearchFocus(line.id)"
+                    (input)="onLineItemSearchInput(line, $any($event.target).value)"
+                    (blur)="onLineItemSearchBlur(line.id)" />
+                  <div class="line-search-results" *ngIf="isLineItemSearchOpen(line)">
+                    <button
+                      type="button"
+                      class="line-search-option"
+                      *ngFor="let option of lineItemSearchOptions(line)"
+                      (mousedown)="$event.preventDefault()"
+                      (click)="selectLineItemSearchOption(line, option)">
+                      <span class="line-search-label">{{ option.label }}</span>
+                      <span class="line-search-meta">{{ option.meta }}</span>
+                    </button>
+                    <div class="line-search-empty" *ngIf="!lineItemSearchOptions(line).length">
+                      No matches found.
+                    </div>
+                  </div>
+                </div>
               </td>
               <td>
                 <input
@@ -440,6 +450,48 @@
       <ng-template #noLines>
         <div class="line-empty">No line items yet. Add part or labor rows above.</div>
       </ng-template>
+    </section>
+
+    <section class="glass-surface ordered-parts-card" *ngIf="invoice() as detail">
+      <ng-container *ngIf="detail.documentType === 'invoice'">
+        <header class="ordered-parts-head">
+          <h3>Ordered Parts</h3>
+          <span>{{ orderedPartLines().length }} item(s)</span>
+        </header>
+
+        <div class="line-table-wrap ordered-parts-wrap" *ngIf="orderedPartLines().length; else noOrderedParts">
+          <table class="line-table ordered-parts-table">
+            <thead>
+              <tr>
+                <th>Part Name</th>
+                <th>SKU</th>
+                <th>Quantity</th>
+                <th>Price</th>
+                <th>Tracking</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let line of orderedPartLines(); trackBy: trackLineItem">
+                <td>{{ line.description || 'Part' }}</td>
+                <td>{{ line.code || '—' }}</td>
+                <td>{{ line.quantity }}</td>
+                <td>{{ line.unitPrice | currency:'USD':'symbol':'1.2-2' }}</td>
+                <td>
+                  <input
+                    type="text"
+                    placeholder="Add tracking number"
+                    [value]="line.trackingNumber || ''"
+                    (input)="updateLineItemField(line.id, 'trackingNumber', $any($event.target).value)" />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <ng-template #noOrderedParts>
+          <div class="line-empty">No ordered parts yet. Set a part status to Ordered to track shipments here.</div>
+        </ng-template>
+      </ng-container>
     </section>
 
     <section class="summary-grid" *ngIf="invoice() as detail">

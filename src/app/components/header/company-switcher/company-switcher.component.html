@@ -1,9 +1,22 @@
-<ng-container *ngIf="show()">
-  <ion-button class="company-trigger" fill="clear" (click)="openMenu($event)">
-    <ion-icon name="business-outline" slot="start"></ion-icon>
-    <span class="company-name">{{ activeLocationName() }}</span>
-    <ion-icon name="chevron-down-outline"></ion-icon>
-  </ion-button>
+<div class="header-center-tools">
+  <label class="global-search-trigger" aria-label="Global search">
+    <ion-icon name="search-outline"></ion-icon>
+    <input
+      type="text"
+      autocomplete="off"
+      spellcheck="false"
+      placeholder="Search anything..."
+      (input)="onTriggerInput($event)" />
+    <span class="search-shortcut">⌘K</span>
+  </label>
+
+  <ng-container *ngIf="show()">
+    <ion-button class="company-trigger" fill="clear" (click)="openMenu($event)">
+      <ion-icon name="business-outline" slot="start"></ion-icon>
+      <span class="company-name">{{ activeLocationName() }}</span>
+      <ion-icon name="chevron-down-outline"></ion-icon>
+    </ion-button>
+  </ng-container>
 
   <ion-popover [isOpen]="open()" [event]="menuEvent()" (didDismiss)="closeMenu()">
     <ng-template>
@@ -31,4 +44,63 @@
       </ion-content>
     </ng-template>
   </ion-popover>
-</ng-container>
+</div>
+
+<ion-modal
+  [isOpen]="searchOpen()"
+  cssClass="global-search-modal"
+  [backdropDismiss]="true"
+  (didDismiss)="closeGlobalSearch()"
+  (didPresent)="onSearchModalPresented()">
+  <ng-template>
+    <section class="global-search-overlay" aria-label="Global search overlay">
+      <div class="global-search-panel glass-surface">
+        <header class="global-search-header">
+          <button type="button" class="global-search-close" (click)="closeGlobalSearch()" aria-label="Close search">×</button>
+        </header>
+
+        <div class="global-search-input-row">
+          <ion-icon name="search-outline"></ion-icon>
+          <input
+            #overlayInput
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="Try customer, phone, invoice #, part SKU, email..."
+            [value]="searchQuery()"
+            (input)="onSearchInput($event)" />
+        </div>
+
+        <div class="global-search-state" *ngIf="searchLoading()">Loading search index...</div>
+        <div class="global-search-state error" *ngIf="searchError()">{{ searchError() }}</div>
+        <div class="global-search-state hint" *ngIf="!searchLoading() && !searchQuery().trim()">
+          Start typing to search across customers, quotes, invoices, inventory, and work board.
+        </div>
+
+        <div class="global-search-results" *ngIf="!searchLoading() && searchQuery().trim()">
+          <ng-container *ngIf="hasResults(); else noResults">
+            <section class="search-bucket" *ngFor="let bucket of searchBuckets()">
+              <div class="search-bucket-head">
+                <h4>{{ bucket.label }}</h4>
+                <span>{{ bucket.results.length }}</span>
+              </div>
+
+              <button
+                type="button"
+                class="search-result-row"
+                *ngFor="let result of bucket.results"
+                (click)="openSearchResult(result)">
+                <span class="result-title">{{ result.title }}</span>
+                <span class="result-subtitle">{{ result.subtitle }}</span>
+                <span class="result-meta">{{ result.meta }}</span>
+              </button>
+            </section>
+          </ng-container>
+          <ng-template #noResults>
+            <div class="global-search-state">No matches found.</div>
+          </ng-template>
+        </div>
+      </div>
+    </section>
+  </ng-template>
+</ion-modal>

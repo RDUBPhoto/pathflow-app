@@ -55,6 +55,6 @@ export default class ForbiddenComponent {
   }
 
   signOut(): void {
-    this.auth.signOut('/login');
+    this.auth.signOut('/');
   }
 }

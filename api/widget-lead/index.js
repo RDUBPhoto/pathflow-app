@@ -448,6 +448,15 @@ function scopedTenantPartition(tenantId) {
   return `${asString(tenantId) || "tenant-unassigned"}${TENANT_SCOPE_DELIMITER}${notificationsScope()}`;
 }
 
+function rowKeyForLeadNotification(leadId, recipientKey) {
+  return String(`lead-${asString(leadId)}-submitted-${asString(recipientKey)}`)
+    .toLowerCase()
+    .replace(/[^a-z0-9._:-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 220);
+}
+
 function mergeNotes(existingNotes, message, sourceName) {
   const existing = asString(existingNotes);
   const inbound = asString(message);
@@ -630,7 +639,9 @@ async function createLeadNotifications(notificationClient, usersClient, tenantId
   const nowIso = new Date().toISOString();
   let created = 0;
   for (const recipient of recipients) {
-    const id = randomUUID();
+    const recipientKey = asString(recipient.targetEmail || recipient.targetUserId);
+    if (!recipientKey) continue;
+    const id = rowKeyForLeadNotification(leadId, recipientKey);
     try {
       await notificationClient.upsertEntity(
         {
@@ -819,7 +830,7 @@ function shouldSendOptInConfirmation(inbound) {
   return asString(process.env.WIDGET_SEND_OPT_IN_CONFIRMATION || "true").toLowerCase() !== "false";
 }
 
-async function sendOptInConfirmation(to, from, message) {
+async function sendOptInConfirmation(to, from, message, context) {
   const mode = smsMode();
   if (!to || !isE164(to)) {
     return { attempted: false, sent: false, simulated: false, status: "invalid-phone", messageId: "", error: "Phone must be E.164." };
@@ -842,7 +853,26 @@ async function sendOptInConfirmation(to, from, message) {
   }
 
   const client = new SmsClient(conn);
-  const response = await client.send({ from, to: [to], message });
+  let response;
+  try {
+    response = await client.send({ from, to: [to], message });
+  } catch (err) {
+    if (context && context.log && typeof context.log.warn === "function") {
+      context.log.warn("[widget-lead][sms-opt-in] provider rejected", {
+        to,
+        message: asString(err && err.message)
+      });
+    }
+    return {
+      attempted: true,
+      sent: false,
+      simulated: false,
+      status: "failed",
+      rawStatus: "ProviderValidationFailed",
+      messageId: "",
+      error: asString(err && err.message) || "Provider rejected message."
+    };
+  }
   const first = Array.isArray(response)
     ? response[0]
     : (Array.isArray(response && response.results) ? response.results[0] : response);
@@ -1087,7 +1117,7 @@ module.exports = async function (context, req) {
       const smsClient = await getTableClient(SMS_TABLE);
       const sender = await resolveSenderNumber(senderClient, tenantId);
       const message = buildOptInMessage();
-      confirmation = await sendOptInConfirmation(inbound.phoneE164, sender, message);
+      confirmation = await sendOptInConfirmation(inbound.phoneE164, sender, message, context);
       if (confirmation.sent) {
         await saveSmsOutboundConfirmation(smsClient, tenantId, customer, inbound.phoneE164, sender, message, confirmation);
         consentStatus = "pending-confirmation";

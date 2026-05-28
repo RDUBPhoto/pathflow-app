@@ -6,8 +6,8 @@ export const environment = {
     powerBiReports: false
   },
   auth: {
-    primaryProvider: 'aad',
-    providers: ['aad', 'google'],
+    primaryProvider: 'local',
+    providers: ['local', 'google', 'aad'],
     hostedEmailEnabled: false,
     hostedEmailProvider: '',
     adminEmails: ['admin.local@yourcompany.dev'],
@@ -26,6 +26,13 @@ export const environment = {
         role: 'admin',
         isSuperAdmin: true,
         displayName: 'Local Super Admin'
+      },
+      {
+        email: 'robert@pathflow-app.com',
+        password: 'Pathflow123!',
+        role: 'admin',
+        isSuperAdmin: true,
+        displayName: 'Robert Super Admin'
       },
       {
         email: 'user@yourcompany.local',

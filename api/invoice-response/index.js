@@ -162,6 +162,19 @@ function normalizeAction(value) {
   return "";
 }
 
+function sanitizeAmount(value) {
+  const normalized = asString(value).replace(/[^0-9.\-]/g, "");
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Math.round((parsed + Number.EPSILON) * 100) / 100;
+}
+
+function maskCardLast4(value) {
+  const digits = asString(value).replace(/\D+/g, "");
+  if (digits.length < 4) return "";
+  return `XXXX${digits.slice(-4)}`;
+}
+
 function rowKeyForNotification(invoiceId, stage, recipientKey) {
   return String(`invoice-${invoiceId}-${stage}-${recipientKey}`)
     .toLowerCase()
@@ -273,6 +286,16 @@ async function createInvoicePaidNotifications(notificationClient, userClient, te
   const invoiceNumber = asString(payload.invoiceNumber) || invoiceId;
   const customerName = asString(payload.customerName) || "Customer";
   const nowIso = new Date().toISOString();
+  const rawLineItems = Array.isArray(payload.lineItems) ? payload.lineItems : [];
+  const partsToOrder = rawLineItems
+    .filter((line) => {
+      const lineType = asString(line && line.type).toLowerCase();
+      const status = asString(line && line.partStatus).toLowerCase();
+      if (lineType === "labor") return false;
+      if (status === "ordered" || status === "received" || status === "in-stock" || status === "in stock") return false;
+      const qty = Number(line && line.quantity);
+      return Number.isFinite(qty) ? qty > 0 : true;
+    });
   let count = 0;
 
   for (const recipient of recipients) {
@@ -311,6 +334,42 @@ async function createInvoicePaidNotifications(notificationClient, userClient, te
       "Merge"
     );
     count += 1;
+
+    if (partsToOrder.length) {
+      const inventoryRowKey = rowKeyForNotification(invoiceId, "inventory-order-needed", recipientKey);
+      await notificationClient.upsertEntity(
+        {
+          partitionKey: tenantId,
+          rowKey: inventoryRowKey,
+          type: "inventory",
+          title: `Parts to order for ${invoiceNumber}`,
+          message: `${customerName} paid ${invoiceNumber}. ${partsToOrder.length} part line item(s) need ordering.`,
+          route: "/inventory",
+          entityType: "invoice",
+          entityId: invoiceId,
+          metadataJson: JSON.stringify({
+            invoiceId,
+            invoiceNumber,
+            customerName,
+            action: "parts-to-order",
+            partsToOrderCount: partsToOrder.length,
+            source: "invoice-paid"
+          }),
+          targetUserId: asString(recipient.targetUserId),
+          targetEmail: normalizeEmail(recipient.targetEmail),
+          targetDisplayName: asString(recipient.targetDisplayName),
+          actorUserId: "",
+          actorEmail: "",
+          actorDisplayName: "System",
+          read: false,
+          readAt: "",
+          createdAt: nowIso,
+          updatedAt: nowIso
+        },
+        "Merge"
+      );
+      count += 1;
+    }
   }
 
   return count;
@@ -350,7 +409,11 @@ module.exports = async function (context, req) {
               action: asString(item.action),
               stage: asString(item.stage),
               invoiceNumber: asString(item.invoiceNumber),
-              updatedAt: asString(item.updatedAt)
+              updatedAt: asString(item.updatedAt),
+              paymentAmount: Number(item.paymentAmount || 0),
+              paymentProvider: asString(item.paymentProvider),
+              paymentTransactionId: asString(item.paymentTransactionId),
+              paymentAccountNumber: asString(item.paymentAccountNumber)
             }
           });
           return;
@@ -373,7 +436,11 @@ module.exports = async function (context, req) {
           action: asString(entity.action),
           stage: asString(entity.stage),
           invoiceNumber: asString(entity.invoiceNumber),
-          updatedAt: asString(entity.updatedAt)
+          updatedAt: asString(entity.updatedAt),
+          paymentAmount: Number(entity.paymentAmount || 0),
+          paymentProvider: asString(entity.paymentProvider),
+          paymentTransactionId: asString(entity.paymentTransactionId),
+          paymentAccountNumber: asString(entity.paymentAccountNumber)
         });
       }
       out.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
@@ -410,6 +477,10 @@ module.exports = async function (context, req) {
         customerName: asString(body.customerName),
         vehicle: asString(body.vehicle),
         businessName: asString(body.businessName),
+        paymentAmount: sanitizeAmount(body.paymentAmount),
+        paymentProvider: asString(body.paymentProvider).toLowerCase(),
+        paymentTransactionId: asString(body.paymentTransactionId),
+        paymentAccountNumber: maskCardLast4(body.paymentAccountNumber),
         updatedAt: now
       },
       "Merge"
@@ -420,6 +491,7 @@ module.exports = async function (context, req) {
       invoiceNumber: asString(body.invoiceNumber),
       customerName: asString(body.customerName),
       paymentKind: asString(body.paymentKind),
+      lineItems: body.lineItems,
       actor
     });
 

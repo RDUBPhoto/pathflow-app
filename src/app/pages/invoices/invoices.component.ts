@@ -40,9 +40,13 @@ type InvoiceKpi = {
   value: number;
   kind: 'count' | 'currency';
   tone: 'open' | 'accepted' | 'declined' | 'expired' | 'neutral';
+  range: KpiRange;
+  rangeLabel: string;
 };
 type InvoicesTab = 'quotes' | 'invoices';
+type KpiRange = 'today' | 'wtd' | 'mtd' | 'ytd' | 'all';
 const INVOICES_TAB_STORAGE_KEY = 'pathflow.quotesInvoices.activeTab';
+const INVOICES_KPI_RANGE_STORAGE_KEY = 'pathflow.quotesInvoices.kpiRanges';
 const LOCAL_PENDING_QUOTE_RESPONSES_KEY = 'pathflow.quoteResponses.pending.v1';
 const LOCAL_PENDING_INVOICE_RESPONSES_KEY = 'pathflow.invoiceResponses.pending.v1';
 type PendingQuoteResponse = {
@@ -104,6 +108,14 @@ export default class InvoicesComponent implements OnDestroy {
   private syncTimer: ReturnType<typeof setInterval> | null = null;
 
   readonly activeTab = signal<InvoicesTab>('quotes');
+  readonly kpiRanges = signal<Record<string, KpiRange>>({});
+  readonly kpiRangeOptions: Array<{ id: KpiRange; label: string }> = [
+    { id: 'today', label: 'Today' },
+    { id: 'wtd', label: 'WTD' },
+    { id: 'mtd', label: 'MTD' },
+    { id: 'ytd', label: 'YTD' },
+    { id: 'all', label: 'All' }
+  ];
   readonly lanes = computed(() => this.activeTab() === 'quotes' ? this.quoteLanes : this.invoiceLanes);
   readonly searchQuery = signal('');
   readonly tabbedInvoices = computed(() => this.invoicesData.invoicesByType(this.documentTypeForTab(this.activeTab())));
@@ -131,21 +143,46 @@ export default class InvoicesComponent implements OnDestroy {
   });
   readonly openStages: InvoiceStage[] = ['draft', 'sent'];
   readonly kpis = computed<InvoiceKpi[]>(() => {
-    const source = this.filteredInvoices();
-    const openBalance = this.sumByStage(this.openStages, source);
-    const acceptedTotal = this.sumByStage(this.activeTab() === 'quotes' ? ['accepted'] : ['accepted', 'completed'], source);
-    const expiredCount = source.filter(item => item.isExpired).length;
+    const openRange = this.kpiRangeForCard('open-balance');
+    const acceptedRange = this.kpiRangeForCard('accepted-total');
+    const expiredRange = this.kpiRangeForCard('expired-count');
+
+    const openSource = this.kpiSourceInvoicesForRange(openRange);
+    const acceptedSource = this.kpiSourceInvoicesForRange(acceptedRange);
+    const expiredSource = this.kpiSourceInvoicesForRange(expiredRange);
+
+    const openBalance = this.sumByStage(this.openStages, openSource);
+    const acceptedTotal = this.sumByStage(this.activeTab() === 'quotes' ? ['accepted'] : ['accepted', 'completed'], acceptedSource);
+    const expiredCount = expiredSource.filter(item => item.isExpired).length;
 
     return [
-      { id: 'open-balance', label: 'Open Balance', value: openBalance, kind: 'currency', tone: 'open' },
+      {
+        id: 'open-balance',
+        label: 'Open Balance',
+        value: openBalance,
+        kind: 'currency',
+        tone: 'open',
+        range: openRange,
+        rangeLabel: this.kpiRangeLabel(openRange)
+      },
       {
         id: 'accepted-total',
         label: this.activeTab() === 'quotes' ? 'Accepted Total' : 'Paid Total',
         value: acceptedTotal,
         kind: 'currency',
-        tone: 'accepted'
+        tone: 'accepted',
+        range: acceptedRange,
+        rangeLabel: this.kpiRangeLabel(acceptedRange)
       },
-      { id: 'expired-count', label: 'Expired (30+ days)', value: expiredCount, kind: 'count', tone: 'expired' }
+      {
+        id: 'expired-count',
+        label: 'Expired (30+ days)',
+        value: expiredCount,
+        kind: 'count',
+        tone: 'expired',
+        range: expiredRange,
+        rangeLabel: this.kpiRangeLabel(expiredRange)
+      },
     ];
   });
 
@@ -186,8 +223,10 @@ export default class InvoicesComponent implements OnDestroy {
   readonly cancelCandidate = signal<InvoiceCard | null>(null);
   readonly cancelError = signal('');
   readonly openMenuId = signal<string | null>(null);
+  readonly openKpiMenuId = signal<string | null>(null);
 
   constructor(private readonly router: Router) {
+    this.kpiRanges.set(this.readPersistedKpiRanges());
     this.route.queryParamMap.subscribe(params => {
       const tab = String(params.get('tab') || '').trim().toLowerCase();
       if (tab === 'invoices') {
@@ -293,6 +332,45 @@ export default class InvoicesComponent implements OnDestroy {
     this.setTab(next === 'invoices' ? 'invoices' : 'quotes');
   }
 
+  setKpiRangeForCard(kpiId: string, value: string | null | undefined): void {
+    const normalized = String(value || '').trim().toLowerCase();
+    const next: KpiRange =
+      normalized === 'today' || normalized === 'wtd' || normalized === 'mtd' || normalized === 'ytd' || normalized === 'all'
+        ? normalized
+        : 'mtd';
+    this.kpiRanges.update(current => {
+      const existing = this.kpiRangeForCard(kpiId);
+      if (existing === next) return current;
+      const updated = { ...current, [kpiId]: next };
+      this.persistKpiRanges(updated);
+      return updated;
+    });
+    this.openKpiMenuId.set(null);
+  }
+
+  toggleKpiMenu(kpiId: string, event?: Event): void {
+    event?.preventDefault();
+    event?.stopPropagation();
+    this.openKpiMenuId.update(current => (current === kpiId ? null : kpiId));
+  }
+
+  closeKpiMenu(): void {
+    if (this.openKpiMenuId()) this.openKpiMenuId.set(null);
+  }
+
+  isKpiMenuOpen(kpiId: string): boolean {
+    return this.openKpiMenuId() === kpiId;
+  }
+
+  kpiRangeForCard(kpiId: string): KpiRange {
+    const raw = this.kpiRanges()[kpiId];
+    return raw === 'today' || raw === 'wtd' || raw === 'mtd' || raw === 'ytd' || raw === 'all' ? raw : 'mtd';
+  }
+
+  kpiRangeLabel(range: KpiRange): string {
+    return this.kpiRangeOptions.find(option => option.id === range)?.label || 'MTD';
+  }
+
   requestDeleteDraft(invoice: InvoiceCard, event?: Event): void {
     event?.preventDefault();
     event?.stopPropagation();
@@ -361,7 +439,8 @@ export default class InvoicesComponent implements OnDestroy {
 
     let emailSent = false;
     const to = String(detail.customerEmail || candidate.customerEmail || '').trim();
-    if (to) {
+    const priorCustomerEmailSent = this.invoicesData.hasCustomerFacingEmailHistory(detail);
+    if (to && priorCustomerEmailSent) {
       const business = String(detail.businessName || '').trim() || 'Our team';
       const subject = `Quote ${detail.invoiceNumber} canceled`;
       const message = `Your quote ${detail.invoiceNumber} has been canceled. If you have questions, reply to this email and ${business} will help.`;
@@ -387,8 +466,10 @@ export default class InvoicesComponent implements OnDestroy {
     this.cancelQuoteDialog();
     if (emailSent) {
       await this.showDeleteToast('Quote canceled and customer email sent.', 'success');
-    } else if (to) {
+    } else if (to && priorCustomerEmailSent) {
       await this.showDeleteToast('Quote canceled, but customer email failed to send.', 'danger');
+    } else if (to) {
+      await this.showDeleteToast('Quote canceled. No prior customer-facing email was sent, so cancellation email was skipped.', 'warning');
     } else {
       await this.showDeleteToast('Quote canceled. No customer email on file.', 'warning');
     }
@@ -456,6 +537,55 @@ export default class InvoicesComponent implements OnDestroy {
     return tab === 'quotes' ? 'quote' : 'invoice';
   }
 
+  private matchesKpiRange(detail: InvoiceDetail, selected: KpiRange): boolean {
+    if (selected === 'all') return true;
+    const target = this.resolveKpiBasisDate(detail);
+    if (!target) return false;
+    const start = this.kpiRangeStart(selected, new Date());
+    if (!start) return true;
+    return target.getTime() >= start.getTime();
+  }
+
+  private kpiSourceInvoicesForRange(range: KpiRange): InvoiceCard[] {
+    const matchingIds = new Set(
+      this.invoicesData
+        .invoiceDetails()
+        .filter(detail => detail.documentType === this.documentTypeForTab(this.activeTab()))
+        .filter(detail => this.matchesKpiRange(detail, range))
+        .map(detail => String(detail.id || '').trim())
+        .filter(Boolean)
+    );
+    return this.tabbedInvoices().filter(card => matchingIds.has(String(card.id || '').trim()));
+  }
+
+  private resolveKpiBasisDate(detail: InvoiceDetail): Date | null {
+    const preferred = String(detail.issueDate || '').trim();
+    if (preferred) {
+      const dateOnly = new Date(`${preferred}T00:00:00`);
+      if (Number.isFinite(dateOnly.getTime())) return dateOnly;
+    }
+    const fallback = new Date(String(detail.createdAt || detail.updatedAt || '').trim());
+    return Number.isFinite(fallback.getTime()) ? fallback : null;
+  }
+
+  private kpiRangeStart(range: Exclude<KpiRange, 'all'>, now: Date): Date | null {
+    if (!Number.isFinite(now.getTime())) return null;
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    if (range === 'today') return start;
+    if (range === 'wtd') {
+      const day = start.getDay();
+      start.setDate(start.getDate() - day);
+      return start;
+    }
+    if (range === 'mtd') {
+      start.setDate(1);
+      return start;
+    }
+    start.setMonth(0, 1);
+    return start;
+  }
+
   private persistActiveTab(tab: InvoicesTab): void {
     try {
       localStorage.setItem(INVOICES_TAB_STORAGE_KEY, tab);
@@ -470,6 +600,33 @@ export default class InvoicesComponent implements OnDestroy {
       return value === 'invoices' ? 'invoices' : 'quotes';
     } catch {
       return 'quotes';
+    }
+  }
+
+  private persistKpiRanges(ranges: Record<string, KpiRange>): void {
+    try {
+      localStorage.setItem(INVOICES_KPI_RANGE_STORAGE_KEY, JSON.stringify(ranges));
+    } catch {
+      // Ignore storage failures.
+    }
+  }
+
+  private readPersistedKpiRanges(): Record<string, KpiRange> {
+    try {
+      const raw = String(localStorage.getItem(INVOICES_KPI_RANGE_STORAGE_KEY) || '').trim();
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return {};
+      const out: Record<string, KpiRange> = {};
+      for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+        const normalized = String(value || '').trim().toLowerCase();
+        if (normalized === 'today' || normalized === 'wtd' || normalized === 'mtd' || normalized === 'ytd' || normalized === 'all') {
+          out[String(key)] = normalized;
+        }
+      }
+      return out;
+    } catch {
+      return {};
     }
   }
 
@@ -572,7 +729,16 @@ export default class InvoicesComponent implements OnDestroy {
   }
 
   private async syncInvoiceResponses(): Promise<void> {
-    const collected: Array<{ invoiceId: string; invoiceNumber: string; stage: 'accepted'; updatedAt: string }> = [];
+    const collected: Array<{
+      invoiceId: string;
+      invoiceNumber: string;
+      stage: 'accepted';
+      updatedAt: string;
+      paymentAmount?: number;
+      paymentProvider?: string;
+      paymentTransactionId?: string;
+      paymentAccountNumber?: string;
+    }> = [];
     try {
       const response = await firstValueFrom(this.invoiceResponseApi.listRecent(250));
       const items = Array.isArray(response?.items) ? response.items : [];
@@ -583,7 +749,16 @@ export default class InvoicesComponent implements OnDestroy {
         const updatedAt = String(item?.updatedAt || '').trim() || new Date().toISOString();
         if (!invoiceId) continue;
         if (stage !== 'accepted') continue;
-        collected.push({ invoiceId, invoiceNumber, stage: 'accepted', updatedAt });
+        collected.push({
+          invoiceId,
+          invoiceNumber,
+          stage: 'accepted',
+          updatedAt,
+          paymentAmount: Number((item as any)?.paymentAmount || 0),
+          paymentProvider: String((item as any)?.paymentProvider || '').trim(),
+          paymentTransactionId: String((item as any)?.paymentTransactionId || '').trim(),
+          paymentAccountNumber: String((item as any)?.paymentAccountNumber || '').trim()
+        });
       }
     } catch {
       // Keep local fallback sync running even when API is unavailable.
@@ -604,7 +779,16 @@ export default class InvoicesComponent implements OnDestroy {
       }
     }
 
-    const deduped = new Map<string, { invoiceId: string; invoiceNumber: string; stage: 'accepted'; updatedAt: string }>();
+    const deduped = new Map<string, {
+      invoiceId: string;
+      invoiceNumber: string;
+      stage: 'accepted';
+      updatedAt: string;
+      paymentAmount?: number;
+      paymentProvider?: string;
+      paymentTransactionId?: string;
+      paymentAccountNumber?: string;
+    }>();
     for (const row of collected) {
       const key = String(row.invoiceId || '').trim().toLowerCase();
       if (!key) continue;
@@ -625,6 +809,19 @@ export default class InvoicesComponent implements OnDestroy {
       if (existing.stage === 'accepted' && Number(existing.paidAmount || 0) >= Number(existing.total || 0)) continue;
       const paidBefore = Math.max(0, Number(existing.paidAmount || 0));
       const wasFinalInvoicePayment = paidBefore > 0 && paidBefore < Math.max(0, Number(existing.total || 0));
+      const provider = this.normalizeRefundProviderKey(String(item?.paymentProvider || existing.paymentProviderKey || '').trim().toLowerCase());
+      const transactionId = String(item?.paymentTransactionId || '').trim();
+      const accountNumber = this.maskedAccountForRefund(String(item?.paymentAccountNumber || '').trim());
+      const paymentAmount = this.roundCurrency(Math.max(0, Number(item?.paymentAmount || existing.total || 0)));
+      if (provider === 'authorize-net' && transactionId && paymentAmount > 0) {
+        this.invoicesData.recordPaymentTransaction(existing.id, {
+          provider,
+          amount: paymentAmount,
+          transactionId,
+          accountNumber,
+          createdAt: item.updatedAt || new Date().toISOString()
+        });
+      }
       this.invoicesData.setPaidAmount(
         existing.id,
         Number(existing.total || 0),
@@ -641,6 +838,19 @@ export default class InvoicesComponent implements OnDestroy {
     if (appliedIds.length) {
       this.removePendingInvoiceResponses(appliedIds);
     }
+  }
+
+  private normalizeRefundProviderKey(provider: string): string {
+    const normalized = String(provider || '').trim().toLowerCase().replace(/[\s_.]+/g, '-');
+    if (!normalized) return '';
+    if (normalized === 'authorizenet' || normalized === 'authorize-net' || normalized === 'authorize.net') return 'authorize-net';
+    return normalized;
+  }
+
+  private maskedAccountForRefund(raw: string): string {
+    const digits = String(raw || '').replace(/\D+/g, '');
+    if (digits.length < 4) return '';
+    return `XXXX${digits.slice(-4)}`;
   }
 
   private readPendingQuoteResponses(): PendingQuoteResponse[] {
@@ -775,6 +985,10 @@ export default class InvoicesComponent implements OnDestroy {
     } catch {
       // Notification failures must not block status sync.
     }
+  }
+
+  private roundCurrency(value: number): number {
+    return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
   }
 
 }

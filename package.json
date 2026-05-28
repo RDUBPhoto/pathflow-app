@@ -15,14 +15,14 @@
     "test": "ng test",
     "test:api": "npm --prefix api test",
     "test:unit:ci": "ng test --watch=false --browsers=ChromeHeadless --code-coverage --progress=false",
-    "test:e2e": "playwright test",
-    "test:e2e:hosted": "playwright test -c playwright.hosted.config.ts",
+    "test:e2e": "npx --no-install playwright test",
+    "test:e2e:hosted": "npx --no-install playwright test -c playwright.hosted.config.ts",
     "test:qa": "node scripts/run-qa.mjs",
     "qa:purge": "node scripts/purge-qa-data.mjs"
   },
   "private": true,
   "engines": {
-    "node": ">=18 <20"
+    "node": "^20.19.0 || ^22.12.0"
   },
   "dependencies": {
     "@angular/cdk": "^19.2.4",
@@ -55,7 +55,7 @@
     "karma-coverage": "~2.2.0",
     "karma-jasmine": "~5.1.0",
     "karma-jasmine-html-reporter": "~2.1.0",
-    "node": "^18.20.8",
+    "node": "^20.19.0",
     "playwright": "^1.58.2",
     "typescript": "~5.7.2"
   }

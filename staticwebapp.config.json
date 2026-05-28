@@ -110,16 +110,5 @@
       "statusCode": 302,
       "redirect": "/login"
     }
-  },
-  "auth": {
-    "rolesSource": "/api/getRoles",
-    "identityProviders": {
-      "google": {
-        "registration": {
-          "clientIdSettingName": "GOOGLE_CLIENT_ID",
-          "clientSecretSettingName": "GOOGLE_CLIENT_SECRET_APP_SETTING_NAME"
-        }
-      }
-    }
   }
 }

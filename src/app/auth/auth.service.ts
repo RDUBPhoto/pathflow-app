@@ -13,6 +13,7 @@ const DEV_AUTH_STORAGE_KEY = 'pathflow.dev.auth.user';
 const AUTH_PROFILE_STORAGE_KEY = 'pathflow.auth.profile';
 const LOCAL_PASSWORD_ACCOUNTS_KEY = 'pathflow.local.password.accounts';
 const LOCAL_PASSKEYS_KEY = 'pathflow.local.passkeys';
+const AUTH_BOOTSTRAP_REQUEST_TIMEOUT_MS = 10000;
 const DEFAULT_LOCATION_ID = 'primary-location';
 const DEFAULT_LOCATION_NAME = 'Primary Location';
 
@@ -847,7 +848,7 @@ export class AuthService {
   private async hydrateRuntimeAuthConfig(): Promise<void> {
     const fallback = this.buildAuthRuntimeConfigFromEnvironment();
     try {
-      const response = await fetch('/api/access?op=auth-config', {
+      const response = await this.fetchWithTimeout('/api/access?op=auth-config', AUTH_BOOTSTRAP_REQUEST_TIMEOUT_MS, {
         method: 'GET',
         credentials: 'include',
         headers: {
@@ -879,7 +880,7 @@ export class AuthService {
 
   private async fetchAccessState(): Promise<AccessHydrationResult> {
     try {
-      const response = await fetch('/api/access?scope=me', {
+      const response = await this.fetchWithTimeout('/api/access?scope=me', AUTH_BOOTSTRAP_REQUEST_TIMEOUT_MS, {
         method: 'GET',
         credentials: 'include',
         headers: {
@@ -1156,6 +1157,16 @@ export class AuthService {
       hostedEmailProvider: hostedEmailEnabled ? hostedEmailProvider : '',
       localPasswordEnabled: !!environment.auth.localPasswordEnabled
     };
+  }
+
+  private async fetchWithTimeout(input: string, timeoutMs: number, init: RequestInit): Promise<Response> {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), Math.max(1000, timeoutMs || 0));
+    try {
+      return await fetch(input, { ...init, signal: controller.signal });
+    } finally {
+      window.clearTimeout(timeoutId);
+    }
   }
 
   private coerceAuthRuntimeConfig(input: unknown): AuthRuntimeConfig | null {

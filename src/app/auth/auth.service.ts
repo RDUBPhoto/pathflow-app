@@ -98,6 +98,7 @@ export class AuthService {
   private readonly accessSignal = signal<AuthAccessState>(this.emptyAccessState(false));
 
   private bootstrapping: Promise<void> | null = null;
+  private signOutInProgress = false;
 
   readonly state = computed(() => this.stateSignal());
   readonly initialized = computed(() => this.stateSignal().initialized);
@@ -179,18 +180,20 @@ export class AuthService {
     window.location.assign(url);
   }
 
-  signOut(redirectTo = '/login'): void {
+  signOut(redirectTo = '/'): void {
+    if (this.signOutInProgress) return;
+    this.signOutInProgress = true;
     const source = this.stateSignal().source;
     this.clearDevUser();
     this.stateSignal.set({
-      initialized: false,
-      loading: true,
+      initialized: true,
+      loading: false,
       source: 'none',
       user: null
     });
     this.accessSignal.set(this.emptyAccessState(false));
 
-    const target = this.normalizeRedirect(redirectTo, '/login');
+    const target = this.normalizeRedirect(redirectTo, '/');
     const finalizeRedirect = () => {
       if (source !== 'swa') {
         window.location.assign(target);
@@ -249,6 +252,32 @@ export class AuthService {
       return { ok: false, error: 'Email and password are required.' };
     }
 
+    const tryLocalSeedFallback = (): { ok: boolean; error?: string } => {
+      const seededAccount = environment.auth.localUsers.find(user => user.email.trim().toLowerCase() === email);
+      const customAccount = this.readLocalPasswordAccounts().find(user => user.email.trim().toLowerCase() === email);
+      const account = customAccount || seededAccount;
+      if (!account || account.password !== password) {
+        return { ok: false, error: 'Invalid email or password.' };
+      }
+
+      const accountPhone = customAccount?.phone;
+      this.setDevUser({
+        role: account.role,
+        email,
+        displayName: account.displayName || undefined,
+        phone: accountPhone || undefined,
+        avatarUrl: account.avatarUrl || undefined
+      }, {
+        registered: customAccount ? !!customAccount.registered : true,
+        canBootstrap: customAccount ? !customAccount.registered : false,
+        isSuperAdmin: !!account.isSuperAdmin,
+        billingStatus: account.isSuperAdmin ? 'active' : undefined,
+        accessLocked: false
+      });
+
+      return { ok: true };
+    };
+
     if (!this.isLocalHost || this.authConfigSignal().localPasswordEnabled) {
       try {
         const response = await fetch('/api/access', {
@@ -266,38 +295,17 @@ export class AuthService {
         });
         const payload = await response.json() as { ok?: boolean; error?: string };
         if (!response.ok || !payload?.ok) {
+          if (this.isLocalHost) return tryLocalSeedFallback();
           return { ok: false, error: String(payload?.error || 'Invalid email or password.') };
         }
         await this.bootstrap(true);
         return { ok: true };
       } catch {
+        if (this.isLocalHost) return tryLocalSeedFallback();
         return { ok: false, error: 'Unable to sign in right now. Please try again.' };
       }
     }
-
-    const seededAccount = environment.auth.localUsers.find(user => user.email.trim().toLowerCase() === email);
-    const customAccount = this.readLocalPasswordAccounts().find(user => user.email.trim().toLowerCase() === email);
-    const account = customAccount || seededAccount;
-    if (!account || account.password !== password) {
-      return { ok: false, error: 'Invalid email or password.' };
-    }
-
-    const accountPhone = customAccount?.phone;
-    this.setDevUser({
-      role: account.role,
-      email,
-      displayName: account.displayName || undefined,
-      phone: accountPhone || undefined,
-      avatarUrl: account.avatarUrl || undefined
-    }, {
-      registered: customAccount ? !!customAccount.registered : true,
-      canBootstrap: customAccount ? !customAccount.registered : false,
-      isSuperAdmin: !!account.isSuperAdmin,
-      billingStatus: account.isSuperAdmin ? 'active' : undefined,
-      accessLocked: false
-    });
-
-    return { ok: true };
+    return tryLocalSeedFallback();
   }
 
   async signInWithPasskey(emailInput: string): Promise<{ ok: boolean; error?: string }> {
@@ -463,9 +471,7 @@ export class AuthService {
   }
 
   isPasskeySupported(): boolean {
-    if (!this.isLocalHost && !environment.auth.devBypass) {
-      return false;
-    }
+    if (!this.isLocalAuthEnabled()) return false;
     return typeof window !== 'undefined' &&
       window.isSecureContext &&
       typeof window.PublicKeyCredential !== 'undefined' &&

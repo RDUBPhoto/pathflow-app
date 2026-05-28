@@ -12,7 +12,7 @@ import {
 } from '@ionic/angular/standalone';
 import { ActivatedRoute, Router } from '@angular/router';
 import { addIcons } from 'ionicons';
-import { keyOutline, logoGoogle, shieldCheckmarkOutline } from 'ionicons/icons';
+import { eyeOffOutline, eyeOutline, keyOutline } from 'ionicons/icons';
 import { environment } from '../../../environments/environment';
 import { AuthService } from '../../auth/auth.service';
 
@@ -42,14 +42,19 @@ export default class LoginComponent {
   private readonly isLikelySwaCli = this.isLocalHost && window.location.port === '4280';
 
   readonly redirectTo = signal('/dashboard');
-  readonly googleEnabled = computed(() => this.auth.isProviderEnabled('google'));
-  readonly primaryProviderLabel = computed(() => this.providerLabel(this.auth.primaryAuthProvider()));
-  readonly hostedEmailEnabled = computed(
-    () => !this.localServerMode && this.auth.isHostedEmailEnabled()
-  );
   readonly devBypassEnabled = environment.auth.devBypass || this.isLocalHost;
   readonly localServerMode = this.isLocalHost && !this.isLikelySwaCli;
   readonly passwordLoginEnabled = computed(() => this.auth.isLocalPasswordAuthEnabled() || this.localServerMode);
+  readonly federatedProviders = computed(() => {
+    const out: Array<{ key: string; label: string }> = [];
+    if (this.auth.isProviderEnabled('aad')) out.push({ key: 'aad', label: 'Continue with Microsoft' });
+    if (this.auth.isProviderEnabled('google')) out.push({ key: 'google', label: 'Continue with Google' });
+    if (this.auth.isHostedEmailEnabled()) {
+      const hosted = String(this.auth.hostedEmailProvider() || '').trim().toLowerCase();
+      if (hosted) out.push({ key: hosted, label: 'Continue with Email' });
+    }
+    return out;
+  });
   readonly localCredentialHints = environment.auth.localUsers.map(user => ({
     email: user.email,
     password: user.password,
@@ -61,17 +66,24 @@ export default class LoginComponent {
   readonly passwordLoginError = signal('');
   readonly passkeyLoginError = signal('');
   readonly passkeyLoginBusy = signal(false);
+  readonly postLoginSetupBusy = signal(false);
   readonly passwordResetStatus = signal('');
   readonly passwordResetError = signal('');
   readonly passwordResetSending = signal(false);
   localLoginEmail = '';
   localLoginPassword = '';
+  showPassword = false;
+  enableBiometricsNextLogin = false;
+  readonly biometricsPromptVisible = signal(false);
+  private readonly passkeyPrefStorageKey = 'pathflow.auth.passkey.pref';
+  private readonly passkeyLastEmailStorageKey = 'pathflow.auth.passkey.last-email';
+  private attemptedAutoPasskey = false;
 
   constructor() {
     addIcons({
-      'shield-checkmark-outline': shieldCheckmarkOutline,
       'key-outline': keyOutline,
-      'logo-google': logoGoogle
+      'eye-outline': eyeOutline,
+      'eye-off-outline': eyeOffOutline
     });
 
     this.route.queryParamMap.subscribe(params => {
@@ -79,12 +91,16 @@ export default class LoginComponent {
       const inviteEmail = String(params.get('email') || '').trim();
       if (inviteEmail && !this.localLoginEmail) {
         this.localLoginEmail = inviteEmail;
+        this.maybeAutoTriggerPasskey();
+      } else {
+        this.primeRememberedBiometricEmail();
       }
     });
 
     effect(() => {
       if (!this.auth.initialized()) return;
       if (!this.auth.isAuthenticated()) return;
+      if (this.postLoginSetupBusy()) return;
       if (this.auth.needsRegistration() || this.auth.isAccessLocked()) {
         void this.router.navigate(['/register'], {
           replaceUrl: true,
@@ -94,32 +110,21 @@ export default class LoginComponent {
       }
       void this.router.navigateByUrl(this.redirectTo(), { replaceUrl: true });
     });
+
+    effect(() => {
+      if (!this.auth.initialized()) return;
+      if (this.auth.isAuthenticated()) return;
+      this.maybeAutoTriggerPasskey();
+    });
   }
 
-  signInPrimary(): void {
+  onEmailInputChanged(): void {
+    this.attemptedAutoPasskey = false;
     this.passwordLoginError.set('');
-    if (this.localServerMode) {
-      this.localAuthHint.set('Microsoft/Google sign-in requires Azure Static Web Apps runtime. Use local quick access below or run with SWA CLI.');
-      return;
-    }
-    this.auth.signIn(this.auth.primaryAuthProvider(), this.redirectTo());
-  }
-
-  signInGoogle(): void {
-    this.passwordLoginError.set('');
-    if (this.localServerMode) {
-      this.localAuthHint.set('Google sign-in requires Azure Static Web Apps runtime. Use local quick access below or run with SWA CLI.');
-      return;
-    }
-    this.auth.signIn('google', this.redirectTo());
-  }
-
-  signInHostedEmail(): void {
-    this.passwordLoginError.set('');
-    if (!this.hostedEmailEnabled()) return;
-    const provider = this.auth.hostedEmailProvider();
-    if (!provider) return;
-    this.auth.signIn(provider, this.redirectTo());
+    this.passkeyLoginError.set('');
+    this.passwordResetStatus.set('');
+    this.passwordResetError.set('');
+    this.maybeAutoTriggerPasskey();
   }
 
   startRegistration(): void {
@@ -150,6 +155,10 @@ export default class LoginComponent {
     this.auth.signInDevSuperAdmin();
   }
 
+  signInWithProvider(provider: string): void {
+    this.auth.signIn(provider, this.redirectTo());
+  }
+
   async signInWithEmailPassword(): Promise<void> {
     this.localAuthHint.set('');
     this.passwordLoginError.set('');
@@ -157,21 +166,37 @@ export default class LoginComponent {
     this.passwordResetStatus.set('');
     this.passwordResetError.set('');
 
-    const result = await this.auth.signInWithEmailPassword(this.localLoginEmail, this.localLoginPassword);
-    if (!result.ok) {
-      const errorText = (result.error || '').toLowerCase();
-      if (
-        errorText.includes('not enabled') ||
-        errorText.includes('invalid') ||
-        errorText.includes('incorrect') ||
-        errorText.includes('unauthorized')
-      ) {
-        this.passwordLoginError.set('Email/Password is not correct. Do you need to create an account?');
+    this.postLoginSetupBusy.set(true);
+    try {
+      const result = await this.auth.signInWithEmailPassword(this.localLoginEmail, this.localLoginPassword);
+      if (!result.ok) {
+        const errorText = (result.error || '').toLowerCase();
+        if (
+          errorText.includes('not enabled') ||
+          errorText.includes('invalid') ||
+          errorText.includes('incorrect') ||
+          errorText.includes('unauthorized')
+        ) {
+          this.passwordLoginError.set('Email/Password is not correct. Do you need to create an account?');
+          return;
+        }
+
+        this.passwordLoginError.set(result.error || 'Email/Password is not correct. Do you need to create an account?');
         return;
       }
 
-      this.passwordLoginError.set(result.error || 'Email/Password is not correct. Do you need to create an account?');
-      return;
+      if (this.enableBiometricsNextLogin && this.auth.isPasskeySupported()) {
+        const enroll = await this.auth.registerPasskeyForCurrentUser();
+        if (!enroll.ok) {
+          this.passkeyLoginError.set(enroll.error || 'Could not enable biometrics on this device.');
+          return;
+        }
+        this.setBiometricPreference(this.localLoginEmail, true);
+        this.setLastBiometricEmail(this.localLoginEmail);
+      }
+      this.setLastBiometricEmail(this.localLoginEmail);
+    } finally {
+      this.postLoginSetupBusy.set(false);
     }
   }
 
@@ -187,6 +212,10 @@ export default class LoginComponent {
       const result = await this.auth.signInWithPasskey(this.localLoginEmail);
       if (!result.ok) {
         this.passkeyLoginError.set(result.error || 'Could not sign in with biometrics.');
+        this.biometricsPromptVisible.set(true);
+      } else {
+        this.setLastBiometricEmail(this.localLoginEmail);
+        this.biometricsPromptVisible.set(false);
       }
     } finally {
       this.passkeyLoginBusy.set(false);
@@ -223,13 +252,91 @@ export default class LoginComponent {
     return value;
   }
 
-  private providerLabel(provider: string): string {
-    const normalized = String(provider || '').trim().toLowerCase();
-    if (normalized === 'aad') return 'Microsoft';
-    if (normalized === 'google') return 'Google';
-    if (normalized === 'github') return 'GitHub';
-    if (normalized === 'twitter') return 'X';
-    if (!normalized) return 'Provider';
-    return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+  private maybeAutoTriggerPasskey(): void {
+    if (!this.passwordLoginEnabled()) return;
+    if (!this.auth.isPasskeySupported()) return;
+    if (this.passkeyLoginBusy() || this.auth.loading()) return;
+    const email = String(this.localLoginEmail || '').trim().toLowerCase();
+    if (!email) {
+      this.biometricsPromptVisible.set(false);
+      return;
+    }
+    const hasPasskey = this.auth.hasPasskeyForEmail(email);
+    const rememberedEmail = this.getLastBiometricEmail();
+    const hasPromptPreference = this.getBiometricPreference(email) || rememberedEmail === email;
+    const shouldPrompt = hasPasskey && hasPromptPreference;
+    this.biometricsPromptVisible.set(shouldPrompt);
+    if (!shouldPrompt || this.attemptedAutoPasskey) return;
+    // Show biometric prompt, but do not auto-submit. Auto-submit can loop
+    // when sessions expire and the login page rehydrates repeatedly.
+    this.attemptedAutoPasskey = true;
+  }
+
+  usePasswordInstead(): void {
+    this.biometricsPromptVisible.set(false);
+  }
+
+  changeBiometricEmail(): void {
+    this.biometricsPromptVisible.set(false);
+    this.passkeyLoginError.set('');
+    this.localLoginPassword = '';
+    this.localLoginEmail = '';
+    this.attemptedAutoPasskey = false;
+    try {
+      localStorage.removeItem(this.passkeyLastEmailStorageKey);
+    } catch {
+      // no-op
+    }
+  }
+
+  onPasswordBlur(): void {
+    this.showPassword = false;
+  }
+
+  private getBiometricPreference(emailInput: string): boolean {
+    const email = String(emailInput || '').trim().toLowerCase();
+    if (!email) return false;
+    try {
+      const raw = localStorage.getItem(this.passkeyPrefStorageKey);
+      const parsed = raw ? JSON.parse(raw) as Record<string, boolean> : {};
+      return !!parsed[email];
+    } catch {
+      return false;
+    }
+  }
+
+  private setBiometricPreference(emailInput: string, enabled: boolean): void {
+    const email = String(emailInput || '').trim().toLowerCase();
+    if (!email) return;
+    try {
+      const raw = localStorage.getItem(this.passkeyPrefStorageKey);
+      const parsed = raw ? JSON.parse(raw) as Record<string, boolean> : {};
+      parsed[email] = enabled;
+      localStorage.setItem(this.passkeyPrefStorageKey, JSON.stringify(parsed));
+    } catch {
+      // no-op
+    }
+  }
+
+  private getLastBiometricEmail(): string {
+    return String(localStorage.getItem(this.passkeyLastEmailStorageKey) || '').trim().toLowerCase();
+  }
+
+  private setLastBiometricEmail(emailInput: string): void {
+    const email = String(emailInput || '').trim().toLowerCase();
+    if (!email) return;
+    try {
+      localStorage.setItem(this.passkeyLastEmailStorageKey, email);
+    } catch {
+      // no-op
+    }
+  }
+
+  private primeRememberedBiometricEmail(): void {
+    if (String(this.localLoginEmail || '').trim()) return;
+    const remembered = this.getLastBiometricEmail();
+    if (!remembered) return;
+    this.localLoginEmail = remembered;
+    this.maybeAutoTriggerPasskey();
   }
 }

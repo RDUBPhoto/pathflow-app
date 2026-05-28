@@ -33,6 +33,16 @@ function isPlaceholderKey(value) {
   return false;
 }
 
+function withNodeOption(env, option) {
+  const current = String((env && env.NODE_OPTIONS) || '').trim();
+  const parts = current ? current.split(/\s+/).filter(Boolean) : [];
+  if (!parts.includes(option)) parts.push(option);
+  return {
+    ...(env || {}),
+    NODE_OPTIONS: parts.join(' ')
+  };
+}
+
 function run(cmd, args, opts = {}) {
   const p = spawn(cmd, args, { stdio: 'inherit', shell: process.platform === 'win32', ...opts });
   procs.push(p);
@@ -87,6 +97,12 @@ process.on('SIGINT', () => shutdown(0));
 process.on('SIGTERM', () => shutdown(0));
 
 const localValues = readLocalSettingsValues();
+const localDataBackend = String(localValues.DATA_BACKEND || localValues.STORAGE_BACKEND || '').trim().toLowerCase();
+const forceInventorySeed =
+  process.argv.includes('--seed-inventory') ||
+  process.env.PATHFLOW_SEED_INVENTORY_FIXTURES === '1' ||
+  String(process.env.PATHFLOW_SEED_INVENTORY_FIXTURES || '').toLowerCase() === 'true';
+const shouldSeedInventoryFixtures = localDataBackend !== 'sql' || forceInventorySeed;
 const localEmailMode = String(localValues.EMAIL_MODE || '').trim().toLowerCase();
 const localEmailFrom = String(localValues.EMAIL_FROM || '').trim();
 const localSendgridKey = String(localValues.SENDGRID_API_KEY || '').trim();
@@ -102,7 +118,10 @@ if (localEmailMode === 'sendgrid') {
 
 assertFunctionsNodeVersion();
 run('azurite', ['--location', '.azurite', '--debug', '.azurite/debug.log']);
-run('func', ['start'], { cwd: apiRoot });
+run('func', ['start'], {
+  cwd: apiRoot,
+  env: withNodeOption(process.env, '--dns-result-order=ipv4first')
+});
 
 async function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -282,23 +301,27 @@ async function seedIfEmpty() {
       });
   }
 
-  try {
-    const invRes = await fetch('http://localhost:7071/api/inventory?scope=items');
-    if (invRes.ok) {
-      const invBody = await invRes.json().catch(() => ({}));
-      const items = Array.isArray(invBody?.items) ? invBody.items : [];
-      if (!items.length) {
-        const seedInventory = [
-          { name: 'Brake Pad Set - Front', sku: 'BP-F150-2018', vendor: 'NAPA', category: 'Brakes', onHand: 2, reorderAt: 4, onOrder: 0, unitCost: 74.5 },
-          { name: 'Oil Filter', sku: 'OF-5W20-FLT', vendor: "O'Reilly", category: 'Maintenance', onHand: 10, reorderAt: 8, onOrder: 0, unitCost: 6.2 },
-          { name: 'Spark Plug Set', sku: 'SP-TOY-4RUN', vendor: 'AutoZone', category: 'Ignition', onHand: 2, reorderAt: 6, onOrder: 0, unitCost: 42.0 }
-        ];
-        for (const item of seedInventory) {
-          await post('http://localhost:7071/api/inventory', { op: 'upsertItem', ...item });
+  if (shouldSeedInventoryFixtures) {
+    try {
+      const invRes = await fetch('http://localhost:7071/api/inventory?scope=items');
+      if (invRes.ok) {
+        const invBody = await invRes.json().catch(() => ({}));
+        const items = Array.isArray(invBody?.items) ? invBody.items : [];
+        if (!items.length) {
+          const seedInventory = [
+            { name: 'Brake Pad Set - Front', sku: 'BP-F150-2018', vendor: 'NAPA', category: 'Brakes', onHand: 2, reorderAt: 4, onOrder: 0, unitCost: 74.5 },
+            { name: 'Oil Filter', sku: 'OF-5W20-FLT', vendor: "O'Reilly", category: 'Maintenance', onHand: 10, reorderAt: 8, onOrder: 0, unitCost: 6.2 },
+            { name: 'Spark Plug Set', sku: 'SP-TOY-4RUN', vendor: 'AutoZone', category: 'Ignition', onHand: 2, reorderAt: 6, onOrder: 0, unitCost: 42.0 }
+          ];
+          for (const item of seedInventory) {
+            await post('http://localhost:7071/api/inventory', { op: 'upsertItem', ...item });
+          }
         }
       }
-    }
-  } catch {}
+    } catch {}
+  } else {
+    console.log('[dev-local] Inventory fixture seed skipped for SQL backend (use --seed-inventory to force).');
+  }
 }
 
 (async () => {

@@ -1,139 +1,116 @@
 <ion-content class="glass-bg auth-page">
-  <div class="auth-shell">
-    <aside class="marketing-panel">
-      <div class="marketing-image"></div>
-      <div class="marketing-overlay">
-        <img src="/pathflow-logo.svg" alt="Pathflow" class="marketing-logo" />
-        <p class="marketing-kicker">Pathflow Platform</p>
-        <h2>Run your shop from one command center.</h2>
-        <p>Capture leads, schedule work, message customers, and complete jobs without jumping between tools.</p>
-      </div>
-    </aside>
+  <div class="auth-backdrop" aria-hidden="true"></div>
 
-    <section class="auth-panel glass-surface">
-      <header class="auth-header">
-        <p class="auth-kicker">Welcome Back</p>
-        <h1>Sign in to your workspace</h1>
-      </header>
+  <section class="auth-panel glass-surface">
+    <header class="auth-header">
+      <img src="/pathflow-logo.svg" alt="Pathflow" class="auth-logo" />
+      <p class="auth-kicker">Welcome Back</p>
+      <h1>Sign in to your workspace</h1>
+      <p class="auth-subtitle">Run your shop from one command center.</p>
+    </header>
 
-      <p class="inline-link-row">
-        Need an account?
-        <button type="button" class="inline-link-btn" (click)="startRegistration()">Register now</button>
-      </p>
+    <p class="inline-link-row">
+      Need an account?
+      <button type="button" class="inline-link-btn" (click)="startRegistration()">Register now</button>
+    </p>
 
-      <section class="form-card" *ngIf="passwordLoginEnabled()">
-        <div class="form-card-head">
-          <h2>Email &amp; Password</h2>
-        </div>
-        <button type="button" class="register-cta" (click)="startRegistration()">
-          Don't have an account, register now?
-        </button>
+    <section class="form-card" *ngIf="passwordLoginEnabled()">
+      <ion-item>
+        <ion-label position="stacked">Email</ion-label>
+        <ion-input
+          type="email"
+          autocomplete="username webauthn"
+          [(ngModel)]="localLoginEmail"
+          placeholder="you@company.com"
+          (ionInput)="onEmailInputChanged()">
+        </ion-input>
+      </ion-item>
 
-        <ion-item>
-          <ion-label position="stacked">Email</ion-label>
-          <ion-input
-            type="email"
-            autocomplete="username"
-            [(ngModel)]="localLoginEmail"
-            placeholder="you@company.com">
-          </ion-input>
-        </ion-item>
-
-        <ion-item>
-          <ion-label position="stacked">Password</ion-label>
-          <ion-input
-            type="password"
-            autocomplete="current-password"
-            [(ngModel)]="localLoginPassword"
-            placeholder="Enter password">
-          </ion-input>
-        </ion-item>
-
-        <ion-button expand="block" (click)="signInWithEmailPassword()" [disabled]="auth.loading()">
-          Sign in with Email
+      <ion-item>
+        <ion-label position="stacked">Password</ion-label>
+        <ion-input
+          [type]="showPassword ? 'text' : 'password'"
+          autocomplete="current-password webauthn"
+          [(ngModel)]="localLoginPassword"
+          placeholder="Enter password"
+          (ionBlur)="onPasswordBlur()">
+        </ion-input>
+        <ion-button
+          fill="clear"
+          slot="end"
+          class="password-visibility-btn"
+          [attr.aria-label]="showPassword ? 'Hide password' : 'Show password'"
+          (click)="showPassword = !showPassword">
+          <ion-icon [name]="showPassword ? 'eye-off-outline' : 'eye-outline'"></ion-icon>
         </ion-button>
+      </ion-item>
+
+      <label class="biometric-optin" *ngIf="auth.isPasskeySupported()">
+        <input type="checkbox" [(ngModel)]="enableBiometricsNextLogin" />
+        <span>Use biometrics on next login</span>
+      </label>
+
+      <ion-button expand="block" (click)="signInWithEmailPassword()" [disabled]="auth.loading()">
+        Sign in
+      </ion-button>
+
+      <button type="button" class="inline-link-btn" (click)="requestPasswordReset()" [disabled]="passwordResetSending()">
+        {{ passwordResetSending() ? 'Sending reset email...' : 'Forgot password?' }}
+      </button>
+
+      <p class="auth-hint error" *ngIf="passwordLoginError()">
+        {{ passwordLoginError() }}
+        <button type="button" class="inline-register-link" (click)="startRegistration()">Create account</button>
+      </p>
+      <p class="auth-hint error" *ngIf="passkeyLoginError()">{{ passkeyLoginError() }}</p>
+      <p class="auth-hint" *ngIf="passwordResetStatus()">{{ passwordResetStatus() }}</p>
+      <p class="auth-hint error" *ngIf="passwordResetError()">{{ passwordResetError() }}</p>
+    </section>
+
+    <section class="form-card" *ngIf="!passwordLoginEnabled()">
+      <ion-button
+        expand="block"
+        *ngFor="let provider of federatedProviders()"
+        (click)="signInWithProvider(provider.key)">
+        {{ provider.label }}
+      </ion-button>
+      <p class="auth-hint" *ngIf="!federatedProviders().length">
+        Sign-in providers are not configured yet.
+      </p>
+    </section>
+
+    <div class="secure-note" *ngIf="passwordLoginEnabled()">
+      <ion-icon name="key-outline"></ion-icon>
+      <span>Sign in once with email/password, then enable biometrics in User Settings for fast future sign-ins.</span>
+    </div>
+
+    <p class="auth-hint" *ngIf="localAuthHint()">{{ localAuthHint() }}</p>
+
+    <div class="loading" *ngIf="auth.loading()">
+      <ion-spinner name="crescent"></ion-spinner>
+    </div>
+  </section>
+
+  <section class="biometric-prompt-overlay" *ngIf="biometricsPromptVisible()">
+    <div class="biometric-prompt glass-surface">
+      <div class="biometric-account-row">
+        <span>{{ localLoginEmail }}</span>
+        <button type="button" class="inline-link-btn" (click)="changeBiometricEmail()">Change</button>
+      </div>
+      <h2>Sign in with Face ID / Touch ID</h2>
+      <p>Use your saved passkey for fast sign-in.</p>
+      <div class="prompt-actions">
         <ion-button
           expand="block"
-          fill="outline"
           (click)="signInWithPasskey()"
           [disabled]="auth.loading() || passkeyLoginBusy() || !auth.isPasskeySupported()">
-          {{ passkeyLoginBusy() ? 'Checking biometrics...' : 'Sign in with Biometrics' }}
+          {{ passkeyLoginBusy() ? 'Checking biometrics...' : 'Log In' }}
         </ion-button>
-        <button type="button" class="inline-link-btn" (click)="requestPasswordReset()" [disabled]="passwordResetSending()">
-          {{ passwordResetSending() ? 'Sending reset email...' : 'Forgot password?' }}
-        </button>
-
-        <p class="auth-hint error" *ngIf="passwordLoginError()">
-          {{ passwordLoginError() }}
-          <button type="button" class="inline-register-link" (click)="startRegistration()">Create account</button>
-        </p>
         <p class="auth-hint error" *ngIf="passkeyLoginError()">{{ passkeyLoginError() }}</p>
-        <p class="auth-hint" *ngIf="passwordResetStatus()">{{ passwordResetStatus() }}</p>
-        <p class="auth-hint error" *ngIf="passwordResetError()">{{ passwordResetError() }}</p>
-      </section>
-
-      <div class="or-divider"><span>or continue with</span></div>
-
-      <ion-button
-        *ngIf="hostedEmailEnabled()"
-        expand="block"
-        size="large"
-        fill="outline"
-        (click)="signInHostedEmail()"
-        [disabled]="auth.loading()">
-        <ion-icon slot="start" name="key-outline"></ion-icon>
-        Continue with Email
-      </ion-button>
-
-      <ion-button expand="block" size="large" (click)="signInPrimary()" [disabled]="auth.loading()">
-        <ion-icon slot="start" name="shield-checkmark-outline"></ion-icon>
-        Continue with {{ primaryProviderLabel() }}
-      </ion-button>
-
-      <ion-button
-        *ngIf="googleEnabled()"
-        expand="block"
-        size="large"
-        fill="outline"
-        (click)="signInGoogle()"
-        [disabled]="auth.loading()">
-        <ion-icon slot="start" name="logo-google"></ion-icon>
-        Continue with Google
-      </ion-button>
-
-      <div class="secure-note">
-        <ion-icon name="key-outline"></ion-icon>
-        <span *ngIf="passwordLoginEnabled(); else providerBiometricHint">
-          Use workspace passkeys above for biometric sign-in, or use your Microsoft/Google provider flow.
-        </span>
-        <ng-template #providerBiometricHint>
-          <span>Biometrics are available through Microsoft sign-in when your Entra account has passkey/Windows Hello enabled.</span>
-        </ng-template>
+        <ion-button expand="block" fill="outline" (click)="usePasswordInstead()">
+          Try another way
+        </ion-button>
       </div>
-
-      <p class="auth-hint" *ngIf="localAuthHint()">{{ localAuthHint() }}</p>
-
-      <div class="loading" *ngIf="auth.loading()">
-        <ion-spinner name="crescent"></ion-spinner>
-      </div>
-
-      <div class="dev-box" *ngIf="localCredentialHints.length">
-        <div class="dev-title">Local Test Accounts</div>
-        <p class="auth-hint">
-          <span *ngFor="let acct of localCredentialHints; let last = last">
-            {{ acct.email }} / {{ acct.password }} ({{ acct.isSuperAdmin ? 'superadmin' : acct.role }})<span *ngIf="!last">, </span>
-          </span>
-        </p>
-      </div>
-
-      <div class="dev-box" *ngIf="devBypassEnabled">
-        <div class="dev-title">Local Development Quick Access</div>
-        <div class="dev-actions">
-          <ion-button size="small" fill="outline" (click)="signInDevAsUser()">Login as User</ion-button>
-          <ion-button size="small" (click)="signInDevAsAdmin()">Login as Admin</ion-button>
-          <ion-button size="small" color="warning" (click)="signInDevAsSuperAdmin()">Login as Super Admin</ion-button>
-        </div>
-      </div>
-    </section>
-  </div>
+    </div>
+  </section>
 </ion-content>

@@ -10,7 +10,7 @@ import { ToastController } from '@ionic/angular';
 import { FormsModule } from '@angular/forms';
 import {
   CdkDropList, CdkDrag, CdkDragDrop,
-  moveItemInArray, transferArrayItem
+  moveItemInArray
 } from '@angular/cdk/drag-drop';
 import { LanesApi, Lane } from '../../services/lanes-api.service';
 import { WorkItemsApi, WorkItem } from '../../services/workitems-api.service';
@@ -32,7 +32,7 @@ import {
 } from 'ionicons/icons';
 import { HttpClient } from '@angular/common/http';
 import { UserScopedSettingsService } from '../../services/user-scoped-settings.service';
-import { catchError, firstValueFrom, forkJoin, of } from 'rxjs';
+import { catchError, firstValueFrom, forkJoin, of, timeout } from 'rxjs';
 import { InvoiceResponseApiService } from '../../services/invoice-response-api.service';
 import { QuoteResponseApiService } from '../../services/quote-response-api.service';
 import { NotificationsApiService } from '../../services/notifications-api.service';
@@ -45,6 +45,7 @@ const DASHBOARD_ONBOARDING_KEY = 'dashboard.onboarding.v1.completed';
 const DASHBOARD_SEEN_LEADS_KEY = 'dashboard.leads.seen.v1';
 const DASHBOARD_SEEN_CARDS_KEY = 'dashboard.cards.seen.v1';
 const DASHBOARD_NOTIFIED_LEADS_KEY = 'dashboard.leads.notified.v1';
+const DASHBOARD_DISMISSED_DOC_CARDS_KEY = 'dashboard.dismissedDocCards.v1';
 const DASHBOARD_CARD_SEEN_KEY_SEPARATOR = '::';
 const NOTIFICATION_OPENED_HINTS_KEY = 'pathflow.notifications.opened.v1';
 
@@ -212,6 +213,7 @@ export default class DashboardComponent implements OnDestroy {
       this.loadSeenLeads();
       this.loadSeenCards();
       this.loadNotifiedLeads();
+      this.loadDismissedDocCards();
     });
     this.loadAll();
     this.checkApi();
@@ -272,6 +274,19 @@ export default class DashboardComponent implements OnDestroy {
     });
 
     effect(() => {
+      const value = this.dismissedDocCardIds();
+      if (!this.dismissedDocCardsLoaded || !this.dismissedDocCardsInitialized) return;
+      if (this.dismissedDocCardsPersistTimer) clearTimeout(this.dismissedDocCardsPersistTimer);
+      this.dismissedDocCardsPersistTimer = setTimeout(() => {
+        const ids = Object.keys(value).filter(Boolean);
+        this.userSettings.setValue(DASHBOARD_DISMISSED_DOC_CARDS_KEY, {
+          initialized: true,
+          ids
+        }).subscribe({ error: () => {} });
+      }, 120);
+    });
+
+    effect(() => {
       const msg = this.status();
       if (this.statusTimer) { clearTimeout(this.statusTimer); this.statusTimer = null; }
       if (this.statusFadeTimer) { clearTimeout(this.statusFadeTimer); this.statusFadeTimer = null; }
@@ -307,12 +322,17 @@ export default class DashboardComponent implements OnDestroy {
   private notifiedLeadsLoadToken = 0;
   private notifiedLeadsLoaded = false;
   private notifiedLeadsInitialized = false;
+  private dismissedDocCardsPersistTimer: any = null;
+  private dismissedDocCardsLoadToken = 0;
+  private dismissedDocCardsLoaded = false;
+  private dismissedDocCardsInitialized = false;
   private interactivityRestoreTimer: any = null;
   private lastToastMessage = '';
   private lastToastAt = 0;
   seenLeadIds = signal<Record<string, true>>({});
   seenCardIds = signal<Record<string, true>>({});
   notifiedLeadIds = signal<Record<string, true>>({});
+  dismissedDocCardIds = signal<Record<string, true>>({});
 
   private async presentStatusToast(message: string): Promise<void> {
     const value = String(message || '').trim();
@@ -930,7 +950,8 @@ export default class DashboardComponent implements OnDestroy {
     const cust = this.customersMap()[it.customerId || ''];
     if (!cust) return;
 
-    this.customerModalInitialNotes.set(this.notesOf(it) || null);
+    const notes = this.notesListOf(it);
+    this.customerModalInitialNotes.set(notes.length ? notes.join('\n') : null);
 
     this.customerModalMode.set('edit');
     this.customerModalId.set(cust.id);
@@ -1032,11 +1053,12 @@ export default class DashboardComponent implements OnDestroy {
     const customerId = this.removeCustomerCustomerId();
     const customer = customerId ? this.customersMap()[customerId] : null;
     const affectedDocs = customerId ? this.matchedActiveDocumentsForCustomer(customerId) : [];
+    const targetItemIds = this.removeCustomerTargetItemIds(itemId || '', customerId);
+    const dismissedDocKeys = this.dismissedDocKeysForItems(targetItemIds);
     this.cancelRemoveCustomer();
     if (!itemId) return;
 
     this.status.set('Removing customer');
-    const targetItemIds = this.removeCustomerTargetItemIds(itemId, customerId);
     const snapshot = this.removeItemsLocally(targetItemIds);
 
     const deleteWorkItem = () => {
@@ -1065,6 +1087,9 @@ export default class DashboardComponent implements OnDestroy {
             void this.sendCancellationEmailsForDocuments(affectedDocs, customerId);
             this.status.set('Customer removed and quote/invoice canceled');
             return;
+          }
+          if (dismissedDocKeys.length) {
+            this.markDocumentCardsDismissed(dismissedDocKeys);
           }
           this.status.set('Customer removed');
         },
@@ -1207,6 +1232,7 @@ export default class DashboardComponent implements OnDestroy {
   private shouldSendCancellationEmail(doc: InvoiceDetail): boolean {
     const stage = String(doc?.stage || '').trim().toLowerCase();
     if (!stage || stage === 'draft') return false;
+    if (!this.invoicesData.hasCustomerFacingEmailHistory(doc)) return false;
     if (doc.documentType === 'invoice') {
       // Only notify invoice cancellation if the invoice had already been sent.
       return stage === 'sent';
@@ -1376,6 +1402,27 @@ export default class DashboardComponent implements OnDestroy {
         this.notifiedLeadsLoaded = true;
         this.maybeInitializeNotifiedLeads(this.items());
         this.maybeNotifyNewLeads(this.items());
+      }
+    });
+  }
+
+  loadDismissedDocCards() {
+    this.dismissedDocCardsLoaded = false;
+    this.dismissedDocCardsInitialized = false;
+    const token = ++this.dismissedDocCardsLoadToken;
+    this.userSettings.getValue<{ initialized?: boolean; ids?: string[] }>(DASHBOARD_DISMISSED_DOC_CARDS_KEY).subscribe({
+      next: value => {
+        if (token !== this.dismissedDocCardsLoadToken) return;
+        const normalized = this.normalizeSeenLeads(value);
+        this.dismissedDocCardIds.set(normalized.ids);
+        this.dismissedDocCardsInitialized = normalized.initialized;
+        this.dismissedDocCardsLoaded = true;
+      },
+      error: () => {
+        if (token !== this.dismissedDocCardsLoadToken) return;
+        this.dismissedDocCardIds.set({});
+        this.dismissedDocCardsInitialized = false;
+        this.dismissedDocCardsLoaded = true;
       }
     });
   }
@@ -1581,99 +1628,76 @@ export default class DashboardComponent implements OnDestroy {
 
   loadAll() {
     this.loading.set(true);
-    this.customersApi.list().subscribe({
-      next: cs => {
+    forkJoin({
+      customers: this.customersApi.list().pipe(
+        timeout(12000),
+        catchError(() => {
+          this.status.set('Load customers timeout');
+          return of([] as Customer[]);
+        })
+      ),
+      schedule: this.scheduleApi.list().pipe(
+        timeout(12000),
+        catchError(() => of([] as ScheduleItem[]))
+      ),
+      lanes: this.lanesApi.list().pipe(
+        timeout(12000),
+        catchError(() => {
+          this.status.set('Load lanes timeout');
+          return of([] as Lane[]);
+        })
+      ),
+      items: this.itemsApi.list().pipe(
+        timeout(12000),
+        catchError(() => {
+          this.status.set('Load items timeout');
+          return of([] as WorkItem[]);
+        })
+      )
+    }).subscribe({
+      next: ({ customers, schedule, lanes, items }) => {
         const m: Record<string, Customer> = {};
-        for (const c of cs) m[c.id] = c;
+        for (const c of customers) m[c.id] = c;
         this.customersMap.set(m);
-        this.allCustomers.set(cs);
-        this.scheduleApi.list().subscribe({
-          next: sched => {
-            this.scheduleItems.set(sched || []);
-            this.lanesApi.list().subscribe({
-              next: lanes => {
-                this.lanes.set(lanes);
-                this.itemsApi.list().subscribe({
-                  next: rows => {
-                    const map: Record<string, WorkItem[]> = {};
-                    for (const l of lanes) map[l.id] = [];
-                    for (const r of rows) {
-                      if (!map[r.laneId]) map[r.laneId] = [];
-                      map[r.laneId].push({ ...r, customerId: r.customerId ?? '' });
-                    }
-                    for (const id of Object.keys(map)) map[id].sort((a,b) => (a.sort ?? 0) - (b.sort ?? 0));
-                    this.items.set(map);
-                    const pruned = this.pruneDuplicateDocumentCards(map, lanes);
-                    if (pruned) {
-                      this.loading.set(false);
-                      return;
-                    }
-                    const seeded = this.ensureDocumentCardsExist(map, lanes);
-                    if (seeded) {
-                      this.loading.set(false);
-                      return;
-                    }
-                    this.maybeInitializeSeenLeads(map);
-                    this.maybeInitializeSeenCards(map);
-                    this.maybeInitializeNotifiedLeads(map);
-                    this.maybeNotifyNewLeads(map);
-                    this.applyOpenedNotificationSeenHints(map);
-                    this.syncFinalPaidInvoicesToCompleted();
-                    this.syncScheduledLane();
-                    this.pruneExpiredCompletedFromBoard();
-                    this.syncInvoiceResponsesFromApi();
-                    this.loading.set(false);
-                  },
-                  error: () => { this.status.set('Load items error'); this.loading.set(false); }
-                });
-              },
-              error: () => { this.status.set('Load lanes error'); this.loading.set(false); }
-            });
-          },
-          error: () => {
-            this.scheduleItems.set([]);
-            this.lanesApi.list().subscribe({
-              next: lanes => {
-                this.lanes.set(lanes);
-                this.itemsApi.list().subscribe({
-                  next: rows => {
-                    const map: Record<string, WorkItem[]> = {};
-                    for (const l of lanes) map[l.id] = [];
-                    for (const r of rows) {
-                      if (!map[r.laneId]) map[r.laneId] = [];
-                      map[r.laneId].push({ ...r, customerId: r.customerId ?? '' });
-                    }
-                    for (const id of Object.keys(map)) map[id].sort((a,b) => (a.sort ?? 0) - (b.sort ?? 0));
-                    this.items.set(map);
-                    const pruned = this.pruneDuplicateDocumentCards(map, lanes);
-                    if (pruned) {
-                      this.loading.set(false);
-                      return;
-                    }
-                    const seeded = this.ensureDocumentCardsExist(map, lanes);
-                    if (seeded) {
-                      this.loading.set(false);
-                      return;
-                    }
-                    this.maybeInitializeSeenLeads(map);
-                    this.maybeInitializeSeenCards(map);
-                    this.maybeInitializeNotifiedLeads(map);
-                    this.maybeNotifyNewLeads(map);
-                    this.applyOpenedNotificationSeenHints(map);
-                    this.syncFinalPaidInvoicesToCompleted();
-                    this.pruneExpiredCompletedFromBoard();
-                    this.syncInvoiceResponsesFromApi();
-                    this.loading.set(false);
-                  },
-                  error: () => { this.status.set('Load items error'); this.loading.set(false); }
-                });
-              },
-              error: () => { this.status.set('Load lanes error'); this.loading.set(false); }
-            });
-          }
-        });
+        this.allCustomers.set(customers);
+        this.scheduleItems.set(schedule || []);
+        this.lanes.set(lanes || []);
+
+        const map: Record<string, WorkItem[]> = {};
+        for (const l of lanes || []) map[l.id] = [];
+        for (const r of items || []) {
+          if (!map[r.laneId]) map[r.laneId] = [];
+          map[r.laneId].push({ ...r, customerId: r.customerId ?? '' });
+        }
+        for (const id of Object.keys(map)) map[id].sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0));
+        this.items.set(map);
+
+        const pruned = this.pruneDuplicateDocumentCards(map, lanes || []);
+        if (pruned) {
+          this.loading.set(false);
+          return;
+        }
+        const seeded = this.ensureDocumentCardsExist(map, lanes || []);
+        if (seeded) {
+          this.loading.set(false);
+          return;
+        }
+
+        this.maybeInitializeSeenLeads(map);
+        this.maybeInitializeSeenCards(map);
+        this.maybeInitializeNotifiedLeads(map);
+        this.maybeNotifyNewLeads(map);
+        this.applyOpenedNotificationSeenHints(map);
+        this.syncFinalPaidInvoicesToCompleted();
+        this.syncScheduledLane();
+        this.pruneExpiredCompletedFromBoard();
+        this.syncInvoiceResponsesFromApi();
+        this.loading.set(false);
       },
-      error: () => { this.status.set('Load customers error'); this.loading.set(false); }
+      error: () => {
+        this.status.set('Load dashboard error');
+        this.loading.set(false);
+      }
     });
   }
 
@@ -1693,6 +1717,17 @@ export default class DashboardComponent implements OnDestroy {
         existingByLaneAndDocument.add(`${laneId.toLowerCase()}::${docRef.toLowerCase()}`);
       }
     }
+    const customersWithWorkflowCards = new Set(
+      Object.entries(map || {})
+        .filter(([laneId]) => {
+          const lane = laneById.get(String(laneId || '').trim()) || null;
+          if (!lane) return false;
+          const stage = this.laneStageKey(lane);
+          return stage === 'scheduled' || stage === 'inprogress' || stage === 'completed';
+        })
+        .flatMap(([, rows]) => (rows || []).map(row => String(row.customerId || '').trim()))
+        .filter(Boolean)
+    );
 
     const toCreate: Array<{ laneId: string; customerId: string; title: string }> = [];
     const seenCreateKeys = new Set<string>();
@@ -1710,11 +1745,20 @@ export default class DashboardComponent implements OnDestroy {
       const laneDocKey = `${targetLaneId.toLowerCase()}::${docRef.toLowerCase()}`;
       if (existingByLaneAndDocument.has(laneDocKey)) continue;
       if (seenCreateKeys.has(laneDocKey)) continue;
+      if (this.dismissedDocCardIds()[laneDocKey]) continue;
+      const customerId = this.customerIdForDocument(doc);
+      if (
+        doc.documentType === 'invoice' &&
+        customerId &&
+        customersWithWorkflowCards.has(customerId)
+      ) {
+        continue;
+      }
 
       seenCreateKeys.add(laneDocKey);
       toCreate.push({
         laneId: targetLaneId,
-        customerId: this.customerIdForDocument(doc),
+        customerId,
         title: this.cardTitleForDocument(doc)
       });
     }
@@ -1724,8 +1768,47 @@ export default class DashboardComponent implements OnDestroy {
     return true;
   }
 
+  private dismissedDocKeysForItems(itemIds: string[]): string[] {
+    const ids = new Set((itemIds || []).map(id => String(id || '').trim()).filter(Boolean));
+    if (!ids.size) return [];
+    const laneById = new Map<string, Lane>((this.lanes() || []).map(lane => [String(lane.id || '').trim(), lane]));
+    const out = new Set<string>();
+
+    for (const [laneId, rows] of Object.entries(this.items() || {})) {
+      const lane = laneById.get(String(laneId || '').trim()) || null;
+      if (!lane) continue;
+      const stage = this.laneStageKey(lane);
+      if (stage !== 'quote' && stage !== 'invoiced') continue;
+      for (const row of rows || []) {
+        const rowId = String(row.id || '').trim();
+        if (!ids.has(rowId)) continue;
+        const ref = String(this.resolvedDocumentRefForLaneCard(row, lane) || '').trim().toLowerCase();
+        if (!ref) continue;
+        out.add(`${String(laneId || '').trim().toLowerCase()}::${ref}`);
+      }
+    }
+
+    return Array.from(out);
+  }
+
+  private markDocumentCardsDismissed(keys: string[]): void {
+    if (!keys.length) return;
+    this.dismissedDocCardsInitialized = true;
+    const next = { ...this.dismissedDocCardIds() };
+    for (const raw of keys) {
+      const key = String(raw || '').trim().toLowerCase();
+      if (!key) continue;
+      next[key] = true;
+    }
+    this.dismissedDocCardIds.set(next);
+  }
+
   private pruneDuplicateDocumentCards(map: Record<string, WorkItem[]>, lanes: Lane[]): boolean {
-    const duplicatesToDelete = this.pruneDuplicateDocumentCardsInMap(map, lanes);
+    const duplicatesToDelete = [
+      ...this.pruneDuplicateDocumentCardsInMap(map, lanes),
+      ...this.pruneWorkflowLaneDuplicatesInMap(map, lanes),
+      ...this.pruneLifecycleStageDuplicatesInMap(map, lanes)
+    ];
     if (!duplicatesToDelete.length) return false;
     this.deleteDuplicateDocumentCards(Array.from(new Set(duplicatesToDelete)));
     return true;
@@ -1770,6 +1853,108 @@ export default class DashboardComponent implements OnDestroy {
     }
 
     return Array.from(new Set(duplicatesToDelete));
+  }
+
+  private workflowCustomerKey(item: WorkItem): string {
+    const customerId = String(item.customerId || '').trim();
+    if (customerId) return `id:${customerId.toLowerCase()}`;
+    const inferred = this.inferredCustomerIdFromItem(item);
+    if (inferred) return `id:${inferred.toLowerCase()}`;
+    const name = String(this.customerName(item) || '').trim().toLowerCase();
+    const vehicle = String(this.vehicleOf(item) || '').trim().toLowerCase();
+    if (!name && !vehicle) return '';
+    return `name:${name}|vehicle:${vehicle}`;
+  }
+
+  private pruneWorkflowLaneDuplicatesInMap(map: Record<string, WorkItem[]>, lanes: Lane[]): string[] {
+    const duplicatesToDelete: string[] = [];
+    for (const lane of lanes || []) {
+      const stage = this.laneStageKey(lane);
+      if (stage !== 'scheduled' && stage !== 'inprogress') continue;
+      const rows = [...(map[lane.id] || [])];
+      if (rows.length <= 1) continue;
+      const byKey = new Map<string, WorkItem[]>();
+      for (const row of rows) {
+        const key = this.workflowCustomerKey(row);
+        if (!key) continue;
+        const list = byKey.get(key) || [];
+        list.push(row);
+        byKey.set(key, list);
+      }
+      const removeIds = new Set<string>();
+      for (const group of byKey.values()) {
+        if (group.length <= 1) continue;
+        const ordered = group
+          .slice()
+          .sort((a, b) => this.asMillis(String(b.updatedAt || b.createdAt || '')) - this.asMillis(String(a.updatedAt || a.createdAt || '')));
+        const keepId = String(ordered[0].id || '').trim();
+        for (const row of ordered.slice(1)) {
+          const id = String(row.id || '').trim();
+          if (!id || id === keepId) continue;
+          removeIds.add(id);
+          duplicatesToDelete.push(id);
+        }
+      }
+      if (removeIds.size) {
+        map[lane.id] = rows.filter(row => !removeIds.has(String(row.id || '').trim()));
+      }
+    }
+    return Array.from(new Set(duplicatesToDelete));
+  }
+
+  private lifecycleStagePriority(stage: string): number {
+    if (stage === 'completed') return 60;
+    if (stage === 'inprogress') return 50;
+    if (stage === 'scheduled') return 40;
+    if (stage === 'invoiced') return 30;
+    if (stage === 'quote') return 20;
+    if (stage === 'lead') return 10;
+    return 0;
+  }
+
+  private pruneLifecycleStageDuplicatesInMap(map: Record<string, WorkItem[]>, lanes: Lane[]): string[] {
+    const laneById = new Map<string, Lane>(
+      (lanes || []).map(lane => [String(lane.id || '').trim(), lane])
+    );
+    const workflowRows: Array<{ laneId: string; laneStage: string; row: WorkItem }> = [];
+    for (const [laneId, rows] of Object.entries(map || {})) {
+      const lane = laneById.get(String(laneId || '').trim()) || null;
+      const stage = this.laneStageKey(lane);
+      if (!this.workflowLaneStage(stage)) continue;
+      for (const row of rows || []) workflowRows.push({ laneId, laneStage: stage, row });
+    }
+
+    const byCustomer = new Map<string, Array<{ laneId: string; laneStage: string; row: WorkItem }>>();
+    for (const entry of workflowRows) {
+      const key = this.workflowCustomerKey(entry.row);
+      if (!key) continue;
+      const list = byCustomer.get(key) || [];
+      list.push(entry);
+      byCustomer.set(key, list);
+    }
+
+    const removeIds = new Set<string>();
+    for (const entries of byCustomer.values()) {
+      if (entries.length <= 1) continue;
+      entries.sort((a, b) => {
+        const stageDiff = this.lifecycleStagePriority(b.laneStage) - this.lifecycleStagePriority(a.laneStage);
+        if (stageDiff !== 0) return stageDiff;
+        return this.asMillis(String(b.row.updatedAt || b.row.createdAt || ''))
+          - this.asMillis(String(a.row.updatedAt || a.row.createdAt || ''));
+      });
+      const keeperId = String(entries[0].row.id || '').trim();
+      for (const entry of entries.slice(1)) {
+        const id = String(entry.row.id || '').trim();
+        if (!id || id === keeperId) continue;
+        removeIds.add(id);
+      }
+    }
+
+    if (!removeIds.size) return [];
+    for (const [laneId, rows] of Object.entries(map || {})) {
+      map[laneId] = (rows || []).filter(row => !removeIds.has(String(row.id || '').trim()));
+    }
+    return Array.from(removeIds);
   }
 
   private deleteDuplicateDocumentCards(ids: string[]): void {
@@ -2647,34 +2832,74 @@ export default class DashboardComponent implements OnDestroy {
     return m?.[1] ?? '';
   }
 
-  notesOf(it: WorkItem): string {
+  notesListOf(it: WorkItem): string[] {
     const cust = this.customersMap()[it.customerId ?? ''] as any;
-    const n = (cust?.notes || '').toString().trim();
-    if (n) return n;
+    const lane = this.laneForItem(it);
+    const stageKey = this.laneStageKey(lane);
+    const out: string[] = [];
+    const seen = new Set<string>();
 
-    const title = it.title || '';
+    const add = (value: unknown) => {
+      const raw = String(value ?? '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (!raw) return;
+      const key = raw.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push(raw);
+    };
+
+    const includeCustomerHistory = stageKey === 'lead' || !stageKey;
+    if (includeCustomerHistory) {
+      const history = Array.isArray(cust?.notesHistory) ? cust.notesHistory : [];
+      const sortedHistory = [...history]
+        .map((entry: any) => ({
+          text: String(entry?.text || '').trim(),
+          ts: this.asMillis(entry?.createdAt || '') || 0
+        }))
+        .filter(entry => !!entry.text)
+        .sort((a, b) => a.ts - b.ts);
+      for (const entry of sortedHistory) add(entry.text);
+      add(cust?.notes);
+    }
+
+    const title = String(it.title || '').trim();
     const idx = title.indexOf('— ');
     if (idx >= 0) {
       let note = title.slice(idx + 2);
       note = note.replace(/\[c=[^\]]+\]/gi, '').trim().replace(/\s{2,}/g, ' ');
-      if (note) return note;
+      add(note);
     }
 
-    const customerId = String(it.customerId || '').trim();
-    const customerEmail = String(cust?.email || '').trim().toLowerCase();
-    const customerName = this.customerName(it).trim().toLowerCase();
-    const doc = this.invoiceDetails()
-      .filter(row => {
-        const rowCustomerId = String(row.customerId || '').trim();
-        if (customerId && rowCustomerId && rowCustomerId === customerId) return true;
-        const rowEmail = String(row.customerEmail || '').trim().toLowerCase();
-        if (customerEmail && rowEmail && rowEmail === customerEmail) return true;
-        const rowName = String(row.customerName || '').trim().toLowerCase();
-        return !!customerName && !!rowName && rowName === customerName;
-      })
-      .sort((a, b) => this.asMillis(b.updatedAt || b.createdAt || '') - this.asMillis(a.updatedAt || a.createdAt || ''))[0];
-    if (!doc) return '';
-    return String(doc.staffNote || doc.customerNote || '').trim();
+    const docs: InvoiceDetail[] = [];
+    if (stageKey === 'quote' && lane) {
+      const linked = this.linkedDocumentForCard(it, lane);
+      if (linked?.documentType === 'quote') docs.push(linked);
+    } else if (stageKey === 'invoiced') {
+      if (lane) {
+        const linked = this.linkedDocumentForCard(it, lane);
+        if (linked?.documentType === 'invoice') docs.push(linked);
+      }
+      if (!docs.length) {
+        const latest = this.latestInvoiceDocumentForCard(it);
+        if (latest) docs.push(latest);
+      }
+    } else if (stageKey === 'scheduled' || stageKey === 'inprogress' || stageKey === 'completed') {
+      const latest = this.latestInvoiceDocumentForCard(it);
+      if (latest) docs.push(latest);
+    }
+
+    for (const doc of docs) {
+      add(String(doc.staffNote || '').trim());
+      add(String(doc.customerNote || '').trim());
+    }
+
+    return out;
+  }
+
+  notesOf(it: WorkItem): string {
+    return this.notesListOf(it)[0] || '';
   }
 
   appointmentLabel(it: WorkItem): string {
@@ -2759,6 +2984,30 @@ export default class DashboardComponent implements OnDestroy {
       'Scheduled customer';
     const vehicle = this.customerVehicleBasic(customer);
     return vehicle ? `${displayName} (${vehicle})` : displayName;
+  }
+
+  private inferredCustomerIdFromItem(item: WorkItem): string {
+    const direct = String(item.customerId || '').trim();
+    if (direct) return direct;
+    const name = String(this.customerName(item) || '').trim().toLowerCase();
+    if (name) {
+      const exactName = this.allCustomers().find(customer =>
+        String(customer.name || '').trim().toLowerCase() === name
+      );
+      if (exactName?.id) return String(exactName.id).trim();
+    }
+    const phone = String(this.customerPhone(item) || '').replace(/\D+/g, '');
+    if (phone) {
+      const byPhone = this.allCustomers().find(customer =>
+        String(customer.phone || '').replace(/\D+/g, '') === phone
+      );
+      if (byPhone?.id) return String(byPhone.id).trim();
+    }
+    return '';
+  }
+
+  private effectiveCustomerIdForItem(item: WorkItem): string {
+    return this.inferredCustomerIdFromItem(item);
   }
 
   private effectiveScheduleEndMs(item: ScheduleItem): number {
@@ -2865,7 +3114,12 @@ export default class DashboardComponent implements OnDestroy {
         next: created => {
           this.itemsApi.update({ id: created.id, customerId }).subscribe({
             next: () => createNext(),
-            error: () => createNext()
+            error: () => {
+              this.itemsApi.delete(created.id).subscribe({
+                next: () => createNext(),
+                error: () => createNext()
+              });
+            }
           });
         },
         error: () => createNext()
@@ -2884,12 +3138,18 @@ export default class DashboardComponent implements OnDestroy {
     const futureCustomerIds = this.futureScheduleCustomerIds(nowMs);
     const activeCheckedInCustomerIds = new Set<string>();
     const customersWithProtectedLaneCards = new Set<string>();
+    const repairedCustomerIds: Array<{ id: string; customerId: string }> = [];
     const map: Record<string, WorkItem[]> = {};
     for (const [laneId, rows] of Object.entries(this.items())) {
-      map[laneId] = [...rows];
-      for (const row of rows || []) {
-        const customerId = String(row.customerId || '').trim();
+      map[laneId] = [...rows].map(row => ({ ...row }));
+      for (const row of map[laneId] || []) {
+        const customerId = this.effectiveCustomerIdForItem(row);
         if (!customerId) continue;
+        if (!String(row.customerId || '').trim()) {
+          row.customerId = customerId;
+          const id = String(row.id || '').trim();
+          if (id) repairedCustomerIds.push({ id, customerId });
+        }
         const hasCheckIn = !!String(row.checkedInAt || '').trim();
         const isCompleted = !!String(row.completedAt || '').trim();
         if (hasCheckIn && !isCompleted) {
@@ -2900,6 +3160,11 @@ export default class DashboardComponent implements OnDestroy {
         }
       }
     }
+    const scheduledCustomerIds = new Set(
+      (map[scheduledId] || [])
+        .map(item => this.effectiveCustomerIdForItem(item))
+        .filter(Boolean)
+    );
 
     const movedToScheduled: WorkItem[] = [];
     const movedOutOfScheduled: Array<{ item: WorkItem; targetLaneId: string }> = [];
@@ -2909,14 +3174,22 @@ export default class DashboardComponent implements OnDestroy {
       const keep: WorkItem[] = [];
       for (const it of map[laneId] || []) {
         const alreadyCheckedIn = !!(it.checkedInAt || '').trim();
-        const customerId = (it.customerId || '').trim();
+        const customerId = this.effectiveCustomerIdForItem(it);
         const hasFutureSchedule = customerId ? futureCustomerIds.has(customerId) : false;
         const hasActiveCheckIn = customerId ? activeCheckedInCustomerIds.has(customerId) : false;
         const hasProtectedLaneCard = customerId ? customersWithProtectedLaneCards.has(customerId) : false;
 
         if (laneId !== scheduledId) {
-          if (customerId && hasFutureSchedule && !alreadyCheckedIn && !hasActiveCheckIn && !this.isLeadLaneById(laneId)) {
+          if (
+            customerId &&
+            hasFutureSchedule &&
+            !alreadyCheckedIn &&
+            !hasActiveCheckIn &&
+            !this.isLeadLaneById(laneId) &&
+            !scheduledCustomerIds.has(customerId)
+          ) {
             movedToScheduled.push({ ...it, laneId: scheduledId });
+            scheduledCustomerIds.add(customerId);
             continue;
           }
           keep.push(it);
@@ -2966,8 +3239,51 @@ export default class DashboardComponent implements OnDestroy {
       map[move.targetLaneId] = [...(map[move.targetLaneId] || []), move.item];
     }
 
-    if (movedToScheduled.length || movedOutOfScheduled.length || removedFromScheduled.length) {
-      const duplicateIds = this.pruneDuplicateDocumentCardsInMap(map, this.lanes());
+    const scheduledRows = [...(map[scheduledId] || [])];
+    if (scheduledRows.length > 1) {
+      const keepByCustomer = new Map<string, WorkItem>();
+      const removeScheduledIds = new Set<string>();
+      for (const row of scheduledRows) {
+        const customerKey = this.workflowCustomerKey(row);
+        if (!customerKey) continue;
+        const existing = keepByCustomer.get(customerKey);
+        if (!existing) {
+          keepByCustomer.set(customerKey, row);
+          continue;
+        }
+        const existingCheckedIn = !!String(existing.checkedInAt || '').trim();
+        const rowCheckedIn = !!String(row.checkedInAt || '').trim();
+        let keepRow = false;
+        if (rowCheckedIn && !existingCheckedIn) {
+          keepRow = true;
+        } else if (rowCheckedIn === existingCheckedIn) {
+          const existingUpdated = this.asMillis(String(existing.updatedAt || existing.createdAt || ''));
+          const rowUpdated = this.asMillis(String(row.updatedAt || row.createdAt || ''));
+          if (rowUpdated >= existingUpdated) keepRow = true;
+        }
+        if (keepRow) {
+          const removeId = String(existing.id || '').trim();
+          if (removeId) removeScheduledIds.add(removeId);
+          keepByCustomer.set(customerKey, row);
+        } else {
+          const removeId = String(row.id || '').trim();
+          if (removeId) removeScheduledIds.add(removeId);
+        }
+      }
+      if (removeScheduledIds.size) {
+        map[scheduledId] = scheduledRows.filter(row => !removeScheduledIds.has(String(row.id || '').trim()));
+        removedFromScheduled.push(
+          ...scheduledRows.filter(row => removeScheduledIds.has(String(row.id || '').trim()))
+        );
+      }
+    }
+
+    if (movedToScheduled.length || movedOutOfScheduled.length || removedFromScheduled.length || repairedCustomerIds.length) {
+      const duplicateIds = Array.from(new Set([
+        ...this.pruneDuplicateDocumentCardsInMap(map, this.lanes()),
+        ...this.pruneWorkflowLaneDuplicatesInMap(map, this.lanes()),
+        ...this.pruneLifecycleStageDuplicatesInMap(map, this.lanes())
+      ]));
       this.items.set(map);
       this.maybeInitializeSeenLeads(map);
       this.maybeInitializeSeenCards(map);
@@ -2979,6 +3295,9 @@ export default class DashboardComponent implements OnDestroy {
       for (const move of movedOutOfScheduled) {
         this.itemsApi.update({ id: move.item.id, laneId: move.targetLaneId }).subscribe();
       }
+      for (const patch of repairedCustomerIds) {
+        this.itemsApi.update({ id: patch.id, customerId: patch.customerId }).subscribe({ error: () => {} });
+      }
       for (const it of removedFromScheduled) {
         this.itemsApi.delete(it.id).subscribe({ error: () => {} });
       }
@@ -2989,13 +3308,13 @@ export default class DashboardComponent implements OnDestroy {
 
     const scheduledCustomers = new Set(
       (map[scheduledId] || [])
-        .map(item => (item.customerId || '').trim())
+        .map(item => this.effectiveCustomerIdForItem(item))
         .filter(Boolean)
     );
     const customersWithNonScheduledCards = new Set(
       Object.entries(map)
         .filter(([laneId]) => laneId !== scheduledId)
-        .flatMap(([, rows]) => (rows || []).map(item => (item.customerId || '').trim()))
+        .flatMap(([, rows]) => (rows || []).map(item => this.effectiveCustomerIdForItem(item)))
         .filter(Boolean)
     );
     const missingScheduledCards = [...futureCustomerIds].filter(customerId => !scheduledCustomers.has(customerId));
@@ -3064,7 +3383,10 @@ export default class DashboardComponent implements OnDestroy {
     }
     nextMap[inProgressLaneId] = (nextMap[inProgressLaneId] || []).filter(item => !movedIds.has(item.id));
     nextMap[completedLaneId] = [...moves.map(move => move.nextItem), ...(nextMap[completedLaneId] || [])];
-    const duplicateIds = this.pruneDuplicateDocumentCardsInMap(nextMap, this.lanes());
+    const duplicateIds = Array.from(new Set([
+      ...this.pruneDuplicateDocumentCardsInMap(nextMap, this.lanes()),
+      ...this.pruneWorkflowLaneDuplicatesInMap(nextMap, this.lanes())
+    ]));
 
     this.items.set(nextMap);
     this.maybeInitializeSeenLeads(nextMap);
@@ -3109,6 +3431,22 @@ export default class DashboardComponent implements OnDestroy {
           const paid = Number(existing.paidAmount || 0);
           if ((existing.stage === 'accepted' || existing.stage === 'completed') && paid >= total) continue;
           const wasFinalInvoicePayment = paid > 0 && paid < total;
+          const provider = this.normalizeRefundProviderKey(String((item as any)?.paymentProvider || existing.paymentProviderKey || '').trim().toLowerCase());
+          const transactionId = String((item as any)?.paymentTransactionId || '').trim();
+          const accountNumber = this.maskedAccountForRefund(String((item as any)?.paymentAccountNumber || '').trim());
+          const paymentAmount = this.roundCurrency(Math.max(
+            0,
+            Number((item as any)?.paymentAmount || total || 0)
+          ));
+          if (provider === 'authorize-net' && transactionId && paymentAmount > 0) {
+            this.invoicesData.recordPaymentTransaction(existing.id, {
+              provider,
+              amount: paymentAmount,
+              transactionId,
+              accountNumber,
+              createdAt: responseUpdatedAt || new Date().toISOString()
+            });
+          }
 
           this.invoicesData.setPaidAmount(existing.id, total, 'Customer paid invoice from public payment link.', 'customer');
           if (wasFinalInvoicePayment) {
@@ -3230,6 +3568,21 @@ export default class DashboardComponent implements OnDestroy {
     if (!changed) return;
     this.seenCardIds.set(next);
     this.persistSeenCardsNow(next);
+  }
+
+  private normalizeRefundProviderKey(provider: string): string {
+    const normalized = String(provider || '').trim().toLowerCase().replace(/[\s_.]+/g, '-');
+    if (!normalized) return '';
+    if (normalized === 'authorizenet' || normalized === 'authorize-net' || normalized === 'authorize.net') {
+      return 'authorize-net';
+    }
+    return normalized;
+  }
+
+  private maskedAccountForRefund(raw: string): string {
+    const digits = String(raw || '').replace(/\D+/g, '');
+    if (digits.length < 4) return '';
+    return `XXXX${digits.slice(-4)}`;
   }
 
   private itemMatchesDocumentCustomer(item: WorkItem, doc: InvoiceDetail): boolean {
@@ -3625,6 +3978,7 @@ export default class DashboardComponent implements OnDestroy {
       if (stage === 'quote' || stage === 'invoiced') {
         const byDocument = new Map<string, WorkItem>();
         for (const item of base) {
+          if (!this.shouldShowLaneCard(item, lane)) continue;
           const docRef = String(this.resolvedDocumentRefForLaneCard(item, lane) || '').trim().toLowerCase();
           if (!docRef) {
             byDocument.set(`id:${String(item.id || '').trim()}`, item);
@@ -3651,6 +4005,15 @@ export default class DashboardComponent implements OnDestroy {
     return arr;
   }
 
+  private shouldShowLaneCard(item: WorkItem, lane: Lane): boolean {
+    const stage = this.laneStageKey(lane);
+    if (stage !== 'quote') return true;
+    const linked = this.linkedDocumentForCard(item, lane);
+    if (!linked || linked.documentType !== 'quote') return true;
+    const linkedStage = String(linked.stage || '').trim().toLowerCase();
+    return linkedStage !== 'canceled' && linkedStage !== 'expired';
+  }
+
   laneItemCount(laneId: string): number {
     return this.getLaneCards(laneId).length;
   }
@@ -3669,8 +4032,26 @@ export default class DashboardComponent implements OnDestroy {
       this.maybeNotifyNewLeads(map);
       return;
     } else {
-      const moved = map[sourceId][event.previousIndex];
-      const movedCustomerId = (moved?.customerId || '').trim();
+      const sourceRendered = Array.isArray(event.previousContainer.data) ? event.previousContainer.data : (map[sourceId] || []);
+      const targetRendered = Array.isArray(event.container.data) ? event.container.data : (map[targetId] || []);
+      const moved = sourceRendered[event.previousIndex] || map[sourceId]?.[event.previousIndex];
+      if (!moved) return;
+      const movedId = String(moved.id || '').trim();
+      map[sourceId] = (map[sourceId] || []).filter(row => String(row.id || '').trim() !== movedId);
+      const targetExisting = (map[targetId] || []).filter(row => String(row.id || '').trim() !== movedId);
+      const renderedTargetIds = targetRendered
+        .map(row => String(row?.id || '').trim())
+        .filter(id => !!id && id !== movedId);
+      const boundedIndex = Math.max(0, Math.min(event.currentIndex, renderedTargetIds.length));
+      const beforeId = renderedTargetIds[boundedIndex];
+      const insertAt = beforeId
+        ? Math.max(0, targetExisting.findIndex(row => String(row.id || '').trim() === beforeId))
+        : targetExisting.length;
+      const canonicalMoved = (this.items()[sourceId] || []).find(row => String(row.id || '').trim() === movedId) || moved;
+      const movedForTarget = { ...canonicalMoved, laneId: targetLaneId };
+      targetExisting.splice(insertAt, 0, movedForTarget);
+      map[targetId] = targetExisting;
+      const movedCustomerId = this.effectiveCustomerIdForItem(moved);
       const launchQuoteAfterMove = this.isQuoteLaneById(targetLaneId);
       const sourceLane = this.lanes().find(lane => lane.id === sourceId) || null;
       const targetLane = this.lanes().find(lane => lane.id === targetLaneId) || null;
@@ -3722,8 +4103,11 @@ export default class DashboardComponent implements OnDestroy {
       }
       const needsSchedulePrompt = !!(isTargetScheduled && movedCustomerId && !this.hasFutureSchedule(movedCustomerId));
 
-      transferArrayItem(map[sourceId], map[targetId], event.previousIndex, event.currentIndex);
-      const duplicateIds = this.pruneDuplicateDocumentCardsInMap(map, this.lanes());
+      const duplicateIds = Array.from(new Set([
+        ...this.pruneDuplicateDocumentCardsInMap(map, this.lanes()),
+        ...this.pruneWorkflowLaneDuplicatesInMap(map, this.lanes()),
+        ...this.pruneLifecycleStageDuplicatesInMap(map, this.lanes())
+      ]));
       this.items.set(map);
       this.maybeInitializeSeenLeads(map);
       this.maybeInitializeSeenCards(map);
@@ -3732,7 +4116,6 @@ export default class DashboardComponent implements OnDestroy {
       for (const id of duplicateIds) {
         this.itemsApi.delete(id).subscribe({ error: () => {} });
       }
-      const movedId = String(moved?.id || '').trim();
       const updated = (map[targetId] || []).find(row => String(row.id || '').trim() === movedId)
         || map[targetId][event.currentIndex];
       if (!updated) {

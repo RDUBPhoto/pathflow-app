@@ -299,6 +299,23 @@ export default class DashboardComponent implements OnDestroy {
         }, 3000);
       }
     });
+
+    this.wasAuthenticated = this.auth.isAuthenticated();
+    effect(() => {
+      const isAuthenticated = this.auth.isAuthenticated();
+      if (!isAuthenticated) {
+        this.wasAuthenticated = false;
+        this.apiStatus.set('unknown');
+        return;
+      }
+      if (this.wasAuthenticated) return;
+      this.wasAuthenticated = true;
+      this.loadAll();
+      this.checkApi();
+      this.refreshUnreadActivity();
+      this.syncQuoteResponsesFromApi();
+      this.syncInvoiceResponsesFromApi();
+    });
   }
 
   private statusTimer: any = null;
@@ -310,6 +327,7 @@ export default class DashboardComponent implements OnDestroy {
   private laneColorPersistTimer: any = null;
   private laneColorsLoadToken = 0;
   private laneColorsLoaded = false;
+  private wasAuthenticated = false;
   private seenLeadsPersistTimer: any = null;
   private seenLeadsLoadToken = 0;
   private seenLeadsLoaded = false;
@@ -474,6 +492,10 @@ export default class DashboardComponent implements OnDestroy {
   }
 
   private checkApi() {
+    if (!this.auth.isAuthenticated()) {
+      this.apiStatus.set('unknown');
+      return;
+    }
     this.http.get<{ ok: boolean }>('/api/ping').subscribe({
       next: () => this.apiStatus.set('up'),
       error: () => this.apiStatus.set('down')
@@ -481,6 +503,13 @@ export default class DashboardComponent implements OnDestroy {
   }
 
   private refreshUnreadActivity(): void {
+    if (!this.auth.isAuthenticated()) {
+      this.unreadActivityByCustomer.set({});
+      this.unreadEmailByCustomer.set({});
+      this.unreadSmsIdsByCustomer.set({});
+      this.unreadEmailIdsByCustomer.set({});
+      return;
+    }
     this.pruneExpiredCompletedFromBoard();
 
     this.smsApi.listInbox().subscribe({
@@ -3424,6 +3453,7 @@ export default class DashboardComponent implements OnDestroy {
   }
 
   private syncInvoiceResponsesFromApi(): void {
+    if (!this.auth.isAuthenticated()) return;
     this.invoiceResponseApi.listRecent(250).subscribe({
       next: response => {
         const items = Array.isArray(response?.items) ? response.items : [];
@@ -3487,6 +3517,7 @@ export default class DashboardComponent implements OnDestroy {
   }
 
   private syncQuoteResponsesFromApi(): void {
+    if (!this.auth.isAuthenticated()) return;
     this.quoteResponseApi.listRecent(250).subscribe({
       next: response => {
         const items = Array.isArray(response?.items) ? response.items : [];

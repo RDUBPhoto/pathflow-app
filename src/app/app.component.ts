@@ -21,6 +21,7 @@ export default class AppComponent {
   private static readonly IDLE_TIMEOUT_MS = 30 * 60 * 1000;
   private static readonly DEFAULT_FAVICON_URL = 'favicon.ico';
   private static readonly FAVICON_LINK_ID = 'pathflow-dynamic-favicon';
+  private static readonly IDLE_REHYDRATE_FLAG_KEY = 'pathflow.auth.idle.rehydrate.pending';
   private readonly auth = inject(AuthService);
   private readonly theme = inject(ThemeService);
   private readonly branding = inject(BrandSettingsService);
@@ -48,6 +49,12 @@ export default class AppComponent {
         return;
       }
       this.bumpIdleTimer();
+    });
+
+    effect(() => {
+      if (!this.auth.isAuthenticated()) return;
+      if (!this.consumeIdleRehydrateFlag()) return;
+      window.location.reload();
     });
 
     effect(() => {
@@ -88,6 +95,7 @@ export default class AppComponent {
     this.clearIdleTimer();
     this.idleTimer = setTimeout(() => {
       if (!this.auth.isAuthenticated()) return;
+      this.markIdleRehydratePending();
       this.auth.signOut('/?reason=idle');
     }, AppComponent.IDLE_TIMEOUT_MS);
   }
@@ -129,6 +137,25 @@ export default class AppComponent {
       return resolved.toString();
     } catch {
       return fallback;
+    }
+  }
+
+  private markIdleRehydratePending(): void {
+    try {
+      sessionStorage.setItem(AppComponent.IDLE_REHYDRATE_FLAG_KEY, '1');
+    } catch {
+      // Ignore when storage is unavailable.
+    }
+  }
+
+  private consumeIdleRehydrateFlag(): boolean {
+    try {
+      const value = String(sessionStorage.getItem(AppComponent.IDLE_REHYDRATE_FLAG_KEY) || '').trim();
+      if (value !== '1') return false;
+      sessionStorage.removeItem(AppComponent.IDLE_REHYDRATE_FLAG_KEY);
+      return true;
+    } catch {
+      return false;
     }
   }
 }

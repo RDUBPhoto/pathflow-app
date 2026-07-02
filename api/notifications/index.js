@@ -266,7 +266,7 @@ function buildRecipientFilter(tenantId, actor) {
   return `PartitionKey eq '${escapedFilterValue(tenantId)}' and (${filters.join(" or ")})`;
 }
 
-async function listUserNotifications(notificationClient, tenantId, actor, unreadOnly = false) {
+async function listRawUserNotifications(notificationClient, tenantId, actor, unreadOnly = false) {
   const recipientFilter = buildRecipientFilter(scopedTenantPartition(tenantId), actor);
   if (!recipientFilter) return [];
   const filter = unreadOnly ? `${recipientFilter} and read eq false` : recipientFilter;
@@ -278,6 +278,52 @@ async function listUserNotifications(notificationClient, tenantId, actor, unread
   }
   items.sort(sortByCreatedDesc);
   return items;
+}
+
+function logicalNotificationKey(item) {
+  const metadata = asObject(item && item.metadata);
+  const source = asString(metadata.source).toLowerCase();
+  const leadItemId = asString(metadata.leadItemId);
+  const customerId = asString(metadata.customerId);
+  const entityType = asString(item && item.entityType).toLowerCase();
+  const entityId = asString(item && item.entityId);
+  if (source === "widget-lead" && (leadItemId || customerId || entityId)) {
+    return [
+      "lead",
+      leadItemId || "no-lead",
+      customerId || entityId || "no-customer"
+    ].join(":");
+  }
+  if (entityType && entityId) {
+    return [
+      asString(item && item.type).toLowerCase() || "notification",
+      entityType,
+      entityId,
+      asString(item && item.title).toLowerCase()
+    ].join(":");
+  }
+  return `id:${asString(item && item.id)}`;
+}
+
+function collapseLogicalNotifications(items) {
+  const byKey = new Map();
+  for (const item of Array.isArray(items) ? items : []) {
+    const key = logicalNotificationKey(item);
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, item);
+      continue;
+    }
+    if (existing.read && !item.read) {
+      byKey.set(key, item);
+    }
+  }
+  return Array.from(byKey.values()).sort(sortByCreatedDesc);
+}
+
+async function listUserNotifications(notificationClient, tenantId, actor, unreadOnly = false) {
+  const raw = await listRawUserNotifications(notificationClient, tenantId, actor, unreadOnly);
+  return collapseLogicalNotifications(raw);
 }
 
 function recipientKeyForNotification(item) {
@@ -401,14 +447,15 @@ async function listMentionableUsers(userClient, tenantId, search) {
 
 async function markReadForIds(notificationClient, tenantId, actor, ids) {
   if (!Array.isArray(ids) || !ids.length) return 0;
-  const seen = new Set();
+  const processed = new Set();
+  const updatedIds = new Set();
   const scopedTenantId = scopedTenantPartition(tenantId);
   let updated = 0;
 
   for (const value of ids) {
     const id = asString(value);
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
+    if (!id || processed.has(id)) continue;
+    processed.add(id);
 
     let entity = null;
     try {
@@ -418,19 +465,31 @@ async function markReadForIds(notificationClient, tenantId, actor, ids) {
     }
     if (!entity) continue;
     if (!matchesRecipient(actor, entity)) continue;
-    if (asBool(entity.read)) continue;
+    const targetNotification = toNotification(entity);
+    const targetLogicalKey = logicalNotificationKey(targetNotification);
+    const rawItems = await listRawUserNotifications(notificationClient, tenantId, actor, true);
+    const relatedIds = rawItems
+      .filter(item => logicalNotificationKey(item) === targetLogicalKey)
+      .map(item => asString(item.id))
+      .filter(Boolean);
+    if (!relatedIds.includes(id)) relatedIds.push(id);
 
-    await notificationClient.upsertEntity(
-      {
-        partitionKey: scopedTenantId,
-        rowKey: id,
-        read: true,
-        readAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      },
-      "Merge"
-    );
-    updated += 1;
+    for (const relatedId of relatedIds) {
+      if (!relatedId || updatedIds.has(relatedId)) continue;
+      updatedIds.add(relatedId);
+      const nowIso = new Date().toISOString();
+      await notificationClient.upsertEntity(
+        {
+          partitionKey: scopedTenantId,
+          rowKey: relatedId,
+          read: true,
+          readAt: nowIso,
+          updatedAt: nowIso
+        },
+        "Merge"
+      );
+      updated += 1;
+    }
   }
 
   return updated;
@@ -634,7 +693,7 @@ module.exports = async function notificationsApi(context, req) {
     }
 
     if (op === "markallread") {
-      const unread = await listUserNotifications(notificationClient, tenantId, actor, true);
+      const unread = await listRawUserNotifications(notificationClient, tenantId, actor, true);
       const updated = await markReadForIds(
         notificationClient,
         tenantId,

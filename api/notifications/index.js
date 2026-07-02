@@ -283,16 +283,16 @@ async function listRawUserNotifications(notificationClient, tenantId, actor, unr
 function logicalNotificationKey(item) {
   const metadata = asObject(item && item.metadata);
   const source = asString(metadata.source).toLowerCase();
-  const leadItemId = asString(metadata.leadItemId);
   const customerId = asString(metadata.customerId);
+  const customerEmail = normalizeEmail(metadata.customerEmail);
+  const customerPhone = asString(metadata.customerPhone).replace(/\D+/g, "");
+  const customerName = asString(metadata.customerName).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   const entityType = asString(item && item.entityType).toLowerCase();
   const entityId = asString(item && item.entityId);
-  if (source === "widget-lead" && (leadItemId || customerId || entityId)) {
-    return [
-      "lead",
-      leadItemId || "no-lead",
-      customerId || entityId || "no-customer"
-    ].join(":");
+  if (source === "widget-lead") {
+    const titleKey = asString(item && item.title).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    const submittedPersonKey = customerEmail || customerPhone || customerName || customerId || entityId || titleKey;
+    if (submittedPersonKey) return `lead-submission:${submittedPersonKey}`;
   }
   if (entityType && entityId) {
     return [

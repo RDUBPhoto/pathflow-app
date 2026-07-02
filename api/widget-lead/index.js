@@ -448,8 +448,16 @@ function scopedTenantPartition(tenantId) {
   return `${asString(tenantId) || "tenant-unassigned"}${TENANT_SCOPE_DELIMITER}${notificationsScope()}`;
 }
 
-function rowKeyForLeadNotification(leadId, recipientKey) {
-  return String(`lead-${asString(leadId)}-submitted-${asString(recipientKey)}`)
+function submittedLeadNotificationSubject(leadId, customer) {
+  const email = normalizeEmail(customer && customer.email);
+  const phone = normalizePhone(customer && customer.phone);
+  const name = asString(customer && customer.name).toLowerCase();
+  const customerId = asString(customer && customer.id);
+  return email || phone || name || customerId || asString(leadId) || "unknown";
+}
+
+function rowKeyForLeadNotification(leadId, customer, recipientKey) {
+  return String(`lead-${submittedLeadNotificationSubject(leadId, customer)}-submitted-${asString(recipientKey)}`)
     .toLowerCase()
     .replace(/[^a-z0-9._:-]+/g, "-")
     .replace(/-+/g, "-")
@@ -641,7 +649,7 @@ async function createLeadNotifications(notificationClient, usersClient, tenantId
   for (const recipient of recipients) {
     const recipientKey = asString(recipient.targetEmail || recipient.targetUserId);
     if (!recipientKey) continue;
-    const id = rowKeyForLeadNotification(leadId, recipientKey);
+    const id = rowKeyForLeadNotification(leadId, customer, recipientKey);
     try {
       await notificationClient.upsertEntity(
         {
@@ -657,7 +665,10 @@ async function createLeadNotifications(notificationClient, usersClient, tenantId
           metadataJson: JSON.stringify({
             source: "widget-lead",
             leadItemId: asString(leadId),
-            customerId
+            customerId,
+            customerName: leadName,
+            customerEmail: normalizeEmail(customer && customer.email),
+            customerPhone: normalizePhone(customer && customer.phone)
           }),
           targetUserId: asString(recipient.targetUserId),
           targetEmail: normalizeEmail(recipient.targetEmail),

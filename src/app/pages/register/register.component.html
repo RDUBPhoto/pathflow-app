@@ -6,18 +6,18 @@
         <img src="/pathflow-logo.svg" alt="Pathflow" class="marketing-logo" />
         <p class="marketing-kicker">{{ requiresBilling() ? 'Billing Required' : 'Pathflow Setup' }}</p>
         <h2>
-          {{ requiresBilling() ? 'Your trial has ended. Add billing to unlock your workspace.' : 'Launch your workspace and start scheduling jobs today.' }}
+          {{ requiresBilling() ? 'Your trial has ended. Add billing to unlock your workspace.' : 'Add your business details and start your 7-day trial.' }}
         </h2>
         <p>
-          {{ requiresBilling() ? 'Choose monthly or annual billing and you will regain full access immediately.' : 'Configure your shop location now and start a 7-day free trial. Billing can be added now or later.' }}
+          {{ requiresBilling() ? 'Choose monthly or annual billing and you will regain full access immediately.' : 'After this, you will land in Business Admin to finish branding, scheduling, payments, messaging, and user setup.' }}
         </p>
       </div>
     </aside>
 
     <section class="register-panel glass-surface">
       <header class="register-header">
-        <p class="register-kicker">{{ requiresBilling() ? 'Step 2 of 2 · Billing Required' : 'Step 2 of 2 · Choose Plan' }}</p>
-        <h1>{{ requiresBilling() ? 'Unlock your workspace' : 'Choose a plan and finish setup' }}</h1>
+        <p class="register-kicker">{{ requiresBilling() ? 'Step 2 of 2 · Billing Required' : 'Step 2 of 2 · Business Details' }}</p>
+        <h1>{{ requiresBilling() ? 'Unlock your workspace' : 'Finish workspace setup' }}</h1>
       </header>
 
       <section class="form-card">
@@ -170,7 +170,20 @@
         </ng-container>
       </section>
 
-      <section class="form-card billing-card">
+      <section class="form-card optional-billing-prompt" *ngIf="!showBillingSection()">
+        <div class="form-card-head">
+          <h2>Billing</h2>
+          <span class="muted-tag">Later</span>
+        </div>
+        <p class="billing-hint">
+          Start the 7-day trial now. Billing can be added later from Business Admin before the trial ends.
+        </p>
+        <button type="button" class="link-btn billing-toggle-btn" (click)="enableOptionalBilling()">
+          Add billing now
+        </button>
+      </section>
+
+      <section class="form-card billing-card" *ngIf="showBillingSection()">
         <div class="form-card-head">
           <h2>Billing</h2>
           <span class="muted-tag">{{ requiresBilling() ? 'Required' : 'Optional' }}</span>

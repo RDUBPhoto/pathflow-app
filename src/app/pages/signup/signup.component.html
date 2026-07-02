@@ -28,7 +28,7 @@
         </button>
         <button type="button" class="wizard-step" [class.active]="step() === 2" [disabled]="!stepOneValid()" (click)="goToPlans()">
           <span class="wizard-index">2</span>
-          <span>Plan</span>
+          <span>Business</span>
         </button>
       </div>
 
@@ -141,8 +141,8 @@
         </section>
 
         <div class="step-actions single">
-          <ion-button expand="block" size="large" (click)="goToPlans()" [disabled]="auth.loading()">
-            Continue to Plan Selection
+          <ion-button expand="block" size="large" (click)="goToPlans()" [disabled]="auth.loading() || saving()">
+            Continue to Business Details
           </ion-button>
         </div>
       </section>
@@ -150,45 +150,65 @@
       <section class="step-body" *ngIf="step() === 2">
         <section class="form-card">
           <div class="form-card-head">
-            <h2>Choose your plan</h2>
+            <h2>Business Details</h2>
           </div>
 
-          <div class="plan-grid">
-            <button
-              type="button"
-              class="plan-btn"
-              [class.active]="selectedPlan() === 'trial'"
-              (click)="setPlan('trial')">
-              <span class="plan-title">7-Day Trial</span>
-              <span class="plan-price">$0</span>
-              <span class="plan-subtitle">Explore everything for 7 days</span>
-            </button>
+          <ion-item>
+            <ion-label position="stacked">Business name</ion-label>
+            <ion-input
+              [value]="businessName()"
+              (ionInput)="businessName.set($any($event.detail).value ?? '')"
+              autocomplete="organization"
+              placeholder="Exodus 4x4">
+            </ion-input>
+          </ion-item>
 
-            <button
-              type="button"
-              class="plan-btn"
-              [class.active]="selectedPlan() === 'monthly'"
-              (click)="setPlan('monthly')">
-              <span class="plan-title">Monthly</span>
-              <span class="plan-price">${{ monthlyPrice() }}/mo</span>
-              <span class="plan-subtitle">Flexible month-to-month billing</span>
-            </button>
+          <ion-item>
+            <ion-label position="stacked">Business email</ion-label>
+            <ion-input
+              [value]="businessEmail()"
+              (ionInput)="businessEmail.set($any($event.detail).value ?? '')"
+              type="email"
+              autocomplete="email"
+              placeholder="service@yourcompany.com">
+            </ion-input>
+          </ion-item>
 
-            <button
-              type="button"
-              class="plan-btn"
-              [class.active]="selectedPlan() === 'annual'"
-              (click)="setPlan('annual')">
-              <span class="plan-title">Annual</span>
-              <span class="plan-price">${{ annualPrice() }}/yr</span>
-              <span class="plan-subtitle">Save {{ annualSavingsPercent() }}% vs monthly</span>
-            </button>
-          </div>
+          <ion-item>
+            <ion-label position="stacked">Business phone</ion-label>
+            <ion-input
+              [value]="businessPhone()"
+              (ionInput)="onBusinessPhoneInput($any($event.detail).value)"
+              type="tel"
+              inputmode="tel"
+              autocomplete="tel"
+              placeholder="(555) 123-4567">
+            </ion-input>
+          </ion-item>
+
+          <ion-item>
+            <ion-label position="stacked">Business address</ion-label>
+            <ion-input
+              [value]="businessAddress()"
+              (ionInput)="businessAddress.set($any($event.detail).value ?? '')"
+              autocomplete="street-address"
+              placeholder="123 Main St, Schertz, TX">
+            </ion-input>
+          </ion-item>
+
+          <ion-item>
+            <ion-label position="stacked">Primary location name</ion-label>
+            <ion-input
+              [value]="locationName()"
+              (ionInput)="locationName.set($any($event.detail).value ?? '')"
+              placeholder="Main Shop">
+            </ion-input>
+          </ion-item>
         </section>
 
         <section class="form-card review-card">
           <div class="form-card-head">
-            <h2>Review</h2>
+            <h2>Trial Start</h2>
           </div>
 
           <div class="review-row">
@@ -198,19 +218,20 @@
             </strong>
           </div>
           <div class="review-row">
-            <span>Plan</span>
-            <strong>{{ selectedPlan() | titlecase }}</strong>
+            <span>Access</span>
+            <strong>7-Day Trial</strong>
           </div>
-          <p class="review-note" *ngIf="selectedPlan() === 'trial'">
-            You will get full access for 7 days, then billing is required to continue.
+          <p class="review-note">
+            Your trial starts when you create the workspace. Billing can be added later from Business Admin.
           </p>
         </section>
 
         <div class="step-actions split">
-          <ion-button fill="outline" size="large" (click)="backToAccount()" [disabled]="auth.loading()">
+          <ion-button fill="outline" size="large" (click)="backToAccount()" [disabled]="auth.loading() || saving()">
             Back
           </ion-button>
-          <ion-button size="large" (click)="submitSignup()" [disabled]="auth.loading()">
+          <ion-button size="large" (click)="submitSignup()" [disabled]="auth.loading() || saving() || !businessDetailsValid()">
+            <ion-spinner *ngIf="saving()" name="crescent" slot="start"></ion-spinner>
             {{ submitCta() }}
           </ion-button>
         </div>
@@ -224,7 +245,7 @@
       <p class="auth-hint" *ngIf="hint()">{{ hint() }}</p>
       <p class="auth-hint error" *ngIf="error()">{{ error() }}</p>
 
-      <div class="loading" *ngIf="auth.loading()">
+      <div class="loading" *ngIf="auth.loading() || saving()">
         <ion-spinner name="crescent"></ion-spinner>
       </div>
     </section>

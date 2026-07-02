@@ -11,13 +11,14 @@ import {
   IonSpinner
 } from '@ionic/angular/standalone';
 import { ActivatedRoute, Router } from '@angular/router';
+import { firstValueFrom } from 'rxjs';
 import { addIcons } from 'ionicons';
 import { keyOutline, logoGoogle, shieldCheckmarkOutline } from 'ionicons/icons';
 import { AuthService } from '../../auth/auth.service';
+import { BusinessProfileService } from '../../services/business-profile.service';
 import { formatUsPhoneInput, phoneDigits } from '../../utils/phone-format';
 
 type SignupMethod = 'email' | 'aad' | 'google';
-type SignupPlan = 'trial' | 'monthly' | 'annual';
 
 @Component({
   selector: 'app-signup',
@@ -40,6 +41,7 @@ export default class SignupComponent {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   readonly auth = inject(AuthService);
+  private readonly businessProfile = inject(BusinessProfileService);
 
   private readonly isLocalHost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
   private readonly isLikelySwaCli = this.isLocalHost && window.location.port === '4280';
@@ -60,31 +62,25 @@ export default class SignupComponent {
 
   readonly step = signal<1 | 2>(1);
   readonly selectedMethod = signal<SignupMethod>('email');
-  readonly selectedPlan = signal<SignupPlan>('trial');
-  readonly monthlyPrice = signal(149);
-  readonly annualPrice = signal(1490);
 
   readonly fullName = signal('');
   readonly email = signal('');
   readonly phone = signal('');
   readonly password = signal('');
   readonly confirmPassword = signal('');
+  readonly businessName = signal('');
+  readonly businessEmail = signal('');
+  readonly businessPhone = signal('');
+  readonly businessAddress = signal('');
+  readonly locationName = signal('Primary Location');
 
   readonly error = signal('');
   readonly hint = signal('');
-
-  readonly annualSavingsPercent = computed(() => {
-    const monthly = this.monthlyPrice();
-    const annual = this.annualPrice();
-    if (monthly <= 0 || annual <= 0) return 0;
-    const yearlyMonthly = monthly * 12;
-    const savings = Math.max(0, yearlyMonthly - annual);
-    return Math.round((savings / yearlyMonthly) * 100);
-  });
+  readonly saving = signal(false);
 
   readonly submitCta = computed(() => {
     if (this.selectedMethod() === 'email') {
-      return this.localEmailCredentialsEnabled() ? 'Create account and continue' : 'Continue with Email';
+      return this.localEmailCredentialsEnabled() ? 'Create workspace and start trial' : 'Continue with Email';
     }
     if (this.selectedMethod() === 'google') {
       return 'Continue with Google';
@@ -110,6 +106,17 @@ export default class SignupComponent {
     );
   });
 
+  readonly businessDetailsValid = computed(() => {
+    const businessEmail = this.businessEmail().trim().toLowerCase();
+    return (
+      this.businessName().trim().length >= 2 &&
+      /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(businessEmail) &&
+      this.digitsOnly(this.businessPhone()).length >= 10 &&
+      this.businessAddress().trim().length >= 6 &&
+      this.locationName().trim().length >= 3
+    );
+  });
+
   constructor() {
     addIcons({
       'shield-checkmark-outline': shieldCheckmarkOutline,
@@ -122,6 +129,9 @@ export default class SignupComponent {
       const inviteEmail = String(params.get('email') || '').trim();
       if (inviteEmail && !this.email()) {
         this.email.set(inviteEmail);
+      }
+      if (inviteEmail && !this.businessEmail()) {
+        this.businessEmail.set(inviteEmail);
       }
     });
 
@@ -157,12 +167,16 @@ export default class SignupComponent {
     this.selectedMethod.set(method);
   }
 
-  setPlan(plan: SignupPlan): void {
-    this.selectedPlan.set(plan);
+  onPhoneInput(value: string | null | undefined): void {
+    const formatted = formatUsPhoneInput(value);
+    this.phone.set(formatted);
+    if (!this.businessPhone().trim()) {
+      this.businessPhone.set(formatted);
+    }
   }
 
-  onPhoneInput(value: string | null | undefined): void {
-    this.phone.set(formatUsPhoneInput(value));
+  onBusinessPhoneInput(value: string | null | undefined): void {
+    this.businessPhone.set(formatUsPhoneInput(value));
   }
 
   goToPlans(): void {
@@ -194,6 +208,18 @@ export default class SignupComponent {
       this.error.set('Enter your full name.');
       return;
     }
+    if (!this.businessName().trim()) {
+      this.businessName.set(this.fullName().trim());
+    }
+    if (!this.businessEmail().trim()) {
+      this.businessEmail.set(email);
+    }
+    if (!this.businessPhone().trim()) {
+      this.businessPhone.set(this.phone());
+    }
+    if (this.locationName().trim() === 'Primary Location' && this.businessName().trim()) {
+      this.locationName.set(this.businessName().trim());
+    }
     if (this.digitsOnly(this.phone()).length < 10) {
       this.error.set('Enter a valid phone number.');
       return;
@@ -220,8 +246,12 @@ export default class SignupComponent {
     this.error.set('');
     this.hint.set('');
 
-    const plan = this.selectedPlan();
-    const registerRedirect = this.registerRedirect(plan);
+    if (!this.businessDetailsValid()) {
+      this.error.set('Enter business name, email, phone, address, and location name to start the trial.');
+      return;
+    }
+
+    const registerRedirect = this.registerRedirect();
     const method = this.selectedMethod();
 
     if (method === 'email') {
@@ -237,6 +267,7 @@ export default class SignupComponent {
           return;
         }
 
+        this.saving.set(true);
         const result = await this.auth.createEmailPasswordAccount(
           this.email(),
           this.password(),
@@ -245,13 +276,30 @@ export default class SignupComponent {
         );
         if (!result.ok) {
           this.error.set(result.error || 'Unable to create your account.');
+          this.saving.set(false);
           return;
         }
 
-        void this.router.navigate(['/register'], {
-          replaceUrl: true,
-          queryParams: { redirect: this.redirectTo(), plan }
-        });
+        const workspace = await this.auth.registerWorkspace([this.locationName().trim()], undefined, 'monthly');
+        if (!workspace.ok) {
+          this.error.set(workspace.error || 'Unable to start your workspace trial.');
+          this.saving.set(false);
+          return;
+        }
+
+        try {
+          await firstValueFrom(this.businessProfile.save({
+            companyName: this.businessName().trim(),
+            companyEmail: this.businessEmail().trim(),
+            companyPhone: this.businessPhone().trim(),
+            companyAddress: this.businessAddress().trim()
+          }));
+        } catch {
+          // Non-blocking: the admin setup stepper can collect this again if needed.
+        }
+
+        this.saving.set(false);
+        void this.router.navigateByUrl(this.redirectTo(), { replaceUrl: true });
         return;
       }
 
@@ -285,10 +333,10 @@ export default class SignupComponent {
     });
   }
 
-  private registerRedirect(plan: SignupPlan): string {
+  private registerRedirect(): string {
     const params = new URLSearchParams();
     params.set('redirect', this.redirectTo());
-    params.set('plan', plan);
+    params.set('plan', 'trial');
     return `/register?${params.toString()}`;
   }
 

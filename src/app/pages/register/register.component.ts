@@ -55,6 +55,7 @@ export default class RegisterComponent implements OnDestroy {
   readonly extraLocationNames = signal<string[]>([]);
   readonly selectedPlan = signal<'trial' | 'monthly' | 'annual'>('trial');
   readonly billingMode = signal(false);
+  readonly showOptionalBilling = signal(false);
   readonly cardholderName = signal('');
   readonly cardNumber = signal('');
   readonly expiryMonth = signal('');
@@ -70,6 +71,7 @@ export default class RegisterComponent implements OnDestroy {
   readonly isBillingUpdateMode = computed(() => this.auth.isAccessLocked() || this.billingMode());
   readonly showTrialOption = computed(() => !this.isBillingUpdateMode());
   readonly requiresBilling = computed(() => this.isBillingUpdateMode() || this.selectedPlan() !== 'trial');
+  readonly showBillingSection = computed(() => this.requiresBilling() || this.showOptionalBilling());
   readonly planCycleForBilling = computed<'monthly' | 'annual'>(() => this.selectedPlan() === 'annual' ? 'annual' : 'monthly');
   readonly annualSavingsPercent = computed(() => {
     const monthly = this.monthlyPrice();
@@ -196,6 +198,9 @@ export default class RegisterComponent implements OnDestroy {
       if (queryPlan === 'annual' || queryPlan === 'monthly' || queryPlan === 'trial') {
         if (this.isBillingUpdateMode() && queryPlan === 'trial') return;
         this.selectedPlan.set(queryPlan as 'trial' | 'monthly' | 'annual');
+        if (queryPlan === 'annual' || queryPlan === 'monthly') {
+          this.showOptionalBilling.set(true);
+        }
       }
       const userEmail = String(this.auth.user()?.email || '').trim();
       if (userEmail && !this.businessEmail().trim()) {
@@ -283,6 +288,13 @@ export default class RegisterComponent implements OnDestroy {
   setPlanCycle(cycle: 'trial' | 'monthly' | 'annual'): void {
     if (this.isBillingUpdateMode() && cycle === 'trial') return;
     this.selectedPlan.set(cycle);
+  }
+
+  enableOptionalBilling(): void {
+    this.showOptionalBilling.set(true);
+    if (this.selectedPlan() === 'trial') {
+      this.selectedPlan.set('monthly');
+    }
   }
 
   setLocationMode(mode: 'single' | 'multiple'): void {

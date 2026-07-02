@@ -79,6 +79,14 @@ function normalizeNeedStatus(raw) {
   return "needs-order";
 }
 
+function normalizeJobPartStatus(raw) {
+  const status = normalizeNeedStatus(raw);
+  if (status === "ordered" || status === "po-draft") return "ordered";
+  if (status === "received") return "received";
+  if (status === "cancelled") return "returned";
+  return "quoted";
+}
+
 async function getTableClient(tableName) {
   const conn = asString(process.env.STORAGE_CONNECTION_STRING);
   if (!conn) throw new Error("Missing STORAGE_CONNECTION_STRING");
@@ -92,6 +100,7 @@ async function getTableClient(tableName) {
 function normalizeLine(raw, index) {
   const source = raw && typeof raw === "object" ? raw : {};
   const qty = Math.max(1, Math.floor(asNumber(source.qty, 1)));
+  const qtyReceived = Math.max(0, Math.min(qty, asNumber(source.qtyReceived, 0)));
   const partName = asString(source.partName || source.name || source.description);
   const sku = asString(source.sku || source.partNumber);
   const unitCost = Math.max(0, asNumber(source.unitCost, 0));
@@ -100,14 +109,26 @@ function normalizeLine(raw, index) {
   return {
     lineId: asString(source.lineId) || `line-${index + 1}`,
     needId: asString(source.needId),
-    itemId: asString(source.itemId),
+    itemId: asString(source.itemId || source.relatedInventoryItemId),
+    relatedInventoryItemId: asString(source.relatedInventoryItemId || source.itemId),
+    jobId: asString(source.jobId),
+    jobNumber: asString(source.jobNumber),
     partName,
     sku,
+    vendorId: asString(source.vendorId),
     vendor: asString(source.vendor || source.vendorHint || source.supplier),
     qty,
+    qtyNeeded: Math.max(1, Math.floor(asNumber(source.qtyNeeded, qty))),
+    qtyOrdered: Math.max(0, Math.floor(asNumber(source.qtyOrdered, qty))),
+    qtyReceived,
     unitCost,
+    orderNumber: asString(source.orderNumber),
+    trackingNumber: asString(source.trackingNumber),
+    etaDate: asString(source.etaDate),
+    vendorInvoiceNumber: asString(source.vendorInvoiceNumber),
     note: asString(source.note || source.notes),
-    lineTotal: Number((qty * unitCost).toFixed(2))
+    lineTotal: Number((qty * unitCost).toFixed(2)),
+    status: qtyReceived >= qty ? "received" : (qtyReceived > 0 ? "partial" : "ordered")
   };
 }
 
@@ -140,6 +161,7 @@ function toPurchaseOrder(entity) {
   return {
     id: asString(entity.rowKey),
     supplier: asString(entity.supplier),
+    vendorId: asString(entity.vendorId),
     status: normalizeOrderStatus(entity.status),
     currency: asString(entity.currency) || "USD",
     note: asString(entity.note),
@@ -177,19 +199,34 @@ async function fetchNeedsByIds(needsClient, tenantId, ids) {
 }
 
 function lineFromNeed(need, index) {
-  const qty = Math.max(1, Math.floor(asNumber(need.qty, 1)));
-  const unitCost = Math.max(0, asNumber(need.estimatedCost || need.unitCost, 0));
+  const qtyNeeded = Math.max(1, Math.floor(asNumber(need.qtyNeeded, asNumber(need.qty, 1))));
+  const qtyOrdered = Math.max(0, Math.floor(asNumber(need.qtyOrdered, 0)));
+  const qtyReceived = Math.max(0, Math.floor(asNumber(need.qtyReceived, 0)));
+  const qty = Math.max(1, qtyNeeded - Math.max(qtyOrdered, qtyReceived));
+  const unitCost = Math.max(0, asNumber(need.estimatedCost || need.unitCost || need.cost, 0));
   return {
     lineId: `line-${index + 1}`,
     needId: asString(need.rowKey),
-    itemId: "",
+    itemId: asString(need.relatedInventoryItemId),
+    relatedInventoryItemId: asString(need.relatedInventoryItemId),
+    jobId: asString(need.jobId),
+    jobNumber: asString(need.jobNumber),
     partName: asString(need.partName),
     sku: asString(need.sku),
+    vendorId: asString(need.vendorId),
     vendor: asString(need.vendorHint),
     qty,
+    qtyNeeded,
+    qtyOrdered,
+    qtyReceived: 0,
     unitCost,
+    orderNumber: "",
+    trackingNumber: "",
+    etaDate: "",
+    vendorInvoiceNumber: "",
     note: asString(need.note),
-    lineTotal: Number((qty * unitCost).toFixed(2))
+    lineTotal: Number((qty * unitCost).toFixed(2)),
+    status: "ordered"
   };
 }
 
@@ -203,6 +240,70 @@ async function updateNeedStates(needsClient, tenantId, ids, status, purchaseOrde
         partitionKey: tenantId,
         rowKey: needId,
         status: normalizeNeedStatus(status),
+        jobPartStatus: normalizeJobPartStatus(status),
+        purchaseOrderId: asString(purchaseOrderId),
+        updatedAt: now
+      },
+      "Merge"
+    );
+  }
+}
+
+async function updateNeedOrderedQuantities(needsClient, tenantId, lines, purchaseOrderId) {
+  const now = new Date().toISOString();
+  for (const line of lines) {
+    const needId = asString(line.needId);
+    if (!needId) continue;
+    let existing = null;
+    try {
+      existing = await needsClient.getEntity(tenantId, needId);
+    } catch (_) {}
+    const currentOrdered = asNumber(existing && existing.qtyOrdered, 0);
+    const currentReceived = asNumber(existing && existing.qtyReceived, 0);
+    const qtyNeeded = Math.max(1, Math.floor(asNumber(existing && (existing.qtyNeeded || existing.qty), asNumber(line.qtyNeeded, line.qty))));
+    const qtyOrdered = Math.max(currentOrdered, currentOrdered + Math.max(0, Math.floor(asNumber(line.qty, 0))));
+    const isFullyReceived = currentReceived >= qtyNeeded;
+    await needsClient.upsertEntity(
+      {
+        partitionKey: tenantId,
+        rowKey: needId,
+        qtyNeeded,
+        qtyOrdered,
+        qtyReceived: currentReceived,
+        status: isFullyReceived ? "received" : "ordered",
+        jobPartStatus: isFullyReceived ? "received" : "ordered",
+        purchaseOrderId: asString(purchaseOrderId),
+        updatedAt: now
+      },
+      "Merge"
+    );
+  }
+}
+
+async function applyNeedReceipts(needsClient, tenantId, receiptLines, purchaseOrderId) {
+  const now = new Date().toISOString();
+  for (const line of receiptLines) {
+    const needId = asString(line.needId);
+    const delta = Math.max(0, asNumber(line.qty, 0));
+    if (!needId || delta <= 0) continue;
+    let existing = null;
+    try {
+      existing = await needsClient.getEntity(tenantId, needId);
+    } catch (_) {}
+    const qtyNeeded = Math.max(1, Math.floor(asNumber(existing && (existing.qtyNeeded || existing.qty), asNumber(line.qtyNeeded, line.qty))));
+    const currentReceived = Math.max(0, asNumber(existing && existing.qtyReceived, 0));
+    const currentOrdered = Math.max(0, asNumber(existing && existing.qtyOrdered, asNumber(line.qtyOrdered, 0)));
+    const qtyReceived = Math.min(qtyNeeded, currentReceived + delta);
+    const fullyReceived = qtyReceived >= Math.max(qtyNeeded, currentOrdered || qtyNeeded);
+    await needsClient.upsertEntity(
+      {
+        partitionKey: tenantId,
+        rowKey: needId,
+        qtyNeeded,
+        qtyOrdered: Math.max(currentOrdered, asNumber(line.qtyOrdered, 0)),
+        qtyReceived,
+        status: fullyReceived ? "received" : "ordered",
+        jobPartStatus: fullyReceived ? "received" : "ordered",
         purchaseOrderId: asString(purchaseOrderId),
         updatedAt: now
       },
@@ -311,6 +412,60 @@ function byUpdatedDesc(a, b) {
   return asString(a.id).localeCompare(asString(b.id));
 }
 
+function receiptRequestsFromBody(body, orderLines) {
+  const raw = asArray(body.receipts || body.lines || body.receiveLines);
+  const byLineId = new Map();
+  for (const item of raw) {
+    const source = item && typeof item === "object" ? item : {};
+    const lineId = asString(source.lineId);
+    if (!lineId) continue;
+    byLineId.set(lineId, {
+      qty: Math.max(0, asNumber(source.qtyReceived != null ? source.qtyReceived : source.qty, 0)),
+      orderNumber: asString(source.orderNumber),
+      trackingNumber: asString(source.trackingNumber),
+      etaDate: asString(source.etaDate),
+      vendorInvoiceNumber: asString(source.vendorInvoiceNumber),
+      note: asString(source.note)
+    });
+  }
+
+  const receiveAllRemaining = byLineId.size === 0;
+  return orderLines.map(line => {
+    const remaining = Math.max(0, asNumber(line.qty, 0) - asNumber(line.qtyReceived, 0));
+    const requested = byLineId.get(asString(line.lineId));
+    const delta = receiveAllRemaining ? remaining : Math.min(remaining, Math.max(0, asNumber(requested && requested.qty, 0)));
+    return {
+      ...line,
+      receiveQty: delta,
+      orderNumber: asString((requested && requested.orderNumber) || line.orderNumber),
+      trackingNumber: asString((requested && requested.trackingNumber) || line.trackingNumber),
+      etaDate: asString((requested && requested.etaDate) || line.etaDate),
+      vendorInvoiceNumber: asString((requested && requested.vendorInvoiceNumber) || line.vendorInvoiceNumber),
+      note: asString((requested && requested.note) || line.note)
+    };
+  });
+}
+
+function applyReceiptsToLines(lines, receipts) {
+  const byLineId = new Map(receipts.map(item => [asString(item.lineId), item]));
+  return lines.map(line => {
+    const receipt = byLineId.get(asString(line.lineId));
+    if (!receipt) return line;
+    const qty = Math.max(1, asNumber(line.qty, 1));
+    const qtyReceived = Math.min(qty, Math.max(0, asNumber(line.qtyReceived, 0) + Math.max(0, asNumber(receipt.receiveQty, 0))));
+    return {
+      ...line,
+      qtyReceived,
+      orderNumber: asString(receipt.orderNumber),
+      trackingNumber: asString(receipt.trackingNumber),
+      etaDate: asString(receipt.etaDate),
+      vendorInvoiceNumber: asString(receipt.vendorInvoiceNumber),
+      note: asString(receipt.note),
+      status: qtyReceived >= qty ? "received" : (qtyReceived > 0 ? "partial" : "ordered")
+    };
+  });
+}
+
 module.exports = async function (context, req) {
   const method = asString(req.method || "GET").toUpperCase();
   const body = asObject(req.body);
@@ -373,6 +528,7 @@ module.exports = async function (context, req) {
       }
 
       const supplier = asString(body.supplier || lines[0].vendor) || "Unassigned Supplier";
+      const vendorId = asString(body.vendorId || lines[0].vendorId);
       const note = asString(body.note);
       const currency = asString(body.currency || "USD").toUpperCase();
       const id = randomUUID();
@@ -383,6 +539,7 @@ module.exports = async function (context, req) {
           partitionKey: tenantId,
           rowKey: id,
           supplier,
+          vendorId,
           status: "draft",
           currency,
           note,
@@ -432,6 +589,7 @@ module.exports = async function (context, req) {
       }
 
       const supplier = asString(body.supplier) || current.supplier;
+      const vendorId = Object.prototype.hasOwnProperty.call(body, "vendorId") ? asString(body.vendorId) : asString(current.vendorId);
       const note = Object.prototype.hasOwnProperty.call(body, "note") ? asString(body.note) : current.note;
       const currency = asString(body.currency || current.currency || "USD").toUpperCase();
       const now = new Date().toISOString();
@@ -441,6 +599,7 @@ module.exports = async function (context, req) {
           partitionKey: tenantId,
           rowKey: id,
           supplier,
+          vendorId,
           note,
           currency,
           linesJson: JSON.stringify(lines),
@@ -501,6 +660,7 @@ module.exports = async function (context, req) {
       const needIds = needIdsFromLines(order.lines);
       if (needIds.length) {
         await updateNeedStates(needsClient, tenantId, needIds, "ordered", id);
+        await updateNeedOrderedQuantities(needsClient, tenantId, order.lines, id);
       }
       await applyInventoryAdjustments(inventoryClient, tenantId, order.lines, "submit");
 
@@ -529,23 +689,36 @@ module.exports = async function (context, req) {
         return;
       }
 
+      const receipts = receiptRequestsFromBody(body, order.lines).filter(item => asNumber(item.receiveQty, 0) > 0);
+      if (!receipts.length) {
+        context.res = json(400, { error: "At least one line quantity is required to receive." });
+        return;
+      }
+
+      const nextLines = applyReceiptsToLines(order.lines, receipts);
+      const fullyReceived = nextLines.every(line => asNumber(line.qtyReceived, 0) >= asNumber(line.qty, 0));
       const now = new Date().toISOString();
+      const summary = summarizeLines(nextLines);
       await purchaseClient.upsertEntity(
         {
           partitionKey: tenantId,
           rowKey: id,
-          status: "received",
-          receivedAt: now,
+          status: fullyReceived ? "received" : "ordered",
+          linesJson: JSON.stringify(nextLines),
+          subtotal: summary.subtotal,
+          receivedAt: fullyReceived ? (asString(existing.receivedAt) || now) : asString(existing.receivedAt),
           updatedAt: now
         },
         "Merge"
       );
 
-      const needIds = needIdsFromLines(order.lines);
-      if (needIds.length) {
-        await updateNeedStates(needsClient, tenantId, needIds, "received", id);
-      }
-      await applyInventoryAdjustments(inventoryClient, tenantId, order.lines, "receive");
+      const receiptLines = receipts.map(line => ({
+        ...line,
+        qty: asNumber(line.receiveQty, 0),
+        qtyOrdered: asNumber(line.qty, 0)
+      }));
+      await applyNeedReceipts(needsClient, tenantId, receiptLines, id);
+      await applyInventoryAdjustments(inventoryClient, tenantId, receiptLines, "receive");
 
       const saved = await purchaseClient.getEntity(tenantId, id);
       context.res = json(200, { ok: true, order: toPurchaseOrder(saved) });

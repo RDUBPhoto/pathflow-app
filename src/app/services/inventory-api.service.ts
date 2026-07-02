@@ -6,6 +6,7 @@ export type InventoryItem = {
   id: string;
   name: string;
   sku: string;
+  vendorId?: string;
   vendor: string;
   category: string;
   unit?: string;
@@ -59,10 +60,20 @@ export type InventoryImportResponse = {
 };
 
 export type InventoryNeedStatus = 'needs-order' | 'po-draft' | 'ordered' | 'received' | 'cancelled';
+export type JobPartStatus = 'quoted' | 'ordered' | 'received' | 'pulled' | 'installed' | 'returned' | 'backordered';
+export type JobPartSourceType = 'quote' | 'invoice' | 'schedule' | 'manual' | 'inventory' | string;
 
 export type InventoryNeed = {
   id: string;
-  sourceType: string;
+  jobId?: string;
+  jobNumber?: string;
+  relatedScheduleId?: string;
+  relatedWorkItemId?: string;
+  relatedQuoteId?: string;
+  relatedInvoiceId?: string;
+  relatedInvoiceLineItemId?: string;
+  relatedInventoryItemId?: string;
+  sourceType: JobPartSourceType;
   sourceId: string;
   scheduleStart: string;
   scheduleEnd: string;
@@ -71,11 +82,22 @@ export type InventoryNeed = {
   customerName: string | null;
   vehicle: string;
   partName: string;
+  description?: string;
   sku: string;
   qty: number;
+  qtyNeeded?: number;
+  qtyOrdered?: number;
+  qtyReceived?: number;
+  qtyPulled?: number;
+  qtyInstalled?: number;
+  cost?: number;
+  markup?: number;
+  customerPrice?: number;
+  vendorId?: string;
   vendorHint: string;
   note: string;
   status: InventoryNeedStatus;
+  jobPartStatus?: JobPartStatus;
   purchaseOrderId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -175,6 +197,13 @@ export class InventoryApiService {
   upsertItem(payload: Partial<InventoryItem> & { id?: string; name?: string; sku?: string }): Observable<{ ok: boolean; item: InventoryItem }> {
     return this.http.post<{ ok: boolean; item: InventoryItem }>('/api/inventory', {
       op: 'upsertItem',
+      ...payload
+    });
+  }
+
+  upsertNeed(payload: Partial<InventoryNeed> & { id?: string; partName: string }): Observable<{ ok: boolean; need: InventoryNeed }> {
+    return this.http.post<{ ok: boolean; need: InventoryNeed }>('/api/inventory', {
+      op: 'upsertNeed',
       ...payload
     });
   }

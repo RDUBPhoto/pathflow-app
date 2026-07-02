@@ -1,0 +1,165 @@
+<ion-header class="glass-header">
+  <ion-toolbar>
+    <ion-buttons slot="start">
+      <app-page-back-button></app-page-back-button>
+    </ion-buttons>
+    <ion-title>Purchase Orders</ion-title>
+    <app-company-switcher></app-company-switcher>
+    <ion-buttons slot="end" class="ion-margin-end">
+      <app-user-menu></app-user-menu>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content class="ion-padding glass-bg purchase-orders-content">
+  <div class="po-stack">
+    <section class="po-feedback" *ngIf="loading() || status() || error()">
+      <div class="feedback-row" *ngIf="loading()">Loading purchase orders...</div>
+      <div class="feedback-row success" *ngIf="!loading() && status()">{{ status() }}</div>
+      <div class="feedback-row error" *ngIf="!loading() && error()">{{ error() }}</div>
+    </section>
+
+    <section class="po-shell glass-surface">
+      <aside class="po-list">
+        <div class="panel-head">
+          <div>
+            <h2>Orders</h2>
+            <div class="panel-meta">{{ orders().length }} purchase order(s)</div>
+          </div>
+          <ion-button size="small" fill="outline" (click)="loadOrders()" [disabled]="loading()">Refresh</ion-button>
+        </div>
+
+        <button
+          type="button"
+          class="po-list-row"
+          *ngFor="let order of orders(); trackBy: trackOrder"
+          [class.active]="selectedOrderId() === order.id"
+          (click)="selectOrder(order)">
+          <div class="po-list-title">{{ order.supplier || 'Unassigned Supplier' }}</div>
+          <div class="po-list-meta">{{ order.status }} · {{ order.lineCount }} line(s) · {{ formatCurrency(order.subtotal) }}</div>
+          <div class="po-list-meta">{{ formatDate(order.updatedAt) }}</div>
+        </button>
+
+        <div class="empty-state" *ngIf="!loading() && !orders().length">
+          No purchase orders yet. Create a draft from Inventory job parts.
+        </div>
+      </aside>
+
+      <article class="po-detail" *ngIf="selectedOrder() as order; else noOrderSelected">
+        <div class="panel-head">
+          <div>
+            <h2>{{ order.supplier || 'Purchase Order' }}</h2>
+            <div class="panel-meta">
+              {{ order.status }} · {{ order.lineCount }} line(s) · {{ formatCurrency(order.subtotal) }}
+            </div>
+          </div>
+          <div class="po-actions">
+            <ion-button size="small" fill="outline" *ngIf="order.status === 'draft'" [disabled]="saving()" (click)="deleteDraft(order)">
+              Delete Draft
+            </ion-button>
+            <ion-button size="small" *ngIf="order.status === 'draft'" [disabled]="saving()" (click)="submitOrder(order)">
+              Submit PO
+            </ion-button>
+            <ion-button size="small" *ngIf="order.status === 'ordered'" [disabled]="saving()" (click)="receiveAll(order)">
+              Receive All
+            </ion-button>
+          </div>
+        </div>
+
+        <div class="po-meta-grid">
+          <div class="po-vendor-field" *ngIf="order.status === 'draft'; else lockedSupplier">
+            <app-vendor-picker
+              [vendorId]="order.vendorId || ''"
+              [vendorName]="order.supplier || ''"
+              (vendorChange)="updateOrderVendor(order, $event)">
+            </app-vendor-picker>
+          </div>
+          <ng-template #lockedSupplier>
+            <div>
+              <span>Supplier</span>
+              <strong>{{ order.supplier || '-' }}</strong>
+            </div>
+          </ng-template>
+          <div>
+            <span>Created</span>
+            <strong>{{ formatDate(order.createdAt) || '-' }}</strong>
+          </div>
+          <div>
+            <span>Submitted</span>
+            <strong>{{ formatDate(order.submittedAt) || '-' }}</strong>
+          </div>
+          <div>
+            <span>Received</span>
+            <strong>{{ formatDate(order.receivedAt) || '-' }}</strong>
+          </div>
+        </div>
+
+        <div class="po-lines">
+          <article class="po-line" *ngFor="let line of order.lines; trackBy: trackLine">
+            <div class="po-line-main">
+              <div class="po-line-title">
+                <span>{{ line.partName || line.sku || 'Part' }}</span>
+                <span class="line-status" [ngClass]="lineStatusClass(line)">{{ lineStatusLabel(line) }}</span>
+              </div>
+              <div class="po-line-meta">
+                {{ line.jobNumber || line.jobId || 'Job TBD' }} · SKU {{ line.sku || 'N/A' }} · {{ line.vendor || order.supplier || 'No supplier' }}
+              </div>
+              <div class="po-line-meta">
+                Ordered {{ line.qty }} · Received {{ line.qtyReceived || 0 }} · Remaining {{ remainingQty(line) }} · Unit {{ formatCurrency(line.unitCost || 0) }}
+              </div>
+            </div>
+
+            <div class="receive-panel" *ngIf="order.status === 'ordered' && remainingQty(line) > 0">
+              <ion-item class="receive-field" lines="none">
+                <ion-label position="stacked">Receive Qty</ion-label>
+                <ion-input
+                  type="number"
+                  [ngModel]="receiptDraft(line).qtyReceived"
+                  (ngModelChange)="setReceiptField(line, 'qtyReceived', $event)">
+                </ion-input>
+              </ion-item>
+              <ion-item class="receive-field" lines="none">
+                <ion-label position="stacked">Order #</ion-label>
+                <ion-input
+                  [ngModel]="receiptDraft(line).orderNumber"
+                  (ngModelChange)="setReceiptField(line, 'orderNumber', $event)">
+                </ion-input>
+              </ion-item>
+              <ion-item class="receive-field" lines="none">
+                <ion-label position="stacked">Tracking #</ion-label>
+                <ion-input
+                  [ngModel]="receiptDraft(line).trackingNumber"
+                  (ngModelChange)="setReceiptField(line, 'trackingNumber', $event)">
+                </ion-input>
+              </ion-item>
+              <ion-item class="receive-field" lines="none">
+                <ion-label position="stacked">ETA</ion-label>
+                <ion-input
+                  type="date"
+                  [ngModel]="receiptDraft(line).etaDate"
+                  (ngModelChange)="setReceiptField(line, 'etaDate', $event)">
+                </ion-input>
+              </ion-item>
+              <ion-item class="receive-field" lines="none">
+                <ion-label position="stacked">Vendor Invoice #</ion-label>
+                <ion-input
+                  [ngModel]="receiptDraft(line).vendorInvoiceNumber"
+                  (ngModelChange)="setReceiptField(line, 'vendorInvoiceNumber', $event)">
+                </ion-input>
+              </ion-item>
+              <ion-button size="small" [disabled]="saving()" (click)="receiveLine(order, line)">
+                Receive Line
+              </ion-button>
+            </div>
+          </article>
+        </div>
+      </article>
+    </section>
+
+    <ng-template #noOrderSelected>
+      <article class="po-detail empty-state">
+        Select a purchase order.
+      </article>
+    </ng-template>
+  </div>
+</ion-content>

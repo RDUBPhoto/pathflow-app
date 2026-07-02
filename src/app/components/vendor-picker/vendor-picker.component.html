@@ -1,0 +1,35 @@
+<label class="vendor-picker">
+  <span class="vendor-picker-label">{{ label }}</span>
+  <input
+    type="text"
+    [ngModel]="query() || vendorName"
+    (focus)="focus()"
+    (ngModelChange)="onInput($event)"
+    [placeholder]="placeholder"
+    autocomplete="off" />
+</label>
+
+<div class="vendor-menu" *ngIf="open()">
+  <button
+    type="button"
+    class="vendor-option"
+    *ngFor="let vendor of vendors()"
+    (click)="selectVendor(vendor)">
+    <strong>{{ vendor.name }}</strong>
+    <span>{{ vendor.phone || vendor.email || vendor.accountNumber || 'Supplier record' }}</span>
+  </button>
+
+  <button
+    type="button"
+    class="vendor-option add"
+    *ngIf="query().trim() && !hasExactMatch()"
+    (click)="addVendor()"
+    [disabled]="loading()">
+    <strong>{{ vendors().length ? 'Add supplier' : 'No results. Add supplier.' }}</strong>
+    <span>{{ query().trim() }}</span>
+  </button>
+
+  <div class="vendor-empty" *ngIf="!loading() && !vendors().length && !query().trim()">Type to search suppliers.</div>
+  <div class="vendor-empty" *ngIf="loading()">Searching suppliers...</div>
+  <div class="vendor-error" *ngIf="error()">{{ error() }}</div>
+</div>

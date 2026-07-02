@@ -812,6 +812,7 @@ export default class InvoicesNewComponent {
     const line = this.recalculateLine({
       id: `li-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       type: 'part',
+      relatedInventoryItemId: String(item?.id || '').trim(),
       partStatus: 'out-of-stock',
       code: this.inventorySku(item),
       description: this.inventoryName(item) || 'Part',

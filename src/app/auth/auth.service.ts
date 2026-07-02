@@ -89,6 +89,7 @@ interface AuthRuntimeConfig {
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private readonly isLocalHost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+  private readonly shouldPreferLocalAuth = this.isLocalHost && (environment.auth.devBypass || environment.auth.localPasswordEnabled);
   private readonly authConfigSignal = signal<AuthRuntimeConfig>(this.buildAuthRuntimeConfigFromEnvironment());
   private readonly stateSignal = signal<AuthState>({
     initialized: false,
@@ -815,6 +816,22 @@ export class AuthService {
   }
 
   private async hydrateAuthState(): Promise<void> {
+    if (this.shouldPreferLocalAuth) {
+      const devRecord = this.readDevRecord();
+      if (devRecord) {
+        this.setDevUser(devRecord);
+        return;
+      }
+      this.stateSignal.set({
+        initialized: true,
+        loading: false,
+        source: 'none',
+        user: null
+      });
+      this.accessSignal.set(this.emptyAccessState(true));
+      return;
+    }
+
     const access = await this.fetchAccessState();
     if (access.principal) {
       const principalUser = this.accessPrincipalToUser(access.principal, access.roles);
@@ -847,6 +864,11 @@ export class AuthService {
 
   private async hydrateRuntimeAuthConfig(): Promise<void> {
     const fallback = this.buildAuthRuntimeConfigFromEnvironment();
+    if (this.shouldPreferLocalAuth) {
+      this.authConfigSignal.set(fallback);
+      return;
+    }
+
     try {
       const response = await this.fetchWithTimeout('/api/access?op=auth-config', AUTH_BOOTSTRAP_REQUEST_TIMEOUT_MS, {
         method: 'GET',

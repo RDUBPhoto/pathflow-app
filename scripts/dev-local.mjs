@@ -6,6 +6,7 @@ const root = process.cwd();
 const apiRoot = path.join(root, 'api');
 const scriptPath = path.resolve(process.argv[1] || path.join(root, 'scripts', 'dev-local.mjs'));
 const repoNode18Path = path.join(root, 'node_modules', 'node', 'bin', 'node');
+const API_BASE_URL = 'http://127.0.0.1:7071';
 const procs = [];
 let shuttingDown = false;
 const REQUIRED_NODE_MAJOR = 18;
@@ -131,7 +132,7 @@ async function waitForPing(timeoutMs = 60000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
-      const res = await fetch('http://localhost:7071/api/ping');
+      const res = await fetch(`${API_BASE_URL}/api/ping`);
       if (res.ok) return true;
     } catch {}
     await sleep(500);
@@ -153,7 +154,7 @@ async function waitForFrontendApiProxy(timeoutMs = 90000) {
 
 async function logEmailRuntimeStatus() {
   try {
-    const res = await fetch('http://localhost:7071/api/email');
+    const res = await fetch(`${API_BASE_URL}/api/email`);
     if (!res.ok) {
       console.warn(`[dev-local] Could not read /api/email status (${res.status})`);
       return;
@@ -175,7 +176,7 @@ async function logEmailRuntimeStatus() {
 
 async function seedIfEmpty() {
   try {
-    const res = await fetch('http://localhost:7071/api/customers');
+    const res = await fetch(`${API_BASE_URL}/api/customers`);
     if (res.ok) {
       const body = await res.json().catch(() => []);
       const list = Array.isArray(body) ? body : (Array.isArray(body?.value) ? body.value : []);
@@ -201,7 +202,7 @@ async function seedIfEmpty() {
   ];
   const laneIds = {};
   for (const name of lanes) {
-    const r = await post('http://localhost:7071/api/lanes', { name });
+    const r = await post(`${API_BASE_URL}/api/lanes`, { name });
     if (r?.id) laneIds[name] = r.id;
   }
 
@@ -216,7 +217,7 @@ async function seedIfEmpty() {
 
   const customerIds = [];
   for (const c of customers) {
-    const r = await post('http://localhost:7071/api/customers', { ...c, createdAt: new Date().toISOString() });
+    const r = await post(`${API_BASE_URL}/api/customers`, { ...c, createdAt: new Date().toISOString() });
     if (r?.id) customerIds.push(r.id);
   }
 
@@ -232,15 +233,15 @@ async function seedIfEmpty() {
   for (const it of items) {
     const laneId = laneIds[it.lane] || Object.values(laneIds)[0];
     if (!laneId) continue;
-    const r = await post('http://localhost:7071/api/workitems', { title: it.title, laneId });
+    const r = await post(`${API_BASE_URL}/api/workitems`, { title: it.title, laneId });
     const custId = customerIds[it.customerIndex];
     if (r?.id && custId) {
-      await post('http://localhost:7071/api/workitems', { id: r.id, customerId: custId });
+      await post(`${API_BASE_URL}/api/workitems`, { id: r.id, customerId: custId });
     }
   }
 
   try {
-    const res = await fetch('http://localhost:7071/api/schedule');
+    const res = await fetch(`${API_BASE_URL}/api/schedule`);
     if (res.ok) {
       const body = await res.json().catch(() => []);
       if (Array.isArray(body) && body.length > 0) return;
@@ -289,7 +290,7 @@ async function seedIfEmpty() {
 
   for (const s of sched) {
     const customerId = customerIds[s.customerIndex];
-    await post('http://localhost:7071/api/schedule', {
+    await post(`${API_BASE_URL}/api/schedule`, {
       start: s.start,
       end: s.end,
         resource: s.resource,
@@ -303,7 +304,7 @@ async function seedIfEmpty() {
 
   if (shouldSeedInventoryFixtures) {
     try {
-      const invRes = await fetch('http://localhost:7071/api/inventory?scope=items');
+      const invRes = await fetch(`${API_BASE_URL}/api/inventory?scope=items`);
       if (invRes.ok) {
         const invBody = await invRes.json().catch(() => ({}));
         const items = Array.isArray(invBody?.items) ? invBody.items : [];
@@ -314,7 +315,7 @@ async function seedIfEmpty() {
             { name: 'Spark Plug Set', sku: 'SP-TOY-4RUN', vendor: 'AutoZone', category: 'Ignition', onHand: 2, reorderAt: 6, onOrder: 0, unitCost: 42.0 }
           ];
           for (const item of seedInventory) {
-            await post('http://localhost:7071/api/inventory', { op: 'upsertItem', ...item });
+            await post(`${API_BASE_URL}/api/inventory`, { op: 'upsertItem', ...item });
           }
         }
       }
@@ -340,7 +341,7 @@ async function seedIfEmpty() {
 
   const proxyOk = await waitForFrontendApiProxy();
   if (proxyOk) {
-    console.log('[dev-local] Frontend proxy ready: http://localhost:4200/api -> http://localhost:7071/api');
+    console.log(`[dev-local] Frontend proxy ready: http://localhost:4200/api -> ${API_BASE_URL}/api`);
   } else {
     console.error('[dev-local] Frontend started but /api proxy check failed at http://localhost:4200/api/ping');
     console.error('[dev-local] If you see /api 404s, stop all dev servers and run `npm start` again from this folder.');

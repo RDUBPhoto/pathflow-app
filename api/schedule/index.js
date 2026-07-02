@@ -101,6 +101,23 @@ function normalizeNeedStatus(raw) {
   return "needs-order";
 }
 
+function normalizeJobPartStatus(raw, fallbackNeedStatus) {
+  const value = asString(raw).toLowerCase();
+  if (value === "quoted") return "quoted";
+  if (value === "ordered" || value === "po-draft") return "ordered";
+  if (value === "received") return "received";
+  if (value === "pulled") return "pulled";
+  if (value === "installed") return "installed";
+  if (value === "returned" || value === "cancelled" || value === "canceled") return "returned";
+  if (value === "backordered" || value === "back-order" || value === "back order") return "backordered";
+
+  const needStatus = normalizeNeedStatus(fallbackNeedStatus);
+  if (needStatus === "ordered" || needStatus === "po-draft") return "ordered";
+  if (needStatus === "received") return "received";
+  if (needStatus === "cancelled") return "returned";
+  return "quoted";
+}
+
 function parsePartRequestLine(line) {
   const raw = asString(line);
   if (!raw) return null;
@@ -260,6 +277,14 @@ async function syncScheduleNeeds(conn, tenantId, scheduleRecord) {
       {
         partitionKey: tenantId,
         rowKey: needId,
+        jobId: asString(reuse && reuse.jobId) || `schedule:${scheduleId}`,
+        jobNumber: asString(reuse && reuse.jobNumber),
+        relatedScheduleId: scheduleId,
+        relatedWorkItemId: asString(reuse && reuse.relatedWorkItemId),
+        relatedQuoteId: asString(reuse && reuse.relatedQuoteId),
+        relatedInvoiceId: asString(reuse && reuse.relatedInvoiceId),
+        relatedInvoiceLineItemId: asString(reuse && reuse.relatedInvoiceLineItemId),
+        relatedInventoryItemId: asString(reuse && reuse.relatedInventoryItemId),
         sourceType: "schedule",
         sourceId: scheduleId,
         scheduleStart: asString(scheduleRecord.start),
@@ -269,11 +294,22 @@ async function syncScheduleNeeds(conn, tenantId, scheduleRecord) {
         customerName,
         vehicle,
         partName: asString(request.partName),
+        description: asString(request.note),
         sku: asString(request.sku),
         qty: Math.max(1, Math.floor(asNumber(request.qty, 1))),
+        qtyNeeded: Math.max(1, Math.floor(asNumber(request.qty, 1))),
+        qtyOrdered: Math.max(0, asNumber(reuse && reuse.qtyOrdered, 0)),
+        qtyReceived: Math.max(0, asNumber(reuse && reuse.qtyReceived, 0)),
+        qtyPulled: Math.max(0, asNumber(reuse && reuse.qtyPulled, 0)),
+        qtyInstalled: Math.max(0, asNumber(reuse && reuse.qtyInstalled, 0)),
+        cost: Math.max(0, asNumber(reuse && reuse.cost, 0)),
+        markup: Math.max(0, asNumber(reuse && reuse.markup, 0)),
+        customerPrice: Math.max(0, asNumber(reuse && reuse.customerPrice, 0)),
+        vendorId: asString(reuse && reuse.vendorId),
         vendorHint: asString(request.vendorHint),
         note: asString(request.note),
         status,
+        jobPartStatus: normalizeJobPartStatus(reuse && reuse.jobPartStatus, status),
         purchaseOrderId: asString(reuse && reuse.purchaseOrderId),
         createdAt: asString(reuse && reuse.createdAt) || now,
         updatedAt: now

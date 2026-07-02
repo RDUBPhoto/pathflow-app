@@ -19,116 +19,120 @@
       <div class="feedback-row error" *ngIf="!loading() && error()">{{ error() }}</div>
     </section>
 
-    <section class="parts-queue glass-surface">
+    <section class="inventory-sections glass-surface">
       <div class="panel-head">
         <div>
-          <h2>Parts To Order (Paid Jobs)</h2>
+          <h2>Inventory Workflow</h2>
           <div class="panel-meta">
-            {{ partsQueueRows().length }} part(s) · {{ queueTotalQty() }} total qty · {{ queueBackorderedCount() }} backordered
+            {{ items().length }} stock item(s) · {{ allJobParts().length }} job-linked part(s) · {{ attentionParts().length }} need attention
           </div>
         </div>
-        <ion-button size="small" fill="outline" (click)="openQueueWorkspace()" [disabled]="!partsQueueRows().length">
-          Open Workspace
+      </div>
+
+      <div class="section-tabs" role="tablist" aria-label="Inventory sections">
+        <button
+          type="button"
+          class="section-tab"
+          *ngFor="let section of inventorySections"
+          [class.active]="activeSection() === section.id"
+          (click)="setActiveSection(section.id)">
+          <span>{{ section.label }}</span>
+          <strong>{{ sectionCount(section.id) }}</strong>
+        </button>
+      </div>
+
+      <div class="compat-note" *ngIf="legacyFallbackCount()">
+        {{ legacyFallbackCount() }} legacy paid-invoice part line(s) are mapped into this view until matching job-part records exist.
+      </div>
+    </section>
+
+    <section class="job-parts-shell glass-surface" *ngIf="activeSection() !== 'stock'">
+      <div class="panel-head">
+        <div>
+          <h2>{{ activeSectionLabel() }}</h2>
+          <div class="panel-meta">
+            {{ activeJobParts().length }} part(s) · showing quantity needed, ordered, received, pulled, and installed
+          </div>
+        </div>
+        <ion-button
+          size="small"
+          fill="outline"
+          [disabled]="saving() || !selectedJobParts().length"
+          (click)="createPurchaseOrderDraft()">
+          Create PO Draft ({{ selectedJobParts().length }})
         </ion-button>
       </div>
 
-      <div class="queue-list" *ngIf="partsQueueRows().length; else noQueueItems">
-        <article class="queue-row" *ngFor="let row of queuePreviewRows(); trackBy: trackPartsQueueRow">
-          <div class="queue-main">
-            <div class="queue-title">{{ row.label }}</div>
-            <div class="queue-meta">
-              SKU {{ row.sku || 'N/A' }} · {{ row.customerCount }} customer(s) · {{ row.invoiceCount }} invoice(s)
+      <div class="job-part-list" *ngIf="activeJobParts().length; else noJobParts">
+        <article
+          class="job-part-row"
+          *ngFor="let row of activeJobParts(); trackBy: trackJobPart"
+          [class.needs-attention]="row.attentionReasons.length">
+          <label class="job-part-select" *ngIf="canCreatePoForPart(row); else noPoSelect">
+            <input
+              type="checkbox"
+              [checked]="isJobPartSelected(row)"
+              (change)="toggleJobPartSelection(row, $any($event.target).checked)" />
+          </label>
+          <ng-template #noPoSelect>
+            <div class="job-part-select-placeholder"></div>
+          </ng-template>
+          <div class="job-part-main">
+            <div class="job-part-title">
+              <span>{{ row.partName }}</span>
+              <span class="stock-pill" [ngClass]="jobPartStatusClass(row.status)">{{ jobPartStatusLabel(row.status) }}</span>
             </div>
-            <div class="queue-meta">Latest invoice {{ row.sampleInvoiceNumber || 'N/A' }} · {{ formatDateTime(row.latestUpdatedAt) }}</div>
-          </div>
-          <div class="queue-actions">
-            <span class="stock-pill" [ngClass]="partsQueueStatusClass(row.status)">{{ partsQueueStatusLabel(row.status) }}</span>
-            <div class="queue-qty">{{ row.qty }} qty</div>
-            <ion-button size="small" fill="outline" (click)="openInvoiceFromQueue(row)">Open Invoice</ion-button>
-          </div>
-        </article>
-        <div class="queue-more" *ngIf="partsQueueRows().length > queuePreviewRows().length">
-          +{{ partsQueueRows().length - queuePreviewRows().length }} more item(s). Open Workspace to manage all.
-        </div>
-      </div>
-
-      <ng-template #noQueueItems>
-        <div class="empty-state">
-          No outstanding parts from paid invoices. Paid jobs with parts marked <strong>out of stock</strong> or <strong>backordered</strong> will show here until they are moved to ordered/in-stock/received.
-        </div>
-      </ng-template>
-    </section>
-
-    <section class="queue-workspace glass-surface" *ngIf="queueWorkspaceOpen()">
-      <div class="panel-head">
-        <div>
-          <h2>Parts To Order Workspace</h2>
-          <div class="panel-meta">Select an invoice on the left, then update part statuses on the right.</div>
-        </div>
-        <ion-button size="small" fill="outline" (click)="closeQueueWorkspace()">Close</ion-button>
-      </div>
-
-      <div class="queue-workspace-grid" *ngIf="queueInvoiceGroups().length; else noQueueWorkspaceItems">
-        <aside class="queue-invoice-list">
-          <button
-            type="button"
-            class="queue-invoice-row"
-            *ngFor="let group of queueInvoiceGroups(); trackBy: trackQueueInvoiceGroup"
-            [class.active]="selectedQueueInvoice()?.invoiceId === group.invoiceId"
-            (click)="selectQueueInvoice(group.invoiceId)">
-            <div class="queue-invoice-title">{{ group.invoiceNumber || 'Invoice' }} · {{ group.customerName }}</div>
-            <div class="queue-invoice-meta">
-              {{ group.lines.length }} line(s) · {{ formatDateTime(group.updatedAt) }}
+            <div class="job-part-meta">
+              {{ row.jobNumber || row.jobId || 'Job TBD' }} · {{ row.customerName || 'Customer TBD' }} · {{ row.vehicle || 'Vehicle TBD' }}
             </div>
-          </button>
-        </aside>
+            <div class="job-part-meta">
+              SKU {{ row.sku || 'N/A' }} · {{ row.vendor || 'No supplier' }} · Install {{ row.installDate ? formatDateTime(row.installDate) : 'not scheduled' }}
+            </div>
+            <div class="attention-list" *ngIf="row.attentionReasons.length">
+              <span *ngFor="let reason of row.attentionReasons">{{ reason }}</span>
+            </div>
+          </div>
 
-        <article class="queue-line-editor" *ngIf="selectedQueueInvoice() as selected; else noQueueInvoiceSelected">
-          <div class="queue-selected-head">
-            <div class="queue-selected-title">{{ selected.invoiceNumber }} · {{ selected.customerName }}</div>
-            <ion-button size="small" fill="outline" (click)="openInvoiceById(selected.invoiceId)">
+          <div class="job-part-qty-grid">
+            <div>
+              <span>Needed</span>
+              <strong>{{ formatQty(row.qtyNeeded) }}</strong>
+            </div>
+            <div>
+              <span>Ordered</span>
+              <strong>{{ formatQty(row.qtyOrdered) }}</strong>
+            </div>
+            <div>
+              <span>Received</span>
+              <strong>{{ formatQty(row.qtyReceived) }}</strong>
+            </div>
+            <div>
+              <span>Pulled</span>
+              <strong>{{ formatQty(row.qtyPulled) }}</strong>
+            </div>
+            <div>
+              <span>Installed</span>
+              <strong>{{ formatQty(row.qtyInstalled) }}</strong>
+            </div>
+          </div>
+
+          <div class="job-part-actions">
+            <div class="panel-meta">{{ row.source === 'legacy-invoice' ? 'Invoice fallback' : 'Job-part foundation' }}</div>
+            <ion-button size="small" fill="outline" *ngIf="row.relatedInvoiceId" (click)="openJobPartSource(row)">
               Open Invoice
             </ion-button>
           </div>
-
-          <div class="queue-line-grid">
-            <div class="queue-line-row" *ngFor="let line of selected.lines">
-              <div class="queue-line-main">
-                <div class="queue-line-title">{{ line.label }}</div>
-                <div class="queue-line-meta">SKU {{ line.sku || 'N/A' }} · {{ line.qty }} qty</div>
-              </div>
-              <label class="queue-line-status">
-                <span>Status</span>
-                <select
-                  [value]="line.status"
-                  [disabled]="isQueueLineSaving(selected.invoiceId, line.id, line.sourceIndex)"
-                  (change)="updateQueueLineStatus(selected.invoiceId, line.id, line.sourceIndex, $any($event.target).value)">
-                  <option value="out-of-stock">Out of stock</option>
-                  <option value="ordered">Ordered</option>
-                  <option value="backordered">Backordered</option>
-                  <option value="in-stock">In-stock</option>
-                  <option value="received">Received</option>
-                </select>
-              </label>
-            </div>
-          </div>
         </article>
       </div>
 
-      <ng-template #noQueueWorkspaceItems>
+      <ng-template #noJobParts>
         <div class="empty-state">
-          No outstanding paid-invoice part lines to manage right now.
-        </div>
-      </ng-template>
-
-      <ng-template #noQueueInvoiceSelected>
-        <div class="empty-state">
-          Select an invoice to manage its part statuses.
+          No job-linked parts in this section yet. Schedule part requests and future job-part records will appear here.
         </div>
       </ng-template>
     </section>
 
-    <section class="inventory-shell glass-surface">
+    <section class="inventory-shell glass-surface" *ngIf="activeSection() === 'stock'">
       <article class="parts-list-pane">
         <div class="panel-head">
           <div>
@@ -206,10 +210,13 @@
               <ion-input [ngModel]="editor()?.sku || ''" (ngModelChange)="setEditorText('sku', $event)"></ion-input>
             </ion-item>
 
-            <ion-item class="detail-item" lines="none">
-              <ion-label position="stacked">Supplier</ion-label>
-              <ion-input [ngModel]="editor()?.vendor || ''" (ngModelChange)="setEditorText('vendor', $event)"></ion-input>
-            </ion-item>
+            <div class="detail-item vendor-detail-item">
+              <app-vendor-picker
+                [vendorId]="editor()?.vendorId || ''"
+                [vendorName]="editor()?.vendor || ''"
+                (vendorChange)="setEditorVendor($event)">
+              </app-vendor-picker>
+            </div>
 
             <ion-item class="detail-item" lines="none">
               <ion-label position="stacked">Category</ion-label>

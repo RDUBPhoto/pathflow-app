@@ -63,6 +63,7 @@ type LineItemSearchOption = {
   label: string;
   meta: string;
   type: InvoiceLineType;
+  relatedInventoryItemId?: string;
   code: string;
   unitPrice: number;
   taxRate: number;
@@ -507,6 +508,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
               label: name || 'Part',
               meta,
               type: 'part' as const,
+              relatedInventoryItemId: String(item.id || '').trim(),
               code: sku,
               unitPrice: price,
               taxRate: this.safeNumber(line.taxRate, 0),
@@ -535,6 +537,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
       type: option.type,
       code: option.code,
       description: option.label,
+      relatedInventoryItemId: option.type === 'part' ? (option.relatedInventoryItemId || '') : '',
       unitPrice: option.unitPrice,
       taxRate: option.taxRate,
       partStatus: option.type === 'part' ? (option.partStatus || 'out-of-stock') : undefined

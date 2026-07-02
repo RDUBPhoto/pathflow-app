@@ -16,20 +16,25 @@ import {
 import { PageBackButtonComponent } from '../../components/navigation/page-back-button/page-back-button.component';
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
 import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
+import { VendorPickerComponent } from '../../components/vendor-picker/vendor-picker.component';
 import {
   InventoryApiService,
-  InventoryItem
+  InventoryItem,
+  InventoryNeed,
+  JobPartStatus
 } from '../../services/inventory-api.service';
 import {
   InvoiceDetail,
-  InvoicePartStatus,
   InvoicesDataService
 } from '../../services/invoices-data.service';
+import { JobPartDraft, JobPartsFoundationService } from '../../services/job-parts-foundation.service';
+import { PurchaseOrderLine, PurchaseOrdersApiService } from '../../services/purchase-orders-api.service';
 
 type InventoryEditor = {
   id: string;
   name: string;
   sku: string;
+  vendorId: string;
   vendor: string;
   category: string;
   onHand: number;
@@ -39,34 +44,34 @@ type InventoryEditor = {
   price: number;
 };
 
-type PartsQueueRow = {
-  key: string;
-  label: string;
-  sku: string;
-  qty: number;
-  customerCount: number;
-  invoiceCount: number;
-  status: InvoicePartStatus;
-  latestUpdatedAt: string;
-  sampleInvoiceId: string;
-  sampleInvoiceNumber: string;
-};
+type InventorySection = 'stock' | 'job-parts' | 'to-order' | 'on-order' | 'received' | 'attention';
 
-type PartsQueueInvoiceLine = {
+type JobPartView = {
   id: string;
-  sourceIndex: number;
-  label: string;
-  sku: string;
-  qty: number;
-  status: InvoicePartStatus;
-};
-
-type PartsQueueInvoiceGroup = {
-  invoiceId: string;
-  invoiceNumber: string;
+  source: 'inventoryneeds' | 'legacy-invoice';
+  jobId: string;
+  jobNumber: string;
+  relatedScheduleId: string;
+  relatedInvoiceId: string;
+  relatedInvoiceLineItemId: string;
+  relatedInventoryItemId: string;
   customerName: string;
-  updatedAt: string;
-  lines: PartsQueueInvoiceLine[];
+  vehicle: string;
+  vendorId: string;
+  vendor: string;
+  unitCost: number;
+  installDate: string;
+  partName: string;
+  sku: string;
+  qtyNeeded: number;
+  qtyOrdered: number;
+  qtyReceived: number;
+  qtyPulled: number;
+  qtyInstalled: number;
+  status: JobPartStatus;
+  legacyNeedStatus: string;
+  note: string;
+  attentionReasons: string[];
 };
 
 @Component({
@@ -86,7 +91,8 @@ type PartsQueueInvoiceGroup = {
     IonInput,
     PageBackButtonComponent,
     UserMenuComponent,
-    CompanySwitcherComponent
+    CompanySwitcherComponent,
+    VendorPickerComponent
   ],
   templateUrl: './inventory.component.html',
   styleUrls: ['./inventory.component.scss']
@@ -95,6 +101,8 @@ export default class InventoryComponent implements OnInit {
   readonly pageSize = 30;
   private readonly inventoryApi = inject(InventoryApiService);
   private readonly invoicesData = inject(InvoicesDataService);
+  private readonly jobPartsFoundation = inject(JobPartsFoundationService);
+  private readonly purchaseOrdersApi = inject(PurchaseOrdersApiService);
   private readonly router = inject(Router);
 
   readonly loading = signal(false);
@@ -104,11 +112,11 @@ export default class InventoryComponent implements OnInit {
   readonly search = signal('');
   readonly page = signal(1);
   readonly items = signal<InventoryItem[]>([]);
+  readonly needs = signal<InventoryNeed[]>([]);
+  readonly activeSection = signal<InventorySection>('stock');
+  readonly selectedJobPartIds = signal<Set<string>>(new Set());
   readonly selectedItemId = signal('');
   readonly editor = signal<InventoryEditor | null>(null);
-  readonly queueWorkspaceOpen = signal(false);
-  readonly selectedQueueInvoiceId = signal('');
-  readonly queueSavingKey = signal('');
 
   readonly filteredItems = computed(() => {
     const query = this.search().trim().toLowerCase();
@@ -148,6 +156,56 @@ export default class InventoryComponent implements OnInit {
       0
     )
   );
+  readonly inventorySections: Array<{ id: InventorySection; label: string }> = [
+    { id: 'stock', label: 'Stock' },
+    { id: 'job-parts', label: 'Job Parts' },
+    { id: 'to-order', label: 'To Order' },
+    { id: 'on-order', label: 'On Order' },
+    { id: 'received', label: 'Received / Ready' },
+    { id: 'attention', label: 'Attention' }
+  ];
+  readonly jobPartRows = computed(() => this.buildJobPartRows());
+  readonly allJobParts = computed(() => this.jobPartRows());
+  readonly toOrderParts = computed(() =>
+    this.jobPartRows().filter(row =>
+      row.status === 'quoted'
+      || row.status === 'backordered'
+      || row.legacyNeedStatus === 'needs-order'
+      || (row.qtyNeeded > Math.max(row.qtyOrdered, row.qtyReceived))
+    )
+  );
+  readonly onOrderParts = computed(() =>
+    this.jobPartRows().filter(row =>
+      row.status === 'ordered'
+      && row.qtyReceived < row.qtyNeeded
+    )
+  );
+  readonly receivedParts = computed(() =>
+    this.jobPartRows().filter(row =>
+      row.qtyReceived >= row.qtyNeeded
+      || row.status === 'received'
+      || row.status === 'pulled'
+      || row.status === 'installed'
+    )
+  );
+  readonly attentionParts = computed(() =>
+    this.jobPartRows().filter(row => row.attentionReasons.length > 0)
+  );
+  readonly activeJobParts = computed(() => {
+    const section = this.activeSection();
+    if (section === 'to-order') return this.toOrderParts();
+    if (section === 'on-order') return this.onOrderParts();
+    if (section === 'received') return this.receivedParts();
+    if (section === 'attention') return this.attentionParts();
+    return this.allJobParts();
+  });
+  readonly legacyFallbackCount = computed(() =>
+    this.jobPartRows().filter(row => row.source === 'legacy-invoice').length
+  );
+  readonly selectedJobParts = computed(() => {
+    const ids = this.selectedJobPartIds();
+    return this.jobPartRows().filter(row => ids.has(row.id) && this.canCreatePoForPart(row));
+  });
   readonly paidInvoices = computed(() =>
     this.invoicesData.invoiceDetails().filter(item => {
       const invoiceNumber = this.normalizeText(item?.invoiceNumber);
@@ -155,148 +213,6 @@ export default class InventoryComponent implements OnInit {
       return looksLikeInvoice && this.isPaidInvoice(item) && !this.isCompletedJob(item);
     })
   );
-  readonly partsQueueRows = computed(() => {
-    const grouped = new Map<string, {
-      label: string;
-      sku: string;
-      qty: number;
-      customerIds: Set<string>;
-      invoiceIds: Set<string>;
-      latestUpdatedMs: number;
-      latestUpdatedAt: string;
-        latestInvoiceId: string;
-        latestInvoiceNumber: string;
-        hasBackordered: boolean;
-        hasOutOfStock: boolean;
-      }>();
-
-    for (const invoice of this.paidInvoices()) {
-      const updatedAt = String(invoice.updatedAt || invoice.createdAt || '').trim();
-      const updatedMs = this.asMillis(updatedAt);
-      const customerId = this.normalizeText(invoice.customerId || '').toLowerCase()
-        || this.normalizeText(invoice.customerEmail || '').toLowerCase()
-        || this.normalizeText(invoice.customerName || '').toLowerCase();
-
-      for (const line of Array.isArray(invoice.lineItems) ? invoice.lineItems : []) {
-        // Backward compatibility: some legacy docs did not persist a clean line type.
-        // Treat anything not explicitly labor as a part candidate for ordering.
-        const normalizedLineType = this.normalizeText((line as any)?.type).toLowerCase();
-        if (normalizedLineType === 'labor') continue;
-        const normalizedStatus = this.normalizePartStatus(line.partStatus);
-        if (normalizedStatus === 'ordered' || normalizedStatus === 'received' || normalizedStatus === 'in-stock') continue;
-
-        const qty = Math.max(0, this.toNumber(line.quantity, 0));
-        if (qty <= 0) continue;
-        const sku = this.normalizeText(line.code);
-        const label = this.normalizeText(line.description || sku || 'Part');
-        const key = `${sku.toLowerCase()}::${label.toLowerCase()}`;
-
-        const existing = grouped.get(key);
-        if (!existing) {
-          grouped.set(key, {
-            label,
-            sku,
-            qty,
-            customerIds: new Set(customerId ? [customerId] : []),
-            invoiceIds: new Set([invoice.id]),
-            latestUpdatedMs: updatedMs,
-            latestUpdatedAt: updatedAt,
-            latestInvoiceId: String(invoice.id || '').trim(),
-            latestInvoiceNumber: String(invoice.invoiceNumber || '').trim(),
-            hasBackordered: normalizedStatus === 'backordered',
-            hasOutOfStock: normalizedStatus === 'out-of-stock'
-          });
-          continue;
-        }
-
-        existing.qty += qty;
-        if (customerId) existing.customerIds.add(customerId);
-        existing.invoiceIds.add(invoice.id);
-        existing.hasBackordered = existing.hasBackordered || normalizedStatus === 'backordered';
-        existing.hasOutOfStock = existing.hasOutOfStock || normalizedStatus === 'out-of-stock';
-        if (updatedMs >= existing.latestUpdatedMs) {
-          existing.latestUpdatedMs = updatedMs;
-          existing.latestUpdatedAt = updatedAt;
-          existing.latestInvoiceId = String(invoice.id || '').trim();
-          existing.latestInvoiceNumber = String(invoice.invoiceNumber || '').trim();
-        }
-      }
-    }
-
-    return Array.from(grouped.entries())
-      .map(([key, value]): PartsQueueRow => ({
-        key,
-        label: value.label,
-        sku: value.sku,
-        qty: Math.round(value.qty * 100) / 100,
-        customerCount: value.customerIds.size,
-        invoiceCount: value.invoiceIds.size,
-        status: value.hasBackordered ? 'backordered' : (value.hasOutOfStock ? 'out-of-stock' : 'ordered'),
-        latestUpdatedAt: value.latestUpdatedAt,
-        sampleInvoiceId: value.latestInvoiceId,
-        sampleInvoiceNumber: value.latestInvoiceNumber
-      }))
-      .sort((a, b) => {
-        const statusDiff = this.partsQueueStatusPriority(a.status) - this.partsQueueStatusPriority(b.status);
-        if (statusDiff !== 0) return statusDiff;
-        const qtyDiff = b.qty - a.qty;
-        if (qtyDiff !== 0) return qtyDiff;
-        return this.normalizeText(a.label).localeCompare(this.normalizeText(b.label), undefined, { sensitivity: 'base' });
-      });
-  });
-  readonly queueTotalQty = computed(() =>
-    this.partsQueueRows().reduce((sum, row) => sum + this.toNumber(row.qty, 0), 0)
-  );
-  readonly queueBackorderedCount = computed(() =>
-    this.partsQueueRows().filter(row => row.status === 'backordered').length
-  );
-  readonly queuePreviewRows = computed(() => this.partsQueueRows().slice(0, 3));
-  readonly queueInvoiceGroups = computed(() => {
-    const groups: PartsQueueInvoiceGroup[] = [];
-    for (const invoice of this.paidInvoices()) {
-      const invoiceId = this.normalizeText(invoice.id);
-      if (!invoiceId) continue;
-      const lines: PartsQueueInvoiceLine[] = [];
-      const sourceLines = Array.isArray(invoice.lineItems) ? invoice.lineItems : [];
-      for (let sourceIndex = 0; sourceIndex < sourceLines.length; sourceIndex += 1) {
-        const line = sourceLines[sourceIndex];
-        const normalizedLineType = this.normalizeText((line as any)?.type).toLowerCase();
-        if (normalizedLineType === 'labor') continue;
-        const status = this.normalizePartStatus(line.partStatus);
-        if (status === 'ordered' || status === 'received' || status === 'in-stock') continue;
-        const qty = Math.max(0, this.toNumber(line.quantity, 0));
-        if (qty <= 0) continue;
-        lines.push({
-          id: this.normalizeText(line.id),
-          sourceIndex,
-          label: this.normalizeText(line.description || line.code || 'Part'),
-          sku: this.normalizeText(line.code),
-          qty: Math.round(qty * 100) / 100,
-          status
-        });
-      }
-      if (!lines.length) continue;
-      groups.push({
-        invoiceId,
-        invoiceNumber: this.normalizeText(invoice.invoiceNumber),
-        customerName: this.normalizeText(invoice.customerName || 'Customer'),
-        updatedAt: this.normalizeText(invoice.updatedAt || invoice.createdAt || ''),
-        lines
-      });
-    }
-    return groups.sort((a, b) => this.asMillis(b.updatedAt) - this.asMillis(a.updatedAt));
-  });
-  readonly selectedQueueInvoice = computed(() => {
-    const selectedId = this.normalizeText(this.selectedQueueInvoiceId());
-    const groups = this.queueInvoiceGroups();
-    if (!groups.length) return null;
-    if (selectedId) {
-      const match = groups.find(group => group.invoiceId === selectedId);
-      if (match) return match;
-    }
-    return groups[0];
-  });
-
   ngOnInit(): void {
     this.loadInventoryItems();
   }
@@ -304,10 +220,11 @@ export default class InventoryComponent implements OnInit {
   loadInventoryItems(): void {
     this.loading.set(true);
     this.error.set('');
-    this.inventoryApi.listItems().subscribe({
+    this.inventoryApi.getState().subscribe({
       next: res => {
         const items = this.sortItems(Array.isArray(res?.items) ? res.items : []);
         this.items.set(items);
+        this.needs.set(Array.isArray(res?.needs) ? res.needs : []);
         this.syncSelection(items);
         this.page.set(1);
         this.loading.set(false);
@@ -350,6 +267,16 @@ export default class InventoryComponent implements OnInit {
     });
   }
 
+  setEditorVendor(selection: { vendorId: string; vendorName: string }): void {
+    const current = this.editor();
+    if (!current) return;
+    this.editor.set({
+      ...current,
+      vendorId: selection.vendorId || '',
+      vendor: selection.vendorName || ''
+    });
+  }
+
   setEditorNumber(field: 'onHand' | 'reorderAt' | 'onOrder' | 'unitCost' | 'price', value: unknown): void {
     const current = this.editor();
     if (!current) return;
@@ -367,6 +294,7 @@ export default class InventoryComponent implements OnInit {
       this.normalizeText(item.name) !== this.normalizeText(draft.name) ||
       this.normalizeText(item.sku) !== this.normalizeText(draft.sku) ||
       this.normalizeText(item.vendor) !== this.normalizeText(draft.vendor) ||
+      this.normalizeText((item as any).vendorId) !== this.normalizeText(draft.vendorId) ||
       this.normalizeText(item.category) !== this.normalizeText(draft.category) ||
       this.toNumber(item.onHand, 0) !== this.toNumber(draft.onHand, 0) ||
       this.toNumber(item.reorderAt, 0) !== this.toNumber(draft.reorderAt, 0) ||
@@ -388,6 +316,7 @@ export default class InventoryComponent implements OnInit {
       id: draft.id,
       name: this.normalizeText(draft.name),
       sku: this.normalizeText(draft.sku),
+      vendorId: this.normalizeText(draft.vendorId),
       vendor: this.normalizeText(draft.vendor),
       category: this.normalizeText(draft.category),
       onHand: Math.max(0, Math.trunc(this.toNumber(draft.onHand, 0))),
@@ -460,34 +389,136 @@ export default class InventoryComponent implements OnInit {
     this.page.update(value => Math.min(this.totalPages(), value + 1));
   }
 
-  trackPartsQueueRow(_index: number, row: PartsQueueRow): string {
-    return row.key;
+  setActiveSection(section: InventorySection): void {
+    this.activeSection.set(section);
   }
 
-  trackQueueInvoiceGroup(_index: number, group: PartsQueueInvoiceGroup): string {
-    return group.invoiceId;
+  sectionCount(section: InventorySection): number {
+    if (section === 'stock') return this.filteredItems().length;
+    if (section === 'job-parts') return this.allJobParts().length;
+    if (section === 'to-order') return this.toOrderParts().length;
+    if (section === 'on-order') return this.onOrderParts().length;
+    if (section === 'received') return this.receivedParts().length;
+    return this.attentionParts().length;
   }
 
-  partsQueueStatusLabel(status: InvoicePartStatus): string {
-    if (status === 'out-of-stock') return 'Out of stock';
-    if (status === 'backordered') return 'Backordered';
-    if (status === 'ordered') return 'Ordered';
-    if (status === 'in-stock') return 'In-stock';
-    return 'Received';
+  activeSectionLabel(): string {
+    const section = this.activeSection();
+    if (section === 'job-parts') return 'Job Parts';
+    if (section === 'to-order') return 'Parts To Order';
+    if (section === 'on-order') return 'Parts On Order';
+    if (section === 'received') return 'Received / Ready';
+    if (section === 'attention') return 'Attention';
+    return 'Stock';
   }
 
-  partsQueueStatusClass(status: InvoicePartStatus): string {
-    if (status === 'out-of-stock') return 'queue-status-needs-order';
-    if (status === 'backordered') return 'queue-status-backordered';
-    if (status === 'ordered') return 'queue-status-needs-order';
-    if (status === 'in-stock') return 'queue-status-in-stock';
-    return 'queue-status-received';
+  trackJobPart(_index: number, row: JobPartView): string {
+    return row.id;
   }
 
-  openInvoiceFromQueue(row: PartsQueueRow): void {
-    const invoiceId = this.normalizeText(row?.sampleInvoiceId);
-    if (!invoiceId) return;
-    void this.router.navigate(['/invoices', invoiceId]);
+  isJobPartSelected(row: JobPartView): boolean {
+    return this.selectedJobPartIds().has(row.id);
+  }
+
+  toggleJobPartSelection(row: JobPartView, checked: boolean): void {
+    if (!this.canCreatePoForPart(row)) return;
+    const next = new Set(this.selectedJobPartIds());
+    if (checked) next.add(row.id);
+    else next.delete(row.id);
+    this.selectedJobPartIds.set(next);
+  }
+
+  canCreatePoForPart(row: JobPartView): boolean {
+    return row.source === 'inventoryneeds'
+      && !!row.id
+      && row.qtyNeeded > Math.max(row.qtyOrdered, row.qtyReceived)
+      && row.status !== 'received'
+      && row.status !== 'pulled'
+      && row.status !== 'installed'
+      && row.status !== 'returned';
+  }
+
+  createPurchaseOrderDraft(): void {
+    const selected = this.selectedJobParts();
+    if (!selected.length) {
+      this.error.set('Select at least one job-linked part that still needs ordering.');
+      return;
+    }
+    const lines: PurchaseOrderLine[] = selected.map((row, index) => {
+      const qty = Math.max(1, Math.ceil(row.qtyNeeded - Math.max(row.qtyOrdered, row.qtyReceived)));
+      return {
+        lineId: `line-${index + 1}`,
+        needId: row.id,
+        itemId: row.relatedInventoryItemId,
+        relatedInventoryItemId: row.relatedInventoryItemId,
+        jobId: row.jobId,
+        jobNumber: row.jobNumber,
+        partName: row.partName,
+        sku: row.sku,
+        vendor: row.vendor,
+        vendorId: row.vendorId,
+        qty,
+        qtyNeeded: row.qtyNeeded,
+        qtyOrdered: row.qtyOrdered,
+        qtyReceived: 0,
+        unitCost: row.unitCost,
+        note: row.note
+      };
+    });
+    const supplier = this.normalizeText(lines.find(line => this.normalizeText(line.vendor))?.vendor) || 'Unassigned Supplier';
+    this.saving.set(true);
+    this.error.set('');
+    this.status.set('');
+    this.purchaseOrdersApi.createDraft({ supplier, lines }).subscribe({
+      next: res => {
+        const id = this.normalizeText(res?.order?.id);
+        this.selectedJobPartIds.set(new Set());
+        this.saving.set(false);
+        this.status.set('Purchase order draft created.');
+        this.loadInventoryItems();
+        if (id) void this.router.navigate(['/purchase-orders'], { queryParams: { id } });
+      },
+      error: err => {
+        this.error.set(this.extractError(err, 'Could not create purchase order draft.'));
+        this.saving.set(false);
+      }
+    });
+  }
+
+  jobPartStatusLabel(status: JobPartStatus | string): string {
+    const normalized = this.normalizeText(status).toLowerCase();
+    if (normalized === 'quoted') return 'Quoted';
+    if (normalized === 'ordered') return 'Ordered';
+    if (normalized === 'received') return 'Received';
+    if (normalized === 'pulled') return 'Pulled';
+    if (normalized === 'installed') return 'Installed';
+    if (normalized === 'returned') return 'Returned';
+    if (normalized === 'backordered') return 'Backordered';
+    return 'Quoted';
+  }
+
+  jobPartStatusClass(status: JobPartStatus | string): string {
+    const normalized = this.normalizeText(status).toLowerCase();
+    if (normalized === 'backordered' || normalized === 'returned') return 'queue-status-backordered';
+    if (normalized === 'received' || normalized === 'pulled' || normalized === 'installed') return 'queue-status-received';
+    if (normalized === 'ordered') return 'queue-status-in-stock';
+    return 'queue-status-needs-order';
+  }
+
+  qtyProgressLabel(row: JobPartView): string {
+    return `Need ${this.formatQty(row.qtyNeeded)} · Ordered ${this.formatQty(row.qtyOrdered)} · Received ${this.formatQty(row.qtyReceived)} · Pulled ${this.formatQty(row.qtyPulled)} · Installed ${this.formatQty(row.qtyInstalled)}`;
+  }
+
+  formatQty(value: number): string {
+    const rounded = Math.round(this.toNumber(value, 0) * 100) / 100;
+    return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2);
+  }
+
+  openJobPartSource(row: JobPartView): void {
+    const invoiceId = this.normalizeText(row.relatedInvoiceId);
+    if (invoiceId) {
+      void this.router.navigate(['/invoices', invoiceId]);
+    }
   }
 
   openInvoiceById(invoiceId: string): void {
@@ -496,69 +527,115 @@ export default class InventoryComponent implements OnInit {
     void this.router.navigate(['/invoices', normalized]);
   }
 
-  openQueueWorkspace(): void {
-    this.queueWorkspaceOpen.set(true);
-    const selected = this.selectedQueueInvoice();
-    this.selectedQueueInvoiceId.set(selected?.invoiceId || '');
-  }
+  private buildJobPartRows(): JobPartView[] {
+    const foundationRows = this.needs().map(need => this.jobPartFromNeed(need));
+    const existingKeys = new Set(foundationRows.flatMap(row => this.jobPartMatchKeys(row)));
+    const fallbackRows: JobPartView[] = [];
 
-  closeQueueWorkspace(): void {
-    this.queueWorkspaceOpen.set(false);
-  }
-
-  selectQueueInvoice(invoiceId: string): void {
-    this.selectedQueueInvoiceId.set(this.normalizeText(invoiceId));
-  }
-
-  updateQueueLineStatus(invoiceId: string, lineId: string, sourceIndex: number, nextStatus: string): void {
-    const normalizedInvoiceId = this.normalizeText(invoiceId);
-    const normalizedLineId = this.normalizeText(lineId);
-    const normalizedSourceIndex = Number.isInteger(sourceIndex) ? sourceIndex : -1;
-    if (!normalizedInvoiceId || (!normalizedLineId && normalizedSourceIndex < 0)) return;
-    const status = this.normalizePartStatus(nextStatus);
-    const savingIdSegment = normalizedLineId || `idx-${normalizedSourceIndex}`;
-    const savingKey = `${normalizedInvoiceId}::${savingIdSegment}`;
-    this.queueSavingKey.set(savingKey);
-    this.error.set('');
-    this.status.set('');
-
-    const detail = this.invoicesData.getInvoiceById(normalizedInvoiceId);
-    if (!detail) {
-      this.queueSavingKey.set('');
-      this.error.set('Could not find invoice for this part line.');
-      return;
+    for (const invoice of this.paidInvoices()) {
+      const lines = Array.isArray(invoice.lineItems) ? invoice.lineItems : [];
+      for (const line of lines) {
+        const draft = this.jobPartsFoundation.mapInvoiceLineToJobPartDraft(invoice, line);
+        if (!draft) continue;
+        const row = this.jobPartFromDraft(draft, invoice);
+        const hasFoundationMatch = this.jobPartMatchKeys(row).some(key => existingKeys.has(key));
+        if (hasFoundationMatch) continue;
+        fallbackRows.push(row);
+        for (const key of this.jobPartMatchKeys(row)) existingKeys.add(key);
+      }
     }
 
-    const updated = {
-      ...detail,
-      lineItems: (detail.lineItems || []).map((line, idx) => {
-        const matchesById = normalizedLineId && this.normalizeText(line.id) === normalizedLineId;
-        const matchesByIndex = normalizedSourceIndex >= 0 && idx === normalizedSourceIndex;
-        if (!matchesById && !matchesByIndex) return line;
-        const normalizedLineType = this.normalizeText((line as any)?.type).toLowerCase();
-        if (normalizedLineType === 'labor') return line;
-        return { ...line, partStatus: status };
-      })
+    return [...foundationRows, ...fallbackRows].sort((a, b) => {
+      const attentionDiff = Number(b.attentionReasons.length > 0) - Number(a.attentionReasons.length > 0);
+      if (attentionDiff !== 0) return attentionDiff;
+      const dateDiff = this.asMillis(a.installDate) - this.asMillis(b.installDate);
+      if (dateDiff !== 0) return dateDiff;
+      return this.normalizeText(a.partName).localeCompare(this.normalizeText(b.partName), undefined, { sensitivity: 'base' });
+    });
+  }
+
+  private jobPartFromNeed(need: InventoryNeed): JobPartView {
+    const draft = this.jobPartsFoundation.mapInventoryNeedToJobPart(need);
+    return this.jobPartFromDraft(draft, null, need);
+  }
+
+  private jobPartFromDraft(draft: JobPartDraft, invoice: InvoiceDetail | null, need?: InventoryNeed): JobPartView {
+    const qtyNeeded = this.toNumber(draft.qtyNeeded, this.toNumber((need as any)?.qty, 1));
+    const qtyOrdered = this.toNumber(draft.qtyOrdered, 0);
+    const qtyReceived = this.toNumber(draft.qtyReceived, 0);
+    const qtyPulled = this.toNumber(draft.qtyPulled, 0);
+    const qtyInstalled = this.toNumber(draft.qtyInstalled, 0);
+    const status = this.normalizeJobPartStatus(draft.status || (need as any)?.jobPartStatus || (need as any)?.status);
+    const installDate = this.normalizeText((need as any)?.scheduleStart);
+    const row: JobPartView = {
+      id: this.normalizeText(draft.id) || `${draft.sourceType}:${draft.sourceId}:${draft.relatedInvoiceLineItemId || draft.partName}`,
+      source: need ? 'inventoryneeds' : 'legacy-invoice',
+      jobId: this.normalizeText(draft.jobId),
+      jobNumber: this.normalizeText(draft.jobNumber),
+      relatedScheduleId: this.normalizeText(draft.relatedScheduleId),
+      relatedInvoiceId: this.normalizeText(draft.relatedInvoiceId),
+      relatedInvoiceLineItemId: this.normalizeText(draft.relatedInvoiceLineItemId),
+      relatedInventoryItemId: this.normalizeText(draft.relatedInventoryItemId),
+      customerName: this.normalizeText((need as any)?.customerName || invoice?.customerName || 'Customer'),
+      vehicle: this.normalizeText((need as any)?.vehicle || invoice?.vehicle),
+      vendorId: this.normalizeText((need as any)?.vendorId),
+      vendor: this.normalizeText((need as any)?.vendorHint),
+      unitCost: this.toNumber(draft.cost || (need as any)?.unitCost || (need as any)?.estimatedCost, 0),
+      installDate,
+      partName: this.normalizeText(draft.partName || draft.description || 'Part'),
+      sku: this.normalizeText(draft.sku),
+      qtyNeeded,
+      qtyOrdered,
+      qtyReceived,
+      qtyPulled,
+      qtyInstalled,
+      status,
+      legacyNeedStatus: this.normalizeText(draft.legacyNeedStatus || (need as any)?.status),
+      note: this.normalizeText(draft.note || draft.description || (need as any)?.note),
+      attentionReasons: []
     };
-
-    try {
-      this.invoicesData.saveInvoice(updated);
-      this.status.set(`Updated part status to ${this.partsQueueStatusLabel(status)}.`);
-    } catch (err: any) {
-      this.error.set(this.extractError(err, 'Could not update part status.'));
-    } finally {
-      this.queueSavingKey.set('');
-      const currentSelected = this.selectedQueueInvoice();
-      if (currentSelected) this.selectedQueueInvoiceId.set(currentSelected.invoiceId);
-    }
+    row.attentionReasons = this.attentionReasonsForPart(row);
+    return row;
   }
 
-  isQueueLineSaving(invoiceId: string, lineId: string, sourceIndex: number): boolean {
-    const normalizedInvoiceId = this.normalizeText(invoiceId);
-    const normalizedLineId = this.normalizeText(lineId);
-    const current = this.queueSavingKey();
-    if (!normalizedLineId) return current === `${normalizedInvoiceId}::idx-${Number.isInteger(sourceIndex) ? sourceIndex : -1}`;
-    return current === `${normalizedInvoiceId}::${normalizedLineId}`;
+  private jobPartMatchKeys(row: JobPartView): string[] {
+    const keys: string[] = [];
+    if (row.relatedInvoiceLineItemId) keys.push(`line:${row.relatedInvoiceLineItemId}`);
+    if (row.relatedInvoiceId && row.sku) keys.push(`invoice-sku:${row.relatedInvoiceId}:${row.sku.toLowerCase()}`);
+    if (row.relatedScheduleId && row.sku) keys.push(`schedule-sku:${row.relatedScheduleId}:${row.sku.toLowerCase()}`);
+    if (row.jobId && row.sku) keys.push(`job-sku:${row.jobId}:${row.sku.toLowerCase()}`);
+    if (row.jobId && row.partName) keys.push(`job-part:${row.jobId}:${row.partName.toLowerCase()}`);
+    return keys;
+  }
+
+  private attentionReasonsForPart(row: JobPartView): string[] {
+    const reasons: string[] = [];
+    if (row.status === 'backordered') reasons.push('Backordered');
+    if (row.qtyReceived < row.qtyNeeded) reasons.push('Not fully received');
+    if (row.qtyReceived > 0 && row.qtyReceived < row.qtyNeeded) reasons.push('Partial received');
+    if (this.isInstallApproaching(row.installDate) && row.qtyReceived < row.qtyNeeded) {
+      reasons.push('Install approaching');
+    }
+    return Array.from(new Set(reasons));
+  }
+
+  private isInstallApproaching(value: string): boolean {
+    const installMs = this.asMillis(value);
+    if (!installMs) return false;
+    const now = Date.now();
+    const sevenDays = 7 * 24 * 60 * 60 * 1000;
+    return installMs >= now && installMs - now <= sevenDays;
+  }
+
+  private normalizeJobPartStatus(value: unknown): JobPartStatus {
+    const normalized = this.normalizeText(value).toLowerCase();
+    if (normalized === 'ordered' || normalized === 'po-draft') return 'ordered';
+    if (normalized === 'received' || normalized === 'in-stock') return 'received';
+    if (normalized === 'pulled') return 'pulled';
+    if (normalized === 'installed') return 'installed';
+    if (normalized === 'returned' || normalized === 'cancelled' || normalized === 'canceled') return 'returned';
+    if (normalized === 'backordered') return 'backordered';
+    return 'quoted';
   }
 
   private syncSelection(items: InventoryItem[]): void {
@@ -583,6 +660,7 @@ export default class InventoryComponent implements OnInit {
       id: String(item.id || ''),
       name: String(item.name || ''),
       sku: String(item.sku || ''),
+      vendorId: String((item as any).vendorId || ''),
       vendor: String(item.vendor || ''),
       category: String(item.category || ''),
       onHand: this.toNumber(item.onHand, 0),
@@ -636,24 +714,6 @@ export default class InventoryComponent implements OnInit {
   private isCompletedJob(item: InvoiceDetail): boolean {
     const stage = this.normalizeText(item?.stage).toLowerCase();
     return stage === 'completed';
-  }
-
-  private normalizePartStatus(value: unknown): InvoicePartStatus {
-    const normalized = this.normalizeText(value).toLowerCase();
-    if (normalized === 'ordered' || normalized === 'order' || normalized === 'on-order' || normalized === 'on order') return 'ordered';
-    if (normalized === 'out-of-stock' || normalized === 'out of stock' || normalized === 'outofstock') return 'out-of-stock';
-    if (normalized === 'backordered' || normalized === 'back-order' || normalized === 'back order') return 'backordered';
-    if (normalized === 'received') return 'received';
-    if (normalized === 'in-stock' || normalized === 'in stock' || normalized === 'instock') return 'in-stock';
-    return 'out-of-stock';
-  }
-
-  private partsQueueStatusPriority(status: InvoicePartStatus): number {
-    if (status === 'out-of-stock') return 0;
-    if (status === 'backordered') return 0;
-    if (status === 'ordered') return 1;
-    if (status === 'in-stock') return 2;
-    return 3;
   }
 
   private toNumber(value: unknown, fallback = 0): number {

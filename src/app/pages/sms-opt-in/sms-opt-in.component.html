@@ -1,112 +1,104 @@
-<ion-header class="glass-header">
+<ion-header class="public-header">
   <ion-toolbar>
-    <ion-title>SMS Opt-In</ion-title>
+    <ion-title>PathFlow SMS Opt-In</ion-title>
   </ion-toolbar>
 </ion-header>
 
-<ion-content class="glass-bg optin-page ion-padding">
-  <div class="optin-shell">
-    <ion-card class="glass-surface intro-card">
-      <ion-card-header>
-        <ion-card-title>Pathflow Customer Updates</ion-card-title>
-      </ion-card-header>
-      <ion-card-content>
-        <p>
-          Use this page as your public SMS consent flow. It captures lead details and creates a lead card in your dashboard.
-        </p>
-        <div class="meta-row">
-          <ion-badge color="primary">Source: Website Widget</ion-badge>
-          <ion-badge color="medium">Consent version: {{ consentVersion }}</ion-badge>
-        </div>
+<ion-content class="optin-page">
+  <main class="optin-shell">
+    <section class="intro-card">
+      <p class="eyebrow">Public consent page</p>
+      <h1>Receive PathFlow transactional SMS updates.</h1>
+      <p>
+        PathFlow is operated by VistaLumina. Use this page to opt in to transactional SMS messages
+        related to account access, appointments, service/job updates, quote and invoice notifications,
+        billing alerts, and support.
+      </p>
+      <div class="proof-grid">
+        <div><strong>Program owner</strong><span>VistaLumina / PathFlow</span></div>
+        <div><strong>Message frequency</strong><span>Varies by account and job activity</span></div>
+        <div><strong>Opt out</strong><span>Reply STOP at any time</span></div>
+        <div><strong>Help</strong><span>Reply HELP for assistance</span></div>
+      </div>
+    </section>
+
+    <section class="form-card">
+      <div>
+        <p class="eyebrow">SMS consent form</p>
+        <h2>Mobile number collection and consent</h2>
         <p class="small-text">
-          Public URL for verification: <code>{{ pageUrl() }}</code>
+          The SMS consent disclosure is shown before submission and must be accepted before messages are sent.
         </p>
-        <p class="small-text">
-          Other opt-in methods: <a [href]="otherOptInUrl" target="_blank" rel="noopener noreferrer">{{ otherOptInUrl }}</a>
-        </p>
-      </ion-card-content>
-    </ion-card>
+      </div>
 
-    <ion-card class="glass-surface form-card">
-      <ion-card-header>
-        <ion-card-title>Request Service Updates</ion-card-title>
-      </ion-card-header>
-      <ion-card-content>
-        <div class="form-grid">
-          <ion-item>
-            <ion-label position="stacked">Full name</ion-label>
-            <ion-input [(ngModel)]="name" placeholder="John Smith"></ion-input>
-          </ion-item>
-
-          <ion-item>
-            <ion-label position="stacked">Email</ion-label>
-            <ion-input [(ngModel)]="email" type="email" placeholder="you@example.com"></ion-input>
-          </ion-item>
-
-          <ion-item>
-            <ion-label position="stacked">Mobile phone</ion-label>
-            <ion-input [ngModel]="phone" (ngModelChange)="onPhoneInput($event)" placeholder="(555) 555-1212"></ion-input>
-          </ion-item>
-
-          <ion-item>
-            <ion-label position="stacked">VIN (required)</ion-label>
-            <ion-input [(ngModel)]="vin" maxlength="17" placeholder="Enter 17-character VIN (no I, O, or Q)"></ion-input>
-          </ion-item>
-        </div>
-
-        <ion-item class="message-item">
-          <ion-label position="stacked">How can we help?</ion-label>
-          <ion-textarea
-            [(ngModel)]="message"
-            rows="4"
-            [autoGrow]="true"
-            maxlength="1200"
-            placeholder="Describe your service request...">
-          </ion-textarea>
+      <div class="form-grid">
+        <ion-item>
+          <ion-label position="stacked">Full name</ion-label>
+          <ion-input [(ngModel)]="name" placeholder="Jane Smith"></ion-input>
         </ion-item>
 
-        <label class="consent-box">
-          <ion-checkbox [(ngModel)]="smsOptIn"></ion-checkbox>
-          <span>{{ consentText }}</span>
-        </label>
+        <ion-item>
+          <ion-label position="stacked">Mobile phone for SMS</ion-label>
+          <ion-input [ngModel]="phone" (ngModelChange)="onPhoneInput($event)" placeholder="(555) 555-1212"></ion-input>
+        </ion-item>
 
-        <p class="small-text">
-          Privacy Policy:
-          <a [href]="privacyPolicyUrl" target="_blank" rel="noopener noreferrer">{{ privacyPolicyUrl }}</a>
-          <br />
-          SMS Terms:
-          <a [href]="smsTermsUrl" target="_blank" rel="noopener noreferrer">{{ smsTermsUrl }}</a>
-        </p>
+        <ion-item>
+          <ion-label position="stacked">Email (optional)</ion-label>
+          <ion-input [(ngModel)]="email" type="email" placeholder="you@example.com"></ion-input>
+        </ion-item>
 
-        <div class="action-row">
-          <ion-button (click)="submit()" [disabled]="!canSubmit()">
-            <ion-spinner name="crescent" *ngIf="submitting()" slot="start"></ion-spinner>
-            {{ submitting() ? 'Submitting...' : 'Submit Request' }}
-          </ion-button>
-        </div>
+        <ion-item>
+          <ion-label position="stacked">VIN or reference (optional)</ion-label>
+          <ion-input [(ngModel)]="vin" maxlength="17" placeholder="Optional 17-character VIN"></ion-input>
+        </ion-item>
+      </div>
 
-        <ion-text color="success" *ngIf="status()">
-          <p class="feedback">{{ status() }}</p>
-        </ion-text>
-        <ion-text color="danger" *ngIf="error()">
-          <p class="feedback">{{ error() }}</p>
-        </ion-text>
-      </ion-card-content>
-    </ion-card>
+      <ion-item class="message-item">
+        <ion-label position="stacked">Reason for updates (optional)</ion-label>
+        <ion-textarea
+          [(ngModel)]="message"
+          rows="3"
+          [autoGrow]="true"
+          maxlength="1200"
+          placeholder="Appointment reminders, service updates, invoices, or account alerts">
+        </ion-textarea>
+      </ion-item>
 
-    <ion-card class="glass-surface result-card" *ngIf="result() as response">
-      <ion-card-header>
-        <ion-card-title>Submission Result</ion-card-title>
-      </ion-card-header>
-      <ion-card-content>
-        <p><strong>Lead:</strong> {{ response.leadId }}</p>
-        <p><strong>Customer:</strong> {{ response.customerName || response.customerId || 'n/a' }}</p>
-        <p><strong>Customer created:</strong> {{ response.customerCreated ? 'Yes' : 'No (matched existing)' }}</p>
-        <p><strong>Lead created:</strong> {{ response.leadCreated ? 'Yes' : 'No (updated existing lead)' }}</p>
-        <p><strong>SMS consent status:</strong> {{ response.sms?.consentStatus || 'n/a' }}</p>
-        <p><strong>Confirmation SMS:</strong> {{ response.sms?.confirmationSent ? 'Sent' : 'Not sent' }}</p>
-        <p *ngIf="response.sms?.confirmationError"><strong>SMS error:</strong> {{ response.sms?.confirmationError }}</p>
-      </ion-card-content>
-    </ion-card>
-  </div>
+      <label class="consent-box">
+        <ion-checkbox [(ngModel)]="smsOptIn"></ion-checkbox>
+        <span>{{ consentText }}</span>
+      </label>
+
+      <p class="small-text">
+        Consent is not a condition of purchase. SMS consent is stored for compliance and may be updated or revoked.
+        See the <a [href]="privacyPolicyUrl" target="_blank" rel="noopener noreferrer">Privacy Policy</a> and
+        <a [href]="smsTermsUrl" target="_blank" rel="noopener noreferrer">Terms and SMS Terms</a>.
+      </p>
+
+      <div class="action-row">
+        <ion-button (click)="submit()" [disabled]="!canSubmit()">
+          <ion-spinner name="crescent" *ngIf="submitting()" slot="start"></ion-spinner>
+          {{ submitting() ? 'Submitting...' : 'Submit SMS Opt-In' }}
+        </ion-button>
+      </div>
+
+      <ion-text color="success" *ngIf="status()">
+        <p class="feedback">{{ status() }}</p>
+      </ion-text>
+      <ion-text color="danger" *ngIf="error()">
+        <p class="feedback">{{ error() }}</p>
+      </ion-text>
+    </section>
+
+    <section class="review-card">
+      <h2>Verification details for reviewers</h2>
+      <p><strong>Public URL:</strong> <code>{{ pageUrl() }}</code></p>
+      <p><strong>Consent version:</strong> {{ consentVersion }}</p>
+      <p><strong>Other opt-in proof:</strong> <a [href]="otherOptInUrl">{{ otherOptInUrl }}</a></p>
+      <p>
+        This page demonstrates that a potential subscriber provides a mobile number and checks an explicit
+        consent box before receiving transactional SMS from PathFlow.
+      </p>
+    </section>
+  </main>
 </ion-content>

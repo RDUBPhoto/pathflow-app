@@ -6,12 +6,7 @@ import { finalize } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { formatUsPhoneInput } from '../../utils/phone-format';
 import {
-  IonBadge,
   IonButton,
-  IonCard,
-  IonCardContent,
-  IonCardHeader,
-  IonCardTitle,
   IonCheckbox,
   IonContent,
   IonHeader,
@@ -56,10 +51,6 @@ type WidgetLeadResponse = {
     IonToolbar,
     IonTitle,
     IonContent,
-    IonCard,
-    IonCardHeader,
-    IonCardTitle,
-    IonCardContent,
     IonItem,
     IonLabel,
     IonInput,
@@ -67,7 +58,6 @@ type WidgetLeadResponse = {
     IonCheckbox,
     IonButton,
     IonText,
-    IonBadge,
     IonSpinner
   ],
   templateUrl: './sms-opt-in.component.html',
@@ -90,17 +80,16 @@ export default class SmsOptInComponent {
   readonly privacyPolicyUrl = this.publicPageUrl('/privacy-policy');
   readonly smsTermsUrl = this.publicPageUrl('/terms-and-conditions');
   readonly otherOptInUrl = this.publicPageUrl('/sms-opt-in-other');
-  readonly consentVersion = 'v1';
+  readonly consentVersion = 'v2';
   readonly sourceName = 'pathflow-sms-opt-in-page';
 
-  readonly consentText = `By checking this box, you agree to receive recurring SMS from Pathflow for appointment updates, job status, service notifications, billing alerts, and support. Message frequency varies. Message and data rates may apply. Reply STOP to opt out, HELP for help.`;
+  readonly consentText = `By checking this box, you agree to receive recurring transactional SMS messages from PathFlow, operated by VistaLumina, for verification codes, appointment reminders, service/job updates, quote and invoice notifications, account alerts, and support. Message frequency varies. Message and data rates may apply. Reply STOP to opt out or HELP for help.`;
 
   readonly canSubmit = computed(() => {
-    const hasContact = !!this.email.trim() || !!this.phone.trim();
     const hasName = !!this.name.trim();
-    const hasVin = this.isValidVin(this.vin);
-    const hasSmsConsent = !this.phone.trim() || this.smsOptIn;
-    return hasName && hasContact && hasVin && hasSmsConsent && !this.submitting();
+    const hasPhone = !!this.phone.trim();
+    const validVinIfPresent = !this.vin.trim() || this.isValidVin(this.vin);
+    return hasName && hasPhone && this.smsOptIn && validVinIfPresent && !this.submitting();
   });
 
   constructor(private readonly http: HttpClient) {
@@ -120,7 +109,7 @@ export default class SmsOptInComponent {
       email: this.email.trim(),
       phone: this.phone.trim(),
       vin: this.vin.trim().toUpperCase().replace(/\s+/g, ''),
-      message: this.message.trim(),
+      message: this.message.trim() || 'SMS opt-in request from public PathFlow website.',
       smsOptIn: this.smsOptIn,
       consentMethod: 'web-checkbox',
       smsConsentVersion: this.consentVersion,
@@ -132,19 +121,15 @@ export default class SmsOptInComponent {
       this.error.set('Name is required.');
       return;
     }
-    if (!payload.email && !payload.phone) {
-      this.error.set('At least email or phone is required.');
+    if (!payload.phone) {
+      this.error.set('Mobile phone is required for SMS opt-in.');
       return;
     }
-    if (!payload.vin) {
-      this.error.set('VIN is required.');
-      return;
-    }
-    if (!this.isValidVin(payload.vin)) {
+    if (payload.vin && !this.isValidVin(payload.vin)) {
       this.error.set('VIN must be 17 characters and cannot include I, O, or Q.');
       return;
     }
-    if (payload.phone && !this.smsOptIn) {
+    if (!this.smsOptIn) {
       this.error.set('SMS opt-in checkbox is required when phone is provided.');
       return;
     }

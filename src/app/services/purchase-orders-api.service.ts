@@ -8,18 +8,31 @@ export type PurchaseOrderLine = {
   lineId?: string;
   needId?: string;
   itemId?: string;
+  relatedInventoryItemId?: string;
+  jobId?: string;
+  jobNumber?: string;
   partName: string;
   sku?: string;
+  vendorId?: string;
   vendor?: string;
   qty: number;
+  qtyNeeded?: number;
+  qtyOrdered?: number;
+  qtyReceived?: number;
   unitCost?: number;
+  orderNumber?: string;
+  trackingNumber?: string;
+  etaDate?: string;
+  vendorInvoiceNumber?: string;
   note?: string;
   lineTotal?: number;
+  status?: 'ordered' | 'partial' | 'received';
 };
 
 export type PurchaseOrder = {
   id: string;
   supplier: string;
+  vendorId?: string;
   status: PurchaseOrderStatus;
   currency: string;
   note: string;
@@ -34,10 +47,21 @@ export type PurchaseOrder = {
 
 export type PurchaseOrderPayload = {
   supplier?: string;
+  vendorId?: string;
   note?: string;
   currency?: string;
   lines?: PurchaseOrderLine[];
   needIds?: string[];
+};
+
+export type PurchaseOrderReceiptLine = {
+  lineId: string;
+  qtyReceived: number;
+  orderNumber?: string;
+  trackingNumber?: string;
+  etaDate?: string;
+  vendorInvoiceNumber?: string;
+  note?: string;
 };
 
 @Injectable({ providedIn: 'root' })
@@ -75,10 +99,11 @@ export class PurchaseOrdersApiService {
     });
   }
 
-  receive(id: string): Observable<{ ok: boolean; order: PurchaseOrder }> {
+  receive(id: string, receipts?: PurchaseOrderReceiptLine[]): Observable<{ ok: boolean; order: PurchaseOrder }> {
     return this.http.post<{ ok: boolean; order: PurchaseOrder }>('/api/purchase-orders', {
       op: 'receive',
-      id
+      id,
+      receipts: receipts || []
     });
   }
 

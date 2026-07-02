@@ -162,6 +162,7 @@ function toInventoryItem(entity) {
     id: asString(entity.rowKey),
     name: asString(entity.name),
     sku: asString(entity.sku),
+    vendorId: asString(entity.vendorId),
     vendor: asString(entity.vendor),
     category: asString(entity.category),
     unit: asString(entity.unit),
@@ -249,9 +250,36 @@ function normalizeNeedStatus(raw) {
   return "needs-order";
 }
 
+function normalizeJobPartStatus(raw, fallbackNeedStatus) {
+  const value = asString(raw).toLowerCase();
+  if (value === "quoted") return "quoted";
+  if (value === "ordered" || value === "po-draft") return "ordered";
+  if (value === "received") return "received";
+  if (value === "pulled") return "pulled";
+  if (value === "installed") return "installed";
+  if (value === "returned" || value === "cancelled" || value === "canceled") return "returned";
+  if (value === "backordered" || value === "back-order" || value === "back order") return "backordered";
+
+  const needStatus = normalizeNeedStatus(fallbackNeedStatus);
+  if (needStatus === "ordered" || needStatus === "po-draft") return "ordered";
+  if (needStatus === "received") return "received";
+  if (needStatus === "cancelled") return "returned";
+  return "quoted";
+}
+
 function toNeed(entity) {
+  const status = normalizeNeedStatus(entity.status);
+  const qtyNeeded = asNumber(entity.qtyNeeded, asNumber(entity.qty, 1));
   return {
     id: asString(entity.rowKey),
+    jobId: asString(entity.jobId),
+    jobNumber: asString(entity.jobNumber),
+    relatedScheduleId: asString(entity.relatedScheduleId),
+    relatedWorkItemId: asString(entity.relatedWorkItemId),
+    relatedQuoteId: asString(entity.relatedQuoteId),
+    relatedInvoiceId: asString(entity.relatedInvoiceId),
+    relatedInvoiceLineItemId: asString(entity.relatedInvoiceLineItemId),
+    relatedInventoryItemId: asString(entity.relatedInventoryItemId),
     sourceType: asString(entity.sourceType) || "schedule",
     sourceId: asString(entity.sourceId),
     scheduleStart: asString(entity.scheduleStart),
@@ -261,11 +289,22 @@ function toNeed(entity) {
     customerName: asString(entity.customerName) || null,
     vehicle: asString(entity.vehicle),
     partName: asString(entity.partName),
+    description: asString(entity.description) || asString(entity.note),
     sku: asString(entity.sku),
-    qty: asNumber(entity.qty, 1),
+    qty: qtyNeeded,
+    qtyNeeded,
+    qtyOrdered: asNumber(entity.qtyOrdered, 0),
+    qtyReceived: asNumber(entity.qtyReceived, 0),
+    qtyPulled: asNumber(entity.qtyPulled, 0),
+    qtyInstalled: asNumber(entity.qtyInstalled, 0),
+    cost: asNumber(entity.cost, 0),
+    markup: asNumber(entity.markup, 0),
+    customerPrice: asNumber(entity.customerPrice, 0),
+    vendorId: asString(entity.vendorId),
     vendorHint: asString(entity.vendorHint),
     note: asString(entity.note),
-    status: normalizeNeedStatus(entity.status),
+    status,
+    jobPartStatus: normalizeJobPartStatus(entity.jobPartStatus, status),
     purchaseOrderId: asString(entity.purchaseOrderId) || null,
     createdAt: asString(entity.createdAt),
     updatedAt: asString(entity.updatedAt)
@@ -717,6 +756,7 @@ module.exports = async function (context, req) {
         rowKey: id,
         name,
         sku,
+        vendorId: asString(body.vendorId),
         vendor: asString(body.vendor || body.mainSupplier),
         category: asString(body.category),
         unit: asString(body.unit),
@@ -854,6 +894,7 @@ module.exports = async function (context, req) {
               name: name || sku,
               sku,
               vendor,
+              vendorId: asString(source.vendorId),
               category,
               unit,
               accountCode,
@@ -892,6 +933,7 @@ module.exports = async function (context, req) {
           if (name && !asString(existing.name)) patch.name = name;
           if (sku && !asString(existing.sku)) patch.sku = sku;
           if (vendor && !asString(existing.vendor)) patch.vendor = vendor;
+          if (source.vendorId && !asString(existing.vendorId)) patch.vendorId = asString(source.vendorId);
           if (category && !asString(existing.category)) patch.category = category;
           if (unit && !asString(existing.unit)) patch.unit = unit;
           if (accountCode && !asString(existing.accountCode)) patch.accountCode = accountCode;
@@ -985,6 +1027,14 @@ module.exports = async function (context, req) {
         {
           partitionKey: tenantId,
           rowKey: id,
+          jobId: asString(body.jobId),
+          jobNumber: asString(body.jobNumber),
+          relatedScheduleId: asString(body.relatedScheduleId),
+          relatedWorkItemId: asString(body.relatedWorkItemId),
+          relatedQuoteId: asString(body.relatedQuoteId),
+          relatedInvoiceId: asString(body.relatedInvoiceId),
+          relatedInvoiceLineItemId: asString(body.relatedInvoiceLineItemId),
+          relatedInventoryItemId: asString(body.relatedInventoryItemId),
           sourceType: asString(body.sourceType) || "manual",
           sourceId: asString(body.sourceId),
           scheduleStart: asString(body.scheduleStart),
@@ -994,11 +1044,22 @@ module.exports = async function (context, req) {
           customerName: asString(body.customerName),
           vehicle: asString(body.vehicle),
           partName,
+          description: asString(body.description || body.note),
           sku: asString(body.sku),
-          qty: Math.max(1, Math.floor(asNumber(body.qty, 1))),
+          qty: Math.max(1, Math.floor(asNumber(body.qtyNeeded != null ? body.qtyNeeded : body.qty, 1))),
+          qtyNeeded: Math.max(1, Math.floor(asNumber(body.qtyNeeded != null ? body.qtyNeeded : body.qty, 1))),
+          qtyOrdered: Math.max(0, asNumber(body.qtyOrdered, 0)),
+          qtyReceived: Math.max(0, asNumber(body.qtyReceived, 0)),
+          qtyPulled: Math.max(0, asNumber(body.qtyPulled, 0)),
+          qtyInstalled: Math.max(0, asNumber(body.qtyInstalled, 0)),
+          cost: Math.max(0, asNumber(body.cost, 0)),
+          markup: Math.max(0, asNumber(body.markup, 0)),
+          customerPrice: Math.max(0, asNumber(body.customerPrice, 0)),
+          vendorId: asString(body.vendorId),
           vendorHint: asString(body.vendorHint),
           note: asString(body.note),
           status: normalizeNeedStatus(body.status),
+          jobPartStatus: normalizeJobPartStatus(body.jobPartStatus, body.status),
           purchaseOrderId: asString(body.purchaseOrderId),
           createdAt: asString(body.createdAt) || now,
           updatedAt: now
@@ -1021,6 +1082,7 @@ module.exports = async function (context, req) {
           partitionKey: tenantId,
           rowKey: id,
           status: normalizeNeedStatus(body.status),
+          jobPartStatus: normalizeJobPartStatus(body.jobPartStatus, body.status),
           purchaseOrderId: asString(body.purchaseOrderId),
           updatedAt: new Date().toISOString()
         },

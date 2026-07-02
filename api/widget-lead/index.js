@@ -999,7 +999,7 @@ module.exports = async function (context, req) {
       requestedTenantId,
       securedByApiKey: !!asString(process.env.WIDGET_API_KEY),
       accepts: ["name", "phone", "email", "vin", "message", "smsOptIn"],
-      requiredFields: ["email or phone", "name (recommended)", "vin (required: 17 chars, A-HJ-NPR-Z0-9)", "message", "smsOptIn (if phone will receive SMS)"]
+      requiredFields: ["email or phone", "name (recommended)", "message", "smsOptIn (if phone will receive SMS)", "vin (optional, 17 chars, A-HJ-NPR-Z0-9 if provided)"]
     });
     return;
   }
@@ -1019,15 +1019,11 @@ module.exports = async function (context, req) {
     context.res = json(req, 400, { error: "At least one contact field is required (`email` or `phone`)." });
     return;
   }
-  if (!inbound.vin) {
-    context.res = json(req, 400, { error: "VIN is required." });
-    return;
-  }
   if (!inbound.message) {
     context.res = json(req, 400, { error: "Message is required." });
     return;
   }
-  if (!isValidVin(inbound.vin)) {
+  if (inbound.vin && !isValidVin(inbound.vin)) {
     context.res = json(req, 400, { error: "VIN must be 17 characters and cannot include I, O, or Q." });
     return;
   }
@@ -1036,11 +1032,13 @@ module.exports = async function (context, req) {
     return;
   }
 
-  const vinDetails = await decodeVinDetails(inbound.vin);
-  inbound.vehicleYear = vinDetails.vehicleYear;
-  inbound.vehicleMake = vinDetails.vehicleMake;
-  inbound.vehicleModel = vinDetails.vehicleModel;
-  inbound.vehicleTrim = vinDetails.vehicleTrim;
+  if (inbound.vin) {
+    const vinDetails = await decodeVinDetails(inbound.vin);
+    inbound.vehicleYear = vinDetails.vehicleYear;
+    inbound.vehicleMake = vinDetails.vehicleMake;
+    inbound.vehicleModel = vinDetails.vehicleModel;
+    inbound.vehicleTrim = vinDetails.vehicleTrim;
+  }
 
   try {
     const customersClient = await getTableClient(CUSTOMERS_TABLE);

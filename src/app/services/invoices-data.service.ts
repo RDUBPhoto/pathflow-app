@@ -11,6 +11,7 @@ export type InvoicePartStatus = 'out-of-stock' | 'in-stock' | 'ordered' | 'backo
 export type InvoiceCard = {
   id: string;
   documentType: InvoiceDocumentType;
+  jobNumber?: string;
   customerId?: string;
   customerName: string;
   customerEmail?: string;
@@ -32,6 +33,8 @@ export type InvoiceLane = {
 export type InvoiceLineItem = {
   id: string;
   type: InvoiceLineType;
+  jobPartId?: string;
+  relatedInventoryItemId?: string;
   partStatus?: InvoicePartStatus;
   trackingNumber?: string;
   code: string;
@@ -81,6 +84,7 @@ export type InvoiceDetail = {
   id: string;
   documentType: InvoiceDocumentType;
   invoiceNumber: string;
+  jobNumber?: string;
   stage: InvoiceStage;
   template: string;
 
@@ -134,6 +138,7 @@ type InvoiceCustomerLookup = {
 
 export type InvoiceDraftPayload = {
   documentType?: InvoiceDocumentType | null;
+  jobNumber?: string | null;
   customerId?: string | null;
   customerName?: string | null;
   customerEmail?: string | null;
@@ -581,17 +586,23 @@ export class InvoicesDataService {
     return `${prefix}-${this.nextInvoiceSequence()}`;
   }
 
+  previewNextJobNumber(): string {
+    return this.formatJobNumber(this.nextJobSequence());
+  }
+
   createDraftInvoice(payload: InvoiceDraftPayload = {}): InvoiceDetail {
     const sequence = this.nextInvoiceSequence();
     const nowIso = new Date().toISOString();
     const today = this.formatIsoDate(new Date());
     const documentType: InvoiceDocumentType = payload.documentType === 'quote' ? 'quote' : 'invoice';
     const numberPrefix = documentType === 'quote' ? 'QTE' : 'INV';
+    const jobNumber = this.safeText(payload.jobNumber) || this.previewNextJobNumber();
 
     const invoice = this.normalizeInvoice({
       id: this.generateDocumentId(),
       documentType,
       invoiceNumber: `${numberPrefix}-${sequence}`,
+      jobNumber,
       stage: payload.stage || 'draft',
       template: this.safeText(payload.template) || 'Other',
 
@@ -689,6 +700,7 @@ export class InvoicesDataService {
           ...incoming,
           id: incomingId || this.generateDocumentId(),
           invoiceNumber: incoming.invoiceNumber || this.previewNextDocumentNumber(incoming.documentType),
+          jobNumber: this.safeText(incoming.jobNumber) || this.previewNextJobNumber(),
           createdAt: incoming.createdAt || nowIso,
           updatedAt: nowIso
         });
@@ -713,6 +725,7 @@ export class InvoicesDataService {
         ...incoming,
         id: existing.id,
         invoiceNumber: existing.invoiceNumber || incoming.invoiceNumber,
+        jobNumber: this.safeText(existing.jobNumber) || this.safeText(incoming.jobNumber) || this.previewNextJobNumber(),
         createdAt: existing.createdAt || incoming.createdAt || nowIso,
         updatedAt: nowIso,
         timeline
@@ -1107,6 +1120,7 @@ export class InvoicesDataService {
 
     const created = this.createDraftInvoice({
       documentType: 'invoice',
+      jobNumber: quote.jobNumber,
       customerId: quote.customerId,
       customerName: quote.customerName,
       customerEmail: quote.customerEmail,
@@ -1210,6 +1224,7 @@ export class InvoicesDataService {
     return {
       id: invoice.id,
       documentType: invoice.documentType,
+      jobNumber: this.safeText(invoice.jobNumber) || undefined,
       customerId: this.safeText(invoice.customerId) || undefined,
       customerName: invoice.customerName,
       customerEmail: this.safeText(invoice.customerEmail) || undefined,
@@ -1252,6 +1267,7 @@ export class InvoicesDataService {
     return {
       ...invoice,
       documentType: normalizedDocumentType,
+      jobNumber: this.safeText((invoice as any).jobNumber),
       stage: normalizedStage,
       customerId: this.safeText(invoice.customerId),
       customerName: this.safeText(invoice.customerName) || 'Customer',
@@ -1324,6 +1340,8 @@ export class InvoicesDataService {
       return {
         id: this.safeText(line.id) || `li-${Date.now()}-${index}`,
         type,
+        jobPartId: type === 'part' ? this.safeText((line as Partial<InvoiceLineItem>).jobPartId) : '',
+        relatedInventoryItemId: type === 'part' ? this.safeText((line as Partial<InvoiceLineItem>).relatedInventoryItemId) : '',
         partStatus: type === 'part' ? this.normalizePartStatus(line.partStatus) : undefined,
         trackingNumber: type === 'part' ? this.safeText((line as Partial<InvoiceLineItem>).trackingNumber) : '',
         code: this.safeText(line.code),
@@ -1540,7 +1558,8 @@ export class InvoicesDataService {
         .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
       const legacyMigrated = this.migrateLegacyCompletedInvoices(normalized);
       const siblingMigrated = this.migrateDuplicateActiveQuotes(legacyMigrated);
-      return siblingMigrated.map(item => this.cloneInvoice(item));
+      const jobMigrated = this.migrateMissingJobNumbers(siblingMigrated);
+      return jobMigrated.map(item => this.cloneInvoice(item));
     } catch {
       return [];
     }
@@ -1667,6 +1686,43 @@ export class InvoicesDataService {
     return next;
   }
 
+  private migrateMissingJobNumbers(items: InvoiceDetail[]): InvoiceDetail[] {
+    const source = Array.isArray(items) ? items : [];
+    if (!source.length) return source;
+
+    const used = new Set<number>();
+    for (const item of source) {
+      const match = String(item.jobNumber || '').trim().toUpperCase().match(/^JOB-(\d+)$/);
+      if (!match) continue;
+      const value = Number(match[1]);
+      if (Number.isFinite(value) && value > 0) used.add(value);
+    }
+
+    let cursor = 1;
+    const nextNumber = () => {
+      while (used.has(cursor)) cursor += 1;
+      const out = cursor;
+      used.add(out);
+      cursor += 1;
+      return this.formatJobNumber(out);
+    };
+
+    let changed = false;
+    const migrated = source.map(item => {
+      if (this.safeText(item.jobNumber)) return item;
+      changed = true;
+      return this.normalizeInvoice({
+        ...item,
+        jobNumber: nextNumber()
+      });
+    });
+
+    if (changed) {
+      setTimeout(() => this.persistToStorage());
+    }
+    return migrated;
+  }
+
   private quoteDedupKey(item: InvoiceDetail): string {
     const customerId = this.normalize(item.customerId);
     if (customerId) return `id:${customerId}`;
@@ -1691,6 +1747,20 @@ export class InvoicesDataService {
     }, 430500);
 
     return max + 1;
+  }
+
+  private nextJobSequence(): number {
+    const max = this.state().reduce((highest, invoice) => {
+      const match = String(invoice.jobNumber || '').trim().toUpperCase().match(/^JOB-(\d+)$/);
+      const value = match ? Number(match[1]) : NaN;
+      return Math.max(highest, Number.isFinite(value) ? value : 0);
+    }, 0);
+    return max + 1;
+  }
+
+  private formatJobNumber(value: number): string {
+    const next = Number.isFinite(value) ? Math.max(1, Math.floor(value)) : 1;
+    return `JOB-${String(next).padStart(4, '0')}`;
   }
 
   private generateDocumentId(): string {

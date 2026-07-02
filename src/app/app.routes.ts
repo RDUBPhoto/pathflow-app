@@ -119,6 +119,11 @@ export const routes: Routes = [
           import('./pages/inventory/inventory.component').then(m => m.default)
       },
       {
+        path: 'purchase-orders',
+        loadComponent: () =>
+          import('./pages/purchase-orders/purchase-orders.component').then(m => m.default)
+      },
+      {
         path: 'invoices/new',
         loadComponent: () =>
           import('./pages/invoices-new/invoices-new.component').then(m => m.default)

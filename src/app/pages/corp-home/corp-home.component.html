@@ -1,46 +1,193 @@
 <ion-content class="corp-home">
-  <div class="hero-bg"></div>
-  <main class="hero-wrap">
-    <header class="top-nav">
-      <div class="brand">Pathflow</div>
-      <div class="actions">
-        <ion-button fill="clear" routerLink="/signup">Get Started</ion-button>
-        <ion-button (click)="openLogin()">Login</ion-button>
+  <main>
+    <header class="site-header">
+      <div class="site-nav">
+        <a class="brand" routerLink="/" aria-label="PathFlow home">
+          <img src="/pathflow-logo.svg" alt="" />
+          <span class="brand-mark" aria-hidden="true">P</span>
+          <span>PathFlow</span>
+        </a>
+        <nav aria-label="Main navigation">
+          <a href="#platform">Platform</a>
+          <a href="#workflow">Workflow</a>
+          <a href="#operations">Operations</a>
+          <a href="#access">Access</a>
+        </nav>
+        <div class="nav-actions">
+          <ion-button fill="clear" routerLink="/signup">Request Access</ion-button>
+          <ion-button (click)="openLogin()">Login</ion-button>
+        </div>
       </div>
     </header>
 
-    <section class="hero-card">
-      <p class="eyebrow">Shop Workflow Platform</p>
-      <h1>Run Leads, Quotes, Invoices, and Messaging in one system.</h1>
-      <p class="sub">
-        Built for multi-tenant service businesses. Capture leads, send approvals, collect payment, and manage jobs from first contact to completion.
-      </p>
-      <div class="cta-row">
-        <ion-button size="large" routerLink="/signup">Start Free Trial</ion-button>
-        <ion-button size="large" fill="outline" (click)="openLogin()">Sign In</ion-button>
+    <section class="hero-section">
+      <div class="hero-copy reveal visible">
+        <p class="eyebrow">Automotive workflow software</p>
+        <h1>One calm workspace for every job in motion.</h1>
+        <p class="hero-sub">
+          PathFlow helps automotive service teams manage leads, quotes, schedules, inventory, purchase orders,
+          invoices, and transactional customer updates without jumping between disconnected tools.
+        </p>
+        <div class="cta-row">
+          <ion-button size="large" routerLink="/signup">Request Access</ion-button>
+          <ion-button size="large" fill="outline" (click)="openLogin()">Login to App</ion-button>
+        </div>
+        <p class="sms-proof-line">Built for service teams that need the front desk, shop, parts, and billing in sync.</p>
+      </div>
+
+      <div class="product-visual reveal visible" aria-label="PathFlow product preview">
+        <div class="journey-panel">
+          <div class="journey-header">
+            <span>Live workflow</span>
+            <strong>7 jobs active today</strong>
+          </div>
+          <div class="journey-rail">
+            <article>
+              <small>New request</small>
+              <strong>Quote sent</strong>
+              <p>Customer approved lift kit package.</p>
+            </article>
+            <article class="active">
+              <small>Install prep</small>
+              <strong>Parts arriving</strong>
+              <p>3 of 4 received. Final box ETA Friday.</p>
+            </article>
+            <article>
+              <small>Ready to bill</small>
+              <strong>Invoice draft</strong>
+              <p>Labor, parts, and approvals stay connected.</p>
+            </article>
+          </div>
+          <div class="signal-row">
+            <span><b>SMS</b> consent recorded</span>
+            <span><b>PO</b> partially received</span>
+            <span><b>Invoice</b> ready</span>
+          </div>
+        </div>
       </div>
     </section>
 
-    <section class="feature-grid">
-      <article class="feature">
-        <h2>Lead to Job</h2>
-        <p>Track every customer through your business flow lanes with real-time status visibility.</p>
-      </article>
-      <article class="feature">
-        <h2>Quotes and Invoices</h2>
-        <p>Send branded quote approvals and convert accepted quotes directly into invoices.</p>
-      </article>
-      <article class="feature">
-        <h2>Messages Hub</h2>
-        <p>Manage SMS and email communication in one place with customer history and templates.</p>
-      </article>
+    <section class="trust-strip reveal">
+      <div>
+        <strong>One operating view</strong>
+        <span>Leads, jobs, schedules, parts, invoices, and messages stay connected.</span>
+      </div>
+      <div>
+        <strong>Built for the shop</strong>
+        <span>Designed around real service workflows, approvals, installs, and handoffs.</span>
+      </div>
+      <div>
+        <strong>Customer-ready</strong>
+        <span>Quotes, invoices, payments, and updates keep customers informed.</span>
+      </div>
     </section>
 
-    <footer class="corp-footer">
-      <p class="corp-disclosure">PathFlow is operated by VistaLumina.</p>
-      <a routerLink="/privacy-policy">Privacy Policy</a>
-      <a routerLink="/terms-and-conditions">Terms</a>
-      <a routerLink="/sms-opt-in">SMS Opt-In</a>
+    <section id="platform" class="section-grid reveal">
+      <div class="section-copy">
+        <p class="eyebrow">Platform</p>
+        <h2>Built for the full service lifecycle.</h2>
+        <p>
+          PathFlow gives service businesses a single operating layer for customer intake, workflow lanes,
+          scheduling, quote approvals, invoices, payments, inventory visibility, and purchase order tracking.
+        </p>
+      </div>
+      <div class="feature-grid">
+        <article>
+          <span>01</span>
+          <h3>Lead to job workflow</h3>
+          <p>Move customers from request to quote to scheduled work with clear operational status.</p>
+        </article>
+        <article>
+          <span>02</span>
+          <h3>Quotes and invoices</h3>
+          <p>Send customer-facing quotes, convert approved work, and collect payments with context intact.</p>
+        </article>
+        <article>
+          <span>03</span>
+          <h3>Parts and purchasing</h3>
+          <p>Track job-linked parts, purchase orders, receiving status, and inventory stock visibility.</p>
+        </article>
+        <article>
+          <span>04</span>
+          <h3>Customer messaging</h3>
+          <p>Send transactional SMS and email updates only after consent is captured and recorded.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="workflow" class="sms-section reveal">
+      <div>
+        <p class="eyebrow">Workflow</p>
+        <h2>From first request to final invoice, every step has context.</h2>
+        <p>
+          PathFlow keeps the customer, vehicle, quote, schedule, parts, purchase orders, invoice, and payment
+          connected so the team can see what is waiting, what is moving, and what needs attention.
+        </p>
+        <a class="text-link" routerLink="/signup">Request platform access</a>
+      </div>
+      <div class="consent-card">
+        <h3>Built around handoffs</h3>
+        <p>
+          Intake can capture the request, sales can quote it, the shop can schedule it, inventory can track
+          parts, and billing can invoice without re-entering the same details.
+        </p>
+      </div>
+    </section>
+
+    <section id="operations" class="section-grid reveal">
+      <div class="section-copy">
+        <p class="eyebrow">Operations</p>
+        <h2>Less chasing. More clarity for the whole team.</h2>
+        <p>
+          Daily work moves through clear lanes with the customer record, job status, parts status, approvals,
+          and billing details available where the team needs them.
+        </p>
+      </div>
+      <div class="policy-list">
+        <div><strong>Front desk:</strong> capture leads, customer details, vehicles, and appointment context.</div>
+        <div><strong>Sales:</strong> build quotes, collect approvals, and keep estimate history connected.</div>
+        <div><strong>Inventory:</strong> see job-linked parts, order status, receiving, and readiness.</div>
+        <div><strong>Billing:</strong> convert approved work into invoices and track payment state.</div>
+      </div>
+    </section>
+
+    <section id="access" class="access-band reveal">
+      <div>
+        <p class="eyebrow">Access</p>
+        <h2>Bring the shop into one workspace.</h2>
+        <p>PathFlow is available by request for service businesses ready to centralize their workflow.</p>
+      </div>
+      <ion-button size="large" routerLink="/signup">Request Access</ion-button>
+    </section>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <div class="footer-brand">
+          <a class="brand footer-logo" routerLink="/" aria-label="PathFlow home">
+            <span class="brand-mark" aria-hidden="true">P</span>
+            <span>PathFlow</span>
+          </a>
+          <p>Automotive workflow and transactional messaging software operated by VistaLumina.</p>
+        </div>
+
+        <div class="footer-column">
+          <strong>Company</strong>
+          <p>
+            3724 Forsyth Park<br />
+            Schertz, TX 78154
+          </p>
+          <a href="mailto:robert@pathflow-app.com">robert&#64;pathflow-app.com</a>
+        </div>
+
+        <nav class="footer-column" aria-label="Footer navigation">
+          <strong>Resources</strong>
+          <a routerLink="/privacy-policy">Privacy Policy</a>
+          <a routerLink="/terms-and-conditions">Terms and SMS Terms</a>
+          <a routerLink="/sms-opt-in">SMS Opt-In</a>
+          <a routerLink="/sms-opt-in-other">Opt-In Methods</a>
+          <a routerLink="/login">Login</a>
+        </nav>
+      </div>
     </footer>
   </main>
 </ion-content>

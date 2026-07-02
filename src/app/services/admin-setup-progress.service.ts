@@ -14,6 +14,7 @@ import { AuthService } from '../auth/auth.service';
 const SCHEDULE_SETTINGS_KEY = 'schedule.settings';
 const SETUP_DONE_KEY = 'admin.setup.done.v1';
 const SETUP_DISMISSED_KEY = 'admin.setup.dismissed.v1';
+const ADMIN_SETUP_ENABLED = false;
 
 export type AdminSetupSection = 'branding' | 'schedule' | 'payments' | 'email' | 'users' | 'subscription' | 'customerImport';
 
@@ -38,9 +39,9 @@ export class AdminSetupProgressService {
   private readonly auth = inject(AuthService);
 
   readonly loading = signal(false);
-  readonly items = signal<AdminSetupItem[]>(this.defaultItems());
-  readonly setupDone = signal(false);
-  readonly dismissed = signal(false);
+  readonly items = signal<AdminSetupItem[]>(ADMIN_SETUP_ENABLED ? this.defaultItems() : []);
+  readonly setupDone = signal(!ADMIN_SETUP_ENABLED);
+  readonly dismissed = signal(!ADMIN_SETUP_ENABLED);
   private refreshInFlight: Promise<void> | null = null;
   private lastRefreshAt = 0;
   private static readonly REFRESH_MIN_INTERVAL_MS = 15000;
@@ -52,6 +53,16 @@ export class AdminSetupProgressService {
   readonly shouldPrompt = computed(() => !this.isComplete() && !this.dismissed());
 
   async refresh(force = false): Promise<void> {
+    if (!ADMIN_SETUP_ENABLED) {
+      this.loading.set(false);
+      this.items.set([]);
+      this.setupDone.set(true);
+      this.dismissed.set(true);
+      this.refreshInFlight = null;
+      this.lastRefreshAt = Date.now();
+      return;
+    }
+
     const now = Date.now();
     if (!force && this.refreshInFlight) return this.refreshInFlight;
     if (!force && now - this.lastRefreshAt < AdminSetupProgressService.REFRESH_MIN_INTERVAL_MS) {
@@ -113,21 +124,25 @@ export class AdminSetupProgressService {
   }
 
   dismissPrompt(): void {
+    if (!ADMIN_SETUP_ENABLED) return;
     this.dismissed.set(true);
     this.userSettings.setValue(SETUP_DISMISSED_KEY, true).subscribe({ error: () => {} });
   }
 
   clearDismissed(): void {
+    if (!ADMIN_SETUP_ENABLED) return;
     this.dismissed.set(false);
     this.userSettings.deleteValue(SETUP_DISMISSED_KEY).subscribe({ error: () => {} });
   }
 
   markDone(): void {
+    if (!ADMIN_SETUP_ENABLED) return;
     this.setupDone.set(true);
     this.userSettings.setValue(SETUP_DONE_KEY, true).subscribe({ error: () => {} });
   }
 
   unmarkDone(): void {
+    if (!ADMIN_SETUP_ENABLED) return;
     this.setupDone.set(false);
     this.userSettings.deleteValue(SETUP_DONE_KEY).subscribe({ error: () => {} });
   }

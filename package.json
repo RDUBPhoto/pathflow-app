@@ -36,6 +36,7 @@
     "@azure/storage-blob": "^12.28.0",
     "@daypilot/daypilot-lite-angular": "^5.3.1",
     "@ionic/angular": "^8.7.4",
+    "@simplewebauthn/browser": "^13.3.0",
     "ionicons": "^8.0.13",
     "powerbi-client": "^2.23.10",
     "rxjs": "~7.8.0",

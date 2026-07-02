@@ -1,4 +1,5 @@
 import { Injectable, computed, signal } from '@angular/core';
+import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import { environment } from '../../environments/environment';
 import { formatUsPhoneInput, phoneDigits } from '../utils/phone-format';
 import {
@@ -323,6 +324,50 @@ export class AuthService {
       return { ok: false, error: 'Enter your email to use biometric sign-in.' };
     }
 
+    if (!this.isLocalHost || this.authConfigSignal().localPasswordEnabled) {
+      try {
+        const optionsResponse = await fetch('/api/access', {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            op: 'passkey-authentication-options',
+            email
+          })
+        });
+        const optionsPayload = await optionsResponse.json() as { ok?: boolean; options?: any; error?: string };
+        if (!optionsResponse.ok || !optionsPayload?.ok || !optionsPayload.options) {
+          return { ok: false, error: String(optionsPayload?.error || 'No passkey is set for this account yet.') };
+        }
+
+        const credential = await startAuthentication({ optionsJSON: optionsPayload.options });
+        const verifyResponse = await fetch('/api/access', {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            op: 'passkey-authentication-verify',
+            email,
+            response: credential
+          })
+        });
+        const verifyPayload = await verifyResponse.json() as { ok?: boolean; error?: string };
+        if (!verifyResponse.ok || !verifyPayload?.ok) {
+          return { ok: false, error: String(verifyPayload?.error || 'Passkey verification failed.') };
+        }
+        await this.bootstrap(true);
+        return { ok: true };
+      } catch {
+        return { ok: false, error: 'Biometric sign-in was cancelled or unavailable.' };
+      }
+    }
+
     const account = this.resolveLocalPasswordAccount(email);
     if (!account) {
       return { ok: false, error: 'No account found for this email.' };
@@ -391,6 +436,48 @@ export class AuthService {
     if (!currentEmail) {
       return { ok: false, error: 'Sign in first, then enable passkeys.' };
     }
+
+    if (!this.isLocalHost || this.authConfigSignal().localPasswordEnabled) {
+      try {
+        const optionsResponse = await fetch('/api/access', {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            op: 'passkey-registration-options'
+          })
+        });
+        const optionsPayload = await optionsResponse.json() as { ok?: boolean; options?: any; error?: string };
+        if (!optionsResponse.ok || !optionsPayload?.ok || !optionsPayload.options) {
+          return { ok: false, error: String(optionsPayload?.error || 'Could not start biometric setup.') };
+        }
+
+        const credential = await startRegistration({ optionsJSON: optionsPayload.options });
+        const verifyResponse = await fetch('/api/access', {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            op: 'passkey-registration-verify',
+            response: credential
+          })
+        });
+        const verifyPayload = await verifyResponse.json() as { ok?: boolean; message?: string; error?: string };
+        if (!verifyResponse.ok || !verifyPayload?.ok) {
+          return { ok: false, error: String(verifyPayload?.error || 'Could not enable biometrics on this device.') };
+        }
+        return { ok: true, message: verifyPayload.message || 'Passkey enabled. You can now sign in with biometrics.' };
+      } catch {
+        return { ok: false, error: 'Passkey setup was cancelled or unavailable.' };
+      }
+    }
+
     const account = this.resolveLocalPasswordAccount(currentEmail);
     if (!account) {
       return { ok: false, error: 'This account does not support local passkeys.' };

@@ -16,6 +16,7 @@
     "@azure/communication-sms": "^1.1.0",
     "@azure/data-tables": "^13.3.1",
     "@azure/storage-blob": "12.14.0",
+    "@simplewebauthn/server": "^13.3.2",
     "mssql": "^11.0.1"
   }
 }

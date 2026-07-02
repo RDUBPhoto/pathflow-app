@@ -194,7 +194,6 @@ export default class LoginComponent {
         this.setBiometricPreference(this.localLoginEmail, true);
         this.setLastBiometricEmail(this.localLoginEmail);
       }
-      this.setLastBiometricEmail(this.localLoginEmail);
     } finally {
       this.postLoginSetupBusy.set(false);
     }
@@ -261,10 +260,9 @@ export default class LoginComponent {
       this.biometricsPromptVisible.set(false);
       return;
     }
-    const hasPasskey = this.auth.hasPasskeyForEmail(email);
     const rememberedEmail = this.getLastBiometricEmail();
     const hasPromptPreference = this.getBiometricPreference(email) || rememberedEmail === email;
-    const shouldPrompt = hasPasskey && hasPromptPreference;
+    const shouldPrompt = hasPromptPreference;
     this.biometricsPromptVisible.set(shouldPrompt);
     if (!shouldPrompt || this.attemptedAutoPasskey) return;
     // Show biometric prompt, but do not auto-submit. Auto-submit can loop

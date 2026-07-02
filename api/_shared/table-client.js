@@ -10,6 +10,10 @@ try {
 const SQL_ENTITY_TABLE = "PathflowEntities";
 const SQL_TENANT_MAP_TABLE = asString(process.env.SQL_TENANT_MAP_TABLE || "TenantSqlDatabases") || "TenantSqlDatabases";
 const GLOBAL_SQL_TABLES = new Set([
+  "authchallenges",
+  "authlocalaccounts",
+  "authpasskeys",
+  "authsessions",
   "useraccess",
   "tenants",
   "emailverifications",

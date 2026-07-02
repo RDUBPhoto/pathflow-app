@@ -6,6 +6,12 @@ const {
 } = require("../_shared/table-client");
 const { EmailClient } = require("@azure/communication-email");
 const { randomUUID } = require("crypto");
+const {
+  generateAuthenticationOptions,
+  generateRegistrationOptions,
+  verifyAuthenticationResponse,
+  verifyRegistrationResponse
+} = require("@simplewebauthn/server");
 const { sanitizeTenantId } = require("../_shared/tenant");
 const {
   hashPassword,
@@ -21,11 +27,16 @@ const USERS_TABLE = "useraccess";
 const TENANTS_TABLE = "tenants";
 const EMAIL_VERIFICATIONS_TABLE = "emailverifications";
 const LOCAL_ACCOUNTS_TABLE = "authlocalaccounts";
+const PASSKEYS_TABLE = "authpasskeys";
+const PASSKEY_CHALLENGES_TABLE = "authchallenges";
 const USERS_PARTITION = "v1";
 const TENANTS_PARTITION = "v1";
 const EMAIL_VERIFICATIONS_PARTITION = "v1";
 const LOCAL_ACCOUNTS_PARTITION = "v1";
+const PASSKEY_REGISTRATION_PARTITION = "registration";
+const PASSKEY_AUTHENTICATION_PARTITION = "authentication";
 const VERIFY_TOKEN_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7;
+const PASSKEY_CHALLENGE_MAX_AGE_MS = 1000 * 60 * 5;
 
 function asString(value) {
   return value == null ? "" : String(value).trim();
@@ -145,6 +156,39 @@ function readQueryParam(req, key) {
 
 function escapedFilterValue(value) {
   return asString(value).replace(/'/g, "''");
+}
+
+function requestOrigin(req) {
+  const configured = normalizeBaseUrl(process.env.PUBLIC_APP_BASE_URL || process.env.APP_BASE_URL);
+  if (configured) return configured;
+  const protoHeader = readHeader(req && req.headers, "x-forwarded-proto");
+  const proto = asString(protoHeader).split(",")[0].trim().toLowerCase() || (isLocalRequest(req) ? "http" : "https");
+  const host = requestHost(req);
+  if (!host) return "";
+  return `${proto}://${host}`.replace(/\/+$/, "");
+}
+
+function passkeyRpId(req) {
+  const configured = normalizeHost(process.env.PASSKEY_RP_ID || process.env.WEBAUTHN_RP_ID);
+  if (configured) return configured.split(":")[0];
+  const origin = requestOrigin(req);
+  try {
+    return asString(new URL(origin).hostname).toLowerCase();
+  } catch {
+    return normalizeHost(requestHost(req)).split(":")[0];
+  }
+}
+
+function passkeyRpName() {
+  return asString(process.env.PASSKEY_RP_NAME || process.env.WEBAUTHN_RP_NAME || "Pathflow") || "Pathflow";
+}
+
+function bytesToBase64Url(bytes) {
+  return Buffer.from(bytes || new Uint8Array()).toString("base64url");
+}
+
+function base64UrlToBytes(value) {
+  return new Uint8Array(Buffer.from(asString(value), "base64url"));
 }
 
 function normalizeEmail(value) {
@@ -701,6 +745,81 @@ async function updateLocalAccountPassword(localAccountClient, emailInput, passwo
     "Merge"
   );
   return getLocalAccountEntity(localAccountClient, email);
+}
+
+async function listPasskeysForEmail(passkeyClient, emailInput) {
+  const email = normalizeEmail(emailInput);
+  if (!email) return [];
+  const filter = `PartitionKey eq '${escapedFilterValue(email)}'`;
+  const out = [];
+  const iter = passkeyClient.listEntities({ queryOptions: { filter } });
+  for await (const entity of iter) {
+    const credentialId = asString(entity.credentialId || entity.rowKey);
+    const publicKey = asString(entity.publicKey);
+    if (!credentialId || !publicKey) continue;
+    out.push(entity);
+  }
+  return out;
+}
+
+async function getPasskeyByCredentialId(passkeyClient, credentialIdInput) {
+  const credentialId = asString(credentialIdInput);
+  if (!credentialId) return null;
+  const iter = passkeyClient.listEntities();
+  for await (const entity of iter) {
+    if (asString(entity.credentialId || entity.rowKey) === credentialId) return entity;
+  }
+  return null;
+}
+
+function passkeyEntityToCredential(entity) {
+  return {
+    id: asString(entity && (entity.credentialId || entity.rowKey)),
+    publicKey: base64UrlToBytes(entity && entity.publicKey),
+    counter: Number(entity && entity.counter) || 0,
+    transports: parseJson(entity && entity.transportsJson, undefined)
+  };
+}
+
+async function savePasskeyChallenge(challengeClient, partitionKey, emailInput, challenge, extra = {}) {
+  const email = normalizeEmail(emailInput);
+  if (!email) throw new Error("Email is required.");
+  const now = new Date();
+  await challengeClient.upsertEntity(
+    {
+      partitionKey,
+      rowKey: email,
+      email,
+      challenge: asString(challenge),
+      createdAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + PASSKEY_CHALLENGE_MAX_AGE_MS).toISOString(),
+      ...extra
+    },
+    "Merge"
+  );
+}
+
+async function consumePasskeyChallenge(challengeClient, partitionKey, emailInput) {
+  const email = normalizeEmail(emailInput);
+  if (!email) return null;
+  let entity = null;
+  try {
+    entity = await challengeClient.getEntity(partitionKey, email);
+  } catch {
+    return null;
+  }
+  try {
+    await challengeClient.deleteEntity(partitionKey, email);
+  } catch {}
+  const expiresAtMs = Date.parse(asString(entity.expiresAt));
+  const createdAtMs = Date.parse(asString(entity.createdAt));
+  const expired = Number.isFinite(expiresAtMs)
+    ? Date.now() > expiresAtMs
+    : Number.isFinite(createdAtMs)
+      ? Date.now() - createdAtMs > PASSKEY_CHALLENGE_MAX_AGE_MS
+      : true;
+  if (expired) return null;
+  return entity;
 }
 
 function parseUserLocationIds(userEntity) {
@@ -1321,6 +1440,125 @@ module.exports = async function (context, req) {
       const anonymousBody = asObject(req && req.body);
       const anonymousOp = asString(anonymousBody.op).toLowerCase();
 
+      if (anonymousOp === "passkey-authentication-options") {
+        const authConfig = getAuthRuntimeConfig();
+        if (!authConfig.localPasswordEnabled && !isLocalRequest(req)) {
+          context.res = json(403, { ok: false, error: "Email/password authentication is disabled." });
+          return;
+        }
+        const email = normalizeEmail(anonymousBody.email);
+        if (!isValidEmail(email)) {
+          context.res = json(400, { ok: false, error: "Enter a valid email address." });
+          return;
+        }
+
+        const passkeyClient = await getTableClient(connectionString, PASSKEYS_TABLE);
+        const challengeClient = await getTableClient(connectionString, PASSKEY_CHALLENGES_TABLE);
+        const passkeys = await listPasskeysForEmail(passkeyClient, email);
+        if (!passkeys.length) {
+          context.res = json(404, { ok: false, error: "No passkey is set for this account yet." });
+          return;
+        }
+
+        const options = await generateAuthenticationOptions({
+          rpID: passkeyRpId(req),
+          allowCredentials: passkeys.map(item => ({
+            id: asString(item.credentialId || item.rowKey),
+            transports: parseJson(item.transportsJson, undefined)
+          })),
+          userVerification: "required",
+          timeout: 60000
+        });
+        await savePasskeyChallenge(challengeClient, PASSKEY_AUTHENTICATION_PARTITION, email, options.challenge);
+        context.res = json(200, { ok: true, options });
+        return;
+      }
+
+      if (anonymousOp === "passkey-authentication-verify") {
+        const authConfig = getAuthRuntimeConfig();
+        if (!authConfig.localPasswordEnabled && !isLocalRequest(req)) {
+          context.res = json(403, { ok: false, error: "Email/password authentication is disabled." });
+          return;
+        }
+        const email = normalizeEmail(anonymousBody.email);
+        const response = asObject(anonymousBody.response);
+        const responseCredentialId = asString(response.id || response.rawId);
+        if (!isValidEmail(email) || !responseCredentialId) {
+          context.res = json(400, { ok: false, error: "Email and passkey response are required." });
+          return;
+        }
+
+        const passkeyClient = await getTableClient(connectionString, PASSKEYS_TABLE);
+        const challengeClient = await getTableClient(connectionString, PASSKEY_CHALLENGES_TABLE);
+        const passkey = await getPasskeyByCredentialId(passkeyClient, responseCredentialId);
+        if (!passkey || normalizeEmail(passkey.email) !== email) {
+          context.res = json(401, { ok: false, error: "Passkey verification failed." });
+          return;
+        }
+        const challenge = await consumePasskeyChallenge(challengeClient, PASSKEY_AUTHENTICATION_PARTITION, email);
+        if (!challenge) {
+          context.res = json(400, { ok: false, error: "Passkey challenge expired. Try again." });
+          return;
+        }
+
+        let verification;
+        try {
+          verification = await verifyAuthenticationResponse({
+            response,
+            expectedChallenge: asString(challenge.challenge),
+            expectedOrigin: requestOrigin(req),
+            expectedRPID: passkeyRpId(req),
+            credential: passkeyEntityToCredential(passkey),
+            requireUserVerification: true
+          });
+        } catch (err) {
+          context.log.warn("Passkey authentication verification failed", String((err && err.message) || err));
+          context.res = json(401, { ok: false, error: "Passkey verification failed." });
+          return;
+        }
+        if (!verification || !verification.verified) {
+          context.res = json(401, { ok: false, error: "Passkey verification failed." });
+          return;
+        }
+
+        const now = new Date().toISOString();
+        await passkeyClient.upsertEntity(
+          {
+            partitionKey: normalizeEmail(passkey.email),
+            rowKey: asString(passkey.credentialId || passkey.rowKey),
+            counter: Number(verification.authenticationInfo && verification.authenticationInfo.newCounter) || Number(passkey.counter) || 0,
+            lastUsedAt: now,
+            updatedAt: now
+          },
+          "Merge"
+        );
+
+        const userClient = await getTableClient(connectionString, USERS_TABLE);
+        const userEntity = await getUserEntity(userClient, email);
+        if (userIsRevoked(userEntity)) {
+          context.res = json(403, { ok: false, error: "Your account access has been removed. Contact your workspace admin." });
+          return;
+        }
+        const roles = userEntity ? parseUserRoles(userEntity) : normalizeRoleList(["authenticated"]);
+        const session = await issueSession({
+          userId: asString((userEntity && userEntity.userId) || email),
+          email,
+          displayName: asString((userEntity && userEntity.displayName) || passkey.displayName || email),
+          identityProvider: "app-passkey",
+          userRoles: roles
+        });
+        context.res = jsonWithHeaders(200, {
+          ok: true,
+          session: {
+            expiresAt: session.expiresAt,
+            identityProvider: "app-passkey"
+          }
+        }, {
+          "set-cookie": createSessionCookie(session.token)
+        });
+        return;
+      }
+
       if (anonymousOp === "password-signup") {
         const authConfig = getAuthRuntimeConfig();
         if (!authConfig.localPasswordEnabled && !isLocalRequest(req)) {
@@ -1553,6 +1791,8 @@ module.exports = async function (context, req) {
     const supportedOps = new Set([
       "bootstrap",
       "update-billing",
+      "passkey-registration-options",
+      "passkey-registration-verify",
       "invite-user",
       "remove-user-access",
       "delete-user",
@@ -1572,6 +1812,112 @@ module.exports = async function (context, req) {
     const isDevPrincipal = asString(principal.identityProvider).toLowerCase() === "dev-local";
     if (!userEntity && isDevPrincipal) {
       userEntity = buildDevUserEntity(principal, tenantHint);
+    }
+
+    if (op === "passkey-registration-options") {
+      const authConfig = getAuthRuntimeConfig();
+      if (!authConfig.localPasswordEnabled && !isLocalRequest(req)) {
+        context.res = json(403, { ok: false, error: "Email/password authentication is disabled." });
+        return;
+      }
+      const email = normalizeEmail(principal.email);
+      const passkeyClient = await getTableClient(connectionString, PASSKEYS_TABLE);
+      const challengeClient = await getTableClient(connectionString, PASSKEY_CHALLENGES_TABLE);
+      const existing = await listPasskeysForEmail(passkeyClient, email);
+      const options = await generateRegistrationOptions({
+        rpName: passkeyRpName(),
+        rpID: passkeyRpId(req),
+        userName: email,
+        userID: Buffer.from(email, "utf8"),
+        userDisplayName: asString((userEntity && userEntity.displayName) || principal.displayName || email),
+        attestationType: "none",
+        timeout: 60000,
+        excludeCredentials: existing.map(item => ({
+          id: asString(item.credentialId || item.rowKey),
+          transports: parseJson(item.transportsJson, undefined)
+        })),
+        authenticatorSelection: {
+          residentKey: "preferred",
+          userVerification: "required"
+        }
+      });
+      await savePasskeyChallenge(challengeClient, PASSKEY_REGISTRATION_PARTITION, email, options.challenge, {
+        userId: asString((userEntity && userEntity.userId) || principal.userId || email),
+        displayName: asString((userEntity && userEntity.displayName) || principal.displayName || email)
+      });
+      context.res = json(200, { ok: true, options });
+      return;
+    }
+
+    if (op === "passkey-registration-verify") {
+      const authConfig = getAuthRuntimeConfig();
+      if (!authConfig.localPasswordEnabled && !isLocalRequest(req)) {
+        context.res = json(403, { ok: false, error: "Email/password authentication is disabled." });
+        return;
+      }
+      const email = normalizeEmail(principal.email);
+      const response = asObject(body.response);
+      if (!response || !asString(response.id || response.rawId)) {
+        context.res = json(400, { ok: false, error: "Passkey response is required." });
+        return;
+      }
+      const passkeyClient = await getTableClient(connectionString, PASSKEYS_TABLE);
+      const challengeClient = await getTableClient(connectionString, PASSKEY_CHALLENGES_TABLE);
+      const challenge = await consumePasskeyChallenge(challengeClient, PASSKEY_REGISTRATION_PARTITION, email);
+      if (!challenge) {
+        context.res = json(400, { ok: false, error: "Passkey setup expired. Try again." });
+        return;
+      }
+
+      let verification;
+      try {
+        verification = await verifyRegistrationResponse({
+          response,
+          expectedChallenge: asString(challenge.challenge),
+          expectedOrigin: requestOrigin(req),
+          expectedRPID: passkeyRpId(req),
+          requireUserVerification: true
+        });
+      } catch (err) {
+        context.log.warn("Passkey registration verification failed", String((err && err.message) || err));
+        context.res = json(400, { ok: false, error: "Passkey setup could not be verified." });
+        return;
+      }
+      if (!verification || !verification.verified || !verification.registrationInfo) {
+        context.res = json(400, { ok: false, error: "Passkey setup could not be verified." });
+        return;
+      }
+
+      const info = verification.registrationInfo;
+      const credential = info.credential;
+      const credentialId = asString(credential && credential.id);
+      if (!credentialId || !credential || !credential.publicKey) {
+        context.res = json(400, { ok: false, error: "Passkey setup did not return a usable credential." });
+        return;
+      }
+      const now = new Date().toISOString();
+      await passkeyClient.upsertEntity(
+        {
+          partitionKey: email,
+          rowKey: credentialId,
+          credentialId,
+          email,
+          userId: asString((userEntity && userEntity.userId) || principal.userId || email),
+          displayName: asString((userEntity && userEntity.displayName) || principal.displayName || email),
+          publicKey: bytesToBase64Url(credential.publicKey),
+          counter: Number(credential.counter) || 0,
+          transportsJson: JSON.stringify(credential.transports || []),
+          credentialDeviceType: asString(info.credentialDeviceType),
+          credentialBackedUp: !!info.credentialBackedUp,
+          aaguid: asString(info.aaguid),
+          createdAt: now,
+          updatedAt: now,
+          lastUsedAt: ""
+        },
+        "Merge"
+      );
+      context.res = json(200, { ok: true, message: "Biometrics enabled for this device." });
+      return;
     }
 
     if (op === "invite-user" || op === "remove-user-access" || op === "delete-user" || op === "reset-user-password") {

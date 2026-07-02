@@ -11,7 +11,8 @@
 .po-feedback,
 .po-list,
 .po-detail,
-.po-lines {
+.po-lines,
+.po-attachments {
   display: grid;
   gap: 10px;
 }
@@ -45,6 +46,11 @@
 .panel-head h2 {
   margin: 0;
   font-size: 18px;
+}
+
+.panel-head h3 {
+  margin: 0;
+  font-size: 15px;
 }
 
 .panel-meta,
@@ -180,6 +186,86 @@
   border-radius: 10px;
 }
 
+.po-attachments {
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.po-attachment-form {
+  display: grid;
+  grid-template-columns: 170px minmax(180px, 1fr) minmax(180px, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.native-field,
+.file-picker,
+.attachment-notes {
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 10px;
+  min-height: 58px;
+}
+
+.native-field {
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  color: var(--app-text-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.native-field select {
+  min-height: 32px;
+  color: var(--app-text);
+  background: transparent;
+  border: 0;
+  outline: none;
+}
+
+.file-picker {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 8px;
+  color: var(--app-text);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.file-picker input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.po-attachment-list {
+  display: grid;
+  gap: 6px;
+}
+
+.po-attachment-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: inherit;
+  text-decoration: none;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 10px;
+  padding: 8px;
+}
+
+.po-attachment-row span {
+  font-weight: 800;
+}
+
+.po-attachment-row small {
+  color: var(--app-text-muted);
+}
+
 .empty-state {
   text-align: center;
   color: var(--app-text-muted);
@@ -196,6 +282,10 @@
   .receive-panel {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .po-attachment-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 760px) {
@@ -207,7 +297,8 @@
   }
 
   .po-meta-grid,
-  .receive-panel {
+  .receive-panel,
+  .po-attachment-form {
     grid-template-columns: minmax(0, 1fr);
   }
 }

@@ -1,0 +1,158 @@
+<ion-header class="glass-header">
+  <ion-toolbar>
+    <ion-buttons slot="start">
+      <app-page-back-button></app-page-back-button>
+    </ion-buttons>
+    <ion-title>Tasks</ion-title>
+    <app-company-switcher></app-company-switcher>
+    <ion-buttons slot="end" class="ion-margin-end">
+      <app-user-menu></app-user-menu>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<main class="tasks-page glass-bg">
+  <div class="tasks-stack">
+    <section class="tasks-feedback" *ngIf="loading() || status() || error()">
+      <div *ngIf="loading()">Loading tasks...</div>
+      <div class="success" *ngIf="!loading() && status()">{{ status() }}</div>
+      <div class="error" *ngIf="!loading() && error()">{{ error() }}</div>
+    </section>
+
+    <section class="tasks-header glass-surface">
+      <div class="panel-head">
+        <div>
+          <div class="eyebrow">Operations</div>
+          <h2>Tasks</h2>
+          <div class="panel-meta">
+            Parts readiness, pull reminders, and job follow-through for scheduled work.
+          </div>
+        </div>
+        <ion-button class="refresh-button" size="small" fill="outline" (click)="loadTasks()" [disabled]="loading()">
+          Refresh
+        </ion-button>
+      </div>
+    </section>
+
+    <section class="task-stats" aria-label="Task summary filters">
+      <button type="button" class="stat-card glass-surface" [class.active]="statusFilter() === 'open'" (click)="setFilter('open')">
+        <span>Open</span>
+        <strong>{{ openCount() }}</strong>
+        <small>Needs action</small>
+      </button>
+      <button type="button" class="stat-card glass-surface" [class.active]="statusFilter() === 'due-soon'" (click)="setFilter('due-soon')">
+        <span>Due soon</span>
+        <strong>{{ dueSoonCount() }}</strong>
+        <small>Next 48 hours</small>
+      </button>
+      <button type="button" class="stat-card glass-surface danger" [class.active]="statusFilter() === 'overdue'" (click)="setFilter('overdue')">
+        <span>Overdue</span>
+        <strong>{{ overdueCount() }}</strong>
+        <small>Past due</small>
+      </button>
+      <button type="button" class="stat-card glass-surface" [class.active]="statusFilter() === 'in_progress'" (click)="setFilter('in_progress')">
+        <span>In progress</span>
+        <strong>{{ inProgressCount() }}</strong>
+        <small>Being worked</small>
+      </button>
+      <button type="button" class="stat-card glass-surface success-card" [class.active]="statusFilter() === 'completed'" (click)="setFilter('completed')">
+        <span>Completed</span>
+        <strong>{{ completedCount() }}</strong>
+        <small>Closed out</small>
+      </button>
+    </section>
+
+    <section class="tasks-shell glass-surface">
+      <div class="board-head">
+        <div>
+          <h2>{{ filterLabel() }}</h2>
+          <div class="panel-meta">{{ visibleTasks().length }} visible · {{ tasks().length }} total</div>
+        </div>
+        <div class="task-filters">
+          <button type="button" [class.active]="statusFilter() === 'open'" (click)="setFilter('open')">Open</button>
+          <button type="button" [class.active]="statusFilter() === 'due-soon'" (click)="setFilter('due-soon')">Due Soon</button>
+          <button type="button" [class.active]="statusFilter() === 'overdue'" (click)="setFilter('overdue')">Overdue</button>
+          <button type="button" [class.active]="statusFilter() === 'in_progress'" (click)="setFilter('in_progress')">In Progress</button>
+          <button type="button" [class.active]="statusFilter() === 'completed'" (click)="setFilter('completed')">Completed</button>
+          <button type="button" [class.active]="statusFilter() === 'all'" (click)="setFilter('all')">All</button>
+        </div>
+      </div>
+
+      <div class="task-list" *ngIf="visibleTasks().length; else noTasks">
+        <article class="task-card" *ngFor="let task of visibleTasks(); trackBy: trackTask" [class]="dueStateClass(task)">
+          <div class="task-main">
+            <div class="task-title-row">
+              <div>
+                <strong>{{ task.title }}</strong>
+                <div class="task-subtitle">{{ task.description || 'Parts readiness workflow' }}</div>
+              </div>
+              <span class="status-pill" [ngClass]="task.status">{{ label(task.status) }}</span>
+            </div>
+            <div class="task-context">
+              <div>
+                <span>Job</span>
+                <strong>{{ task.jobNumber || task.jobId || 'Job TBD' }}</strong>
+              </div>
+              <div>
+                <span>Customer</span>
+                <strong>{{ task.customerName || 'Customer TBD' }}</strong>
+              </div>
+              <div>
+                <span>Vehicle</span>
+                <strong>{{ task.vehicle || 'Vehicle TBD' }}</strong>
+              </div>
+              <div>
+                <span>Due</span>
+                <strong>{{ formatDate(task.dueDate) }}</strong>
+              </div>
+            </div>
+            <div class="task-meta">
+              {{ task.assignedRole || 'Inventory / Front Desk' }} · Owner {{ task.ownerRole || task.ownerUser || 'Inventory Manager' }} · {{ dueStateLabel(task) }} · Priority {{ label(task.priority) }}
+            </div>
+            <div class="task-warning" *ngIf="task.warning">{{ task.warning }}</div>
+            <label class="task-comment">
+              <span>Comments</span>
+              <textarea
+                [ngModel]="task.comments || ''"
+                (ngModelChange)="updateTaskComments(task, $event)"
+                placeholder="Add task notes"></textarea>
+            </label>
+          </div>
+          <div class="task-actions">
+            <ion-button size="small" fill="outline" [routerLink]="['/jobs/detail']" [queryParams]="jobQuery(task)">
+              Open Job
+            </ion-button>
+            <ion-button size="small" [disabled]="saving() || task.status === 'completed'" (click)="completeTask(task)">
+              Complete
+            </ion-button>
+            <ion-button size="small" fill="outline" [disabled]="saving()" (click)="saveNotes(task)">
+              Save Notes
+            </ion-button>
+          </div>
+        </article>
+      </div>
+
+      <ng-template #noTasks>
+        <div class="empty-state">
+          <div class="empty-icon">✓</div>
+          <h3>{{ emptyTitle() }}</h3>
+          <p>{{ emptyMessage() }}</p>
+          <div class="empty-actions">
+            <ion-button size="small" routerLink="/inventory">Open Inventory</ion-button>
+            <ion-button size="small" fill="outline" routerLink="/calendar">Open Calendar</ion-button>
+          </div>
+          <div class="empty-rules">
+            <article>
+              <span>7 days before install</span>
+              <strong>Confirm all parts are ready for install</strong>
+            </article>
+            <article>
+              <span>1 day before install</span>
+              <strong>Pull parts for install</strong>
+            </article>
+          </div>
+        </div>
+      </ng-template>
+    </section>
+  </div>
+</main>

@@ -1,7 +1,7 @@
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import {
   IonButton,
   IonButtons,
@@ -80,6 +80,7 @@ type JobPartView = {
   imports: [
     CommonModule,
     FormsModule,
+    RouterLink,
     IonHeader,
     IonToolbar,
     IonTitle,
@@ -507,6 +508,17 @@ export default class InventoryComponent implements OnInit {
 
   qtyProgressLabel(row: JobPartView): string {
     return `Need ${this.formatQty(row.qtyNeeded)} · Ordered ${this.formatQty(row.qtyOrdered)} · Received ${this.formatQty(row.qtyReceived)} · Pulled ${this.formatQty(row.qtyPulled)} · Installed ${this.formatQty(row.qtyInstalled)}`;
+  }
+
+  jobDetailQueryParams(row: JobPartView): Record<string, string> {
+    const params: Record<string, string> = {};
+    if (row.jobId) params['jobId'] = row.jobId;
+    if (row.jobNumber) params['jobNumber'] = row.jobNumber;
+    if (row.source === 'inventoryneeds' && row.id) params['needId'] = row.id;
+    if (row.relatedScheduleId) params['scheduleId'] = row.relatedScheduleId;
+    if (row.relatedInvoiceId) params['invoiceId'] = row.relatedInvoiceId;
+    if (row.relatedInvoiceLineItemId) params['invoiceLineItemId'] = row.relatedInvoiceLineItemId;
+    return params;
   }
 
   formatQty(value: number): string {

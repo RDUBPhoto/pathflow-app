@@ -1,7 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import {
   IonButton,
   IonButtons,
@@ -18,6 +18,11 @@ import { PageBackButtonComponent } from '../../components/navigation/page-back-b
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
 import { VendorPickerComponent } from '../../components/vendor-picker/vendor-picker.component';
 import {
+  Attachment,
+  AttachmentCategory,
+  AttachmentsApiService
+} from '../../services/attachments-api.service';
+import {
   PurchaseOrder,
   PurchaseOrderLine,
   PurchaseOrderReceiptLine,
@@ -33,12 +38,18 @@ type ReceiptDraft = {
   note: string;
 };
 
+type PoAttachmentDraft = {
+  category: AttachmentCategory;
+  description: string;
+};
+
 @Component({
   selector: 'app-purchase-orders',
   standalone: true,
   imports: [
     CommonModule,
     FormsModule,
+    RouterLink,
     IonHeader,
     IonToolbar,
     IonTitle,
@@ -58,6 +69,7 @@ type ReceiptDraft = {
 })
 export default class PurchaseOrdersComponent implements OnInit {
   private readonly purchaseOrdersApi = inject(PurchaseOrdersApiService);
+  private readonly attachmentsApi = inject(AttachmentsApiService);
   private readonly route = inject(ActivatedRoute);
 
   readonly loading = signal(false);
@@ -67,6 +79,9 @@ export default class PurchaseOrdersComponent implements OnInit {
   readonly orders = signal<PurchaseOrder[]>([]);
   readonly selectedOrderId = signal('');
   readonly receiptDrafts = signal<Record<string, ReceiptDraft>>({});
+  readonly poAttachments = signal<Attachment[]>([]);
+  readonly poAttachmentFile = signal<File | null>(null);
+  readonly poAttachmentDraft = signal<PoAttachmentDraft>({ category: 'vendor_invoice', description: '' });
 
   readonly selectedOrder = computed(() => {
     const id = this.selectedOrderId();
@@ -90,6 +105,7 @@ export default class PurchaseOrdersComponent implements OnInit {
         this.orders.set(orders);
         if (!this.selectedOrderId() && orders[0]) this.selectedOrderId.set(orders[0].id);
         this.seedReceiptDrafts(this.selectedOrder());
+        this.loadPoAttachments(this.selectedOrder());
         this.loading.set(false);
       },
       error: err => {
@@ -102,6 +118,7 @@ export default class PurchaseOrdersComponent implements OnInit {
   selectOrder(order: PurchaseOrder): void {
     this.selectedOrderId.set(order.id);
     this.seedReceiptDrafts(order);
+    this.loadPoAttachments(order);
   }
 
   submitOrder(order: PurchaseOrder): void {
@@ -199,6 +216,66 @@ export default class PurchaseOrdersComponent implements OnInit {
     });
   }
 
+  setPoAttachmentField<K extends keyof PoAttachmentDraft>(field: K, value: PoAttachmentDraft[K]): void {
+    this.poAttachmentDraft.set({
+      ...this.poAttachmentDraft(),
+      [field]: value
+    });
+  }
+
+  setPoAttachmentFile(input: HTMLInputElement): void {
+    this.poAttachmentFile.set(input.files && input.files[0] ? input.files[0] : null);
+  }
+
+  async uploadPoAttachment(order: PurchaseOrder): Promise<void> {
+    const file = this.poAttachmentFile();
+    if (!file) {
+      this.error.set('Choose a file to upload.');
+      return;
+    }
+    try {
+      this.saving.set(true);
+      this.clearMessages();
+      const firstLine = (order.lines || [])[0] || null;
+      const fileDataUrl = await this.attachmentsApi.fileToDataUrl(file);
+      this.attachmentsApi.upload({
+        jobId: String(firstLine?.jobId || ''),
+        jobNumber: String(firstLine?.jobNumber || ''),
+        relatedPurchaseOrderId: order.id,
+        relatedVendorId: String(order.vendorId || firstLine?.vendorId || ''),
+        fileName: file.name,
+        originalFileName: file.name,
+        contentType: file.type || 'application/octet-stream',
+        fileDataUrl,
+        category: this.poAttachmentDraft().category,
+        description: this.poAttachmentDraft().description
+      }).subscribe({
+        next: () => {
+          this.status.set('Purchase order attachment uploaded.');
+          this.poAttachmentFile.set(null);
+          this.poAttachmentDraft.set({ category: 'vendor_invoice', description: '' });
+          this.saving.set(false);
+          this.loadPoAttachments(order);
+        },
+        error: err => this.failSave(err, 'Could not upload purchase order attachment.')
+      });
+    } catch (err: any) {
+      this.error.set(String(err?.message || 'Could not read attachment.'));
+      this.saving.set(false);
+    }
+  }
+
+  loadPoAttachments(order: PurchaseOrder | null): void {
+    if (!order?.id) {
+      this.poAttachments.set([]);
+      return;
+    }
+    this.attachmentsApi.list({ purchaseOrderId: order.id }).subscribe({
+      next: res => this.poAttachments.set(Array.isArray(res?.attachments) ? res.attachments : []),
+      error: () => this.poAttachments.set([])
+    });
+  }
+
   remainingQty(line: PurchaseOrderLine): number {
     return Math.max(0, this.toNumber(line.qty, 0) - this.toNumber(line.qtyReceived, 0));
   }
@@ -229,6 +306,19 @@ export default class PurchaseOrdersComponent implements OnInit {
     return new Date(ts).toLocaleString();
   }
 
+  formatBytes(value: unknown): string {
+    const bytes = this.toNumber(value, 0);
+    if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${Math.round(bytes)} B`;
+  }
+
+  label(value: unknown): string {
+    return String(value || '')
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, char => char.toUpperCase());
+  }
+
   trackOrder(_index: number, order: PurchaseOrder): string {
     return order.id;
   }
@@ -239,6 +329,14 @@ export default class PurchaseOrdersComponent implements OnInit {
 
   lineId(line: PurchaseOrderLine): string {
     return String(line.lineId || `${line.needId || ''}-${line.partName || ''}-${line.sku || ''}`).trim();
+  }
+
+  jobDetailQueryParams(line: PurchaseOrderLine): Record<string, string> {
+    const params: Record<string, string> = {};
+    if (line.jobId) params['jobId'] = line.jobId;
+    if (line.jobNumber) params['jobNumber'] = line.jobNumber;
+    if (line.needId) params['needId'] = line.needId;
+    return params;
   }
 
   receiptDraft(line: PurchaseOrderLine): ReceiptDraft {

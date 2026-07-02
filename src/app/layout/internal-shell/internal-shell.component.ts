@@ -8,6 +8,7 @@ import { addIcons } from 'ionicons';
 import {
   barChartOutline,
   calendarClearOutline,
+  checkmarkDoneOutline,
   chatbubbleEllipsesOutline,
   chevronBackOutline,
   chevronForwardOutline,
@@ -181,6 +182,7 @@ export class InternalShellComponent implements OnInit, OnDestroy {
     addIcons({
       'grid-outline': gridOutline,
       'calendar-clear-outline': calendarClearOutline,
+      'checkmark-done-outline': checkmarkDoneOutline,
       'cube-outline': cubeOutline,
       'people-outline': peopleOutline,
       'receipt-outline': receiptOutline,

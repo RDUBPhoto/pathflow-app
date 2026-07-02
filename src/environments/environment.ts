@@ -1,18 +1,18 @@
 export const environment = {
   apiBase: '',
-  publicAppUrl: 'https://wonderful-glacier-0f45f5110.6.azurestaticapps.net',
+  publicAppUrl: 'https://www.pathflow-app.com',
   features: {
     demoTools: false,
     powerBiReports: false
   },
   auth: {
-    primaryProvider: 'aad',
-    providers: ['aad', 'google'],
+    primaryProvider: 'local',
+    providers: ['local', 'aad', 'google'],
     hostedEmailEnabled: false,
     hostedEmailProvider: '',
     adminEmails: [] as string[],
     devBypass: false,
-    localPasswordEnabled: false,
+    localPasswordEnabled: true,
     localUsers: [] as Array<{
       email: string;
       password: string;

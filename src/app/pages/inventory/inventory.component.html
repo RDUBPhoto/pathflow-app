@@ -118,6 +118,13 @@
 
           <div class="job-part-actions">
             <div class="panel-meta">{{ row.source === 'legacy-invoice' ? 'Invoice fallback' : 'Job-part foundation' }}</div>
+            <ion-button
+              size="small"
+              fill="outline"
+              [routerLink]="['/jobs/detail']"
+              [queryParams]="jobDetailQueryParams(row)">
+              Open Job
+            </ion-button>
             <ion-button size="small" fill="outline" *ngIf="row.relatedInvoiceId" (click)="openJobPartSource(row)">
               Open Invoice
             </ion-button>

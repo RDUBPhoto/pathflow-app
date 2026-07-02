@@ -94,6 +94,59 @@
           </div>
         </div>
 
+        <section class="po-attachments">
+          <div class="panel-head compact">
+            <div>
+              <h3>Attachments</h3>
+              <div class="panel-meta">Vendor invoices, receipts, and PO documents</div>
+            </div>
+          </div>
+          <div class="po-attachment-form">
+            <label class="native-field">
+              <span>Category</span>
+              <select
+                [ngModel]="poAttachmentDraft().category"
+                (ngModelChange)="setPoAttachmentField('category', $any($event))">
+                <option value="vendor_invoice">Vendor Invoice</option>
+                <option value="receipt">Receipt</option>
+                <option value="document">Document</option>
+                <option value="photo">Photo</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+            <ion-item class="attachment-notes" lines="none">
+              <ion-label position="stacked">Notes</ion-label>
+              <ion-input
+                [ngModel]="poAttachmentDraft().description"
+                (ngModelChange)="setPoAttachmentField('description', $event)"
+                placeholder="Vendor invoice number, receipt note">
+              </ion-input>
+            </ion-item>
+            <label class="file-picker">
+              <span>{{ poAttachmentFile()?.name || 'Choose file' }}</span>
+              <input
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png,.heic,.heif,.doc,.docx,application/pdf,image/jpeg,image/png,image/heic,image/heif,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                (change)="setPoAttachmentFile($any($event.target))" />
+            </label>
+            <ion-button size="small" [disabled]="saving() || !poAttachmentFile()" (click)="uploadPoAttachment(order)">
+              Upload
+            </ion-button>
+          </div>
+
+          <div class="po-attachment-list" *ngIf="poAttachments().length">
+            <a
+              class="po-attachment-row"
+              *ngFor="let attachment of poAttachments()"
+              [href]="attachment.url"
+              target="_blank"
+              rel="noopener">
+              <span>{{ attachment.originalFileName || attachment.fileName }}</span>
+              <small>{{ label(attachment.category) }} · {{ formatBytes(attachment.size) }}</small>
+            </a>
+          </div>
+        </section>
+
         <div class="po-lines">
           <article class="po-line" *ngFor="let line of order.lines; trackBy: trackLine">
             <div class="po-line-main">
@@ -106,6 +159,9 @@
               </div>
               <div class="po-line-meta">
                 Ordered {{ line.qty }} · Received {{ line.qtyReceived || 0 }} · Remaining {{ remainingQty(line) }} · Unit {{ formatCurrency(line.unitCost || 0) }}
+              </div>
+              <div class="po-line-meta" *ngIf="line.needId || line.jobId || line.jobNumber">
+                <a [routerLink]="['/jobs/detail']" [queryParams]="jobDetailQueryParams(line)">Open Job</a>
               </div>
             </div>
 

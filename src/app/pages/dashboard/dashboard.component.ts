@@ -2896,7 +2896,12 @@ export default class DashboardComponent implements OnDestroy {
       out.push(raw);
     };
 
-    const includeCustomerHistory = stageKey === 'lead' || !stageKey;
+    const itemRecord = it as any;
+    add(itemRecord.message);
+    add(itemRecord.notes);
+    add(itemRecord.customerNote);
+
+    const includeCustomerHistory = stageKey !== 'lead' && !out.length;
     if (includeCustomerHistory) {
       const history = Array.isArray(cust?.notesHistory) ? cust.notesHistory : [];
       const sortedHistory = [...history]
@@ -2912,7 +2917,7 @@ export default class DashboardComponent implements OnDestroy {
 
     const title = String(it.title || '').trim();
     const idx = title.indexOf('— ');
-    if (idx >= 0) {
+    if (stageKey !== 'lead' && idx >= 0) {
       let note = title.slice(idx + 2);
       note = note.replace(/\[c=[^\]]+\]/gi, '').trim().replace(/\s{2,}/g, ' ');
       add(note);

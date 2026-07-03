@@ -210,7 +210,14 @@ export default class LoginComponent {
     try {
       const result = await this.auth.signInWithPasskey(this.localLoginEmail);
       if (!result.ok) {
-        this.passkeyLoginError.set(result.error || 'Could not sign in with biometrics.');
+        const error = result.error || 'Could not sign in with biometrics.';
+        if (this.isMissingServerPasskeyError(error)) {
+          this.clearBiometricPreference(this.localLoginEmail);
+          this.biometricsPromptVisible.set(false);
+          this.passkeyLoginError.set('No biometric login is saved for this account yet. Sign in with your password, then re-enable biometrics.');
+          return;
+        }
+        this.passkeyLoginError.set(error);
         this.biometricsPromptVisible.set(true);
       } else {
         this.setLastBiometricEmail(this.localLoginEmail);
@@ -314,6 +321,26 @@ export default class LoginComponent {
     } catch {
       // no-op
     }
+  }
+
+  private clearBiometricPreference(emailInput: string): void {
+    const email = String(emailInput || '').trim().toLowerCase();
+    try {
+      const raw = localStorage.getItem(this.passkeyPrefStorageKey);
+      const parsed = raw ? JSON.parse(raw) as Record<string, boolean> : {};
+      if (email) delete parsed[email];
+      localStorage.setItem(this.passkeyPrefStorageKey, JSON.stringify(parsed));
+      if (!email || this.getLastBiometricEmail() === email) {
+        localStorage.removeItem(this.passkeyLastEmailStorageKey);
+      }
+    } catch {
+      // no-op
+    }
+  }
+
+  private isMissingServerPasskeyError(error: string): boolean {
+    const value = String(error || '').toLowerCase();
+    return value.includes('no passkey') || value.includes('not set for this account');
   }
 
   private getLastBiometricEmail(): string {

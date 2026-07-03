@@ -338,7 +338,7 @@ export class AuthService {
             email
           })
         });
-        const optionsPayload = await optionsResponse.json() as { ok?: boolean; options?: any; error?: string };
+        const optionsPayload = await this.safeJson<{ ok?: boolean; options?: any; error?: string }>(optionsResponse);
         if (!optionsResponse.ok || !optionsPayload?.ok || !optionsPayload.options) {
           return { ok: false, error: String(optionsPayload?.error || 'No passkey is set for this account yet.') };
         }
@@ -357,7 +357,7 @@ export class AuthService {
             response: credential
           })
         });
-        const verifyPayload = await verifyResponse.json() as { ok?: boolean; error?: string };
+        const verifyPayload = await this.safeJson<{ ok?: boolean; error?: string }>(verifyResponse);
         if (!verifyResponse.ok || !verifyPayload?.ok) {
           return { ok: false, error: String(verifyPayload?.error || 'Passkey verification failed.') };
         }
@@ -421,6 +421,14 @@ export class AuthService {
       return { ok: true };
     } catch {
       return { ok: false, error: 'Biometric sign-in was cancelled or unavailable.' };
+    }
+  }
+
+  private async safeJson<T extends Record<string, unknown>>(response: Response): Promise<T | null> {
+    try {
+      return await response.json() as T;
+    } catch {
+      return null;
     }
   }
 

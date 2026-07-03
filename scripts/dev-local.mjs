@@ -5,11 +5,13 @@ import path from 'node:path';
 const root = process.cwd();
 const apiRoot = path.join(root, 'api');
 const scriptPath = path.resolve(process.argv[1] || path.join(root, 'scripts', 'dev-local.mjs'));
-const repoNode18Path = path.join(root, 'node_modules', 'node', 'bin', 'node');
+const repoNodePath = path.join(root, 'node_modules', 'node', 'bin', 'node');
+const angularCliPath = path.join(root, 'node_modules', '@angular', 'cli', 'bin', 'ng.js');
 const API_BASE_URL = 'http://127.0.0.1:7071';
 const procs = [];
 let shuttingDown = false;
 const REQUIRED_NODE_MAJOR = 18;
+const REQUIRED_ANGULAR_NODE_MAJOR = 20;
 const shouldSeedDemo =
   process.argv.includes('--seed-demo') ||
   process.env.PATHFLOW_SEED_DEMO === '1' ||
@@ -62,13 +64,39 @@ function nodeMajor(version = process.version) {
   return Number.isFinite(parsed) ? parsed : NaN;
 }
 
+function nodeVersionFor(binary) {
+  if (!binary || !fs.existsSync(binary)) return '';
+  const result = spawnSync(binary, ['-p', 'process.version'], {
+    cwd: root,
+    encoding: 'utf8'
+  });
+  if (result.status !== 0) return '';
+  return String(result.stdout || '').trim();
+}
+
+function findFunctionsNodeRuntime() {
+  const candidates = [
+    process.env.PATHFLOW_FUNCTIONS_NODE,
+    process.execPath,
+    path.join(process.env.HOME || '', '.nvm', 'versions', 'node', 'v18.20.8', 'bin', 'node'),
+    path.join(process.env.HOME || '', '.nvm', 'versions', 'node', 'v18.20.7', 'bin', 'node'),
+    path.join(process.env.HOME || '', '.nvm', 'versions', 'node', 'v18.19.1', 'bin', 'node')
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const version = nodeVersionFor(candidate);
+    if (nodeMajor(version) === REQUIRED_NODE_MAJOR) return candidate;
+  }
+  return '';
+}
+
 function assertFunctionsNodeVersion() {
   const major = nodeMajor();
   if (major === REQUIRED_NODE_MAJOR) return;
 
-  // Re-run under the repo-managed Node 18 runtime when the global Node is incompatible.
-  if (process.env.PATHFLOW_DEV_LOCAL_REEXEC !== '1' && fs.existsSync(repoNode18Path)) {
-    const result = spawnSync(repoNode18Path, [scriptPath, ...process.argv.slice(2)], {
+  const functionsNode = findFunctionsNodeRuntime();
+  if (process.env.PATHFLOW_DEV_LOCAL_REEXEC !== '1' && functionsNode) {
+    const result = spawnSync(functionsNode, [scriptPath, ...process.argv.slice(2)], {
       cwd: root,
       stdio: 'inherit',
       env: {
@@ -83,6 +111,31 @@ function assertFunctionsNodeVersion() {
   console.error(`[dev-local] Switch to Node ${REQUIRED_NODE_MAJOR} and run npm start again.`);
   console.error(`[dev-local] If you use nvm: nvm install ${REQUIRED_NODE_MAJOR} && nvm use ${REQUIRED_NODE_MAJOR}`);
   process.exit(1);
+}
+
+function angularServeCommand() {
+  const repoNodeVersion = nodeVersionFor(repoNodePath);
+  if (nodeMajor(repoNodeVersion) >= REQUIRED_ANGULAR_NODE_MAJOR && fs.existsSync(angularCliPath)) {
+    return {
+      cmd: repoNodePath,
+      args: [
+        angularCliPath,
+        'serve',
+        '--no-hmr',
+        '--proxy-config',
+        'proxy.conf.local.json',
+        '--port',
+        '4200',
+        '--host',
+        '0.0.0.0'
+      ]
+    };
+  }
+
+  return {
+    cmd: 'ng',
+    args: ['serve', '--no-hmr', '--proxy-config', 'proxy.conf.local.json', '--port', '4200', '--host', '0.0.0.0']
+  };
 }
 
 function shutdown(code = 0) {
@@ -337,7 +390,8 @@ async function seedIfEmpty() {
   } else {
     console.error('[dev-local] API did not start in time');
   }
-  run('ng', ['serve', '--no-hmr', '--proxy-config', 'proxy.conf.local.json', '--port', '4200', '--host', '0.0.0.0']);
+  const angularServe = angularServeCommand();
+  run(angularServe.cmd, angularServe.args);
 
   const proxyOk = await waitForFrontendApiProxy();
   if (proxyOk) {

@@ -324,7 +324,10 @@ export class AuthService {
       return { ok: false, error: 'Enter your email to use biometric sign-in.' };
     }
 
-    if (!this.isLocalHost || this.authConfigSignal().localPasswordEnabled) {
+    const hasLocalPasskey = this.isLocalHost && this.hasPasskeyForEmail(email);
+    const shouldUseServerPasskeys = !hasLocalPasskey && (!this.isLocalHost || this.authConfigSignal().localPasswordEnabled);
+
+    if (shouldUseServerPasskeys) {
       try {
         const optionsResponse = await fetch('/api/access', {
           method: 'POST',
@@ -445,7 +448,10 @@ export class AuthService {
       return { ok: false, error: 'Sign in first, then enable passkeys.' };
     }
 
-    if (!this.isLocalHost || this.authConfigSignal().localPasswordEnabled) {
+    const isDevSession = this.stateSignal().source === 'dev';
+    const shouldUseServerPasskeys = !isDevSession && (!this.isLocalHost || this.authConfigSignal().localPasswordEnabled);
+
+    if (shouldUseServerPasskeys) {
       try {
         const optionsResponse = await fetch('/api/access', {
           method: 'POST',

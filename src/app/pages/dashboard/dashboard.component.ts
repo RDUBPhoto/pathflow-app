@@ -1958,6 +1958,14 @@ export default class DashboardComponent implements OnDestroy {
     return 0;
   }
 
+  private isWebLeadCard(row: WorkItem, laneStage: string): boolean {
+    if (laneStage !== 'lead') return false;
+    const source = String((row as any).source || '').trim().toLowerCase();
+    const leadSource = String((row as any).leadSource || '').trim().toLowerCase();
+    const channel = String((row as any).channel || '').trim().toLowerCase();
+    return source === 'web' || leadSource === 'web' || channel === 'website';
+  }
+
   private pruneLifecycleStageDuplicatesInMap(map: Record<string, WorkItem[]>, lanes: Lane[]): string[] {
     const laneById = new Map<string, Lane>(
       (lanes || []).map(lane => [String(lane.id || '').trim(), lane])
@@ -1990,6 +1998,7 @@ export default class DashboardComponent implements OnDestroy {
       });
       const keeperId = String(entries[0].row.id || '').trim();
       for (const entry of entries.slice(1)) {
+        if (this.isWebLeadCard(entry.row, entry.laneStage)) continue;
         const id = String(entry.row.id || '').trim();
         if (!id || id === keeperId) continue;
         removeIds.add(id);

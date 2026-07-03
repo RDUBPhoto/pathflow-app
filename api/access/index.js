@@ -1837,7 +1837,9 @@ module.exports = async function (context, req) {
           transports: parseJson(item.transportsJson, undefined)
         })),
         authenticatorSelection: {
-          residentKey: "preferred",
+          authenticatorAttachment: "platform",
+          residentKey: "required",
+          requireResidentKey: true,
           userVerification: "required"
         }
       });

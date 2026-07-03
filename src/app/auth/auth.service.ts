@@ -386,10 +386,16 @@ export class AuthService {
       const assertion = await navigator.credentials.get({
         publicKey: {
           challenge,
-          allowCredentials: passkeys
-            .map(item => this.base64UrlToBytes(item.credentialId))
-            .filter((id): id is Uint8Array => !!id)
-            .map(id => ({ type: 'public-key' as const, id })),
+          allowCredentials: passkeys.flatMap(item => {
+            const id = this.base64UrlToBytes(item.credentialId);
+            return id
+              ? [{
+                type: 'public-key' as const,
+                id,
+                transports: item.transports
+              }]
+              : [];
+          }),
           userVerification: 'required',
           timeout: 60000,
           rpId: window.location.hostname
@@ -518,7 +524,9 @@ export class AuthService {
             { type: 'public-key', alg: -257 }
           ],
           authenticatorSelection: {
-            residentKey: 'preferred',
+            authenticatorAttachment: 'platform',
+            residentKey: 'required',
+            requireResidentKey: true,
             userVerification: 'required'
           },
           timeout: 60000,

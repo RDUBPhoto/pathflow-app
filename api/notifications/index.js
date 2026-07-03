@@ -289,7 +289,7 @@ function logicalNotificationKey(item) {
   const customerName = asString(metadata.customerName).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   const entityType = asString(item && item.entityType).toLowerCase();
   const entityId = asString(item && item.entityId);
-  if (source === "widget-lead") {
+  if (source === "widget-lead" || source === "dashboard-new-lead" || entityType === "lead") {
     const titleKey = asString(item && item.title).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
     const submittedPersonKey = customerEmail || customerPhone || customerName || customerId || entityId || titleKey;
     if (submittedPersonKey) return `lead-submission:${submittedPersonKey}`;
@@ -324,6 +324,14 @@ function collapseLogicalNotifications(items) {
 async function listUserNotifications(notificationClient, tenantId, actor, unreadOnly = false) {
   const raw = await listRawUserNotifications(notificationClient, tenantId, actor, unreadOnly);
   return collapseLogicalNotifications(raw);
+}
+
+async function findExistingLogicalNotification(notificationClient, tenantId, actor, notification) {
+  if (!actor || !notification) return null;
+  const targetKey = logicalNotificationKey(notification);
+  if (!targetKey || targetKey.startsWith("id:")) return null;
+  const raw = await listRawUserNotifications(notificationClient, tenantId, actor, false);
+  return raw.find(item => logicalNotificationKey(item) === targetKey) || null;
 }
 
 function recipientKeyForNotification(item) {
@@ -616,6 +624,40 @@ module.exports = async function notificationsApi(context, req) {
       const entityType = asString(body.entityType || "item");
       const entityId = asString(body.entityId);
       const metadata = asObject(body.metadata);
+      const candidate = {
+        id: "",
+        tenantId,
+        type: "mention",
+        title,
+        message,
+        route,
+        entityType,
+        entityId: entityId || null,
+        metadata,
+        targetUserId: targetUserId || null,
+        targetEmail: targetEmail || null,
+        targetDisplayName: targetDisplayName || null,
+        actorUserId: asString(actor.userId) || null,
+        actorEmail: normalizeEmail(actor.email) || null,
+        actorDisplayName: asString(actor.displayName || actor.email || actor.userId) || null,
+        read: false,
+        readAt: null,
+        createdAt: new Date().toISOString()
+      };
+      const existingLogical = await findExistingLogicalNotification(notificationClient, tenantId, {
+        userId: targetUserId,
+        email: targetEmail,
+        displayName: targetDisplayName
+      }, candidate);
+      if (existingLogical) {
+        context.res = json(200, {
+          ok: true,
+          scope: "createMention",
+          deduped: true,
+          item: existingLogical
+        });
+        return;
+      }
       const id = randomUUID();
       const nowIso = new Date().toISOString();
 

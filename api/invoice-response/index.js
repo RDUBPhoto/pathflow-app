@@ -1,8 +1,10 @@
 const { TableClient, isSqlBackendEnabled } = require("../_shared/table-client");
 const { resolveTenantId } = require("../_shared/tenant");
+const { createHash } = require("crypto");
 
 const TABLE = "invoiceresponses";
 const NOTIFICATIONS_TABLE = "notifications";
+const INVENTORY_NEEDS_TABLE = "inventoryneeds";
 const USERS_TABLE = "useraccess";
 const USERS_PARTITION = "v1";
 
@@ -182,6 +184,105 @@ function rowKeyForNotification(invoiceId, stage, recipientKey) {
     .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 220);
+}
+
+function asNumber(value, fallback = 0) {
+  const parsed = Number(asString(value).replace(/[$,%\s]/g, "").replace(/,/g, ""));
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function rowKeyForInventoryNeed(invoiceId, line) {
+  const lineId = asString(line && line.id);
+  const partName = asString(line && (line.description || line.code || line.partName));
+  const hash = createHash("sha1")
+    .update([invoiceId, lineId, partName].join("|"))
+    .digest("hex")
+    .slice(0, 20);
+  return `invoice-part-${hash}`;
+}
+
+function isPartLineNeedingOrder(line) {
+  const lineType = asString(line && line.type).toLowerCase();
+  const status = asString(line && line.partStatus).toLowerCase();
+  if (lineType === "labor") return false;
+  if (status === "ordered" || status === "received" || status === "in-stock" || status === "in stock") return false;
+  const partName = asString(line && (line.description || line.code || line.partName));
+  if (!partName) return false;
+  return asNumber(line && line.quantity, 1) > 0;
+}
+
+async function upsertInventoryNeedsForPaidInvoice(needsClient, tenantId, payload) {
+  const invoiceId = asString(payload && payload.invoiceId);
+  if (!invoiceId) return 0;
+
+  const lineItems = Array.isArray(payload && payload.lineItems) ? payload.lineItems : [];
+  const partLines = lineItems.filter(isPartLineNeedingOrder);
+  if (!partLines.length) return 0;
+
+  const now = new Date().toISOString();
+  const jobNumber = asString(payload.jobNumber);
+  const jobId = jobNumber ? `job-number:${jobNumber}` : `document:${invoiceId}`;
+  let count = 0;
+
+  for (const line of partLines) {
+    const rowKey = rowKeyForInventoryNeed(invoiceId, line);
+    let existing = null;
+    try {
+      existing = await needsClient.getEntity(tenantId, rowKey);
+    } catch (_) {}
+
+    const existingStatus = asString(existing && existing.status).toLowerCase();
+    const existingJobPartStatus = asString(existing && existing.jobPartStatus).toLowerCase();
+    const qtyNeeded = Math.max(1, Math.ceil(asNumber(line && line.quantity, 1)));
+    const unitPrice = Math.max(0, asNumber(line && line.unitPrice, 0));
+
+    await needsClient.upsertEntity(
+      {
+        partitionKey: tenantId,
+        rowKey,
+        jobId: asString(existing && existing.jobId) || jobId,
+        jobNumber: asString(existing && existing.jobNumber) || jobNumber,
+        relatedScheduleId: asString(existing && existing.relatedScheduleId),
+        relatedWorkItemId: asString(existing && existing.relatedWorkItemId),
+        relatedQuoteId: asString(existing && existing.relatedQuoteId),
+        relatedInvoiceId: invoiceId,
+        relatedInvoiceLineItemId: asString(line && line.id),
+        relatedInventoryItemId: asString(line && line.relatedInventoryItemId),
+        sourceType: "invoice",
+        sourceId: invoiceId,
+        scheduleStart: asString(existing && existing.scheduleStart),
+        scheduleEnd: asString(existing && existing.scheduleEnd),
+        resource: asString(existing && existing.resource),
+        customerId: asString(payload.customerId || (existing && existing.customerId)),
+        customerName: asString(payload.customerName || (existing && existing.customerName)),
+        vehicle: asString(payload.vehicle || (existing && existing.vehicle)),
+        partName: asString(line && (line.description || line.code || line.partName)) || "Part",
+        description: asString(line && line.description),
+        sku: asString(line && line.code),
+        qty: qtyNeeded,
+        qtyNeeded,
+        qtyOrdered: Math.max(0, asNumber(existing && existing.qtyOrdered, 0)),
+        qtyReceived: Math.max(0, asNumber(existing && existing.qtyReceived, 0)),
+        qtyPulled: Math.max(0, asNumber(existing && existing.qtyPulled, 0)),
+        qtyInstalled: Math.max(0, asNumber(existing && existing.qtyInstalled, 0)),
+        cost: Math.max(0, asNumber(existing && existing.cost, 0)),
+        markup: Math.max(0, asNumber(existing && existing.markup, 0)),
+        customerPrice: unitPrice,
+        vendorId: asString(existing && existing.vendorId),
+        vendorHint: asString(existing && existing.vendorHint),
+        note: asString(existing && existing.note) || `Created when invoice ${asString(payload.invoiceNumber) || invoiceId} was paid.`,
+        status: existingStatus && existingStatus !== "needs-order" ? existingStatus : "needs-order",
+        jobPartStatus: existingJobPartStatus && existingJobPartStatus !== "quoted" ? existingJobPartStatus : "quoted",
+        purchaseOrderId: asString(existing && existing.purchaseOrderId),
+        createdAt: asString(existing && existing.createdAt) || now,
+        updatedAt: now
+      },
+      "Merge"
+    );
+    count += 1;
+  }
+
+  return count;
 }
 
 function parseUserLocationIds(userEntity) {
@@ -389,6 +490,7 @@ module.exports = async function (context, req) {
   try {
     const client = await getTableClient(TABLE);
     const notificationClient = await getTableClient(NOTIFICATIONS_TABLE);
+    const needsClient = await getTableClient(INVENTORY_NEEDS_TABLE);
     const userClient = await getTableClient(USERS_TABLE);
 
     if (method === "GET") {
@@ -474,6 +576,8 @@ module.exports = async function (context, req) {
         action,
         stage,
         invoiceNumber: asString(body.invoiceNumber),
+        jobNumber: asString(body.jobNumber),
+        customerId: asString(body.customerId),
         customerName: asString(body.customerName),
         vehicle: asString(body.vehicle),
         businessName: asString(body.businessName),
@@ -489,10 +593,21 @@ module.exports = async function (context, req) {
     const notificationsCreated = await createInvoicePaidNotifications(notificationClient, userClient, tenantId, {
       invoiceId,
       invoiceNumber: asString(body.invoiceNumber),
+      jobNumber: asString(body.jobNumber),
+      customerId: asString(body.customerId),
       customerName: asString(body.customerName),
       paymentKind: asString(body.paymentKind),
       lineItems: body.lineItems,
       actor
+    });
+    const inventoryNeedsCreated = await upsertInventoryNeedsForPaidInvoice(needsClient, tenantId, {
+      invoiceId,
+      invoiceNumber: asString(body.invoiceNumber),
+      jobNumber: asString(body.jobNumber),
+      customerId: asString(body.customerId),
+      customerName: asString(body.customerName),
+      vehicle: asString(body.vehicle),
+      lineItems: body.lineItems
     });
 
     context.res = json(200, {
@@ -502,7 +617,8 @@ module.exports = async function (context, req) {
       action,
       stage,
       updatedAt: now,
-      notificationsCreated
+      notificationsCreated,
+      inventoryNeedsCreated
     });
   } catch (err) {
     context.log.error(err);

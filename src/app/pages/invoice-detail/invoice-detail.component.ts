@@ -42,6 +42,7 @@ import { TenantContextService } from '../../services/tenant-context.service';
 import { PaymentRefundApiService, PaymentRefundResponse } from '../../services/payment-refund-api.service';
 import { AppSettingsApiService } from '../../services/app-settings-api.service';
 import { InventoryApiService, InventoryItem } from '../../services/inventory-api.service';
+import { InvoiceResponseApiService } from '../../services/invoice-response-api.service';
 import { environment } from '../../../environments/environment';
 
 type StatusTone = 'neutral' | 'success' | 'error';
@@ -111,6 +112,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
   private readonly paymentRefundApi = inject(PaymentRefundApiService);
   private readonly settingsApi = inject(AppSettingsApiService);
   private readonly inventoryApi = inject(InventoryApiService);
+  private readonly invoiceResponseApi = inject(InvoiceResponseApiService);
   private readonly toastController = inject(ToastController);
 
   readonly loading = signal(true);
@@ -676,6 +678,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
       }
 
       const saved = this.invoicesData.saveInvoice(next);
+      const partsBridgeSynced = await this.syncPaidInvoicePartsIfNeeded(previousStage, saved);
       await this.notifyInvoiceBuildNeeded(previousStage, saved);
       const autoCompleteOutcome = await this.autoCompleteWorkItemOnInvoiceAccepted(previousStage, saved);
       this.invoice.set(saved);
@@ -684,6 +687,8 @@ export default class InvoiceDetailComponent implements OnDestroy {
         this.setStatus(`${saved.invoiceNumber} saved. Work item moved to Completed.`, 'success');
       } else if (autoCompleteOutcome === 'failed') {
         this.setStatus(`${saved.invoiceNumber} saved. Could not auto-complete active work item.`, 'neutral');
+      } else if (!partsBridgeSynced && this.invoiceBecamePaid(previousStage, saved)) {
+        this.setStatus(`${saved.invoiceNumber} saved. Parts-to-order sync needs a refresh.`, 'neutral');
       } else {
         this.setStatus(`${saved.invoiceNumber} saved.`, 'success');
       }
@@ -1642,6 +1647,44 @@ export default class InvoiceDetailComponent implements OnDestroy {
     };
   }
 
+  private invoiceBecamePaid(previousStage: InvoiceStage, saved: InvoiceDetail): boolean {
+    if (!saved || saved.documentType !== 'invoice') return false;
+    if (previousStage === 'accepted' || previousStage === 'completed') return false;
+    return this.invoiceIsPaid(saved);
+  }
+
+  private invoiceIsPaid(invoice: InvoiceDetail): boolean {
+    if (invoice.documentType !== 'invoice') return false;
+    const total = this.roundCurrency(Math.max(0, Number(invoice.total || 0)));
+    const paid = this.roundCurrency(Math.max(0, Number(invoice.paidAmount || 0)));
+    if (invoice.stage !== 'accepted' && invoice.stage !== 'completed') return false;
+    return total > 0 ? paid >= total : paid > 0;
+  }
+
+  private async syncPaidInvoicePartsIfNeeded(previousStage: InvoiceStage, saved: InvoiceDetail): Promise<boolean> {
+    if (!this.invoiceBecamePaid(previousStage, saved)) return true;
+    try {
+      await firstValueFrom(this.invoiceResponseApi.capture({
+        invoiceId: saved.id,
+        action: 'pay',
+        tenantId: String(this.tenantContext.tenantId() || '').trim().toLowerCase() || 'primary-location',
+        invoiceNumber: saved.invoiceNumber,
+        jobNumber: saved.jobNumber,
+        customerId: saved.customerId,
+        customerName: saved.customerName,
+        vehicle: saved.vehicle,
+        businessName: saved.businessName,
+        paymentKind: 'initial',
+        paymentAmount: Number(saved.paidAmount || saved.total || 0),
+        paymentProvider: String(saved.paymentProviderKey || 'manual').trim().toLowerCase(),
+        lineItems: saved.lineItems.map(line => ({ ...line }))
+      }));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private async autoCompleteWorkItemOnInvoiceAccepted(
     previousStage: InvoiceStage,
     saved: InvoiceDetail
@@ -1990,7 +2033,34 @@ export default class InvoiceDetailComponent implements OnDestroy {
     query.set('dueDate', detail.dueDate || '');
     query.set('paymentUrl', paymentLink);
     query.set('paymentProvider', String(detail.paymentProviderKey || '').trim().toLowerCase());
+    const invoiceData = this.encodeQuotePayload(this.invoicePaymentPayload(detail));
+    if (invoiceData) query.set('invoiceData', invoiceData);
     return this.publicRouteUrl('/invoice-payment', query);
+  }
+
+  private invoicePaymentPayload(detail: InvoiceDetail): unknown {
+    return {
+      jobNumber: String(detail.jobNumber || '').trim(),
+      customerId: String(detail.customerId || '').trim(),
+      subtotal: this.roundCurrency(Number(detail.subtotal || 0)),
+      taxTotal: this.roundCurrency(Number(detail.taxTotal || 0)),
+      total: this.roundCurrency(Number(detail.total || 0)),
+      lineItems: (detail.lineItems || []).map(line => ({
+        id: String(line.id || '').trim(),
+        type: String(line.type || '').trim().toLowerCase(),
+        jobPartId: String(line.jobPartId || '').trim(),
+        relatedInventoryItemId: String(line.relatedInventoryItemId || '').trim(),
+        partStatus: String(line.partStatus || '').trim(),
+        code: String(line.code || '').trim(),
+        description: String(line.description || '').trim(),
+        quantity: Number(line.quantity || 0),
+        unitPrice: this.roundCurrency(Number(line.unitPrice || 0)),
+        taxRate: this.roundCurrency(Number(line.taxRate || 0)),
+        lineSubtotal: this.roundCurrency(Number(line.lineSubtotal || 0)),
+        taxAmount: this.roundCurrency(Number(line.taxAmount || 0)),
+        lineTotal: this.roundCurrency(Number(line.lineTotal || 0))
+      }))
+    };
   }
 
   private quoteResponseUrl(detail: InvoiceDetail, action: 'view' | 'accept' | 'decline'): string {

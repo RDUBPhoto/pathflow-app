@@ -3,6 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { AuthService } from '../auth/auth.service';
 import { TenantContextService } from './tenant-context.service';
+import { InvoiceLineItem } from './invoices-data.service';
 
 export type InvoiceResponseAction = 'pay';
 export type InvoiceResponseStage = 'accepted';
@@ -12,6 +13,8 @@ export type InvoiceResponsePayload = {
   action: InvoiceResponseAction;
   tenantId: string;
   invoiceNumber?: string;
+  jobNumber?: string;
+  customerId?: string;
   customerName?: string;
   vehicle?: string;
   businessName?: string;
@@ -20,6 +23,7 @@ export type InvoiceResponsePayload = {
   paymentProvider?: string;
   paymentTransactionId?: string;
   paymentAccountNumber?: string;
+  lineItems?: InvoiceLineItem[];
 };
 
 export type InvoiceResponseRecord = {

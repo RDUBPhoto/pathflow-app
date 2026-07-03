@@ -34,6 +34,15 @@ type PaymentChargeResponse = {
   accountNumber?: string;
 };
 
+type InvoicePaymentPayload = {
+  jobNumber?: string;
+  customerId?: string;
+  subtotal?: number;
+  taxTotal?: number;
+  total?: number;
+  lineItems?: InvoiceLineItem[];
+};
+
 @Component({
   selector: 'app-invoice-payment',
   standalone: true,
@@ -61,23 +70,30 @@ export default class InvoicePaymentComponent {
   readonly paymentProvider = computed(() => String(this.route.snapshot.queryParamMap.get('paymentProvider') || '').trim().toLowerCase());
   readonly isAuthorizeNet = computed(() => this.paymentProvider() === 'authorize-net' || this.paymentUrl().includes('/authorize-net/'));
   readonly detail = computed(() => this.invoicesData.getInvoiceById(this.invoiceId()));
+  readonly invoicePayload = computed<InvoicePaymentPayload | null>(() => this.decodeInvoicePayload(this.route.snapshot.queryParamMap.get('invoiceData')));
   readonly businessLogoUrl = computed(() => String(this.detail()?.businessLogoUrl || '').trim());
   readonly businessAddressLines = computed(() => this.toAddressLines(String(this.detail()?.businessAddress || this.businessName())));
   readonly customerAddressLines = computed(() => this.toAddressLines(String(this.detail()?.customerAddress || '')));
-  readonly lineItems = computed<InvoiceLineItem[]>(() => this.detail()?.lineItems || []);
+  readonly lineItems = computed<InvoiceLineItem[]>(() => this.detail()?.lineItems || this.invoicePayload()?.lineItems || []);
   readonly displaySubtotal = computed(() => {
     const fromDetail = Number(this.detail()?.subtotal || 0);
     if (fromDetail > 0) return fromDetail;
+    const fromPayload = Number(this.invoicePayload()?.subtotal || 0);
+    if (fromPayload > 0) return fromPayload;
     return this.roundCurrency(this.lineItems().reduce((sum, item) => sum + Number(item.lineSubtotal || 0), 0));
   });
   readonly displayTax = computed(() => {
     const fromDetail = Number(this.detail()?.taxTotal || 0);
     if (fromDetail > 0) return fromDetail;
+    const fromPayload = Number(this.invoicePayload()?.taxTotal || 0);
+    if (fromPayload > 0) return fromPayload;
     return this.roundCurrency(this.lineItems().reduce((sum, item) => sum + Number(item.taxAmount || 0), 0));
   });
   readonly displayTotal = computed(() => {
     const fromDetail = Number(this.detail()?.total || 0);
     if (fromDetail > 0) return fromDetail;
+    const fromPayload = Number(this.invoicePayload()?.total || 0);
+    if (fromPayload > 0) return fromPayload;
     return this.roundCurrency(this.displaySubtotal() + this.displayTax());
   });
   readonly displayPaid = computed(() => {
@@ -171,6 +187,8 @@ export default class InvoicePaymentComponent {
           action: 'pay',
           tenantId: this.tenantId(),
           invoiceNumber: this.invoiceNumber(),
+          jobNumber: String(this.detail()?.jobNumber || this.invoicePayload()?.jobNumber || '').trim(),
+          customerId: String(this.detail()?.customerId || this.invoicePayload()?.customerId || '').trim(),
           customerName: this.customerName(),
           vehicle: this.vehicle(),
           businessName: this.businessName(),
@@ -178,7 +196,8 @@ export default class InvoicePaymentComponent {
           paymentAmount: Number(this.normalizedAmount()),
           paymentProvider: String(authorizeCharge?.provider || this.paymentProvider() || 'authorize-net').trim().toLowerCase(),
           paymentTransactionId: String(authorizeCharge?.transactionId || '').trim(),
-          paymentAccountNumber: String(authorizeCharge?.accountNumber || '').trim()
+          paymentAccountNumber: String(authorizeCharge?.accountNumber || '').trim(),
+          lineItems: this.lineItems().map(line => ({ ...line }))
         }));
       }
 
@@ -510,5 +529,58 @@ export default class InvoicePaymentComponent {
       return String(window.location.origin).trim().replace(/\/+$/, '');
     }
     return '';
+  }
+
+  private decodeInvoicePayload(raw: string | null): InvoicePaymentPayload | null {
+    const value = String(raw || '').trim();
+    if (!value) return null;
+    try {
+      const padded = value.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(value.length / 4) * 4, '=');
+      const json = typeof atob === 'function' ? atob(padded) : '';
+      const decoded = typeof TextDecoder !== 'undefined'
+        ? new TextDecoder().decode(Uint8Array.from(json, char => char.charCodeAt(0)))
+        : json;
+      const parsed = JSON.parse(decoded || '{}') as InvoicePaymentPayload;
+      if (!parsed || typeof parsed !== 'object') return null;
+      const lineItems = Array.isArray(parsed.lineItems)
+        ? parsed.lineItems.map((line, index) => this.normalizePayloadLineItem(line, index))
+        : [];
+      return {
+        jobNumber: String(parsed.jobNumber || '').trim(),
+        customerId: String(parsed.customerId || '').trim(),
+        subtotal: this.roundCurrency(Math.max(0, Number(parsed.subtotal || 0))),
+        taxTotal: this.roundCurrency(Math.max(0, Number(parsed.taxTotal || 0))),
+        total: this.roundCurrency(Math.max(0, Number(parsed.total || 0))),
+        lineItems
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private normalizePayloadLineItem(line: Partial<InvoiceLineItem>, index: number): InvoiceLineItem {
+    const quantity = Math.max(0, Number(line?.quantity || 0));
+    const unitPrice = this.roundCurrency(Math.max(0, Number(line?.unitPrice || 0)));
+    const taxRate = this.roundCurrency(Math.max(0, Number(line?.taxRate || 0)));
+    const lineSubtotal = this.roundCurrency(Math.max(0, Number(line?.lineSubtotal || quantity * unitPrice)));
+    const taxAmount = this.roundCurrency(Math.max(0, Number(line?.taxAmount || (lineSubtotal * taxRate) / 100)));
+    const lineTotal = this.roundCurrency(Math.max(0, Number(line?.lineTotal || lineSubtotal + taxAmount)));
+    const type = String(line?.type || '').trim().toLowerCase() === 'labor' ? 'labor' : 'part';
+    return {
+      id: String(line?.id || `payment-line-${index}`).trim(),
+      type,
+      jobPartId: type === 'part' ? String(line?.jobPartId || '').trim() : '',
+      relatedInventoryItemId: type === 'part' ? String(line?.relatedInventoryItemId || '').trim() : '',
+      partStatus: type === 'part' ? line?.partStatus : undefined,
+      trackingNumber: type === 'part' ? String(line?.trackingNumber || '').trim() : '',
+      code: String(line?.code || '').trim(),
+      description: String(line?.description || '').trim(),
+      quantity,
+      unitPrice,
+      taxRate,
+      lineSubtotal,
+      taxAmount,
+      lineTotal
+    };
   }
 }

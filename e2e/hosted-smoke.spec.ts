@@ -86,15 +86,36 @@ test.describe('Hosted Smoke', () => {
 
   test('landing page renders healthy', async ({ page }) => {
     await gotoAndAssertHealthy(page, '/', async () => {
-      await expect(page.getByRole('heading', { level: 1, name: /Run Leads, Quotes, Invoices/i })).toBeVisible();
+      await expect(page.getByRole('heading', { level: 1, name: 'Run your shop from first call to pickup.' })).toBeVisible();
     });
     expect(page.url()).toMatch(/^https?:\/\//);
+  });
+
+  test('login navigation stays in the SPA and remembered biometrics appears promptly', async ({ page }) => {
+    const email = 'hosted-regression@example.com';
+    await page.addInitScript(seedEmail => {
+      localStorage.setItem('pathflow.auth.passkey.pref', JSON.stringify({ [seedEmail]: true }));
+      localStorage.setItem('pathflow.auth.passkey.last-email', seedEmail);
+    }, email);
+    await page.goto('/', { waitUntil: 'networkidle' });
+
+    const documentRequests: string[] = [];
+    page.on('request', request => {
+      if (request.resourceType() === 'document') documentRequests.push(request.url());
+    });
+
+    const started = Date.now();
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await expect(page).toHaveURL(/\/login$/);
+    await expect(page.getByRole('dialog', { name: 'Sign in with Face ID / Touch ID' })).toBeVisible();
+    expect(Date.now() - started).toBeLessThan(2500);
+    expect(documentRequests, 'Login must not trigger a full document navigation').toEqual([]);
   });
 
   test('login page renders healthy', async ({ page }) => {
     await gotoAndAssertHealthy(page, '/login', async () => {
       await expect(page.getByRole('heading', { level: 1, name: /sign in/i })).toBeVisible();
-      await expect(page.getByRole('button', { name: /continue with|sign in with|login/i }).first()).toBeVisible();
+      await expect(page.getByRole('button', { name: /continue with|sign in/i }).first()).toBeVisible();
     });
   });
 

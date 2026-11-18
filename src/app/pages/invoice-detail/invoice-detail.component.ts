@@ -1,19 +1,9 @@
+import { ToastController, UiModal } from '../../ui/overlays';
+import { UiIcon } from '../../ui/icons';
 import { CommonModule, CurrencyPipe, DatePipe } from '@angular/common';
-import { Component, HostListener, OnDestroy, computed, inject, signal } from '@angular/core';
-import { ActivatedRoute, Router } from '@angular/router';
-import { ToastController } from '@ionic/angular';
-import { IonButton, IonButtons, IonContent, IonHeader, IonModal, IonTitle, IonToolbar } from '@ionic/angular/standalone';
+import { Component, HostListener, OnDestroy, computed, effect, inject, signal, untracked, ChangeDetectionStrategy } from '@angular/core';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { Subscription, finalize, firstValueFrom } from 'rxjs';
-import { IonIcon } from '@ionic/angular/standalone';
-import { addIcons } from 'ionicons';
-import {
-  mailOpenOutline,
-  documentOutline,
-  checkmarkOutline,
-  closeOutline,
-  pauseOutline,
-  alertCircleOutline
-} from 'ionicons/icons';
 import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
 import { PageBackButtonComponent } from '../../components/navigation/page-back-button/page-back-button.component';
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
@@ -35,14 +25,17 @@ import { PaymentGatewaySettingsService } from '../../services/payment-gateway-se
 import { WorkItem, WorkItemsApi } from '../../services/workitems-api.service';
 import { AddressLookupService, AddressSuggestion } from '../../services/address-lookup.service';
 import { AuthService } from '../../auth/auth.service';
-import { NotificationsApiService } from '../../services/notifications-api.service';
+import { AppNotification, NotificationsApiService } from '../../services/notifications-api.service';
 import { EmailApiService } from '../../services/email-api.service';
 import { SmsApiService } from '../../services/sms-api.service';
 import { TenantContextService } from '../../services/tenant-context.service';
-import { PaymentRefundApiService, PaymentRefundResponse } from '../../services/payment-refund-api.service';
+import { PaymentRefundApiService, PaymentRefundPayload, PaymentRefundPreview, PaymentRefundResponse } from '../../services/payment-refund-api.service';
 import { AppSettingsApiService } from '../../services/app-settings-api.service';
 import { InventoryApiService, InventoryItem } from '../../services/inventory-api.service';
 import { InvoiceResponseApiService } from '../../services/invoice-response-api.service';
+import { PurchaseOrder, PurchaseOrderLine, PurchaseOrdersApiService } from '../../services/purchase-orders-api.service';
+import { CustomerPortalApi } from '../../services/customer-portal-api.service';
+import { QuoteResponseApiService } from '../../services/quote-response-api.service';
 import { environment } from '../../../environments/environment';
 
 type StatusTone = 'neutral' | 'success' | 'error';
@@ -52,6 +45,7 @@ type RefundAllocation = {
   originalTransactionId: string;
   accountNumber: string;
   refundableAmount: number;
+  alreadyReversed?: number;
 };
 type LaborRateOption = {
   id: string;
@@ -71,6 +65,11 @@ type LineItemSearchOption = {
   partStatus?: InvoicePartStatus;
 };
 
+type LinkedPurchaseOrderRow = {
+  order: PurchaseOrder;
+  line: PurchaseOrderLine;
+};
+
 @Component({
   selector: 'app-invoice-detail',
   standalone: true,
@@ -78,19 +77,15 @@ type LineItemSearchOption = {
     CommonModule,
     CurrencyPipe,
     DatePipe,
-    IonHeader,
-    IonToolbar,
-    IonTitle,
-    IonButtons,
-    IonButton,
-    IonModal,
-    IonIcon,
-    IonContent,
+    UiModal,
+    UiIcon,
+    RouterLink,
     PageBackButtonComponent,
     CompanySwitcherComponent,
     UserMenuComponent
   ],
   templateUrl: './invoice-detail.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./invoice-detail.component.scss']
 })
 export default class InvoiceDetailComponent implements OnDestroy {
@@ -100,6 +95,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly invoicesData = inject(InvoicesDataService);
+  readonly documentSyncError = this.invoicesData.documentSyncError;
   private readonly paymentSettings = inject(PaymentGatewaySettingsService);
   private readonly lanesApi = inject(LanesApi);
   private readonly workItemsApi = inject(WorkItemsApi);
@@ -113,6 +109,9 @@ export default class InvoiceDetailComponent implements OnDestroy {
   private readonly settingsApi = inject(AppSettingsApiService);
   private readonly inventoryApi = inject(InventoryApiService);
   private readonly invoiceResponseApi = inject(InvoiceResponseApiService);
+  private readonly purchaseOrdersApi = inject(PurchaseOrdersApiService);
+  private readonly quoteResponseApi = inject(QuoteResponseApiService);
+  private readonly customerPortal = inject(CustomerPortalApi);
   private readonly toastController = inject(ToastController);
 
   readonly loading = signal(true);
@@ -122,6 +121,9 @@ export default class InvoiceDetailComponent implements OnDestroy {
   readonly statusTone = signal<StatusTone>('neutral');
   readonly lineItemsPage = signal(1);
   readonly inventoryItems = signal<InventoryItem[]>([]);
+  readonly partPickerOpen = signal(false);
+  readonly partPickerQuery = signal('');
+  readonly purchaseOrders = signal<PurchaseOrder[]>([]);
   readonly laborRates = signal<LaborRateOption[]>([]);
   readonly lineItemSearchQuery = signal<Record<string, string>>({});
   readonly activeLineItemSearchId = signal('');
@@ -164,6 +166,12 @@ export default class InvoiceDetailComponent implements OnDestroy {
   ];
 
   readonly paymentAvailability = this.paymentSettings.paymentLinkAvailability;
+  readonly portalOpen = signal(false);
+  readonly portalBusy = signal(false);
+  readonly portalUrl = signal('');
+  readonly portalStatus = signal('');
+  readonly portalFeedback = signal('');
+  readonly portalError = signal('');
   readonly documentTypeLabel = computed(() => this.documentTypeLabelFor(this.invoice()?.documentType || 'invoice'));
   readonly invoiceEmailTarget = computed(() => String(this.invoice()?.customerEmail || '').trim());
   readonly invoiceSmsTarget = computed(() => String(this.invoice()?.customerPhone || '').trim());
@@ -179,7 +187,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
     const lineItems = detail?.lineItems || [];
     const subtotal = this.roundCurrency(lineItems.reduce((sum, line) => sum + line.lineSubtotal, 0));
     const taxTotal = this.roundCurrency(lineItems.reduce((sum, line) => sum + line.taxAmount, 0));
-    const total = this.roundCurrency(subtotal + taxTotal);
+    const total = this.roundCurrency(Math.max(0, subtotal + taxTotal - Number(detail?.returnCreditAmount || 0)));
     return { subtotal, taxTotal, total };
   });
   readonly paidAmount = computed(() => {
@@ -187,6 +195,35 @@ export default class InvoiceDetailComponent implements OnDestroy {
   });
   readonly amountDue = computed(() => this.roundCurrency(Math.max(0, this.totals().total - this.paidAmount())));
   readonly overpaymentAmount = computed(() => this.roundCurrency(Math.max(0, this.paidAmount() - this.totals().total)));
+  readonly paylynxRefunds = computed(() => {
+    const detail = this.invoice();
+    return detail ? this.buildRefundAllocations(detail, this.paidAmount(), 'paylynx') : [];
+  });
+  readonly paylynxReturn = signal<RefundAllocation | null>(null);
+  readonly returnPreview = signal<PaymentRefundPreview | null>(null);
+  readonly loadingReturn = signal(false);
+  readonly returnError = signal('');
+  readonly returnResult = signal('');
+  readonly returnNeedsReview = signal(false);
+  readonly returnMode = signal<'payment' | 'credit'>('payment');
+  readonly returnAmount = signal('');
+  readonly returnFee = signal('');
+  readonly returnReason = signal('');
+  readonly returnNetAmount = computed(() => {
+    const amount = this.returnPreview()?.operation === 'void' ? this.returnPreview()?.originalAmount || 0
+      : Number(this.returnAmount());
+    const fee = this.returnMode() === 'credit' && this.returnPreview()?.operation === 'refund' ? Number(this.returnFee()) : 0;
+    return this.roundCurrency(amount - fee);
+  });
+  readonly canSubmitReturn = computed(() => {
+    const preview = this.returnPreview();
+    if (!preview || this.refundingCustomer() || this.returnNeedsReview() || this.hasChanges() || this.returnNetAmount() <= 0) return false;
+    if (preview.operation === 'refund' && (!/^\d+(\.\d{1,2})?$/.test(this.returnAmount()) ||
+        Number(this.returnAmount()) > preview.refundableAmount)) return false;
+    if (this.returnMode() === 'credit' && (!this.returnReason().trim() || this.returnNetAmount() > preview.invoiceTotal ||
+        (this.returnFee() && !/^\d+(\.\d{1,2})?$/.test(this.returnFee())))) return false;
+    return preview.operation === 'refund' || preview.originalAmount === preview.refundableAmount;
+  });
   readonly sendInvoiceLabel = computed(() => {
     const detail = this.invoice();
     if (!detail || detail.documentType !== 'invoice') return 'Send Invoice';
@@ -223,21 +260,67 @@ export default class InvoiceDetailComponent implements OnDestroy {
     const start = (page - 1) * this.lineItemsPageSize;
     return this.lineItems().slice(start, start + this.lineItemsPageSize);
   });
+  readonly partPickerResults = computed(() => {
+    const query = this.partPickerQuery().trim().toLowerCase();
+    const terms = query.split(/\s+/).filter(Boolean);
+    return this.inventoryItems()
+      .filter(item => {
+        if (!terms.length) return true;
+        const haystack = [
+          this.inventoryName(item),
+          this.inventorySku(item),
+          this.inventoryVendor(item)
+        ].join(' ').toLowerCase();
+        return terms.every(term => haystack.includes(term));
+      })
+      .slice(0, 60);
+  });
   readonly orderedPartLines = computed(() =>
     (this.lineItems() || []).filter(line => line.type === 'part' && this.normalizePartStatus(line.partStatus) === 'ordered')
   );
+  readonly linkedPurchaseOrderRows = computed<LinkedPurchaseOrderRow[]>(() => {
+    const detail = this.invoice();
+    if (!detail || detail.documentType !== 'invoice') return [];
+    const invoiceId = this.safeText(detail.id);
+    const jobNumber = this.safeText(detail.jobNumber);
+    const lineItemIds = new Set(
+      (detail.lineItems || [])
+        .map(line => this.safeText(line.id))
+        .filter(Boolean)
+    );
+    const jobPartIds = new Set(
+      (detail.lineItems || [])
+        .map(line => this.safeText(line.jobPartId))
+        .filter(Boolean)
+    );
+    const seen = new Set<string>();
+    const rows: LinkedPurchaseOrderRow[] = [];
+    for (const order of this.purchaseOrders()) {
+      for (const line of order.lines || []) {
+        const key = `${order.id}:${line.lineId || line.needId || line.partName}`;
+        if (seen.has(key)) continue;
+        if (
+          (invoiceId && this.safeText(line.relatedInvoiceId) === invoiceId)
+          || (line.relatedInvoiceLineItemId && lineItemIds.has(this.safeText(line.relatedInvoiceLineItemId)))
+          || (line.needId && jobPartIds.has(this.safeText(line.needId)))
+          || (jobNumber && this.safeText(line.jobNumber) === jobNumber)
+        ) {
+          seen.add(key);
+          rows.push({ order, line });
+        }
+      }
+    }
+    return rows;
+  });
 
   constructor() {
-    addIcons({
-      'mail-open-outline': mailOpenOutline,
-      'document-outline': documentOutline,
-      'checkmark-outline': checkmarkOutline,
-      'close-outline': closeOutline,
-      'pause-outline': pauseOutline,
-      'alert-circle-outline': alertCircleOutline
-    });
     void this.ensureLineItemSourcesLoaded();
 
+    effect(() => {
+      this.invoicesData.invoiceDetails();
+      const id = String(this.route.snapshot.paramMap.get('id') || '').trim();
+      if (id) untracked(() => this.resolveInvoiceFromStore(id));
+    });
     this.route.paramMap.subscribe(params => {
       const id = String(params.get('id') || '').trim();
       this.loadInvoice(id);
@@ -401,6 +484,54 @@ export default class InvoiceDetailComponent implements OnDestroy {
 
   addLineItem(type: InvoiceLineType = 'part'): void {
     void this.ensureLineItemSourcesLoaded();
+    if (type === 'part') {
+      this.openPartPicker();
+      return;
+    }
+    this.addBlankLineItem(type);
+  }
+
+  openPartPicker(): void {
+    void this.ensureLineItemSourcesLoaded();
+    this.partPickerQuery.set('');
+    this.partPickerOpen.set(true);
+  }
+
+  closePartPicker(): void {
+    this.partPickerOpen.set(false);
+    this.partPickerQuery.set('');
+  }
+
+  setPartPickerQuery(value: string): void {
+    this.partPickerQuery.set(String(value || ''));
+  }
+
+  addInventoryPartFromPicker(item: InventoryItem): void {
+    const price = this.roundCurrency(this.safeNumber((item as InventoryItem & Record<string, unknown>).price, this.safeNumber(item.unitCost, this.safeNumber(item.cost, 0))));
+    const line = this.recalculateLine({
+      id: `li-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      type: 'part',
+      partStatus: 'out-of-stock',
+      relatedInventoryItemId: String(item.id || '').trim(),
+      code: this.inventorySku(item),
+      description: this.inventoryName(item) || 'Part',
+      quantity: 1,
+      unitPrice: price,
+      taxRate: 0,
+      lineSubtotal: 0,
+      taxAmount: 0,
+      lineTotal: 0
+    });
+    this.appendLineItem(line);
+    this.closePartPicker();
+  }
+
+  addCustomPartFromPicker(): void {
+    this.addBlankLineItem('part');
+    this.closePartPicker();
+  }
+
+  private addBlankLineItem(type: InvoiceLineType): void {
     this.invoice.update(current => {
       if (!current) return current;
       const line: InvoiceLineItem = this.recalculateLine({
@@ -422,11 +553,19 @@ export default class InvoiceDetailComponent implements OnDestroy {
         updatedAt: new Date().toISOString()
       };
     });
-    const latest = this.invoice()?.lineItems.at(-1);
-    if (latest?.id) {
-      this.lineItemSearchQuery.update(current => ({ ...current, [latest.id]: '' }));
-      this.activeLineItemSearchId.set(latest.id);
-    }
+    this.clearStatus();
+    this.lineItemsPage.set(this.lineItemsTotalPages());
+  }
+
+  private appendLineItem(line: InvoiceLineItem): void {
+    this.invoice.update(current => {
+      if (!current) return current;
+      return {
+        ...current,
+        lineItems: [...current.lineItems, line],
+        updatedAt: new Date().toISOString()
+      };
+    });
     this.clearStatus();
     this.lineItemsPage.set(this.lineItemsTotalPages());
   }
@@ -637,6 +776,11 @@ export default class InvoiceDetailComponent implements OnDestroy {
   async save(): Promise<void> {
     const current = this.invoice();
     if (!current || !this.canSave()) return;
+    const stored = this.invoicesData.getInvoiceById(current.id);
+    if (stored && this.snapshot(stored) !== this.baselineSnapshot()) {
+      this.setStatus('Another session changed this document. Review the saved version before applying your edits.', 'error');
+      return;
+    }
 
     const availability = this.paymentAvailability();
     if (current.includePaymentLink && !availability.enabled) {
@@ -652,11 +796,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
       next.lineItems = next.lineItems.map(line => this.recalculateLine(line));
 
       if (next.includePaymentLink && availability.provider) {
-        next.paymentProviderKey = availability.provider.key;
-        if (!String(next.paymentLinkUrl || '').trim()) {
-          next.paymentLinkUrl =
-            this.paymentSettings.createHostedPaymentLink(next.id, next.invoiceNumber) || next.paymentLinkUrl || '';
-        }
+        next = this.withCurrentPaymentLink(next);
       }
 
       if (!next.includePaymentLink) {
@@ -677,18 +817,22 @@ export default class InvoiceDetailComponent implements OnDestroy {
         ];
       }
 
+      if (!await this.syncPaidInvoicePartsIfNeeded(previousStage, next)) {
+        this.setStatus('Could not record payment. Check the published balance and try again.', 'error');
+        return;
+      }
       const saved = this.invoicesData.saveInvoice(next);
-      const partsBridgeSynced = await this.syncPaidInvoicePartsIfNeeded(previousStage, saved);
+      if (previousStage !== saved.stage) {
+        await this.markStaleWorkflowNotificationsRead(saved);
+      }
       await this.notifyInvoiceBuildNeeded(previousStage, saved);
-      const autoCompleteOutcome = await this.autoCompleteWorkItemOnInvoiceAccepted(previousStage, saved);
+      const autoCompleteOutcome = await this.autoCompleteWorkItemOnInvoiceCompleted(previousStage, saved);
       this.invoice.set(saved);
       this.baselineSnapshot.set(this.snapshot(saved));
       if (autoCompleteOutcome === 'completed') {
         this.setStatus(`${saved.invoiceNumber} saved. Work item moved to Completed.`, 'success');
       } else if (autoCompleteOutcome === 'failed') {
         this.setStatus(`${saved.invoiceNumber} saved. Could not auto-complete active work item.`, 'neutral');
-      } else if (!partsBridgeSynced && this.invoiceBecamePaid(previousStage, saved)) {
-        this.setStatus(`${saved.invoiceNumber} saved. Parts-to-order sync needs a refresh.`, 'neutral');
       } else {
         this.setStatus(`${saved.invoiceNumber} saved.`, 'success');
       }
@@ -708,6 +852,55 @@ export default class InvoiceDetailComponent implements OnDestroy {
     void this.router.navigate(['/quotes-invoices'], { queryParams: { tab } });
   }
 
+  invoiceJobDetailQueryParams(detail: InvoiceDetail): Record<string, string> {
+    const params: Record<string, string> = {};
+    const jobNumber = this.safeText(detail.jobNumber);
+    if (jobNumber) params['jobNumber'] = jobNumber;
+    if (detail.id) params['invoiceId'] = detail.id;
+    if (detail.lineItems?.[0]?.id) params['invoiceLineItemId'] = detail.lineItems[0].id;
+    return params;
+  }
+
+  poJobDetailQueryParams(row: LinkedPurchaseOrderRow): Record<string, string> {
+    const params: Record<string, string> = {};
+    const jobId = this.safeText(row.line.jobId);
+    const jobNumber = this.safeText(row.line.jobNumber);
+    const needId = this.safeText(row.line.needId);
+    const invoiceId = this.safeText(row.line.relatedInvoiceId);
+    const invoiceLineItemId = this.safeText(row.line.relatedInvoiceLineItemId);
+    if (jobId) params['jobId'] = jobId;
+    if (jobNumber) params['jobNumber'] = jobNumber;
+    if (needId) params['needId'] = needId;
+    if (invoiceId) params['invoiceId'] = invoiceId;
+    if (invoiceLineItemId) params['invoiceLineItemId'] = invoiceLineItemId;
+    return params;
+  }
+
+  poReceivedProgress(line: PurchaseOrderLine): string {
+    const received = this.safeNumber(line.qtyReceived, 0);
+    const ordered = Math.max(this.safeNumber(line.qty, 0), this.safeNumber(line.qtyNeeded, 0), received);
+    return `${this.formatQuantity(received)} / ${this.formatQuantity(ordered)}`;
+  }
+
+  formatQuantity(value: unknown): string {
+    const numeric = this.safeNumber(value, 0);
+    if (Math.abs(numeric - Math.round(numeric)) < 0.001) return String(Math.round(numeric));
+    return numeric.toFixed(2);
+  }
+
+  trackingUrl(value: unknown): string {
+    const tracking = this.safeText(value);
+    return tracking ? `https://www.google.com/search?q=${encodeURIComponent(`${tracking} tracking`)}` : '';
+  }
+
+  formatDateOnly(value: unknown): string {
+    const text = this.safeText(value);
+    if (!text) return 'N/A';
+    const date = new Date(text);
+    if (Number.isNaN(date.getTime())) return text;
+    return date.toLocaleDateString();
+  }
+
   async createInvoiceFromQuote(): Promise<void> {
     const current = this.invoice();
     if (!current || current.documentType !== 'quote' || current.stage !== 'accepted') return;
@@ -716,6 +909,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
       this.setStatus('Could not create invoice from quote.', 'error');
       return;
     }
+    await this.markStaleWorkflowNotificationsRead(current);
     await this.moveQuoteWorkItemToInvoiceLane(current, created);
     void this.router.navigate(['/invoices', created.id]);
   }
@@ -732,7 +926,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
     const hasSms = this.canSendInvoiceViaSms();
 
     this.sendInvoiceViaEmail.set(hasEmail);
-    this.sendInvoiceViaSms.set(hasSms && !hasEmail);
+    this.sendInvoiceViaSms.set(hasSms);
     this.sendInvoiceModalError.set('');
     this.sendInvoiceModalOpen.set(true);
   }
@@ -761,11 +955,71 @@ export default class InvoiceDetailComponent implements OnDestroy {
     });
   }
 
+  openCustomerPortal(): void {
+    this.portalOpen.set(true);
+    this.portalStatus.set('');
+    this.portalUrl.set('');
+    void this.updatePortalAccess('issue');
+  }
+
+  async updatePortalAccess(action: 'issue' | 'rotate' | 'revoke'): Promise<void> {
+    const detail = this.invoice();
+    if (!detail || this.portalBusy()) return;
+    this.portalBusy.set(true);
+    this.portalError.set('');
+    this.portalFeedback.set('');
+    try {
+      const access = await this.customerPortal.manage(detail.id, action);
+      this.portalUrl.set(access.path ? this.publicRouteUrl(access.path) : '');
+      this.portalStatus.set(access.status);
+      if (action === 'rotate') this.portalFeedback.set('New link created.');
+      if (action === 'revoke') this.portalFeedback.set('Link revoked.');
+    } catch (error) {
+      this.portalError.set(this.extractSendFailureReason(error) || 'Could not update portal access.');
+    } finally {
+      this.portalBusy.set(false);
+    }
+  }
+
+  async copyCustomerPortal(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(this.portalUrl());
+      this.portalFeedback.set('Link copied.');
+      this.portalError.set('');
+    } catch {
+      this.portalError.set('Could not copy automatically. Select and copy the URL.');
+    }
+  }
+
+  async sendCustomerPortal(channel: 'email' | 'sms'): Promise<void> {
+    const detail = this.invoice();
+    const url = this.portalUrl();
+    const target = channel === 'email' ? this.invoiceEmailTarget() : this.invoiceSmsTarget();
+    if (!detail || !url || !target || this.portalBusy()) return;
+    this.portalBusy.set(true);
+    this.portalError.set('');
+    this.portalFeedback.set('');
+    try {
+      const content = {
+        customerId: detail.customerId || '', customerName: detail.customerName,
+        to: target, message: `${detail.businessName || 'Your shop'}: Open your service visit: ${url}`
+      };
+      if (channel === 'email') {
+        await firstValueFrom(this.emailApi.sendToCustomer({ ...content, subject: 'Your service visit' }));
+      } else {
+        await firstValueFrom(this.smsApi.sendToCustomer(content));
+      }
+      this.portalFeedback.set(channel === 'email' ? 'Link sent by email.' : 'Link sent by SMS.');
+    } catch (error) {
+      this.portalError.set(this.extractSendFailureReason(error) || 'Could not send the portal link.');
+    } finally {
+      this.portalBusy.set(false);
+    }
+  }
+
   async sendInvoiceForPayment(options?: { email: boolean; sms: boolean }): Promise<void> {
     const detail = this.invoice();
     if (!detail || detail.documentType !== 'invoice' || this.sendingInvoice()) return;
-
-    const availability = this.paymentAvailability();
 
     const emailTarget = String(detail.customerEmail || '').trim();
     const phoneTarget = String(detail.customerPhone || '').trim();
@@ -796,16 +1050,15 @@ export default class InvoiceDetailComponent implements OnDestroy {
     this.sendingInvoice.set(true);
     this.clearStatus();
     try {
-      const paymentLink =
-        String(detail.paymentLinkUrl || '').trim()
-        || this.paymentSettings.createHostedPaymentLink(detail.id, detail.invoiceNumber)
-        || '';
+      const checkout = this.withCurrentPaymentLink(detail);
+      const paymentLink = checkout.paymentLinkUrl || '';
       if (!paymentLink) {
         this.sendInvoiceModalError.set('Payment link unavailable. Connect payment provider or save invoice with a payment link.');
         this.setStatus('Payment link unavailable. Save invoice or connect payment provider, then try again.', 'error');
         return;
       }
-      const publicLink = this.invoicePaymentPublicUrl(detail, paymentLink, amountDue);
+      await this.publishInvoicePaymentSnapshotUrl(checkout, paymentLink, amountDue, true);
+      const publicLink = this.publicRouteUrl(await this.customerPortal.issueLink(detail.id));
       const business = String(detail.businessName || '').trim() || 'Your Company';
       const subject = `Invoice ${detail.invoiceNumber} - payment requested`;
       const plainMessage = `Hi ${detail.customerName || 'Customer'}, invoice ${detail.invoiceNumber} has an amount due of ${this.formatUsd(amountDue)}. Pay here: ${publicLink}`;
@@ -835,7 +1088,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
               customerId: String(detail.customerId || detail.id || '').trim(),
               customerName: String(detail.customerName || '').trim(),
               to: phoneTarget,
-              message: `${business}: ${detail.invoiceNumber} amount due ${this.formatUsd(amountDue)}. Pay: ${publicLink}`
+            message: `${business}: ${detail.invoiceNumber} amount due ${this.formatUsd(amountDue)}. View and pay: ${publicLink}`
             })
           )
         });
@@ -845,11 +1098,20 @@ export default class InvoiceDetailComponent implements OnDestroy {
       const results = sends.map((row, index) => ({ channel: row.channel, result: settled[index] }));
       const emailSuccess = !wantsEmail || results.some(row => row.channel === 'email' && row.result.status === 'fulfilled');
       const smsSuccess = !wantsSms || results.some(row => row.channel === 'sms' && row.result.status === 'fulfilled');
+      const emailFailureReason = results
+        .filter(row => row.channel === 'email' && row.result.status === 'rejected')
+        .map(row => this.extractSendFailureReason((row.result as PromiseRejectedResult).reason))
+        .find(Boolean) || '';
+      const smsFailureReason = results
+        .filter(row => row.channel === 'sms' && row.result.status === 'rejected')
+        .map(row => this.extractSendFailureReason((row.result as PromiseRejectedResult).reason))
+        .find(Boolean) || '';
       const anySuccess = emailSuccess || smsSuccess;
 
       if (!anySuccess) {
-        this.sendInvoiceModalError.set('Invoice send failed. Email/SMS could not be delivered.');
-        this.setStatus('Invoice send failed. Email/SMS could not be delivered.', 'error');
+        const message = this.composeDeliveryFailureMessage('Invoice', wantsEmail, wantsSms, emailFailureReason, smsFailureReason);
+        this.sendInvoiceModalError.set(message);
+        this.setStatus(message, 'error');
         return;
       }
 
@@ -878,7 +1140,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
       const sent = this.invoicesData.saveInvoice({
         ...detail,
         includePaymentLink: true,
-        paymentProviderKey: availability.provider?.key || detail.paymentProviderKey,
+        paymentProviderKey: checkout.paymentProviderKey,
         paymentLinkUrl: paymentLink,
         stage: 'sent',
         timeline: this.isFinalInvoiceMode()
@@ -898,6 +1160,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
       this.baselineSnapshot.set(this.snapshot(sent));
       this.sendInvoiceModalError.set('');
       this.sendInvoiceModalOpen.set(false);
+      await this.markStaleWorkflowNotificationsRead(sent);
 
       let successMessage = '';
       let successTone: StatusTone = 'success';
@@ -906,29 +1169,31 @@ export default class InvoiceDetailComponent implements OnDestroy {
           successMessage = 'Invoice sent by email and SMS.';
           successTone = 'success';
         } else if (emailSuccess) {
-          successMessage = 'Invoice sent by email. SMS delivery failed.';
-          successTone = 'error';
+          successMessage = `Invoice sent by email. SMS failed${smsFailureReason ? `: ${smsFailureReason}` : '.'}`;
+          successTone = 'neutral';
         } else if (smsSuccess) {
-          successMessage = 'Invoice sent by SMS. Email delivery failed.';
-          successTone = 'error';
+          successMessage = `Invoice sent by SMS. Email failed${emailFailureReason ? `: ${emailFailureReason}` : '.'}`;
+          successTone = 'neutral';
         } else {
-          successMessage = 'Invoice send failed. Email/SMS could not be delivered.';
+          successMessage = this.composeDeliveryFailureMessage('Invoice', wantsEmail, wantsSms, emailFailureReason, smsFailureReason);
           successTone = 'error';
         }
       } else if (wantsEmail) {
-        successMessage = emailSuccess ? 'Invoice sent by email.' : 'Invoice send failed. Email could not be delivered.';
+        successMessage = emailSuccess ? 'Invoice sent by email.' : `Invoice email failed${emailFailureReason ? `: ${emailFailureReason}` : '.'}`;
         successTone = emailSuccess ? 'success' : 'error';
       } else if (wantsSms) {
-        successMessage = smsSuccess ? 'Invoice sent by SMS.' : 'Invoice send failed. SMS could not be delivered.';
+        successMessage = smsSuccess ? 'Invoice sent by SMS.' : `Invoice SMS failed${smsFailureReason ? `: ${smsFailureReason}` : '.'}`;
         successTone = smsSuccess ? 'success' : 'error';
       } else {
         successMessage = 'Pick at least one delivery channel.';
         successTone = 'error';
       }
       this.setStatusAfterModalClose(successMessage, successTone);
-    } catch {
-      this.sendInvoiceModalError.set('Could not send invoice.');
-      this.setStatus('Could not send invoice.', 'error');
+    } catch (error) {
+      const reason = this.extractSendFailureReason(error);
+      const message = reason ? `Could not send invoice: ${reason}.` : 'Could not send invoice.';
+      this.sendInvoiceModalError.set(message);
+      this.setStatus(message, 'error');
     } finally {
       this.sendingInvoice.set(false);
     }
@@ -961,11 +1226,11 @@ export default class InvoiceDetailComponent implements OnDestroy {
       const business = String(detail.businessName || '').trim() || 'Our team';
       const quoteNumber = String(detail.invoiceNumber || 'Quote').trim();
       const subject = `Quote ${quoteNumber} is ready`;
-      const viewUrl = this.quoteResponseUrl(detail, 'view');
-      const acceptUrl = this.quoteResponseUrl(detail, 'accept');
-      const declineUrl = this.quoteResponseUrl(detail, 'decline');
-      const plainMessage = `Hi ${detail.customerName || 'Customer'}, your quote ${quoteNumber} is ready. View: ${viewUrl} Accept: ${acceptUrl} Decline: ${declineUrl}`;
-      const html = this.buildQuoteEmailHtml(detail, business, viewUrl, acceptUrl, declineUrl);
+      const publicToken = this.publicToken();
+      await this.publishQuoteSnapshot(detail, publicToken);
+      const viewUrl = this.publicRouteUrl(await this.customerPortal.issueLink(detail.id));
+      const plainMessage = `Hi ${detail.customerName || 'Customer'}, your quote ${quoteNumber} is ready. Review it here: ${viewUrl}`;
+      const html = this.buildQuoteEmailHtml(detail, business, viewUrl);
 
       const sends: Array<{ channel: 'email' | 'sms'; promise: Promise<unknown> }> = [];
       if (wantsEmail && emailTarget) {
@@ -991,7 +1256,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
               customerId: String(detail.customerId || detail.id || '').trim(),
               customerName: String(detail.customerName || '').trim(),
               to: phoneTarget,
-              message: `${business}: Quote ${quoteNumber}. View: ${viewUrl} Accept: ${acceptUrl} Decline: ${declineUrl}`
+              message: `${business}: Quote ${quoteNumber} is ready. Review and respond: ${viewUrl}`
             })
           )
         });
@@ -1001,10 +1266,18 @@ export default class InvoiceDetailComponent implements OnDestroy {
       const results = sends.map((row, index) => ({ channel: row.channel, result: settled[index] }));
       const emailSuccess = !wantsEmail || results.some(row => row.channel === 'email' && row.result.status === 'fulfilled');
       const smsSuccess = !wantsSms || results.some(row => row.channel === 'sms' && row.result.status === 'fulfilled');
+      const emailFailureReason = results
+        .filter(row => row.channel === 'email' && row.result.status === 'rejected')
+        .map(row => this.extractSendFailureReason((row.result as PromiseRejectedResult).reason))
+        .find(Boolean) || '';
+      const smsFailureReason = results
+        .filter(row => row.channel === 'sms' && row.result.status === 'rejected')
+        .map(row => this.extractSendFailureReason((row.result as PromiseRejectedResult).reason))
+        .find(Boolean) || '';
       const anySuccess = emailSuccess || smsSuccess;
 
       if (!anySuccess) {
-        this.setStatus('Quote send failed. Email/SMS could not be delivered.', 'error');
+        this.setStatus(this.composeDeliveryFailureMessage('Quote', wantsEmail, wantsSms, emailFailureReason, smsFailureReason), 'error');
         return;
       }
 
@@ -1037,18 +1310,20 @@ export default class InvoiceDetailComponent implements OnDestroy {
       });
       this.invoice.set(sent);
       this.baselineSnapshot.set(this.snapshot(sent));
+      await this.markStaleWorkflowNotificationsRead(sent);
 
       if (wantsEmail && wantsSms) {
         if (emailSuccess && smsSuccess) this.setStatus('Quote sent by email and SMS.', 'success');
-        else if (emailSuccess) this.setStatus('Quote sent by email. SMS delivery failed.', 'error');
-        else if (smsSuccess) this.setStatus('Quote sent by SMS. Email delivery failed.', 'error');
+        else if (emailSuccess) this.setStatus(`Quote sent by email. SMS failed${smsFailureReason ? `: ${smsFailureReason}` : '.'}`, 'neutral');
+        else if (smsSuccess) this.setStatus(`Quote sent by SMS. Email failed${emailFailureReason ? `: ${emailFailureReason}` : '.'}`, 'neutral');
       } else if (wantsEmail) {
-        this.setStatus(emailSuccess ? 'Quote sent by email.' : 'Quote send failed. Email could not be delivered.', emailSuccess ? 'success' : 'error');
+        this.setStatus(emailSuccess ? 'Quote sent by email.' : `Quote email failed${emailFailureReason ? `: ${emailFailureReason}` : '.'}`, emailSuccess ? 'success' : 'error');
       } else if (wantsSms) {
-        this.setStatus(smsSuccess ? 'Quote sent by SMS.' : 'Quote send failed. SMS could not be delivered.', smsSuccess ? 'success' : 'error');
+        this.setStatus(smsSuccess ? 'Quote sent by SMS.' : `Quote SMS failed${smsFailureReason ? `: ${smsFailureReason}` : '.'}`, smsSuccess ? 'success' : 'error');
       }
-    } catch {
-      this.setStatus('Could not send quote.', 'error');
+    } catch (error) {
+      const reason = this.extractSendFailureReason(error);
+      this.setStatus(reason ? `Could not send quote: ${reason}.` : 'Could not send quote.', 'error');
     } finally {
       this.sendingInvoice.set(false);
     }
@@ -1114,6 +1389,122 @@ export default class InvoiceDetailComponent implements OnDestroy {
     }
   }
 
+  openPaylynxCharge(): void {
+    this.closeInvoiceActionsMenu();
+    const detail = this.invoice();
+    if (!detail || this.hasChanges() || this.amountDue() <= 0) return;
+    void this.router.navigate(['/invoices', detail.id, 'charge'], { queryParams: { tenantId: this.tenantContext.tenantId() } });
+  }
+
+  openPaylynxReturn(allocation: RefundAllocation): void {
+    this.closeInvoiceActionsMenu();
+    if (!this.invoice() || this.refundingCustomer() || this.hasChanges()) return;
+    this.paylynxReturn.set(allocation);
+    this.returnResult.set('');
+    this.returnMode.set('payment');
+    this.returnFee.set('');
+    this.returnReason.set('');
+    this.returnAmount.set('');
+    this.returnNeedsReview.set(false);
+    void this.loadPaylynxReturn();
+  }
+
+  closePaylynxReturn(): void {
+    if (!this.refundingCustomer()) this.paylynxReturn.set(null);
+  }
+
+  async loadPaylynxReturn(): Promise<void> {
+    const detail = this.invoice();
+    const allocation = this.paylynxReturn();
+    if (!detail || !allocation || this.loadingReturn()) return;
+    this.loadingReturn.set(true);
+    this.returnError.set('');
+    this.returnPreview.set(null);
+    try {
+      const result = await firstValueFrom(this.paymentRefundApi.preview(detail.id, this.tenantContext.tenantId(), allocation.originalTransactionId));
+      if (this.paylynxReturn() !== allocation) return;
+      this.returnPreview.set(result);
+      this.returnAmount.set(result.refundableAmount.toFixed(2));
+      this.returnNeedsReview.set(false);
+    } catch (error) {
+      if (this.paylynxReturn() === allocation) this.returnError.set(this.refundErrorMessage(error));
+    } finally {
+      this.loadingReturn.set(false);
+      if (this.paylynxReturn() && this.paylynxReturn() !== allocation) void this.loadPaylynxReturn();
+    }
+  }
+
+  async confirmPaylynxReturn(): Promise<void> {
+    const detail = this.invoice();
+    const allocation = this.paylynxReturn();
+    const preview = this.returnPreview();
+    if (!detail || !allocation || !preview || !this.canSubmitReturn()) return;
+    const amount = this.returnNetAmount();
+    const creditInvoice = this.returnMode() === 'credit';
+    this.refundingCustomer.set(true);
+    this.returnError.set('');
+    this.clearStatus();
+    try {
+      const { response, updated } = await this.submitProcessorRefund(detail,
+        { ...allocation, alreadyReversed: preview.alreadyReversed }, amount, this.returnReason().trim(), {
+          creditInvoice, expectedOperation: preview.operation,
+          retainedFee: creditInvoice && preview.operation === 'refund' ? Number(this.returnFee()) : 0
+        });
+      if (updated) {
+        this.invoice.set(updated);
+        this.baselineSnapshot.set(this.snapshot(updated));
+      }
+      this.paylynxReturn.set(null);
+      const action = response.operation === 'void' ? 'Voided' : 'Refunded';
+      this.returnResult.set(`${action} ${this.formatUsd(amount)} through PayLynx.${creditInvoice ? ' Invoice credited.' : ''}`);
+    } catch (error) {
+      const failure = error as { status?: number; error?: { code?: string } };
+      if (failure.error?.code === 'reversal_pending' || failure.status === 0) {
+        this.returnNeedsReview.set(true);
+        this.returnError.set('The reversal is awaiting confirmation. Check PayLynx before submitting again.');
+      } else {
+        if (failure.error?.code === 'reversal_changed') this.returnPreview.set(null);
+        this.returnError.set(this.refundErrorMessage(error));
+      }
+    } finally {
+      this.refundingCustomer.set(false);
+    }
+  }
+
+  private async submitProcessorRefund(detail: InvoiceDetail, allocation: RefundAllocation, amount: number, reason?: string,
+    returnDetails?: Pick<PaymentRefundPayload, 'creditInvoice' | 'retainedFee' | 'expectedOperation'>) {
+    let accountNumber = allocation.accountNumber;
+    if (allocation.provider === 'authorize-net') {
+      accountNumber ||= this.promptLast4ForRefund(allocation.originalTransactionId, amount);
+      if (!accountNumber) throw new Error('Last 4 card digits are required to process this refund.');
+    }
+    const response = await firstValueFrom(this.paymentRefundApi.refund({
+      invoiceId: detail.id,
+      tenantId: this.tenantContext.tenantId(),
+      provider: allocation.provider,
+      amount: amount.toFixed(2),
+      invoiceNumber: detail.invoiceNumber,
+      originalTransactionId: allocation.originalTransactionId,
+      alreadyReversed: allocation.alreadyReversed,
+      accountNumber,
+      reason,
+      ...returnDetails
+    }));
+    const settled = this.normalizeRefundResponse(response, allocation, amount);
+    const updated = this.invoicesData.recordProcessorRefund(detail.id, {
+      ...settled,
+      reason,
+      id: response.reversal?.id,
+      createdAt: response.reversal?.createdAt,
+      paidAmount: response.paidAmount,
+      returnCreditAmount: response.returnCreditAmount,
+      creditInvoice: returnDetails?.creditInvoice,
+      retainedFee: returnDetails?.retainedFee,
+      operation: response.operation
+    });
+    return { response, updated };
+  }
+
   async refundCustomerOverpayment(): Promise<void> {
     this.closeInvoiceActionsMenu();
     const detail = this.invoice();
@@ -1146,7 +1537,6 @@ export default class InvoiceDetailComponent implements OnDestroy {
     );
     if (!confirmed) return;
 
-    const tenantId = String(this.tenantContext.tenantId() || 'main').trim().toLowerCase() || 'main';
     const reason = 'Overpayment refunded after invoice update.';
     let remaining = overpayment;
     let refundedTotal = 0;
@@ -1159,30 +1549,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
         if (remaining <= 0) break;
         const amountToRefund = this.roundCurrency(Math.min(allocation.refundableAmount, remaining));
         if (amountToRefund <= 0) continue;
-        const accountNumber = allocation.accountNumber || this.promptLast4ForRefund(allocation.originalTransactionId, amountToRefund);
-        if (!accountNumber) {
-          throw new Error('Last 4 card digits are required to process this refund.');
-        }
-
-        const response = await firstValueFrom(this.paymentRefundApi.refund({
-          invoiceId: detail.id,
-          tenantId,
-          provider: allocation.provider,
-          amount: amountToRefund.toFixed(2),
-          invoiceNumber: detail.invoiceNumber,
-          originalTransactionId: allocation.originalTransactionId,
-          accountNumber,
-          reason
-        }));
-
-        const settled = this.normalizeRefundResponse(response, allocation, amountToRefund);
-        const updated = this.invoicesData.recordProcessorRefund(detail.id, {
-          provider: settled.provider,
-          amount: amountToRefund,
-          transactionId: settled.transactionId,
-          originalTransactionId: settled.originalTransactionId,
-          reason
-        });
+        const { updated } = await this.submitProcessorRefund(detail, allocation, amountToRefund, reason);
         if (updated) latest = updated;
 
         refundedTotal = this.roundCurrency(refundedTotal + amountToRefund);
@@ -1219,7 +1586,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
     }
   }
 
-  printPaidInvoice(): void {
+  async printPaidInvoice(): Promise<void> {
     this.closeInvoiceActionsMenu();
     const detail = this.invoice();
     if (!detail || detail.documentType !== 'invoice') return;
@@ -1229,14 +1596,21 @@ export default class InvoiceDetailComponent implements OnDestroy {
       return;
     }
 
-    const html = detail.stage === 'accepted'
-      ? this.buildPaidReceiptPrintHtml(detail, this.displayPaidDate(detail))
-      : this.buildInvoicePrintHtml(detail);
     try {
+      const checkout = this.withCurrentPaymentLink(detail);
+      const amountDue = this.amountDue();
+      const paymentLink = checkout.paymentLinkUrl || '';
+      const publicLink = amountDue > 0 && paymentLink
+        ? await this.publishInvoicePaymentSnapshotUrl(checkout, paymentLink, amountDue, true)
+        : '';
+      const html = amountDue === 0 && ['accepted', 'completed'].includes(detail.stage)
+        ? this.buildPaidReceiptPrintHtml(detail, this.displayPaidDate(detail))
+        : this.buildInvoicePrintHtml(detail, publicLink, amountDue);
       popup.document.open('text/html', 'replace');
       popup.document.write(html);
       popup.document.close();
     } catch {
+      popup.close();
       this.setStatus('Could not render print preview. Please try again.', 'error');
       return;
     }
@@ -1279,12 +1653,12 @@ export default class InvoiceDetailComponent implements OnDestroy {
 
   timelineMarkerGlyph(message: string): string {
     const kind = this.timelineMarkerKind(message);
-    if (kind === 'draft') return 'document-outline';
-    if (kind === 'sent') return 'mail-open-outline';
-    if (kind === 'accepted') return 'checkmark-outline';
-    if (kind === 'declined') return 'close-outline';
-    if (kind === 'paused') return 'pause-outline';
-    return 'alert-circle-outline';
+    if (kind === 'draft') return 'file';
+    if (kind === 'sent') return 'mail-opened';
+    if (kind === 'accepted') return 'check';
+    if (kind === 'declined') return 'x';
+    if (kind === 'paused') return 'player-pause';
+    return 'alert-circle';
   }
 
   isCustomerTimelineEntry(entry: InvoiceTimelineEntry): boolean {
@@ -1364,7 +1738,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
     return String(user?.displayName || user?.email || 'System').trim();
   }
 
-  private buildRefundAllocations(detail: InvoiceDetail, targetAmount: number): RefundAllocation[] {
+  private buildRefundAllocations(detail: InvoiceDetail, targetAmount: number, onlyProvider?: string): RefundAllocation[] {
     const wanted = this.roundCurrency(Math.max(0, Number(targetAmount || 0)));
     if (wanted <= 0) return [];
 
@@ -1373,8 +1747,9 @@ export default class InvoiceDetailComponent implements OnDestroy {
       const originalTransactionId = this.safeText((refund as InvoiceRefundTransaction).originalTransactionId);
       if (!originalTransactionId) continue;
       const refunded = this.roundCurrency(Math.max(0, Number((refund as InvoiceRefundTransaction).amount || 0)));
-      const next = this.roundCurrency((refundsByOriginal.get(originalTransactionId) || 0) + refunded);
-      refundsByOriginal.set(originalTransactionId, next);
+      const key = `${this.normalizeRefundProviderKey(refund.provider)}|${originalTransactionId}`;
+      const next = this.roundCurrency((refundsByOriginal.get(key) || 0) + refunded);
+      refundsByOriginal.set(key, next);
     }
 
     const payments = [...(detail.paymentTransactions || [])]
@@ -1386,7 +1761,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
     for (const payment of payments) {
       if (remainingTarget <= 0) break;
       const provider = this.normalizeRefundProviderKey(this.safeText((payment as InvoicePaymentTransaction).provider));
-      if (!this.supportsAutomatedRefund(provider)) continue;
+      if (!this.supportsAutomatedRefund(provider) || (onlyProvider && provider !== onlyProvider)) continue;
 
       const transactionId = this.safeText((payment as InvoicePaymentTransaction).transactionId);
       if (!transactionId) continue;
@@ -1394,7 +1769,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
       const accountNumber = this.maskedAccountForRefund(this.safeText((payment as InvoicePaymentTransaction).accountNumber));
 
       const paid = this.roundCurrency(Math.max(0, Number((payment as InvoicePaymentTransaction).amount || 0)));
-      const refunded = this.roundCurrency(Math.max(0, Number(refundsByOriginal.get(transactionId) || 0)));
+      const refunded = refundsByOriginal.get(`${provider}|${transactionId}`) || 0;
       const available = this.roundCurrency(Math.max(0, paid - refunded));
       if (available <= 0) continue;
 
@@ -1403,6 +1778,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
         provider,
         originalTransactionId: transactionId,
         accountNumber,
+        alreadyReversed: refunded,
         refundableAmount: portion
       });
       remainingTarget = this.roundCurrency(Math.max(0, remainingTarget - portion));
@@ -1440,7 +1816,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
   }
 
   private supportsAutomatedRefund(provider: string): boolean {
-    return this.normalizeRefundProviderKey(provider) === 'authorize-net';
+    return ['authorize-net', 'paylynx'].includes(this.normalizeRefundProviderKey(provider));
   }
 
   private normalizeRefundProviderKey(provider: string): string {
@@ -1457,7 +1833,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
     if (needed <= 0) return null;
 
     const provider = this.normalizeRefundProviderKey(this.safeText(detail.paymentProviderKey) || 'authorize-net');
-    if (!this.supportsAutomatedRefund(provider)) return null;
+    if (provider !== 'authorize-net') return null;
 
     const invoiceRef = this.safeText(detail.invoiceNumber || detail.id) || 'invoice';
     const transactionId = this.safeText(window.prompt(
@@ -1505,6 +1881,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
   private resolveInvoiceFromStore(id: string): void {
     if (!id) {
       this.invoice.set(null);
+      this.purchaseOrders.set([]);
       this.error.set('Invoice not found.');
       this.loading.set(false);
       return;
@@ -1515,6 +1892,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
     if (!found) {
       if (!this.invoice() || this.invoice()!.id !== id) {
         this.invoice.set(null);
+        this.purchaseOrders.set([]);
         this.error.set('Invoice not found.');
       }
       this.loading.set(false);
@@ -1526,16 +1904,24 @@ export default class InvoiceDetailComponent implements OnDestroy {
     const canHydrate =
       !current
       || current.id !== found.id
-      || this.snapshot(current) !== foundSnapshot;
+      || (this.snapshot(current) === this.baselineSnapshot() && this.baselineSnapshot() !== foundSnapshot);
     if (canHydrate) {
       this.invoice.set(found);
       this.baselineSnapshot.set(foundSnapshot);
       this.lineItemsPage.set(1);
+      this.loadLinkedPurchaseOrders();
     }
     this.error.set('');
     this.loading.set(false);
     this.scheduleAutoOpenSendModal();
     this.scheduleAutoSendNow();
+  }
+
+  private loadLinkedPurchaseOrders(): void {
+    this.purchaseOrdersApi.list().subscribe({
+      next: res => this.purchaseOrders.set(Array.isArray(res?.items) ? res.items : []),
+      error: () => this.purchaseOrders.set([])
+    });
   }
 
   private maybeOpenSendModalFromQuery(): void {
@@ -1633,6 +2019,66 @@ export default class InvoiceDetailComponent implements OnDestroy {
     return 0;
   }
 
+  private async markStaleWorkflowNotificationsRead(detail: InvoiceDetail): Promise<void> {
+    const ids = await this.findUnreadWorkflowNotificationIds(detail);
+    if (!ids.length) return;
+    try {
+      await firstValueFrom(this.notificationsApi.markReadBatch(ids));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('pathflow:notifications-refresh'));
+      }
+    } catch {
+      // Notification cleanup is best-effort and should not block the workflow action.
+    }
+  }
+
+  private async findUnreadWorkflowNotificationIds(detail: InvoiceDetail): Promise<string[]> {
+    try {
+      const response = await firstValueFrom(this.notificationsApi.listAll(100, 0));
+      const items = Array.isArray(response.items) ? response.items : [];
+      const ids = items
+        .filter(item => !item.read && this.notificationBelongsToDocument(item, detail))
+        .map(item => String(item.id || '').trim())
+        .filter(Boolean);
+      return Array.from(new Set(ids));
+    } catch {
+      return [];
+    }
+  }
+
+  private notificationBelongsToDocument(notification: AppNotification, detail: InvoiceDetail): boolean {
+    const documentId = String(detail.id || '').trim().toLowerCase();
+    const documentNumber = String(detail.invoiceNumber || '').trim().toLowerCase();
+    const customerName = String(detail.customerName || '').trim().toLowerCase();
+    const route = String(notification.route || '').trim().toLowerCase();
+    const entityId = String(notification.entityId || '').trim().toLowerCase();
+    const metadata = notification.metadata || {};
+    const metadataIds = [
+      metadata['invoiceId'],
+      metadata['quoteId'],
+      metadata['documentId']
+    ].map(value => String(value || '').trim().toLowerCase()).filter(Boolean);
+    const metadataNumbers = [
+      metadata['invoiceNumber'],
+      metadata['quoteNumber'],
+      metadata['documentNumber']
+    ].map(value => String(value || '').trim().toLowerCase()).filter(Boolean);
+    const metadataCustomer = String(metadata['customerName'] || '').trim().toLowerCase();
+
+    if (documentId && (entityId === documentId || metadataIds.includes(documentId))) return true;
+    if (documentId && route.includes(encodeURIComponent(documentId).toLowerCase())) return true;
+    if (documentNumber && metadataNumbers.includes(documentNumber)) return true;
+
+    const title = String(notification.title || '').trim().toLowerCase();
+    const message = String(notification.message || '').trim().toLowerCase();
+    const text = `${title} ${message}`;
+    if (documentNumber && text.includes(documentNumber)) {
+      if (!customerName || !metadataCustomer || metadataCustomer === customerName || text.includes(customerName)) return true;
+    }
+
+    return false;
+  }
+
   private snapshot(invoice: InvoiceDetail): string {
     return JSON.stringify(invoice);
   }
@@ -1664,7 +2110,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
   private async syncPaidInvoicePartsIfNeeded(previousStage: InvoiceStage, saved: InvoiceDetail): Promise<boolean> {
     if (!this.invoiceBecamePaid(previousStage, saved)) return true;
     try {
-      await firstValueFrom(this.invoiceResponseApi.capture({
+      await firstValueFrom(this.invoiceResponseApi.recordManualPayment({
         invoiceId: saved.id,
         action: 'pay',
         tenantId: String(this.tenantContext.tenantId() || '').trim().toLowerCase() || 'primary-location',
@@ -1674,9 +2120,8 @@ export default class InvoiceDetailComponent implements OnDestroy {
         customerName: saved.customerName,
         vehicle: saved.vehicle,
         businessName: saved.businessName,
-        paymentKind: 'initial',
-        paymentAmount: Number(saved.paidAmount || saved.total || 0),
-        paymentProvider: String(saved.paymentProviderKey || 'manual').trim().toLowerCase(),
+        paymentAmount: this.roundCurrency(Number(saved.paidAmount || saved.total || 0) -
+          Number(this.invoicesData.getInvoiceById(saved.id)?.paidAmount || 0)),
         lineItems: saved.lineItems.map(line => ({ ...line }))
       }));
       return true;
@@ -1685,13 +2130,13 @@ export default class InvoiceDetailComponent implements OnDestroy {
     }
   }
 
-  private async autoCompleteWorkItemOnInvoiceAccepted(
+  private async autoCompleteWorkItemOnInvoiceCompleted(
     previousStage: InvoiceStage,
     saved: InvoiceDetail
   ): Promise<'completed' | 'failed' | 'noop'> {
-    const movedToSettled = saved.stage === 'accepted' || saved.stage === 'completed';
-    const alreadySettled = previousStage === 'accepted' || previousStage === 'completed';
-    if (alreadySettled || !movedToSettled) return 'noop';
+    const movedToCompleted = saved.stage === 'completed';
+    const alreadyCompleted = previousStage === 'completed';
+    if (alreadyCompleted || !movedToCompleted) return 'noop';
 
     const customerId = String(saved.customerId || '').trim();
     if (!customerId) return 'noop';
@@ -1962,19 +2407,24 @@ export default class InvoiceDetailComponent implements OnDestroy {
     };
   }
 
-  private inventoryName(item: InventoryItem): string {
+  inventoryName(item: InventoryItem): string {
     const raw = item as InventoryItem & Record<string, unknown>;
     return this.text(raw.name, this.text(raw['description'], 'Part'));
   }
 
-  private inventorySku(item: InventoryItem): string {
+  inventorySku(item: InventoryItem): string {
     const raw = item as InventoryItem & Record<string, unknown>;
     return this.text(raw.sku, this.text(raw['partLaborCode'], ''));
   }
 
-  private inventoryVendor(item: InventoryItem): string {
+  inventoryVendor(item: InventoryItem): string {
     const raw = item as InventoryItem & Record<string, unknown>;
     return this.text(raw.vendor, this.text(raw['mainSupplier'], ''));
+  }
+
+  inventoryCategory(item: InventoryItem): string {
+    const raw = item as InventoryItem & Record<string, unknown>;
+    return this.text(raw.category, '');
   }
 
   private text(primary: unknown, fallback = ''): string {
@@ -2020,21 +2470,46 @@ export default class InvoiceDetailComponent implements OnDestroy {
     return 'Out of stock';
   }
 
-  private invoicePaymentPublicUrl(detail: InvoiceDetail, paymentLink: string, amountDue: number): string {
+  private withCurrentPaymentLink(detail: InvoiceDetail): InvoiceDetail {
+    const provider = this.paymentAvailability().provider?.key;
+    if (!provider) return detail;
+    if (provider !== 'paylynx' && provider === detail.paymentProviderKey && detail.paymentLinkUrl?.trim()) return detail;
+    return {
+      ...detail,
+      paymentProviderKey: provider,
+      paymentLinkUrl: this.paymentSettings.createHostedPaymentLink(detail.id, detail.invoiceNumber) || ''
+    };
+  }
+
+  private async publishInvoicePaymentSnapshotUrl(detail: InvoiceDetail, paymentLink: string, amountDue: number, keepExistingToken = false): Promise<string> {
+    const publicToken = this.publicToken();
+    const tenantId = String(this.tenantContext.tenantId() || 'main').trim().toLowerCase() || 'main';
+    const amount = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amountDue);
+    const paymentProvider = String(detail.paymentProviderKey || '').trim().toLowerCase();
+    const published = await firstValueFrom(this.invoiceResponseApi.publishSnapshot({
+      invoiceId: detail.id,
+      publicToken,
+      keepExistingToken,
+      tenantId,
+      invoiceNumber: detail.invoiceNumber,
+      customerName: detail.customerName || 'Customer',
+      customerEmail: String(detail.customerEmail || '').trim(),
+      vehicle: detail.vehicle || 'Vehicle details pending',
+      businessName: detail.businessName || 'Our team',
+      amount,
+      dueDate: detail.dueDate || '',
+      paymentUrl: paymentLink,
+      paymentProvider,
+      invoiceData: this.invoicePaymentPayload(detail)
+    }));
+    if (!published?.ok || published.invoiceId !== detail.id || !published.publicToken) {
+      throw new Error('Could not publish the invoice payment link.');
+    }
+
     const query = new URLSearchParams();
     query.set('invoiceId', detail.id);
-    query.set('tenantId', String(this.tenantContext.tenantId() || 'main').trim().toLowerCase() || 'main');
-    query.set('invoiceNumber', detail.invoiceNumber);
-    query.set('customerName', detail.customerName || 'Customer');
-    query.set('customerEmail', String(detail.customerEmail || '').trim());
-    query.set('vehicle', detail.vehicle || 'Vehicle details pending');
-    query.set('businessName', detail.businessName || 'Our team');
-    query.set('amount', new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amountDue));
-    query.set('dueDate', detail.dueDate || '');
-    query.set('paymentUrl', paymentLink);
-    query.set('paymentProvider', String(detail.paymentProviderKey || '').trim().toLowerCase());
-    const invoiceData = this.encodeQuotePayload(this.invoicePaymentPayload(detail));
-    if (invoiceData) query.set('invoiceData', invoiceData);
+    query.set('tenantId', tenantId);
+    query.set('publicToken', published.publicToken);
     return this.publicRouteUrl('/invoice-payment', query);
   }
 
@@ -2044,7 +2519,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
       customerId: String(detail.customerId || '').trim(),
       subtotal: this.roundCurrency(Number(detail.subtotal || 0)),
       taxTotal: this.roundCurrency(Number(detail.taxTotal || 0)),
-      total: this.roundCurrency(Number(detail.total || 0)),
+      total: this.roundCurrency(Number(detail.total || 0) + Number(detail.returnCreditAmount || 0)),
       lineItems: (detail.lineItems || []).map(line => ({
         id: String(line.id || '').trim(),
         type: String(line.type || '').trim().toLowerCase(),
@@ -2063,27 +2538,37 @@ export default class InvoiceDetailComponent implements OnDestroy {
     };
   }
 
-  private quoteResponseUrl(detail: InvoiceDetail, action: 'view' | 'accept' | 'decline'): string {
-    const path = action === 'accept' ? '/quote-accepted' : action === 'decline' ? '/quote-declined' : '/quote-response';
-    const query = new URLSearchParams();
-    query.set('action', action);
-    query.set('quoteId', String(detail.id || '').trim());
-    query.set('tenantId', String(this.tenantContext.tenantId() || 'main').trim().toLowerCase() || 'main');
-    query.set('quoteNumber', String(detail.invoiceNumber || '').trim());
-    query.set('customerName', String(detail.customerName || 'Customer').trim());
-    query.set('vehicle', String(detail.vehicle || 'Vehicle details pending').trim());
-    query.set('businessName', String(detail.businessName || 'Our team').trim());
-    const quotePayload = this.buildPublicQuotePayload(detail);
-    if (quotePayload) query.set('quoteData', quotePayload);
-    return this.publicRouteUrl(path, query);
+  private async publishQuoteSnapshot(detail: InvoiceDetail, publicToken: string): Promise<void> {
+    const quotePayload = this.buildPublicQuotePayloadObject(detail);
+    const published = await firstValueFrom(this.quoteResponseApi.publishSnapshot({
+      quoteId: String(detail.id || '').trim(),
+      publicToken,
+      tenantId: String(this.tenantContext.tenantId() || 'main').trim().toLowerCase() || 'main',
+      quoteNumber: String(detail.invoiceNumber || '').trim(),
+      customerName: String(detail.customerName || 'Customer').trim(),
+      vehicle: String(detail.vehicle || 'Vehicle details pending').trim(),
+      businessName: String(detail.businessName || 'Our team').trim(),
+      quoteData: quotePayload
+    }));
+    if (!published?.ok || published.publicToken !== publicToken || published.quoteId !== String(detail.id || '').trim()) {
+      throw new Error('Quote link publication was not confirmed. Nothing was sent.');
+    }
+
+
+  }
+
+  private publicToken(): string {
+    const cryptoApi = typeof crypto !== 'undefined' ? crypto : null;
+    if (cryptoApi && typeof cryptoApi.randomUUID === 'function') {
+      return cryptoApi.randomUUID().replace(/-/g, '');
+    }
+    return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 14)}`;
   }
 
   private buildQuoteEmailHtml(
     detail: InvoiceDetail,
     business: string,
-    viewUrl: string,
-    acceptUrl: string,
-    declineUrl: string
+    viewUrl: string
   ): string {
     const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
     const quoteNumber = String(detail.invoiceNumber || 'Quote').trim();
@@ -2106,7 +2591,6 @@ export default class InvoiceDetailComponent implements OnDestroy {
       `)
       .join('');
     const customerNote = String(detail.customerNote || '').trim();
-    const staffNote = String(detail.staffNote || '').trim();
     const description = String(detail.description || '').trim();
     return `
       <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.45;color:#0f172a;max-width:960px;margin:0 auto;">
@@ -2174,77 +2658,48 @@ export default class InvoiceDetailComponent implements OnDestroy {
 
         <div style="clear:both;"></div>
         <p style="margin:0 0 14px;">
-          <a href="${this.escapeHtml(viewUrl)}" style="display:inline-block;margin-right:8px;background:#1d4ed8;color:#fff;text-decoration:none;padding:10px 14px;border-radius:8px;font-weight:700;">View Quote</a>
-          <a href="${this.escapeHtml(acceptUrl)}" style="display:inline-block;margin-right:8px;background:#16a34a;color:#fff;text-decoration:none;padding:10px 14px;border-radius:8px;font-weight:700;">Accept Quote</a>
-          <a href="${this.escapeHtml(declineUrl)}" style="display:inline-block;background:#ef4444;color:#fff;text-decoration:none;padding:10px 14px;border-radius:8px;font-weight:700;">Decline Quote</a>
+          <a href="${this.escapeHtml(viewUrl)}" style="display:inline-block;margin-right:8px;background:#1d4ed8;color:#fff;text-decoration:none;padding:10px 14px;border-radius:8px;font-weight:700;">Review quote in your portal</a>
         </p>
         ${description ? `<p style="margin:8px 0 0;color:#334155;"><strong>Description:</strong> ${this.escapeHtml(description)}</p>` : ''}
         ${customerNote ? `<p style="margin:8px 0 0;color:#334155;"><strong>Customer Note:</strong> ${this.escapeHtml(customerNote)}</p>` : ''}
-        ${staffNote ? `<p style="margin:8px 0 0;color:#334155;"><strong>Terms:</strong> ${this.escapeHtml(staffNote)}</p>` : ''}
         <p style="margin:14px 0 0;color:#334155;">If you have questions, reply to this email and ${this.escapeHtml(business)} will help.</p>
       </div>
     `;
   }
 
-  private buildPublicQuotePayload(detail: InvoiceDetail): string {
-    try {
-      const payload = {
-        quoteId: String(detail.id || '').trim(),
-        quoteNumber: String(detail.invoiceNumber || '').trim(),
-        customerName: String(detail.customerName || '').trim(),
-        customerEmail: String(detail.customerEmail || '').trim(),
-        customerPhone: String(detail.customerPhone || '').trim(),
-        customerAddress: String(detail.customerAddress || '').trim(),
-        vehicle: String(detail.vehicle || '').trim(),
-        businessName: String(detail.businessName || '').trim(),
-        businessEmail: String(detail.businessEmail || '').trim(),
-        businessPhone: String(detail.businessPhone || '').trim(),
-        businessAddress: String(detail.businessAddress || '').trim(),
-        businessLogoUrl: String(detail.businessLogoUrl || '').trim(),
-        issueDate: String(detail.issueDate || '').trim(),
-        dueDate: String(detail.dueDate || '').trim(),
-        description: String(detail.description || '').trim(),
-        customerNote: String(detail.customerNote || '').trim(),
-        staffNote: String(detail.staffNote || '').trim(),
-        subtotal: this.roundCurrency(Number(detail.subtotal || 0)),
-        taxTotal: this.roundCurrency(Number(detail.taxTotal || 0)),
-        total: this.roundCurrency(Number(detail.total || 0)),
-        lineItems: (detail.lineItems || []).map(line => ({
-          type: String(line.type || '').trim().toLowerCase(),
-          code: String(line.code || '').trim(),
-          description: String(line.description || '').trim(),
-          quantity: Number(line.quantity || 0),
-          unitPrice: this.roundCurrency(Number(line.unitPrice || 0)),
-          taxRate: this.roundCurrency(Number(line.taxRate || 0)),
-          lineSubtotal: this.roundCurrency(Number(line.lineSubtotal || 0)),
-          taxAmount: this.roundCurrency(Number(line.taxAmount || 0)),
-          lineTotal: this.roundCurrency(Number(line.lineTotal || 0))
-        }))
-      };
-      return this.encodeQuotePayload(payload);
-    } catch {
-      return '';
-    }
-  }
-
-  private encodeQuotePayload(payload: unknown): string {
-    try {
-      const json = JSON.stringify(payload || {});
-      if (typeof TextEncoder !== 'undefined' && typeof btoa === 'function') {
-        const bytes = new TextEncoder().encode(json);
-        let binary = '';
-        for (let i = 0; i < bytes.length; i += 1) {
-          binary += String.fromCharCode(bytes[i]);
-        }
-        return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
-      }
-      if (typeof btoa === 'function') {
-        return btoa(json).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
-      }
-      return '';
-    } catch {
-      return '';
-    }
+  private buildPublicQuotePayloadObject(detail: InvoiceDetail): Record<string, unknown> {
+    return {
+      quoteId: String(detail.id || '').trim(),
+      quoteNumber: String(detail.invoiceNumber || '').trim(),
+      customerName: String(detail.customerName || '').trim(),
+      customerEmail: String(detail.customerEmail || '').trim(),
+      customerPhone: String(detail.customerPhone || '').trim(),
+      customerAddress: String(detail.customerAddress || '').trim(),
+      vehicle: String(detail.vehicle || '').trim(),
+      businessName: String(detail.businessName || '').trim(),
+      businessEmail: String(detail.businessEmail || '').trim(),
+      businessPhone: String(detail.businessPhone || '').trim(),
+      businessAddress: String(detail.businessAddress || '').trim(),
+      businessLogoUrl: String(detail.businessLogoUrl || '').trim(),
+      issueDate: String(detail.issueDate || '').trim(),
+      dueDate: String(detail.dueDate || '').trim(),
+      description: String(detail.description || '').trim(),
+      customerNote: String(detail.customerNote || '').trim(),
+      subtotal: this.roundCurrency(Number(detail.subtotal || 0)),
+      taxTotal: this.roundCurrency(Number(detail.taxTotal || 0)),
+      total: this.roundCurrency(Number(detail.total || 0)),
+      lineItems: (detail.lineItems || []).map(line => ({
+        type: String(line.type || '').trim().toLowerCase(),
+        code: String(line.code || '').trim(),
+        description: String(line.description || '').trim(),
+        quantity: Number(line.quantity || 0),
+        unitPrice: this.roundCurrency(Number(line.unitPrice || 0)),
+        taxRate: this.roundCurrency(Number(line.taxRate || 0)),
+        lineSubtotal: this.roundCurrency(Number(line.lineSubtotal || 0)),
+        taxAmount: this.roundCurrency(Number(line.taxAmount || 0)),
+        lineTotal: this.roundCurrency(Number(line.lineTotal || 0))
+      }))
+    };
   }
 
   private buildInvoiceEmailHtml(detail: InvoiceDetail, publicLink: string, business: string, amountDue: number): string {
@@ -2252,6 +2707,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
     const subtotal = Number(detail.subtotal || 0);
     const taxTotal = Number(detail.taxTotal || 0);
     const total = Number(detail.total || 0);
+    const returnCredit = Number(detail.returnCreditAmount || 0);
     const paid = this.normalizePaidAmount(detail.paidAmount);
     const dueDate = String(detail.dueDate || '').trim();
     const issueDate = String(detail.issueDate || '').trim();
@@ -2326,6 +2782,10 @@ export default class InvoiceDetailComponent implements OnDestroy {
             <td style="padding:8px 10px;color:#111827;">Tax:</td>
             <td style="padding:8px 10px;color:#111827;text-align:right;font-weight:700;">${this.escapeHtml(money.format(taxTotal))}</td>
           </tr>
+          ${returnCredit > 0 ? `<tr>
+            <td style="padding:8px 10px;color:#111827;">Return Credit:</td>
+            <td style="padding:8px 10px;color:#111827;text-align:right;font-weight:700;">${this.escapeHtml(money.format(-returnCredit))}</td>
+          </tr>` : ''}
           <tr>
             <td style="padding:10px;background:#e2e8f0;color:#111827;font-weight:800;">Total Due:</td>
             <td style="padding:10px;background:#e2e8f0;color:#111827;text-align:right;font-weight:800;">${this.escapeHtml(money.format(amountDue))}</td>
@@ -2345,9 +2805,9 @@ export default class InvoiceDetailComponent implements OnDestroy {
         </table>
         <div style="clear:both"></div>
 
-        <div style="margin:14px 0 4px;">
+        ${publicLink ? `<div style="margin:14px 0 4px;">
           <a href="${this.escapeHtml(publicLink)}" style="display:inline-block;background:#1d4ed8;color:#ffffff;text-decoration:none;padding:11px 18px;border-radius:8px;font-weight:700;">Pay Invoice Now</a>
-        </div>
+        </div>` : ''}
         <p style="margin:14px 0 0;color:#334155;">If you have questions, reply to this email and ${this.escapeHtml(business)} will help.</p>
       </div>
     `;
@@ -2443,12 +2903,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
 </html>`;
   }
 
-  private buildInvoicePrintHtml(detail: InvoiceDetail): string {
-    const amountDue = this.roundCurrency(Math.max(0, Number(detail.total || 0) - Number(detail.paidAmount || 0)));
-    const paymentLink = String(detail.paymentLinkUrl || '').trim()
-      || this.paymentSettings.createHostedPaymentLink(detail.id, detail.invoiceNumber)
-      || '';
-    const publicLink = this.invoicePaymentPublicUrl(detail, paymentLink, amountDue);
+  private buildInvoicePrintHtml(detail: InvoiceDetail, publicLink: string, amountDue: number): string {
     const business = String(detail.businessName || '').trim() || 'Your Company';
     const html = this.buildInvoiceEmailHtml(detail, publicLink, business, amountDue);
     return `<!doctype html>
@@ -2488,7 +2943,8 @@ export default class InvoiceDetailComponent implements OnDestroy {
     const sentAt = this.latestTimelineEventAt(detail, 'final invoice sent to customer');
     if (!sentAt) return false;
     const updatedAt = this.latestTimelineEventAt(detail, 'final invoice updated after send');
-    return !updatedAt || sentAt >= updatedAt;
+    const reversedAt = Math.max(0, ...(detail.refundTransactions || []).map(item => Date.parse(item.createdAt) || 0));
+    return sentAt >= Math.max(updatedAt, reversedAt);
   }
 
   private latestTimelineEventAt(detail: InvoiceDetail, needle: string): number {
@@ -2517,11 +2973,30 @@ export default class InvoiceDetailComponent implements OnDestroy {
   private resolveEmailLogoUrl(value: string): string {
     const raw = String(value || '').trim();
     if (!raw) return '';
-    if (/^https?:\/\//i.test(raw)) return raw;
-    const base = this.publicAppBaseUrl();
-    if (!base) return raw;
+    if (/^https?:\/\//i.test(raw)) return this.isPublicHttpsUrl(raw) ? raw : '';
+    const base = String(environment.publicAppUrl || '').trim().replace(/\/+$/, '');
+    if (!base || !this.isPublicHttpsUrl(base)) return '';
     if (raw.startsWith('/')) return `${base}${raw}`;
     return `${base}/${raw}`;
+  }
+
+  private isLoopbackUrl(value: string): boolean {
+    try {
+      const url = new URL(String(value || '').trim(), 'http://localhost');
+      const host = url.hostname.toLowerCase();
+      return host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1';
+    } catch {
+      return false;
+    }
+  }
+
+  private isPublicHttpsUrl(value: string): boolean {
+    try {
+      const url = new URL(String(value || '').trim());
+      return url.protocol === 'https:' && !this.isLoopbackUrl(url.href);
+    } catch {
+      return false;
+    }
   }
 
   private publicAppBaseUrl(): string {
@@ -2647,6 +3122,59 @@ export default class InvoiceDetailComponent implements OnDestroy {
     const value = String(message || '').trim();
     if (!value) return;
     setTimeout(() => this.setStatus(value, tone), 220);
+  }
+
+  private extractSendFailureReason(error: unknown): string {
+    const candidate = error as {
+      error?: { error?: string; message?: string; title?: string; detail?: string; errors?: unknown };
+      message?: string;
+      statusText?: string;
+      status?: number;
+      url?: string;
+    };
+    const nestedErrors = candidate?.error?.errors
+      ? (Array.isArray(candidate.error.errors)
+        ? candidate.error.errors.join(', ')
+        : JSON.stringify(candidate.error.errors))
+      : '';
+    const genericServerError = /^server error$/i.test(String(candidate?.error?.error || '').trim());
+    const raw =
+      (genericServerError ? '' : candidate?.error?.error) ||
+      candidate?.error?.detail ||
+      candidate?.error?.message ||
+      candidate?.error?.title ||
+      nestedErrors ||
+      candidate?.message ||
+      candidate?.statusText ||
+      '';
+    const normalized = String(raw).trim();
+    if (!normalized) {
+      const status = Number(candidate?.status || 0);
+      const url = String(candidate?.url || '').trim();
+      if (status && url) return `request failed with HTTP ${status} at ${url}`;
+      if (status) return `request failed with HTTP ${status}`;
+      return '';
+    }
+    if (/too\s*many\s*requests|\b429\b|rate limit|throttl/i.test(normalized)) {
+      return 'email service is rate limiting right now; retry in a moment';
+    }
+    if (/verify|verified|verification/i.test(normalized)) return 'number not verified';
+    if (/config|configured|from number|sender/i.test(normalized)) return 'sender not configured';
+    if (/forbidden|unauthorized|401|403/i.test(normalized)) return 'not authorized';
+    return normalized;
+  }
+
+  private composeDeliveryFailureMessage(
+    label: 'Invoice' | 'Quote',
+    attemptedEmail: boolean,
+    attemptedSms: boolean,
+    emailReason: string,
+    smsReason: string
+  ): string {
+    const reasons: string[] = [];
+    if (attemptedEmail) reasons.push(`Email${emailReason ? `: ${emailReason}` : ' failed'}`);
+    if (attemptedSms) reasons.push(`SMS${smsReason ? `: ${smsReason}` : ' failed'}`);
+    return `${label} send failed.${reasons.length ? ` ${reasons.join(' · ')}.` : ''}`;
   }
 
   private async presentStatusToast(message: string, tone: StatusTone): Promise<void> {

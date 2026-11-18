@@ -1,9 +1,5 @@
-import { Component, DestroyRef, effect, inject } from '@angular/core';
-import {
-  IonApp, IonRouterOutlet
-} from '@ionic/angular/standalone';
-import { addIcons } from 'ionicons';
-import { settingsOutline } from 'ionicons/icons';
+import { RouterOutlet } from '@angular/router';
+import { Component, DestroyRef, effect, inject, ChangeDetectionStrategy } from '@angular/core';
 import { ThemeService } from './services/theme.service';
 import { AuthService } from './auth/auth.service';
 import { BrandSettingsService } from './services/brand-settings.service';
@@ -12,9 +8,10 @@ import { BrandSettingsService } from './services/brand-settings.service';
   selector: 'app-root',
   standalone: true,
   imports: [
-    IonApp, IonRouterOutlet
+     RouterOutlet
   ],
   templateUrl: './app.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./app.component.scss']
 })
 export default class AppComponent {
@@ -41,6 +38,7 @@ export default class AppComponent {
   constructor() {
     // Keep app theme initialized at bootstrap.
     void this.theme;
+    this.runCustomerDataResetIfRequested();
     this.bindIdleTracking();
 
     effect(() => {
@@ -72,9 +70,6 @@ export default class AppComponent {
       this.applyFavicon(hasCustomLogo ? logoUrl : AppComponent.DEFAULT_FAVICON_URL);
     });
 
-    addIcons({
-      'settings-outline': settingsOutline
-    });
   }
 
   private bindIdleTracking(): void {
@@ -157,5 +152,53 @@ export default class AppComponent {
     } catch {
       return false;
     }
+  }
+
+  private runCustomerDataResetIfRequested(): void {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search || '');
+    const shouldReset =
+      params.get('resetCustomerData') === '1'
+      || params.get('resetCustomerData') === 'true';
+    if (!shouldReset) return;
+
+    const keep = [
+      /^pathflow\.auth\./i,
+      /^pathflow\.dev\.auth\.user$/i,
+      /^pathflow\.local\.password\.accounts$/i,
+      /^pathflow\.local\.passkeys$/i,
+      /^pathflow\.tenant\.id$/i,
+      /^pathflow\.ui\.theme$/i
+    ];
+    const shouldKeep = (key: string): boolean => keep.some(pattern => pattern.test(key));
+    const shouldClear = (key: string): boolean => {
+      if (!/^pathflow\./i.test(key)) return false;
+      if (shouldKeep(key)) return false;
+      return /invoice|quote|customer|workitem|notification|sms|message|job|schedule|purchase|task|attachment/i.test(key);
+    };
+
+    try {
+      for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+        const key = localStorage.key(index) || '';
+        if (shouldClear(key)) localStorage.removeItem(key);
+      }
+    } catch {
+      // Ignore storage errors; this is a local/dev reset helper only.
+    }
+
+    try {
+      for (let index = sessionStorage.length - 1; index >= 0; index -= 1) {
+        const key = sessionStorage.key(index) || '';
+        if (shouldClear(key) && key !== AppComponent.IDLE_REHYDRATE_FLAG_KEY) sessionStorage.removeItem(key);
+      }
+    } catch {
+      // Ignore storage errors; this is a local/dev reset helper only.
+    }
+
+    params.delete('resetCustomerData');
+    const nextQuery = params.toString();
+    const nextUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ''}${window.location.hash || ''}`;
+    window.history.replaceState(null, '', nextUrl);
+    window.location.reload();
   }
 }

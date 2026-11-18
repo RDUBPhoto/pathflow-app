@@ -1,15 +1,14 @@
+import { UiIcon } from '../../../ui/icons';
 import { Location } from '@angular/common';
-import { Component } from '@angular/core';
+import { Component, ChangeDetectionStrategy } from '@angular/core';
 import { Router } from '@angular/router';
-import { IonButton, IonIcon } from '@ionic/angular/standalone';
-import { addIcons } from 'ionicons';
-import { arrowBackOutline } from 'ionicons/icons';
 
 @Component({
   selector: 'app-page-back-button',
   standalone: true,
-  imports: [IonButton, IonIcon],
+  imports: [ UiIcon],
   templateUrl: './page-back-button.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./page-back-button.component.scss']
 })
 export class PageBackButtonComponent {
@@ -17,9 +16,6 @@ export class PageBackButtonComponent {
     private location: Location,
     private router: Router
   ) {
-    addIcons({
-      'arrow-back-outline': arrowBackOutline
-    });
   }
 
   goBack(): void {

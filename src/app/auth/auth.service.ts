@@ -1,7 +1,9 @@
-import { Injectable, computed, signal } from '@angular/core';
+import { Injectable, computed, inject, signal } from '@angular/core';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import { environment } from '../../environments/environment';
 import { formatUsPhoneInput, phoneDigits } from '../utils/phone-format';
+import { StartupTelemetryService } from '../services/startup-telemetry.service';
+import { normalizeAuthRedirect } from './auth-redirect';
 import {
   AccessProfileResponse,
   AuthAccessState,
@@ -11,9 +13,12 @@ import {
 } from './auth.models';
 
 const DEV_AUTH_STORAGE_KEY = 'pathflow.dev.auth.user';
+const LOCAL_SERVER_SESSION_KEY = 'pathflow.local.server-session';
 const AUTH_PROFILE_STORAGE_KEY = 'pathflow.auth.profile';
 const LOCAL_PASSWORD_ACCOUNTS_KEY = 'pathflow.local.password.accounts';
 const LOCAL_PASSKEYS_KEY = 'pathflow.local.passkeys';
+const AUTH_RUNTIME_CONFIG_CACHE_KEY = 'pathflow.auth.runtime-config.v1';
+const AUTH_RUNTIME_CONFIG_CACHE_TTL_MS = 5 * 60 * 1000;
 const AUTH_BOOTSTRAP_REQUEST_TIMEOUT_MS = 10000;
 const DEFAULT_LOCATION_ID = 'primary-location';
 const DEFAULT_LOCATION_NAME = 'Primary Location';
@@ -80,6 +85,7 @@ interface AccessHydrationResult {
 }
 
 interface AuthRuntimeConfig {
+  subscriptionBillingEnabled: boolean;
   primaryProvider: string;
   providers: string[];
   hostedEmailEnabled: boolean;
@@ -89,8 +95,9 @@ interface AuthRuntimeConfig {
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
+  private readonly telemetry = inject(StartupTelemetryService);
   private readonly isLocalHost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
-  private readonly shouldPreferLocalAuth = this.isLocalHost && (environment.auth.devBypass || environment.auth.localPasswordEnabled);
+  private readonly shouldPreferLocalAuth = this.isLocalHost && environment.auth.devBypass;
   private readonly authConfigSignal = signal<AuthRuntimeConfig>(this.buildAuthRuntimeConfigFromEnvironment());
   private readonly stateSignal = signal<AuthState>({
     initialized: false,
@@ -101,11 +108,13 @@ export class AuthService {
   private readonly accessSignal = signal<AuthAccessState>(this.emptyAccessState(false));
 
   private bootstrapping: Promise<void> | null = null;
+  private bootstrapGeneration = 0;
   private signOutInProgress = false;
 
   readonly state = computed(() => this.stateSignal());
   readonly initialized = computed(() => this.stateSignal().initialized);
   readonly loading = computed(() => this.stateSignal().loading);
+  readonly sessionCheckFailed = signal(false);
   readonly user = computed(() => this.stateSignal().user);
   readonly isAuthenticated = computed(() => this.stateSignal().user !== null);
   readonly isAdmin = computed(() => this.hasRole('admin'));
@@ -113,12 +122,14 @@ export class AuthService {
   readonly needsRegistration = computed(() => this.isAuthenticated() && this.accessSignal().loaded && !this.accessSignal().registered);
   readonly isAccessLocked = computed(() => this.accessSignal().accessLocked);
   readonly accessLockReason = computed(() => this.accessSignal().accessLockReason);
+  readonly subscriptionBillingEnabled = computed(() => this.authConfigSignal().subscriptionBillingEnabled);
   readonly billingStatus = computed(() => this.accessSignal().billingStatus);
   readonly trialEndsAt = computed(() => this.accessSignal().trialEndsAt);
   readonly planCycle = computed(() => this.accessSignal().planCycle);
   readonly authConfig = computed(() => this.authConfigSignal());
   readonly canBootstrapRegistration = computed(() => this.accessSignal().canBootstrap);
   readonly isSuperAdmin = computed(() => this.accessSignal().isSuperAdmin);
+  readonly areaAccess = computed(() => this.accessSignal().areaAccess);
   readonly locations = computed(() => this.accessSignal().locations);
   readonly defaultLocationId = computed(() => this.accessSignal().defaultLocationId);
 
@@ -127,29 +138,43 @@ export class AuthService {
   }
 
   bootstrap(force = false): Promise<void> {
-    if (!force && this.stateSignal().initialized) {
-      return Promise.resolve();
-    }
     if (!force && this.bootstrapping) {
       return this.bootstrapping;
     }
+    if (!force && this.stateSignal().initialized) {
+      return Promise.resolve();
+    }
 
     this.stateSignal.update(current => ({ ...current, loading: true }));
-    this.accessSignal.set(this.emptyAccessState(false));
+    const generation = ++this.bootstrapGeneration;
+    const startedAt = this.telemetry.now();
+    this.telemetry.mark('auth.bootstrap.start');
+    let outcome = 'ok';
 
-    this.bootstrapping = this.hydrateRuntimeAuthConfig()
-      .then(() => this.hydrateAuthState())
+    const runtimeConfigPromise = this.hydrateRuntimeAuthConfig();
+    const accessStatePromise: Promise<AccessHydrationResult | undefined> = this.prefersDevSession()
+      ? Promise.resolve(undefined)
+      : this.fetchAccessState();
+
+    this.bootstrapping = Promise.all([runtimeConfigPromise, accessStatePromise])
+      .then(([, access]) => {
+        if (generation !== this.bootstrapGeneration) return;
+        this.sessionCheckFailed.set(false);
+        this.hydrateAuthState(access);
+      })
       .catch(() => {
-        this.stateSignal.set({
-          initialized: true,
-          loading: false,
-          source: 'none',
-          user: null
-        });
-        this.accessSignal.set(this.emptyAccessState(true));
+        if (generation !== this.bootstrapGeneration) return;
+        outcome = 'unavailable';
+        this.sessionCheckFailed.set(true);
+        this.stateSignal.update(current => ({ ...current, initialized: true, loading: false }));
       })
       .finally(() => {
-        this.bootstrapping = null;
+        this.telemetry.trackDuration('auth.bootstrap', startedAt, {
+          outcome,
+          mode: this.shouldPreferLocalAuth ? 'local' : 'remote',
+          authenticated: this.stateSignal().user !== null
+        });
+        if (generation === this.bootstrapGeneration) this.bootstrapping = null;
       });
 
     return this.bootstrapping;
@@ -161,6 +186,15 @@ export class AuthService {
     const check = role.trim().toLowerCase();
     if (!check) return false;
     return user.roles.some(r => r.toLowerCase() === check);
+  }
+
+  hasAreaAccess(area: string): boolean {
+    const normalized = String(area || '').trim().toLowerCase();
+    if (!normalized) return true;
+    if (this.isAdmin() || this.isSuperAdmin()) return true;
+    const access = this.accessSignal().areaAccess || {};
+    if (!Object.prototype.hasOwnProperty.call(access, normalized)) return true;
+    return access[normalized] !== false;
   }
 
   signIn(provider?: string, redirectTo?: string): void {
@@ -178,7 +212,7 @@ export class AuthService {
       if (hosted) allowedProviders.add(hosted);
     }
     const selectedProvider = allowedProviders.has(requestedProvider) ? requestedProvider : primary;
-    const target = this.normalizeRedirect(redirectTo);
+    const target = normalizeAuthRedirect(redirectTo);
     const url = `/.auth/login/${selectedProvider}?post_login_redirect_uri=${encodeURIComponent(target)}`;
     window.location.assign(url);
   }
@@ -186,6 +220,8 @@ export class AuthService {
   signOut(redirectTo = '/'): void {
     if (this.signOutInProgress) return;
     this.signOutInProgress = true;
+    this.bootstrapGeneration++;
+    this.bootstrapping = null;
     const source = this.stateSignal().source;
     this.clearDevUser();
     this.stateSignal.set({
@@ -196,7 +232,7 @@ export class AuthService {
     });
     this.accessSignal.set(this.emptyAccessState(false));
 
-    const target = this.normalizeRedirect(redirectTo, '/');
+    const target = normalizeAuthRedirect(redirectTo, '/');
     const finalizeRedirect = () => {
       if (source !== 'swa') {
         window.location.assign(target);
@@ -219,6 +255,7 @@ export class AuthService {
   }
 
   signInDev(role: 'admin' | 'user', email?: string): void {
+    if (!this.shouldPreferLocalAuth) return;
     const fallbackEmail = role === 'admin' ? 'admin.local@yourcompany.dev' : 'user.local@yourcompany.dev';
     const record: DevAuthRecord = {
       role,
@@ -229,6 +266,7 @@ export class AuthService {
   }
 
   signInDevSuperAdmin(email = 'superadmin.local@yourcompany.dev'): void {
+    if (!this.shouldPreferLocalAuth) return;
     const record: DevAuthRecord = {
       role: 'admin',
       email: (email || 'superadmin.local@yourcompany.dev').trim().toLowerCase(),
@@ -281,7 +319,12 @@ export class AuthService {
       return { ok: true };
     };
 
-    if (!this.isLocalHost || this.authConfigSignal().localPasswordEnabled) {
+    if (this.shouldPreferLocalAuth) {
+      const localResult = tryLocalSeedFallback();
+      if (localResult.ok) return localResult;
+    }
+
+    if (this.authConfigSignal().localPasswordEnabled) {
       try {
         const response = await fetch('/api/access', {
           method: 'POST',
@@ -297,14 +340,9 @@ export class AuthService {
           })
         });
         const payload = await response.json() as { ok?: boolean; error?: string };
-        if (!response.ok || !payload?.ok) {
-          if (this.isLocalHost) return tryLocalSeedFallback();
-          return { ok: false, error: String(payload?.error || 'Invalid email or password.') };
-        }
-        await this.bootstrap(true);
-        return { ok: true };
+        if (!response.ok || !payload?.ok) return { ok: false, error: String(payload?.error || 'Invalid email or password.') };
+        return await this.confirmAppSession(email);
       } catch {
-        if (this.isLocalHost) return tryLocalSeedFallback();
         return { ok: false, error: 'Unable to sign in right now. Please try again.' };
       }
     }
@@ -324,8 +362,8 @@ export class AuthService {
       return { ok: false, error: 'Enter your email to use biometric sign-in.' };
     }
 
-    const hasLocalPasskey = this.isLocalHost && this.hasPasskeyForEmail(email);
-    const shouldUseServerPasskeys = !hasLocalPasskey && (!this.isLocalHost || this.authConfigSignal().localPasswordEnabled);
+    const shouldUseServerPasskeys = this.authConfigSignal().localPasswordEnabled &&
+      (!this.shouldPreferLocalAuth || !this.resolveLocalPasswordAccount(email));
 
     if (shouldUseServerPasskeys) {
       try {
@@ -364,8 +402,7 @@ export class AuthService {
         if (!verifyResponse.ok || !verifyPayload?.ok) {
           return { ok: false, error: String(verifyPayload?.error || 'Passkey verification failed.') };
         }
-        await this.bootstrap(true);
-        return { ok: true };
+        return await this.confirmAppSession(email);
       } catch {
         return { ok: false, error: 'Biometric sign-in was cancelled or unavailable.' };
       }
@@ -455,7 +492,7 @@ export class AuthService {
     }
 
     const isDevSession = this.stateSignal().source === 'dev';
-    const shouldUseServerPasskeys = !isDevSession && (!this.isLocalHost || this.authConfigSignal().localPasswordEnabled);
+    const shouldUseServerPasskeys = !isDevSession && this.authConfigSignal().localPasswordEnabled;
 
     if (shouldUseServerPasskeys) {
       try {
@@ -644,7 +681,7 @@ export class AuthService {
       return { ok: false, error: 'Password must be at least 8 characters.' };
     }
 
-    if (!this.isLocalHost || this.authConfigSignal().localPasswordEnabled) {
+    if (this.authConfigSignal().localPasswordEnabled) {
       try {
         const response = await fetch('/api/access', {
           method: 'POST',
@@ -665,8 +702,7 @@ export class AuthService {
         if (!response.ok || !payload?.ok) {
           return { ok: false, error: String(payload?.error || 'Unable to create your account right now.') };
         }
-        await this.bootstrap(true);
-        return { ok: true };
+        return await this.confirmAppSession(email);
       } catch {
         return { ok: false, error: 'Unable to create your account right now.' };
       }
@@ -871,6 +907,22 @@ export class AuthService {
     }
   }
 
+  async resetPassword(token: string, password: string): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const response = await this.fetchWithTimeout('/api/access', AUTH_BOOTSTRAP_REQUEST_TIMEOUT_MS, {
+        method: 'POST', credentials: 'include',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ op: 'reset-password', token, password })
+      }, 'auth.reset.request');
+      const payload = await this.safeJson<{ ok?: boolean; error?: string }>(response);
+      if (!response.ok || !payload?.ok) return { ok: false, error: payload?.error || 'Could not save your password. Request a new link and try again.' };
+      await this.bootstrap(true);
+      return { ok: true };
+    } catch {
+      return { ok: false, error: 'Could not save your password. Please try again.' };
+    }
+  }
+
   updateProfile(patch: { email?: string; avatarUrl?: string; displayName?: string }): { ok: boolean; error?: string } {
     const current = this.user();
     const source = this.stateSignal().source;
@@ -918,14 +970,19 @@ export class AuthService {
 
   clearDevUser(): void {
     localStorage.removeItem(DEV_AUTH_STORAGE_KEY);
+    localStorage.removeItem(LOCAL_SERVER_SESSION_KEY);
   }
 
   async refresh(): Promise<void> {
     await this.bootstrap(true);
   }
 
-  private async hydrateAuthState(): Promise<void> {
-    if (this.shouldPreferLocalAuth) {
+  recheckSession(): Promise<void> {
+    return this.bootstrapping || this.bootstrap(true);
+  }
+
+  private hydrateAuthState(access?: AccessHydrationResult): void {
+    if (!access && this.prefersDevSession()) {
       const devRecord = this.readDevRecord();
       if (devRecord) {
         this.setDevUser(devRecord);
@@ -941,8 +998,7 @@ export class AuthService {
       return;
     }
 
-    const access = await this.fetchAccessState();
-    if (access.principal) {
+    if (access?.principal) {
       const principalUser = this.accessPrincipalToUser(access.principal, access.roles);
       this.stateSignal.set({
         initialized: true,
@@ -954,14 +1010,6 @@ export class AuthService {
       return;
     }
 
-    if (this.isLocalAuthEnabled()) {
-      const devRecord = this.readDevRecord();
-      if (devRecord) {
-        this.setDevUser(devRecord);
-        return;
-      }
-    }
-
     this.stateSignal.set({
       initialized: true,
       loading: false,
@@ -971,6 +1019,18 @@ export class AuthService {
     this.accessSignal.set(this.emptyAccessState(true));
   }
 
+  private async confirmAppSession(email: string): Promise<{ ok: boolean; error?: string }> {
+    if (this.shouldPreferLocalAuth) localStorage.setItem(LOCAL_SERVER_SESSION_KEY, '1');
+    await this.bootstrap(true);
+    const state = this.stateSignal();
+    if (!this.sessionCheckFailed() && state.source === 'session' && state.user?.email === email) return { ok: true };
+    return { ok: false, error: 'Unable to confirm your sign-in. Please try again.' };
+  }
+
+  private prefersDevSession(): boolean {
+    return this.shouldPreferLocalAuth && localStorage.getItem(LOCAL_SERVER_SESSION_KEY) !== '1';
+  }
+
   private async hydrateRuntimeAuthConfig(): Promise<void> {
     const fallback = this.buildAuthRuntimeConfigFromEnvironment();
     if (this.shouldPreferLocalAuth) {
@@ -978,6 +1038,17 @@ export class AuthService {
       return;
     }
 
+    const cached = this.readCachedAuthRuntimeConfig();
+    if (cached) {
+      this.authConfigSignal.set(cached);
+      void this.refreshRuntimeAuthConfig(fallback, true);
+      return;
+    }
+
+    await this.refreshRuntimeAuthConfig(fallback, false);
+  }
+
+  private async refreshRuntimeAuthConfig(fallback: AuthRuntimeConfig, preserveCurrent: boolean): Promise<void> {
     try {
       const response = await this.fetchWithTimeout('/api/access?op=auth-config', AUTH_BOOTSTRAP_REQUEST_TIMEOUT_MS, {
         method: 'GET',
@@ -985,89 +1056,78 @@ export class AuthService {
         headers: {
           Accept: 'application/json'
         }
-      });
+      }, 'auth.config.request');
       if (!response.ok) {
-        this.authConfigSignal.set(fallback);
+        if (!preserveCurrent) this.authConfigSignal.set(fallback);
         return;
       }
       const payload = await response.json() as { ok?: boolean; config?: unknown };
       if (!payload?.ok) {
-        this.authConfigSignal.set(fallback);
+        if (!preserveCurrent) this.authConfigSignal.set(fallback);
         return;
       }
       const runtimeConfig = this.coerceAuthRuntimeConfig(payload.config);
-      this.authConfigSignal.set(runtimeConfig || fallback);
+      const resolved = runtimeConfig || fallback;
+      this.authConfigSignal.set(resolved);
+      if (runtimeConfig) this.writeCachedAuthRuntimeConfig(runtimeConfig);
     } catch {
-      this.authConfigSignal.set(fallback);
+      if (!preserveCurrent) this.authConfigSignal.set(fallback);
     }
   }
 
-  private normalizeRedirect(path?: string, fallback = '/dashboard'): string {
-    const candidate = (path || '').trim();
-    if (!candidate.startsWith('/')) return fallback;
-    if (candidate.startsWith('/.auth/')) return fallback;
-    return candidate;
-  }
-
   private async fetchAccessState(): Promise<AccessHydrationResult> {
-    try {
-      const response = await this.fetchWithTimeout('/api/access?scope=me', AUTH_BOOTSTRAP_REQUEST_TIMEOUT_MS, {
-        method: 'GET',
-        credentials: 'include',
-        headers: {
-          Accept: 'application/json'
-        }
-      });
-
-      const payload = (await response.json()) as AccessProfileResponse;
-      if (!response.ok || !payload || !payload.ok) {
-        return {
-          roles: [],
-          state: this.emptyAccessState(true, { registered: false, canBootstrap: false }),
-          principal: null
-        };
+    const response = await this.fetchWithTimeout('/api/access?scope=me', AUTH_BOOTSTRAP_REQUEST_TIMEOUT_MS, {
+      method: 'GET',
+      credentials: 'include',
+      headers: {
+        Accept: 'application/json'
       }
+    }, 'auth.state.request');
 
-      const principal = this.normalizeAccessPrincipal(payload.principal);
-      const profile = payload.profile || null;
-      if (!profile) {
-        return {
-          roles: [],
-          state: this.emptyAccessState(true, {
-            registered: false,
-            canBootstrap: !!payload.canBootstrap
-          }),
-          principal
-        };
-      }
-
-      const locations = this.normalizeLocations(profile.locations);
-      const defaultLocationId = this.pickDefaultLocationId(profile.defaultLocationId, locations);
-      return {
-        roles: this.normalizeRoleList(profile.roles || []),
-        state: {
-          loaded: true,
-          registered: true,
-          canBootstrap: !!payload.canBootstrap,
-          isSuperAdmin: !!profile.isSuperAdmin,
-          locations,
-          defaultLocationId,
-          billingStatus: String(profile.billingStatus || '').trim().toLowerCase() || 'trial',
-          trialStartsAt: String(profile.trialStartsAt || '').trim(),
-          trialEndsAt: String(profile.trialEndsAt || '').trim(),
-          accessLocked: !!profile.accessLocked,
-          accessLockReason: String(profile.accessLockReason || '').trim(),
-          planCycle: this.normalizePlanCycle(profile.planCycle)
-        },
-        principal
-      };
-    } catch {
+    const payload = await this.safeJson<AccessProfileResponse & Record<string, unknown>>(response);
+    if (response.status === 401 || (response.ok && payload?.ok === false && payload.principal === null)) {
       return {
         roles: [],
         state: this.emptyAccessState(true, { registered: false, canBootstrap: false }),
         principal: null
       };
     }
+    if (!response.ok || !payload?.ok || !payload.principal) throw new Error('Access check failed.');
+
+    const principal = this.normalizeAccessPrincipal(payload.principal);
+    const profile = payload.profile || null;
+    if (!profile) {
+      return {
+        roles: [],
+        state: this.emptyAccessState(true, {
+          registered: false,
+          canBootstrap: !!payload.canBootstrap
+        }),
+        principal
+      };
+    }
+
+    const locations = this.normalizeLocations(profile.locations);
+    const defaultLocationId = this.pickDefaultLocationId(profile.defaultLocationId, locations);
+    return {
+      roles: this.normalizeRoleList(profile.roles || []),
+      state: {
+        loaded: true,
+        registered: true,
+        canBootstrap: !!payload.canBootstrap,
+        isSuperAdmin: !!profile.isSuperAdmin,
+        areaAccess: this.normalizeAreaAccess(profile.areaAccess),
+        locations,
+        defaultLocationId,
+        billingStatus: String(profile.billingStatus || '').trim().toLowerCase() || 'trial',
+        trialStartsAt: String(profile.trialStartsAt || '').trim(),
+        trialEndsAt: String(profile.trialEndsAt || '').trim(),
+        accessLocked: !!profile.accessLocked,
+        accessLockReason: String(profile.accessLockReason || '').trim(),
+        planCycle: this.normalizePlanCycle(profile.planCycle)
+      },
+      principal
+    };
   }
 
   private normalizeAccessPrincipal(input: AccessProfileResponse['principal']): AccessHydrationResult['principal'] {
@@ -1164,6 +1224,7 @@ export class AuthService {
       registered: false,
       canBootstrap: false,
       isSuperAdmin: false,
+      areaAccess: {},
       locations: [],
       defaultLocationId: '',
       billingStatus: 'trial',
@@ -1174,6 +1235,17 @@ export class AuthService {
       planCycle: 'monthly',
       ...patch
     };
+  }
+
+  private normalizeAreaAccess(input: Record<string, boolean> | undefined): Record<string, boolean> {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return {};
+    const out: Record<string, boolean> = {};
+    for (const [key, value] of Object.entries(input)) {
+      const normalized = String(key || '').trim().toLowerCase();
+      if (!normalized) continue;
+      out[normalized] = value !== false;
+    }
+    return out;
   }
 
   private sanitizeTenantId(value: string): string {
@@ -1232,6 +1304,7 @@ export class AuthService {
   }
 
   private setDevUser(record: DevAuthRecord, options?: DevSessionOptions): void {
+    localStorage.removeItem(LOCAL_SERVER_SESSION_KEY);
     localStorage.setItem(DEV_AUTH_STORAGE_KEY, JSON.stringify(record));
     const user = this.devRecordToUser(record);
     this.stateSignal.set({
@@ -1250,6 +1323,7 @@ export class AuthService {
       registered,
       canBootstrap: options?.canBootstrap ?? !registered,
       isSuperAdmin: options?.isSuperAdmin ?? user.roles.includes('admin'),
+      areaAccess: {},
       locations: registered ? locationList : [],
       defaultLocationId: registered ? (options?.defaultLocationId || defaultLocation.id) : '',
       billingStatus: options?.billingStatus || 'trial',
@@ -1262,7 +1336,7 @@ export class AuthService {
   }
 
   private isLocalAuthEnabled(): boolean {
-    return environment.auth.devBypass || this.authConfigSignal().localPasswordEnabled || this.isLocalHost;
+    return this.shouldPreferLocalAuth || this.authConfigSignal().localPasswordEnabled;
   }
 
   private buildAuthRuntimeConfigFromEnvironment(): AuthRuntimeConfig {
@@ -1286,17 +1360,59 @@ export class AuthService {
       providers: Array.from(providers),
       hostedEmailEnabled,
       hostedEmailProvider: hostedEmailEnabled ? hostedEmailProvider : '',
+      subscriptionBillingEnabled: false,
       localPasswordEnabled: !!environment.auth.localPasswordEnabled
     };
   }
 
-  private async fetchWithTimeout(input: string, timeoutMs: number, init: RequestInit): Promise<Response> {
+  private async fetchWithTimeout(
+    input: string,
+    timeoutMs: number,
+    init: RequestInit,
+    telemetryEvent: string
+  ): Promise<Response> {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), Math.max(1000, timeoutMs || 0));
+    const startedAt = this.telemetry.now();
+    let outcome = 'error';
+    let status = 0;
     try {
-      return await fetch(input, { ...init, signal: controller.signal });
+      const response = await fetch(input, { ...init, signal: controller.signal });
+      status = response.status;
+      outcome = response.ok ? 'ok' : 'http-error';
+      return response;
+    } catch (error) {
+      outcome = error instanceof DOMException && error.name === 'AbortError' ? 'timeout' : 'network-error';
+      throw error;
     } finally {
       window.clearTimeout(timeoutId);
+      this.telemetry.trackDuration(telemetryEvent, startedAt, { outcome, status });
+    }
+  }
+
+  private readCachedAuthRuntimeConfig(): AuthRuntimeConfig | null {
+    try {
+      const raw = sessionStorage.getItem(AUTH_RUNTIME_CONFIG_CACHE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as { expiresAt?: number; config?: unknown };
+      if (!Number.isFinite(parsed.expiresAt) || Number(parsed.expiresAt) <= Date.now()) {
+        sessionStorage.removeItem(AUTH_RUNTIME_CONFIG_CACHE_KEY);
+        return null;
+      }
+      return this.coerceAuthRuntimeConfig(parsed.config);
+    } catch {
+      return null;
+    }
+  }
+
+  private writeCachedAuthRuntimeConfig(config: AuthRuntimeConfig): void {
+    try {
+      sessionStorage.setItem(AUTH_RUNTIME_CONFIG_CACHE_KEY, JSON.stringify({
+        expiresAt: Date.now() + AUTH_RUNTIME_CONFIG_CACHE_TTL_MS,
+        config
+      }));
+    } catch {
+      // Runtime configuration caching is an optimization only.
     }
   }
 
@@ -1322,6 +1438,7 @@ export class AuthService {
       providers: Array.from(providers),
       hostedEmailEnabled,
       hostedEmailProvider: hostedEmailEnabled ? hostedEmailProvider : '',
+      subscriptionBillingEnabled: raw.subscriptionBillingEnabled === true,
       localPasswordEnabled: !!raw.localPasswordEnabled
     };
   }
@@ -1397,13 +1514,13 @@ export class AuthService {
     };
   }
 
-  private createChallenge(size = 32): Uint8Array {
+  private createChallenge(size = 32): Uint8Array<ArrayBuffer> {
     const bytes = new Uint8Array(size);
     crypto.getRandomValues(bytes);
     return bytes;
   }
 
-  private createUserIdBytes(email: string): Uint8Array {
+  private createUserIdBytes(email: string): Uint8Array<ArrayBuffer> {
     const source = String(email || '').trim().toLowerCase().slice(0, 64);
     return new TextEncoder().encode(source || crypto.randomUUID());
   }
@@ -1416,7 +1533,7 @@ export class AuthService {
     return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
   }
 
-  private base64UrlToBytes(value: string): Uint8Array | null {
+  private base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> | null {
     const normalized = String(value || '').replace(/-/g, '+').replace(/_/g, '/');
     if (!normalized) return null;
     const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);

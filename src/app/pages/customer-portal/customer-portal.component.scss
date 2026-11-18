@@ -1,0 +1,48 @@
+:host {
+  display: block;
+  min-height: 100vh;
+  background: var(--tblr-bg-surface-secondary);
+}
+
+.visit-page {
+  max-width: 65rem;
+  margin-inline: auto;
+  padding: clamp(1rem, 4vw, 3rem);
+}
+
+.visit-header {
+  margin-bottom: 1.5rem;
+
+  h1 { font-size: clamp(1.9rem, 5vw, 2.8rem); margin-bottom: .25rem; }
+  p { margin-bottom: .5rem; }
+}
+
+.business-name { color: var(--tblr-primary); font-weight: 600; }
+.visit-loading, .error-card { margin-block: 2rem; }
+.appointment { border-top: 1px solid var(--tblr-border-color); }
+
+.visit-documents {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 21rem), 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.visit-lines {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1rem;
+
+  li {
+    display: flex;
+    gap: .75rem;
+    justify-content: space-between;
+    padding: .55rem 0;
+    border-bottom: 1px solid var(--tblr-border-color);
+  }
+}
+
+.visit-total, .visit-actions { display: flex; gap: .65rem; justify-content: space-between; }
+.visit-total { margin-block: .4rem; }
+.visit-note { margin-top: 1rem; white-space: pre-wrap; }
+.visit-actions { justify-content: flex-start; flex-wrap: wrap; margin-top: 1rem; }

@@ -1,3 +1,4 @@
+const { scopedTenantPartition } = require("../_shared/notification-partition");
 const { TableClient } = require("../_shared/table-client");
 const { BlobServiceClient } = require("@azure/storage-blob");
 const { EmailClient } = require("@azure/communication-email");
@@ -799,6 +800,31 @@ async function sendViaSendgrid(to, subject, message, sender, html) {
   };
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function retryDelayMsFromError(error, attempt) {
+  const retryAfter = error && error.response && error.response.headers
+    ? Number(error.response.headers.get && error.response.headers.get("retry-after"))
+    : NaN;
+  if (Number.isFinite(retryAfter) && retryAfter >= 0) {
+    return Math.min(5000, Math.max(500, retryAfter * 1000));
+  }
+  return Math.min(5000, 650 * Math.max(1, attempt));
+}
+
+function isRetryableAzureEmailError(error) {
+  const statusCode = Number(error && (error.statusCode || error.status || error.code));
+  const message = asString(error && error.message).toLowerCase();
+  if (statusCode === 429 || statusCode === 408) return true;
+  if (statusCode >= 500 && statusCode < 600) return true;
+  return message.includes("too many requests")
+    || message.includes("rate limit")
+    || message.includes("throttl")
+    || message.includes("timeout");
+}
+
 async function sendViaAzureEmail(to, subject, message, sender, html) {
   const conn = getAzureEmailConnectionString();
   const from = normalizeEmail(sender && sender.fromEmail);
@@ -817,19 +843,50 @@ async function sendViaAzureEmail(to, subject, message, sender, html) {
       to: [{ address: asString(to) }]
     }
   };
-  const htmlValue = asString(html);
-  if (htmlValue) payload.content.html = htmlValue;
-
-  const poller = await emailClient.beginSend(payload);
-  const result = await poller.pollUntilDone();
-  const status = asString(result && result.status).toLowerCase();
-  if (status && status !== "succeeded") {
-    throw new Error(`Azure Email rejected message (${status}).`);
+  let htmlValue = asString(html);
+  let attachments = [];
+  if (htmlValue) {
+    const prepared = await buildInlineBrandingAttachments(htmlValue);
+    htmlValue = prepared.html;
+    attachments = prepared.attachments;
   }
-  return {
-    provider: "azure",
-    providerMessageId: asString(result && result.id)
-  };
+  if (htmlValue) payload.content.html = htmlValue;
+  if (attachments.length) {
+    payload.attachments = attachments.map((attachment) => ({
+      name: asString(attachment.filename) || "logo.png",
+      contentType: asString(attachment.type) || "application/octet-stream",
+      contentInBase64: asString(attachment.content),
+      contentId: asString(attachment.content_id)
+    })).filter((attachment) => attachment.contentInBase64 && attachment.contentId);
+  }
+
+  let lastError = null;
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const poller = await emailClient.beginSend(payload);
+      const result = await poller.pollUntilDone();
+      const status = asString(result && result.status).toLowerCase();
+      if (status && status !== "succeeded") {
+        throw new Error(`Azure Email rejected message (${status}).`);
+      }
+      return {
+        provider: "azure",
+        providerMessageId: asString(result && result.id)
+      };
+    } catch (err) {
+      lastError = err;
+      if (attempt >= maxAttempts || !isRetryableAzureEmailError(err)) break;
+      await sleep(retryDelayMsFromError(err, attempt));
+    }
+  }
+
+  const statusCode = Number(lastError && (lastError.statusCode || lastError.status || 0));
+  const errorMessage = asString(lastError && lastError.message);
+  if (statusCode === 429 || /too many requests|rate limit|throttl/i.test(errorMessage)) {
+    throw new Error("Azure Email is rate limiting sends right now. Please retry in a moment.");
+  }
+  throw lastError || new Error("Azure Email send failed.");
 }
 
 function inferContentTypeFromBlobName(blobName) {
@@ -859,15 +916,26 @@ function parseBlobNamesFromHtml(html) {
 
 function extractBlobNameFromBrandingUrl(rawValue) {
   const raw = asString(rawValue).replace(/&amp;/g, "&").trim();
-  if (!raw || raw.indexOf("/api/brandingUpload") < 0) return "";
+  if (!raw) return "";
   try {
     const parsed = new URL(raw, "https://local");
-    const blob = asString(parsed.searchParams.get("blob"));
-    if (!blob) return "";
-    return decodeURIComponent(blob).replace(/^\/+/, "");
+    if (parsed.pathname === "/api/brandingUpload") {
+      const blob = asString(parsed.searchParams.get("blob"));
+      if (!blob) return "";
+      return decodeURIComponent(blob).replace(/^\/+/, "");
+    }
+    const marker = `/${BRANDING_CONTAINER}/`;
+    const markerIndex = parsed.pathname.indexOf(marker);
+    if (markerIndex >= 0) {
+      return decodeURIComponent(parsed.pathname.slice(markerIndex + marker.length)).replace(/^\/+/, "");
+    }
   } catch (_) {
     return "";
   }
+  if (!raw.startsWith("http://") && !raw.startsWith("https://") && !raw.startsWith("/")) {
+    return raw.replace(/^\/+/, "");
+  }
+  return "";
 }
 
 function replaceBlobUrlsWithCid(html, blobNameToCid) {
@@ -986,7 +1054,8 @@ async function createInboundEmailNotifications(notificationClient, userClient, t
     const rowKey = randomUUID();
     await notificationClient.upsertEntity(
       {
-        partitionKey: tenantId,
+        partitionKey: scopedTenantPartition(tenantId),
+        tenantId,
         rowKey,
         type: "inboundEmail",
         title: "New Email Received",
@@ -1330,69 +1399,11 @@ module.exports = async function (context, req) {
       return;
     }
 
-    const templateClient = await getTableClient(EMAIL_TEMPLATE_TABLE);
-    const sender = await getSenderConfig(templateClient, tenantId);
-    const config = await getConfigStatus(templateClient, tenantId);
-    const composed = skipFooterTerms
-      ? { message: requestMessage, html: requestHtml || "" }
-      : appendGlobalFooter(
-        requestMessage,
-        requestHtml,
-        await getEmailFooterTerms(await getTableClient(APP_SETTINGS_TABLE), tenantId)
-      );
-    let simulated = true;
-    let provider = config.provider;
-    let providerMessageId = "";
-
-    if (config.mode === "sendgrid" || config.mode === "azure") {
-      if (!config.readyForLive) {
-        context.res = json(500, {
-          error: config.mode === "azure"
-            ? "EMAIL_MODE is azure but ACS_EMAIL_CONNECTION_STRING (or COMMUNICATION_SERVICES_CONNECTION_STRING) or EMAIL_FROM is missing."
-            : "EMAIL_MODE is sendgrid but SENDGRID_API_KEY or EMAIL_FROM is missing."
-        });
-        return;
-      }
-      const sendResult = config.mode === "azure"
-        ? await sendViaAzureEmail(requestTo, requestSubject, composed.message, sender, composed.html)
-        : await sendViaSendgrid(requestTo, requestSubject, composed.message, sender, composed.html);
-      simulated = false;
-      provider = sendResult.provider;
-      providerMessageId = sendResult.providerMessageId;
-    } else {
-      if (typeof context.log === "function") {
-        context.log("[email][mock] to=%s subject=%s", requestTo, requestSubject);
-      }
-    }
-
-    const messageClient = await getTableClient(EMAIL_TABLE);
-    const saved = await saveEmailMessage(messageClient, tenantId, {
-      customerId: requestedCustomerId,
-      customerName: requestedCustomerName,
-      direction: "outbound",
-      from: sender.fromEmail || config.fromEmail || "",
-      to: requestTo,
-      subject: requestSubject,
-      message: composed.message,
-      html: composed.html,
-      read: true,
-      readAt: new Date().toISOString(),
-      simulated,
-      provider,
-      providerMessageId
+    const sent = await sendOutboundEmail(context, tenantId, {
+      to: requestTo, subject: requestSubject, message: requestMessage, html: requestHtml,
+      customerId: requestedCustomerId, customerName: requestedCustomerName, skipFooterTerms
     });
-
-    context.res = json(200, {
-      ok: true,
-      mode: config.mode,
-      provider,
-      simulated,
-      id: saved.id,
-      createdAt: saved.createdAt,
-      to: requestTo,
-      customerId: requestedCustomerId || null,
-      messageId: providerMessageId || null
-    });
+    context.res = json(200, sent);
   } catch (err) {
     if (context.log && typeof context.log.error === "function") context.log.error(err);
     context.res = json(500, {
@@ -1401,3 +1412,42 @@ module.exports = async function (context, req) {
     });
   }
 };
+
+
+async function sendOutboundEmail(context, tenantId, payload) {
+  const { to, subject, message, html, customerId, customerName, skipFooterTerms } = payload;
+  const templateClient = await getTableClient(EMAIL_TEMPLATE_TABLE);
+  const sender = await getSenderConfig(templateClient, tenantId);
+  const config = await getConfigStatus(templateClient, tenantId);
+  const composed = skipFooterTerms
+    ? { message, html: html || "" }
+    : appendGlobalFooter(message, html, await getEmailFooterTerms(await getTableClient(APP_SETTINGS_TABLE), tenantId));
+  let simulated = true;
+  let provider = config.provider;
+  let providerMessageId = "";
+
+  if (config.mode === "sendgrid" || config.mode === "azure") {
+    if (!config.readyForLive) throw new Error(config.mode === "azure"
+      ? "EMAIL_MODE is azure but ACS_EMAIL_CONNECTION_STRING (or COMMUNICATION_SERVICES_CONNECTION_STRING) or EMAIL_FROM is missing."
+      : "EMAIL_MODE is sendgrid but SENDGRID_API_KEY or EMAIL_FROM is missing.");
+    const sent = config.mode === "azure"
+      ? await sendViaAzureEmail(to, subject, composed.message, sender, composed.html)
+      : await sendViaSendgrid(to, subject, composed.message, sender, composed.html);
+    simulated = false;
+    provider = sent.provider;
+    providerMessageId = sent.providerMessageId;
+  } else if (typeof context.log === "function") {
+    context.log("[email][mock] to=%s subject=%s", to, subject);
+  }
+
+  const saved = await saveEmailMessage(await getTableClient(EMAIL_TABLE), tenantId, {
+    customerId, customerName, direction: "outbound",
+    from: sender.fromEmail || config.fromEmail || "", to, subject,
+    message: composed.message, html: composed.html, read: true, readAt: new Date().toISOString(),
+    simulated, provider, providerMessageId
+  });
+  return { ok: true, mode: config.mode, provider, simulated, id: saved.id, createdAt: saved.createdAt,
+    to, customerId: customerId || null, messageId: providerMessageId || null };
+}
+
+module.exports.sendOutboundEmail = sendOutboundEmail;

@@ -11,13 +11,13 @@ export class TenantContextService {
 
   readonly tenantId = computed(() => {
     const overrideRaw = this.tenantOverride();
-    const override = this.sanitizeTenantId(overrideRaw);
+    const override = this.sanitizeOptionalTenantId(overrideRaw);
     const locations = this.auth.locations();
     const overrideAllowed = !override || !locations.length || locations.some(location => location.id === override);
     const defaultLocation = this.auth.defaultLocationId();
     const emailTenant = this.tenantFromEmail(this.auth.user()?.email || '');
     const hostTenant = this.tenantFromHost(window.location.hostname || '');
-    const preferredOverride = overrideAllowed ? override : '';
+    const preferredOverride = override && overrideAllowed ? override : '';
     return this.sanitizeTenantId(preferredOverride || defaultLocation || emailTenant || hostTenant || DEFAULT_TENANT_ID);
   });
 
@@ -77,5 +77,14 @@ export class TenantContextService {
       .replace(/^-+|-+$/g, '')
       .slice(0, 80);
     return cleaned || DEFAULT_TENANT_ID;
+  }
+
+  private sanitizeOptionalTenantId(value: string): string {
+    const cleaned = String(value || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9._:-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 80);
+    return cleaned;
   }
 }

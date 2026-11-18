@@ -1,14 +1,18 @@
 :host {
-  display: block;
+  display: flex;
+  flex-direction: column;
   height: 100%;
-}
-
-ion-content {
-  --padding-bottom: 16px;
+  min-height: 0;
 }
 
 .schedule-content {
   position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.schedule-controls {
+  flex: none;
 }
 
 .feedback-overlay {
@@ -48,12 +52,39 @@ ion-content {
 .validation-error {
   margin-top: 8px;
   font-size: 12px;
-  color: var(--ion-color-danger, #ef4444);
+  color: var(--ui-color-danger, #ef4444);
 }
 
 .hint-text {
   margin-top: 8px;
   font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.appointment-editor-modal {
+  --ui-dialog-width: 45rem;
+  --ui-dialog-height: 47.5rem;
+}
+
+.appointment-editor-modal .modal-form-content {
+  --padding-bottom: calc(128px + env(safe-area-inset-bottom));
+}
+
+.editor-parts-panel {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.18);
+}
+
+.editor-parts-heading {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--app-text-muted);
 }
 
@@ -73,6 +104,10 @@ ion-content {
 }
 
 .parts-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 6px;
+  row-gap: 2px;
   color: var(--app-text);
   font-size: 13px;
   line-height: 1.35;
@@ -84,10 +119,19 @@ ion-content {
 
 .parts-name {
   font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .parts-meta {
+  grid-column: 2;
   color: var(--app-text-muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .parts-empty {
@@ -97,6 +141,139 @@ ion-content {
   color: var(--app-text-muted);
   font-size: 12px;
   padding: 10px 12px;
+}
+
+.appointment-summary,
+.appointment-channel-panel,
+.appointment-message-panel,
+.appointment-preview {
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.2);
+}
+
+.appointment-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+
+.appointment-summary > div {
+  display: grid;
+  gap: 4px;
+}
+
+.summary-label,
+.preview-title,
+.appointment-message-panel label {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+}
+
+.appointment-channel-panel {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.channel-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.channel-row input {
+  width: 16px;
+  height: 16px;
+}
+
+.channel-row span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.channel-row small {
+  color: var(--app-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channel-row.disabled {
+  opacity: 0.58;
+}
+
+.appointment-message-panel {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.appointment-message-panel textarea {
+  width: 100%;
+  min-height: 110px;
+  resize: vertical;
+  border-radius: 10px;
+  border: 1px solid var(--app-border-subtle);
+  background: rgba(15, 23, 42, 0.28);
+  color: var(--app-text);
+  padding: 12px;
+  font: inherit;
+  line-height: 1.4;
+}
+
+.appointment-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.appointment-preview {
+  padding: 12px;
+  min-height: 118px;
+}
+
+.appointment-preview p {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--app-text);
+  line-height: 1.45;
+}
+
+.appointment-error {
+  margin: 12px 0 0;
+  color: #fecaca;
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  background: rgba(127, 29, 29, 0.18);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.appointment-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+@media (max-width: 760px) {
+  .appointment-summary,
+  .appointment-preview-grid {
+    grid-template-columns: 1fr;
+  }
+
 }
 
 .calendar-toolbar {
@@ -175,6 +352,19 @@ ion-content {
   margin-bottom: 8px;
 }
 
+.planner-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.manual-slot {
+  border-color: var(--app-nav-active-border);
+  background: var(--app-nav-active-bg);
+  color: var(--app-nav-active-text);
+}
+
 .planner-hints-header h3 {
   margin: 0;
   font-size: 14px;
@@ -230,14 +420,17 @@ ion-content {
 .schedule-shell {
   border-radius: 16px;
   padding: 12px;
-  box-shadow: var(--glass-shadow);
-  height: 100%;
-  min-height: 420px;
-  flex: 1 1 auto;
+  box-shadow: var(--surface-shadow);
   display: flex;
   flex-direction: column;
+  flex: none;
   gap: 10px;
+  min-width: 0;
   overflow: hidden;
+}
+
+.schedule-shell.month-view {
+  flex: 1 0 auto;
 }
 
 .month-legend {
@@ -264,18 +457,15 @@ ion-content {
 }
 
 .month-shell {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: auto;
+  flex: 1 0 auto;
+  overflow: hidden;
   border-radius: 12px;
   border: 1px solid var(--app-border-subtle);
-  height: 100%;
 }
 
 .scheduler-stage {
   position: relative;
-  flex: 1 1 auto;
-  min-height: 0;
+  min-width: 0;
 }
 
 daypilot-scheduler,
@@ -283,13 +473,6 @@ daypilot-month {
   display: block;
   width: 100%;
   min-width: 0;
-  height: 100%;
-}
-
-daypilot-scheduler {
-  height: 100%;
-  flex: 1 1 auto;
-  min-height: 0;
 }
 
 .day-now-line {
@@ -307,13 +490,6 @@ daypilot-scheduler {
   font-weight: 700;
   color: #fff;
   background: #f97316;
-}
-
-.schedule-shell ::ng-deep .scheduler_default_rowheader,
-.schedule-shell ::ng-deep .scheduler_default_rowheader_inner,
-.schedule-shell ::ng-deep .scheduler_default_row,
-.schedule-shell ::ng-deep .scheduler_default_cell {
-  height: var(--row-height, 120px);
 }
 
 .schedule-shell ::ng-deep .scheduler_default_main {
@@ -476,7 +652,7 @@ html[data-theme='light'] .month-shell ::ng-deep .month_default_cell.pf-month-cel
   min-width: 92px;
 }
 
-html:not([data-theme='light']) ion-footer.modal-form-footer .settings-save-button[disabled] {
+html:not([data-theme='light']) .ui-footer.modal-form-footer .settings-save-button[disabled] {
   --opacity: 1 !important;
   opacity: 1 !important;
   --background: #3a4556 !important;
@@ -487,7 +663,7 @@ html:not([data-theme='light']) ion-footer.modal-form-footer .settings-save-butto
   --box-shadow: none !important;
 }
 
-html[data-theme='light'] ion-footer.modal-form-footer .settings-save-button[disabled] {
+html[data-theme='light'] .ui-footer.modal-form-footer .settings-save-button[disabled] {
   --opacity: 1 !important;
   opacity: 1 !important;
   --background: #e6ebf2 !important;
@@ -512,7 +688,7 @@ html[data-theme='light'] ion-footer.modal-form-footer .settings-save-button[disa
 .settings-section {
   border-radius: 14px;
   padding: 14px;
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--surface-border);
   margin-bottom: 14px;
 }
 
@@ -538,7 +714,7 @@ html[data-theme='light'] ion-footer.modal-form-footer .settings-save-button[disa
   gap: 10px;
 }
 
-.settings-section ion-item {
+.settings-section .ui-item {
   --background: rgba(255, 255, 255, 0.03);
   --border-color: rgba(255, 255, 255, 0.1);
   --inner-padding-end: 10px;

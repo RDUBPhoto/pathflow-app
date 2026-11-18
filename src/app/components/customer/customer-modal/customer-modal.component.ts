@@ -1,10 +1,8 @@
-import { Component, Input, Output, EventEmitter, OnInit, OnChanges, OnDestroy, SimpleChanges, signal, computed, ElementRef, ViewChild } from '@angular/core';
+import { UiModal } from '../../../ui/overlays';
+import { UiInput, UiTextarea } from '../../../ui/controls';
+import { Component, Input, Output, EventEmitter, OnInit, OnChanges, OnDestroy, SimpleChanges, signal, computed, input, ElementRef, ViewChild, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import {
-  IonModal, IonHeader, IonToolbar, IonTitle, IonButtons, IonButton,
-  IonContent, IonItem, IonLabel, IonInput, IonTextarea, IonList, IonNote, IonSpinner, IonFooter
-} from '@ionic/angular/standalone';
 import { HttpClient } from '@angular/common/http';
 import { CustomersApi, Customer } from '../../../services/customers-api.service';
 import { AddressLookupService, AddressSuggestion } from '../../../services/address-lookup.service';
@@ -12,7 +10,7 @@ import { Subscription, finalize, firstValueFrom } from 'rxjs';
 import { formatUsPhoneInput } from '../../../utils/phone-format';
 
 type ColorOpt = { label: string; hex: string };
-type Mode = 'add' | 'edit';
+type Mode = 'add' | 'edit' | 'lead';
 type UICustomer = Customer & {
   createdAt?: string;
   address?: string;
@@ -38,22 +36,22 @@ type UICustomer = Customer & {
   standalone: true,
   imports: [
     CommonModule, FormsModule,
-    IonHeader, IonToolbar, IonTitle, IonButtons, IonButton,
-    IonContent, IonItem, IonLabel, IonInput, IonTextarea, IonList, IonNote, IonSpinner, IonFooter
+       UiInput, UiTextarea,
   ],
   templateUrl: './customer-modal.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./customer-modal.component.scss']
 })
 export default class CustomerModalComponent implements OnInit, OnChanges, OnDestroy {
   @ViewChild('vinPhotoInput') private vinPhotoInput?: ElementRef<HTMLInputElement>;
   @Input() isOpen: boolean = false;
-  @Input() mode: Mode = 'add';
+  readonly mode = input<Mode>('add');
   @Input() customerId: string | null = null;
   @Input() laneId: string | null = null;
   @Input() initialNotes: string | null = null;
 
   @Output() closed = new EventEmitter<void>();
-  @Output() saved = new EventEmitter<{ id: string }>();
+  @Output() saved = new EventEmitter<Customer>();
 
   loading = signal(false);
   status = signal('');
@@ -109,7 +107,7 @@ export default class CustomerModalComponent implements OnInit, OnChanges, OnDest
 
   phoneValid = computed(() => this.normalizePhone(this.phone()).length >= 10);
   emailValid = computed(() => this.email().trim() !== '' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(this.email().trim()));
-  nameValid = computed(() => !!this.firstName().trim() && !!this.lastName().trim());
+  nameValid = computed(() => !!this.firstName().trim() && (this.mode() === 'lead' || !!this.lastName().trim()));
   addressValid = computed(() => this.address().trim().length >= 3);
   vehicleMakeValid = computed(() => !!this.vehicleMake().trim());
   vehicleModelValid = computed(() => !!this.vehicleModel().trim());
@@ -126,17 +124,16 @@ export default class CustomerModalComponent implements OnInit, OnChanges, OnDest
     return /^[A-HJ-NPR-Z0-9]{17}$/.test(v);
   });
   formDirty = computed(() => this.formSnapshotValue() !== this.initialFormSnapshot());
-  canSave = computed(() =>
-    this.nameValid() &&
-    this.phoneValid() &&
-    this.emailValid() &&
-    this.addressValid() &&
-    this.vehicleMakeValid() &&
-    this.vehicleModelValid() &&
-    this.vehicleYearValid() &&
-    this.vinValid() &&
-    this.formDirty()
-  );
+  canSave = computed(() => {
+    if (!this.nameValid() || !this.phoneValid() || !this.vinValid() || !this.formDirty()) return false;
+    if (this.mode() === 'lead') {
+      return (!this.email().trim() || this.emailValid()) &&
+        (!this.address().trim() || this.addressValid()) &&
+        (!this.vehicleYear().trim() || this.vehicleYearValid());
+    }
+    return this.emailValid() && this.addressValid() && this.vehicleMakeValid() &&
+      this.vehicleModelValid() && this.vehicleYearValid();
+  });
   hasVinDetails = computed(() => Object.values(this.vinDecoded()).some(v => !!v));
 
   constructor(
@@ -148,10 +145,10 @@ export default class CustomerModalComponent implements OnInit, OnChanges, OnDest
   ngOnInit() {
     this.loadAllCustomers();
 
-    if (this.mode === 'add') {
+    if (this.mode() !== 'edit') {
       this.loadingForm.set(false);
       this.resetFormForAdd();
-    } else if (this.mode === 'edit' && this.customerId) {
+    } else if (this.customerId) {
       this.loadingForm.set(true);
       this.loadCustomer(this.customerId);
     }
@@ -159,7 +156,7 @@ export default class CustomerModalComponent implements OnInit, OnChanges, OnDest
 
   ngOnChanges(changes: SimpleChanges) {
     if (changes['mode'] || changes['customerId']) {
-      if (this.mode === 'edit' && this.customerId) {
+      if (this.mode() === 'edit' && this.customerId) {
         this.loadingForm.set(true);
         this.loadCustomer(this.customerId);
       } else {
@@ -177,7 +174,7 @@ export default class CustomerModalComponent implements OnInit, OnChanges, OnDest
     }
   }
 
-  close() { this.closed.emit(); }
+  close() { if (!this.loading()) this.closed.emit(); }
 
   onFirstChange(v: string) { this.firstName.set(v ?? ''); this.recomputeDupMatches(); }
   onLastChange(v: string) { this.lastName.set(v ?? ''); this.recomputeDupMatches(); }
@@ -307,6 +304,11 @@ export default class CustomerModalComponent implements OnInit, OnChanges, OnDest
   }
 
   selectDuplicate(d: Customer) {
+    if (this.loading()) return;
+    if (this.mode() === 'lead') {
+      this.saved.emit(d);
+      return;
+    }
     const full = (d.name || '').trim();
     const parts = full.split(/\s+/);
     const first = parts.slice(0, -1).join(' ') || parts[0] || '';
@@ -334,6 +336,7 @@ export default class CustomerModalComponent implements OnInit, OnChanges, OnDest
   }
 
   save() {
+    if (this.loading()) return;
     if (!this.canSave()) { this.showErrors.set(true); this.status.set('Please complete required fields'); return; }
     const name = `${this.firstName().trim()} ${this.lastName().trim()}`.trim();
     const base: Partial<UICustomer> = {
@@ -359,16 +362,16 @@ export default class CustomerModalComponent implements OnInit, OnChanges, OnDest
     };
 
     const payload: UICustomer =
-      (this.mode === 'edit' && this.customerId)
+      (this.mode() === 'edit' && this.customerId)
         ? { ...(base as UICustomer), id: this.customerId }
         : { ...(base as UICustomer), id: '', createdAt: new Date().toISOString() };
 
     this.status.set('Saving');
-    this.api.upsert(payload).subscribe({
+    this.loading.set(true);
+    this.api.upsert(payload).pipe(finalize(() => this.loading.set(false))).subscribe({
       next: res => {
-        const id = res.id;
-        this.saved.emit({ id });
         this.resetStateAfterSave();
+        this.saved.emit({ ...payload, id: res.id });
       },
       error: () => this.status.set('Save error')
     });
@@ -402,7 +405,10 @@ export default class CustomerModalComponent implements OnInit, OnChanges, OnDest
 
   private loadAllCustomers() {
     this.api.list().subscribe({
-      next: cs => this.allCustomers.set(cs),
+      next: cs => {
+        this.allCustomers.set(cs);
+        if (this.mode() === 'lead') this.recomputeDupMatches();
+      },
       error: () => {}
     });
   }

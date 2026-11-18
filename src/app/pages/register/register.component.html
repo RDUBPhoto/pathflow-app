@@ -1,4 +1,13 @@
-<ion-content class="glass-bg register-page">
+@if (billingMode() && !auth.subscriptionBillingEnabled()) {
+  <section class="ui-content app-content register-page">
+    <div class="register-panel app-surface">
+      <h1>Complimentary workspace access</h1>
+      <p role="status">Pathflow subscription billing is currently disabled. Your workspace is available without a subscription charge.</p>
+      <a class="btn btn-primary" routerLink="/dashboard">Open workspace</a>
+    </div>
+  </section>
+} @else {
+<div class="ui-content app-content register-page">
   <div class="register-shell">
     <aside class="marketing-panel">
       <div class="marketing-image"></div>
@@ -6,15 +15,15 @@
         <img src="/pathflow-logo.svg" alt="Pathflow" class="marketing-logo" />
         <p class="marketing-kicker">{{ requiresBilling() ? 'Billing Required' : 'Pathflow Setup' }}</p>
         <h2>
-          {{ requiresBilling() ? 'Your trial has ended. Add billing to unlock your workspace.' : 'Add your business details and start your 7-day trial.' }}
+          {{ requiresBilling() ? 'Your trial has ended. Add billing to unlock your workspace.' : 'Add your business details and set up your workspace.' }}
         </h2>
         <p>
-          {{ requiresBilling() ? 'Choose monthly or annual billing and you will regain full access immediately.' : 'After this, you will land in your workspace. Your Pathflow team can finish onboarding manually.' }}
+          {{ requiresBilling() ? 'Choose your plan. Paid access starts after your subscription is confirmed.' : 'After this, you will land in your workspace. Your Pathflow team can finish onboarding manually.' }}
         </p>
       </div>
     </aside>
 
-    <section class="register-panel glass-surface">
+    <section class="register-panel app-surface">
       <header class="register-header">
         <p class="register-kicker">{{ requiresBilling() ? 'Step 2 of 2 · Billing Required' : 'Step 2 of 2 · Business Details' }}</p>
         <h1>{{ requiresBilling() ? 'Unlock your workspace' : 'Finish workspace setup' }}</h1>
@@ -26,306 +35,334 @@
           <button type="button" class="link-btn" (click)="useDifferentAccount()">Use Different Account</button>
         </div>
 
-        <ion-item>
-          <ion-label position="stacked">Email</ion-label>
-          <ion-input [readonly]="true" [value]="auth.user()?.email ?? ''" placeholder="you@company.com"></ion-input>
-        </ion-item>
+        <div class="ui-item">
+          <span class="ui-label">Email</span>
+          <ui-input aria-label="Email" [readonly]="true" [value]="auth.user()?.email ?? ''" placeholder="you@company.com"></ui-input>
+        </div>
 
-        <ion-item>
-          <ion-label position="stacked">Password</ion-label>
-          <ion-input
+        <div class="ui-item">
+          <span class="ui-label">Password</span>
+          <ui-input aria-label="Password"
             [readonly]="true"
             type="password"
             value="************"
             placeholder="Managed by your sign-in provider">
-          </ion-input>
-        </ion-item>
+          </ui-input>
+        </div>
 
         <p class="account-note">
           Use the same credentials from login. Password updates are handled by your sign-in provider.
         </p>
       </section>
 
-      <section class="form-card" *ngIf="!requiresBilling()">
-        <div class="form-card-head">
-          <h2>Workspace Details</h2>
-        </div>
-
-        <ion-item>
-          <ion-label position="stacked">Business name</ion-label>
-          <ion-input
-            [disabled]="saving() || !auth.canBootstrapRegistration()"
-            [value]="businessName()"
-            (ionInput)="businessName.set($any($event.detail).value ?? '')"
-            placeholder="Acme Inc">
-          </ion-input>
-        </ion-item>
-
-        <ion-item>
-          <ion-label position="stacked">Business email</ion-label>
-          <ion-input
-            [disabled]="saving() || !auth.canBootstrapRegistration()"
-            [value]="businessEmail()"
-            (ionInput)="businessEmail.set($any($event.detail).value ?? '')"
-            placeholder="service@yourcompany.com">
-          </ion-input>
-        </ion-item>
-
-        <ion-item>
-          <ion-label position="stacked">Business phone</ion-label>
-          <ion-input
-            [disabled]="saving() || !auth.canBootstrapRegistration()"
-            [value]="businessPhone()"
-            (ionInput)="onBusinessPhoneInput($any($event.detail).value)"
-            placeholder="(555) 555-0100">
-          </ion-input>
-        </ion-item>
-
-        <ion-item>
-          <ion-label position="stacked">Business address</ion-label>
-          <ion-input
-            [disabled]="saving() || !auth.canBootstrapRegistration()"
-            [value]="businessAddress()"
-            (ionInput)="onBusinessAddressChange($any($event.detail).value ?? '')"
-            (ionBlur)="onBusinessAddressBlur()"
-            placeholder="123 Main St, Anytown, USA">
-          </ion-input>
-        </ion-item>
-        <div class="address-lookup-box" *ngIf="businessAddressSearching() || businessAddressSuggestions().length || businessAddressNoMatches()">
-          <div class="address-lookup-state" *ngIf="businessAddressSearching()">Searching addresses...</div>
-          <button
-            type="button"
-            class="address-lookup-option"
-            *ngFor="let item of businessAddressSuggestions()"
-            (mousedown)="$event.preventDefault()"
-            (click)="selectBusinessAddressSuggestion(item)">
-            {{ item.display }}
-          </button>
-          <div class="address-lookup-state" *ngIf="!businessAddressSearching() && businessAddressNoMatches()">
-            No address matches found.
+      @if (!requiresBilling()) {
+        <section class="form-card">
+          <div class="form-card-head">
+            <h2>Workspace Details</h2>
           </div>
-        </div>
-
-        <div class="location-mode-row">
-          <label class="location-mode-option">
-            <input
-              type="radio"
-              name="locationMode"
-              value="single"
-              [checked]="hasMultipleLocations() === 'single'"
+          <div class="ui-item">
+            <span class="ui-label">Business name</span>
+            <ui-input aria-label="Business name"
               [disabled]="saving() || !auth.canBootstrapRegistration()"
-              (change)="setLocationMode('single')" />
-            <span>One location</span>
-          </label>
-          <label class="location-mode-option">
-            <input
-              type="radio"
-              name="locationMode"
-              value="multiple"
-              [checked]="hasMultipleLocations() === 'multiple'"
+              [value]="businessName()"
+              (valueInput)="businessName.set($any($event.detail).value ?? '')"
+              placeholder="Acme Inc">
+            </ui-input>
+          </div>
+          <div class="ui-item">
+            <span class="ui-label">Business email</span>
+            <ui-input aria-label="Business email"
               [disabled]="saving() || !auth.canBootstrapRegistration()"
-              (change)="setLocationMode('multiple')" />
-            <span>More than one location</span>
-          </label>
-        </div>
-
-        <ion-item>
-          <ion-label position="stacked">Primary location name</ion-label>
-          <ion-input
-            [disabled]="saving() || !auth.canBootstrapRegistration()"
-            [value]="locationName()"
-            (ionInput)="locationName.set($any($event.detail).value ?? '')"
-            placeholder="Pathflow HQ">
-          </ion-input>
-        </ion-item>
-
-        <ng-container *ngIf="hasMultipleLocations() === 'multiple'">
-          <ion-item *ngFor="let location of extraLocationNames(); let i = index">
-            <ion-label position="stacked">Additional location {{ i + 2 }}</ion-label>
-            <ion-input
+              [value]="businessEmail()"
+              (valueInput)="businessEmail.set($any($event.detail).value ?? '')"
+              placeholder="service@yourcompany.com">
+            </ui-input>
+          </div>
+          <div class="ui-item">
+            <span class="ui-label">Business phone</span>
+            <ui-input aria-label="Business phone"
               [disabled]="saving() || !auth.canBootstrapRegistration()"
-              [value]="location"
-              (ionInput)="updateLocationField(i, $any($event.detail).value ?? '')"
-              placeholder="Pathflow North">
-            </ion-input>
-          </ion-item>
+              [value]="businessPhone()"
+              (valueInput)="onBusinessPhoneInput($any($event.detail).value)"
+              placeholder="(555) 555-0100">
+            </ui-input>
+          </div>
+          <div class="ui-item">
+            <span class="ui-label">Business address</span>
+            <ui-input aria-label="Business address"
+              [disabled]="saving() || !auth.canBootstrapRegistration()"
+              [value]="businessAddress()"
+              (valueInput)="onBusinessAddressChange($any($event.detail).value ?? '')"
+              (controlBlur)="onBusinessAddressBlur()"
+              placeholder="123 Main St, Anytown, USA">
+            </ui-input>
+          </div>
+          @if (businessAddressSearching() || businessAddressSuggestions().length || businessAddressNoMatches()) {
+            <div class="address-lookup-box">
+              @if (businessAddressSearching()) {
+                <div class="address-lookup-state">Searching addresses...</div>
+              }
+              @for (item of businessAddressSuggestions(); track item) {
+                <button
+                  type="button"
+                  class="address-lookup-option"
+                  (mousedown)="$event.preventDefault()"
+                  (click)="selectBusinessAddressSuggestion(item)">
+                  {{ item.display }}
+                </button>
+              }
+              @if (!businessAddressSearching() && businessAddressNoMatches()) {
+                <div class="address-lookup-state">
+                  No address matches found.
+                </div>
+              }
+            </div>
+          }
+          <div class="location-mode-row">
+            <label class="location-mode-option">
+              <input class="form-check-input"
+                type="radio"
+                name="locationMode"
+                value="single"
+                [checked]="hasMultipleLocations() === 'single'"
+                [disabled]="saving() || !auth.canBootstrapRegistration()"
+                (change)="setLocationMode('single')" />
+              <span>One location</span>
+            </label>
+            <label class="location-mode-option">
+              <input class="form-check-input"
+                type="radio"
+                name="locationMode"
+                value="multiple"
+                [checked]="hasMultipleLocations() === 'multiple'"
+                [disabled]="saving() || !auth.canBootstrapRegistration()"
+                (change)="setLocationMode('multiple')" />
+              <span>More than one location</span>
+            </label>
+          </div>
+          <div class="ui-item">
+            <span class="ui-label">Primary location name</span>
+            <ui-input aria-label="Primary location name"
+              [disabled]="saving() || !auth.canBootstrapRegistration()"
+              [value]="locationName()"
+              (valueInput)="locationName.set($any($event.detail).value ?? '')"
+              placeholder="Pathflow HQ">
+            </ui-input>
+          </div>
+          @if (hasMultipleLocations() === 'multiple') {
+            @for (location of extraLocationNames(); track location; let i = $index) {
+              <div class="ui-item">
+                <span class="ui-label">Additional location {{ i + 2 }}</span>
+                <ui-input
+                  [disabled]="saving() || !auth.canBootstrapRegistration()"
+                  [value]="location"
+                  (valueInput)="updateLocationField(i, $any($event.detail).value ?? '')"
+                  placeholder="Pathflow North">
+                </ui-input>
+              </div>
+            }
+            <div class="location-actions">
+              <button
+                type="button"
+                class="link-btn"
+                [disabled]="saving() || !auth.canBootstrapRegistration()"
+                (click)="addLocationField()">
+                + Add another location
+              </button>
+              @if (extraLocationNames().length > 0) {
+                <button
+                  type="button"
+                  class="link-btn"
+                  [disabled]="saving() || !auth.canBootstrapRegistration()"
+                  (click)="removeLocationField(extraLocationNames().length - 1)">
+                  Remove last location
+                </button>
+              }
+            </div>
+          }
+        </section>
+      }
 
-          <div class="location-actions">
+      @if (auth.subscriptionBillingEnabled() && !showBillingSection()) {
+        <section class="form-card optional-billing-prompt">
+          <div class="form-card-head">
+            <h2>Billing</h2>
+            <span class="muted-tag">Later</span>
+          </div>
+          <p class="billing-hint">
+            Start the 7-day trial now. Billing can be added later from Business Admin before the trial ends.
+          </p>
+          <button type="button" class="link-btn billing-toggle-btn" (click)="enableOptionalBilling()">
+            Add billing now
+          </button>
+        </section>
+      }
+
+      @if (showBillingSection()) {
+        <section class="form-card billing-card">
+          <div class="form-card-head">
+            <h2>Billing</h2>
+            <span class="muted-tag">{{ requiresBilling() ? 'Required' : 'Optional' }}</span>
+          </div>
+          @if (localBillingSandbox) {
+            <p class="billing-hint">
+              {{ requiresBilling() ? 'Add billing details to continue. For sandbox testing, use all 9s for card number.' : 'You can skip billing to start your 7-day trial, or add billing now. Use all 9s for sandbox testing.' }}
+            </p>
+          }
+          @if (!localBillingSandbox) {
+            <p class="billing-hint" role="status">
+              Online subscription billing is being configured. Contact Pathflow support to activate a paid plan.
+            </p>
+          }
+          <div class="plan-toggle">
+            @if (showTrialOption()) {
+              <button
+                type="button"
+                class="plan-btn"
+                [class.active]="selectedPlan() === 'trial'"
+                [disabled]="saving()"
+                (click)="setPlanCycle('trial')">
+                <span class="plan-btn-title">7-Day Trial</span>
+                <span class="plan-btn-subtitle">$0 for 7 days</span>
+              </button>
+            }
             <button
               type="button"
-              class="link-btn"
-              [disabled]="saving() || !auth.canBootstrapRegistration()"
-              (click)="addLocationField()">
-              + Add another location
+              class="plan-btn"
+              [class.active]="selectedPlan() === 'monthly'"
+              [disabled]="saving()"
+              (click)="setPlanCycle('monthly')">
+              <span class="plan-btn-title">Monthly</span>
+              <span class="plan-btn-subtitle">${{ monthlyPrice() }}/month</span>
             </button>
             <button
               type="button"
-              class="link-btn"
-              *ngIf="extraLocationNames().length > 0"
-              [disabled]="saving() || !auth.canBootstrapRegistration()"
-              (click)="removeLocationField(extraLocationNames().length - 1)">
-              Remove last location
+              class="plan-btn"
+              [class.active]="selectedPlan() === 'annual'"
+              [disabled]="saving()"
+              (click)="setPlanCycle('annual')">
+              <span class="plan-btn-title">Annual</span>
+              <span class="plan-btn-subtitle">${{ annualPrice() }}/year · Save {{ annualSavingsPercent() }}%</span>
             </button>
           </div>
-        </ng-container>
-      </section>
+          @if (localBillingSandbox) {
+            <div class="ui-item">
+              <span class="ui-label">Cardholder name</span>
+              <ui-input aria-label="Cardholder name"
+                [disabled]="saving() || (!auth.canBootstrapRegistration() && !requiresBilling())"
+                [value]="cardholderName()"
+                (valueInput)="cardholderName.set($any($event.detail).value ?? '')"
+                placeholder="Robert Warren">
+              </ui-input>
+            </div>
+            <div class="ui-item">
+              <span class="ui-label">Card number</span>
+              <ui-input aria-label="Card number"
+                [disabled]="saving() || (!auth.canBootstrapRegistration() && !requiresBilling())"
+                [value]="cardNumber()"
+                (valueInput)="cardNumber.set($any($event.detail).value ?? '')"
+                inputmode="numeric"
+                placeholder="4111111111111111 or 9999999999999999">
+              </ui-input>
+            </div>
+            <div class="billing-row">
+              <div class="ui-item">
+                <span class="ui-label">Exp month</span>
+                <ui-input aria-label="Exp month"
+                  [disabled]="saving() || (!auth.canBootstrapRegistration() && !requiresBilling())"
+                  [value]="expiryMonth()"
+                  (valueInput)="expiryMonth.set($any($event.detail).value ?? '')"
+                  inputmode="numeric"
+                  placeholder="MM">
+                </ui-input>
+              </div>
+              <div class="ui-item">
+                <span class="ui-label">Exp year</span>
+                <ui-input aria-label="Exp year"
+                  [disabled]="saving() || (!auth.canBootstrapRegistration() && !requiresBilling())"
+                  [value]="expiryYear()"
+                  (valueInput)="expiryYear.set($any($event.detail).value ?? '')"
+                  inputmode="numeric"
+                  placeholder="YYYY">
+                </ui-input>
+              </div>
+            </div>
+            <div class="billing-row">
+              <div class="ui-item">
+                <span class="ui-label">CVC</span>
+                <ui-input aria-label="CVC"
+                  [disabled]="saving() || (!auth.canBootstrapRegistration() && !requiresBilling())"
+                  [value]="cvc()"
+                  (valueInput)="cvc.set($any($event.detail).value ?? '')"
+                  inputmode="numeric"
+                  placeholder="123">
+                </ui-input>
+              </div>
+              <div class="ui-item">
+                <span class="ui-label">Postal code</span>
+                <ui-input aria-label="Postal code"
+                  [disabled]="saving() || (!auth.canBootstrapRegistration() && !requiresBilling())"
+                  [value]="postalCode()"
+                  (valueInput)="postalCode.set($any($event.detail).value ?? '')"
+                  inputmode="numeric"
+                  placeholder="78154">
+                </ui-input>
+              </div>
+            </div>
+          }
+        </section>
+      }
 
-      <section class="form-card optional-billing-prompt" *ngIf="!showBillingSection()">
-        <div class="form-card-head">
-          <h2>Billing</h2>
-          <span class="muted-tag">Later</span>
-        </div>
-        <p class="billing-hint">
-          Start the 7-day trial now. Billing can be added later from Business Admin before the trial ends.
+      @if (requiresBilling() && trialEndsDisplay()) {
+        <p class="auth-hint warning">
+          Trial access ended on {{ trialEndsDisplay() }}.
         </p>
-        <button type="button" class="link-btn billing-toggle-btn" (click)="enableOptionalBilling()">
-          Add billing now
-        </button>
-      </section>
+      }
 
-      <section class="form-card billing-card" *ngIf="showBillingSection()">
-        <div class="form-card-head">
-          <h2>Billing</h2>
-          <span class="muted-tag">{{ requiresBilling() ? 'Required' : 'Optional' }}</span>
-        </div>
-
-        <p class="billing-hint">
-          {{ requiresBilling() ? 'Add billing details to continue. For sandbox testing, use all 9s for card number.' : 'You can skip billing to start your 7-day trial, or add billing now. Use all 9s for sandbox testing.' }}
+      @if (requiresBilling() && auth.accessLockReason()) {
+        <p class="auth-hint warning">
+          {{ auth.accessLockReason() }}
         </p>
+      }
 
-        <div class="plan-toggle">
-          <button
-            *ngIf="showTrialOption()"
-            type="button"
-            class="plan-btn"
-            [class.active]="selectedPlan() === 'trial'"
-            [disabled]="saving()"
-            (click)="setPlanCycle('trial')">
-            <span class="plan-btn-title">7-Day Trial</span>
-            <span class="plan-btn-subtitle">$0 for 7 days</span>
-          </button>
-          <button
-            type="button"
-            class="plan-btn"
-            [class.active]="selectedPlan() === 'monthly'"
-            [disabled]="saving()"
-            (click)="setPlanCycle('monthly')">
-            <span class="plan-btn-title">Monthly</span>
-            <span class="plan-btn-subtitle">${{ monthlyPrice() }}/month</span>
-          </button>
-          <button
-            type="button"
-            class="plan-btn"
-            [class.active]="selectedPlan() === 'annual'"
-            [disabled]="saving()"
-            (click)="setPlanCycle('annual')">
-            <span class="plan-btn-title">Annual</span>
-            <span class="plan-btn-subtitle">${{ annualPrice() }}/year · Save {{ annualSavingsPercent() }}%</span>
-          </button>
-        </div>
+      @if (!requiresBilling() && !auth.canBootstrapRegistration()) {
+        <p class="auth-hint warning">
+          This account is not allowed to bootstrap a new workspace. Ask an admin to invite or provision you.
+        </p>
+      }
 
-        <ion-item>
-          <ion-label position="stacked">Cardholder name</ion-label>
-          <ion-input
-            [disabled]="saving() || (!auth.canBootstrapRegistration() && !requiresBilling())"
-            [value]="cardholderName()"
-            (ionInput)="cardholderName.set($any($event.detail).value ?? '')"
-            placeholder="Robert Warren">
-          </ion-input>
-        </ion-item>
+      @if (!requiresBilling() && !registrationBusinessValid()) {
+        <p class="auth-hint warning">
+          Enter business name, email, phone, and address to continue.
+        </p>
+      }
 
-        <ion-item>
-          <ion-label position="stacked">Card number</ion-label>
-          <ion-input
-            [disabled]="saving() || (!auth.canBootstrapRegistration() && !requiresBilling())"
-            [value]="cardNumber()"
-            (ionInput)="cardNumber.set($any($event.detail).value ?? '')"
-            inputmode="numeric"
-            placeholder="4111111111111111 or 9999999999999999">
-          </ion-input>
-        </ion-item>
+      @if (localBillingSandbox && requiresBilling() && !billingValid()) {
+        <p class="auth-hint warning">
+          Enter valid billing details to unlock your workspace.
+        </p>
+      }
 
-        <div class="billing-row">
-          <ion-item>
-            <ion-label position="stacked">Exp month</ion-label>
-            <ion-input
-              [disabled]="saving() || (!auth.canBootstrapRegistration() && !requiresBilling())"
-              [value]="expiryMonth()"
-              (ionInput)="expiryMonth.set($any($event.detail).value ?? '')"
-              inputmode="numeric"
-              placeholder="MM">
-            </ion-input>
-          </ion-item>
-          <ion-item>
-            <ion-label position="stacked">Exp year</ion-label>
-            <ion-input
-              [disabled]="saving() || (!auth.canBootstrapRegistration() && !requiresBilling())"
-              [value]="expiryYear()"
-              (ionInput)="expiryYear.set($any($event.detail).value ?? '')"
-              inputmode="numeric"
-              placeholder="YYYY">
-            </ion-input>
-          </ion-item>
-        </div>
+      @if (!requiresBilling() && billingProvided() && !billingValid()) {
+        <p class="auth-hint warning">
+          Billing details are incomplete. Complete all required fields or clear billing to continue with the free trial.
+        </p>
+      }
 
-        <div class="billing-row">
-          <ion-item>
-            <ion-label position="stacked">CVC</ion-label>
-            <ion-input
-              [disabled]="saving() || (!auth.canBootstrapRegistration() && !requiresBilling())"
-              [value]="cvc()"
-              (ionInput)="cvc.set($any($event.detail).value ?? '')"
-              inputmode="numeric"
-              placeholder="123">
-            </ion-input>
-          </ion-item>
-          <ion-item>
-            <ion-label position="stacked">Postal code</ion-label>
-            <ion-input
-              [disabled]="saving() || (!auth.canBootstrapRegistration() && !requiresBilling())"
-              [value]="postalCode()"
-              (ionInput)="postalCode.set($any($event.detail).value ?? '')"
-              inputmode="numeric"
-              placeholder="78154">
-            </ion-input>
-          </ion-item>
-        </div>
-      </section>
-
-      <p class="auth-hint warning" *ngIf="requiresBilling() && trialEndsDisplay()">
-        Trial access ended on {{ trialEndsDisplay() }}.
-      </p>
-
-      <p class="auth-hint warning" *ngIf="requiresBilling() && auth.accessLockReason()">
-        {{ auth.accessLockReason() }}
-      </p>
-
-      <p class="auth-hint warning" *ngIf="!requiresBilling() && !auth.canBootstrapRegistration()">
-        This account is not allowed to bootstrap a new workspace. Ask an admin to invite or provision you.
-      </p>
-
-      <p class="auth-hint warning" *ngIf="!requiresBilling() && !registrationBusinessValid()">
-        Enter business name, email, phone, and address to continue.
-      </p>
-
-      <p class="auth-hint warning" *ngIf="requiresBilling() && !billingValid()">
-        Enter valid billing details to unlock your workspace.
-      </p>
-
-      <p class="auth-hint warning" *ngIf="!requiresBilling() && billingProvided() && !billingValid()">
-        Billing details are incomplete. Complete all required fields or clear billing to continue with the free trial.
-      </p>
-
-      <ion-button
-        expand="block"
-        size="large"
+      <button class="btn ui-button btn-primary btn-lg w-100" type="button"
         [disabled]="!canSubmit()"
         (click)="submitRegistration()">
-        <ion-spinner *ngIf="saving()" name="crescent" slot="start"></ion-spinner>
+        @if (saving()) {
+          <span class="spinner-border spinner-border-sm ui-spinner" role="status" aria-label="Loading" slot="start"></span>
+        }
         {{ submitLabel() }}
-      </ion-button>
+      </button>
 
-      <p class="auth-hint error" *ngIf="error()">{{ error() }}</p>
+      @if (error()) {
+        <p class="auth-hint error">{{ error() }}</p>
+      }
     </section>
   </div>
-</ion-content>
+</div>
+
+}

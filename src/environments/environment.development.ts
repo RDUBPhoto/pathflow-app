@@ -1,9 +1,13 @@
 export const environment = {
-  apiBase: 'https://wonderful-glacier-0f45f5110.6.azurestaticapps.net',
-  publicAppUrl: 'https://wonderful-glacier-0f45f5110.6.azurestaticapps.net',
+  apiBase: 'http://localhost:4200',
+  publicAppUrl: 'http://localhost:4200',
   features: {
     demoTools: true,
     powerBiReports: false
+  },
+  telemetry: {
+    enabled: false,
+    endpoint: '/api/telemetry'
   },
   auth: {
     primaryProvider: 'local',

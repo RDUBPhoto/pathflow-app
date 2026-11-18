@@ -1,582 +1,807 @@
-<ion-header class="glass-header">
-  <ion-toolbar>
-    <ion-buttons slot="start">
+<header class="ui-header app-header">
+  <div class="ui-toolbar">
+    <div class="ui-buttons" slot="start">
       <app-page-back-button></app-page-back-button>
-    </ion-buttons>
-    <ion-title>Job Detail</ion-title>
+    </div>
+    <h1 class="ui-title">Job Workfile</h1>
     <app-company-switcher></app-company-switcher>
-    <ion-buttons slot="end" class="ion-margin-end">
+    <div slot="end" class="ui-buttons me-2">
       <app-user-menu></app-user-menu>
-    </ion-buttons>
-  </ion-toolbar>
-</ion-header>
+    </div>
+  </div>
+</header>
 
-<ion-content class="ion-padding glass-bg job-detail-content">
+<div class="ui-content app-padding app-content job-detail-content">
   <div class="job-detail-stack">
-    <section class="feedback-panel" *ngIf="loading() || error()">
-      <div *ngIf="loading()">Loading connected records...</div>
-      <div class="error" *ngIf="!loading() && error()">{{ error() }}</div>
-    </section>
+    @if (loading() || error()) {
+      <section class="feedback-panel">
+        @if (loading()) {
+          <div>Loading connected records...</div>
+        }
+        @if (!loading() && error()) {
+          <div class="error">{{ error() }}</div>
+        }
+      </section>
+    }
 
-    <ng-container *ngIf="detail() as job">
-      <section class="job-hero glass-surface">
+    @if (detail(); as job) {
+      <section class="job-hero app-surface">
         <div>
-          <p class="eyebrow">Connected Records</p>
+          <p class="eyebrow">Job Workfile</p>
           <h1>{{ job.jobNumber || job.jobId || 'Job' }}</h1>
           <div class="hero-meta">
-            {{ job.customerName }} · {{ job.vehicle }} · Install {{ formatDate(job.installDate) }}
+            <strong>{{ job.customerName || 'Customer TBD' }}</strong>
+            <span>{{ job.vehicle || 'Vehicle TBD' }}</span>
+            <span>Install {{ formatShortDate(job.installDate) }}</span>
           </div>
         </div>
         <div class="hero-status">
-          <span>{{ job.status }}</span>
+          <span>{{ jobPrimaryStatusLabel(job) }}</span>
           <strong>{{ job.partsReadiness }}</strong>
+          <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="printJobPacket(job)">
+            Print Job Packet
+          </button>
         </div>
       </section>
-
       <section class="summary-grid">
-        <article class="summary-card glass-surface">
-          <span>Quote</span>
-          <strong>{{ job.quotes.length ? job.quotes[0].document.stage : 'None' }}</strong>
-          <small>{{ job.quotes.length ? formatCurrency(job.quotes[0].document.total) : 'No related quote' }}</small>
+        <article class="summary-card app-surface summary-card-wide">
+          <span>Current Parts Status</span>
+          <strong>{{ jobPartsStatusLabel(job) }}</strong>
+          <small>{{ job.parts.length ? job.parts.length + ' job part(s)' : 'No parts tied to this job' }}</small>
         </article>
-        <article class="summary-card glass-surface">
-          <span>Invoice</span>
-          <strong>{{ job.invoices.length ? job.invoices[0].document.stage : 'None' }}</strong>
-          <small>{{ job.invoices.length ? formatCurrency(job.invoices[0].document.total) : 'No customer invoice' }}</small>
+        <article class="summary-card app-surface summary-card-wide">
+          <span>Next Action</span>
+          <strong>{{ jobNextActionLabel(job) }}</strong>
+          <small>Primary workflow step</small>
         </article>
-        <article class="summary-card glass-surface">
-          <span>Parts</span>
-          <strong>{{ job.parts.length }}</strong>
-          <small>{{ job.partsReadiness }}</small>
+        <article class="summary-card app-surface summary-card-wide" [class.needs-attention]="jobMainBlockerLabel(job) !== 'No blocker'">
+          <span>Main Blocker / Warning</span>
+          <strong>{{ jobMainBlockerLabel(job) }}</strong>
+          <small>{{ jobMainBlockerLabel(job) === 'No blocker' ? 'Ready for the next step' : 'Needs attention' }}</small>
         </article>
-        <article class="summary-card glass-surface">
+        <article class="summary-card app-surface">
+          <span>Parts To Order</span>
+          <strong>{{ partsNeedingOrderCount(job) }}</strong>
+          <small>{{ partsNeedingOrderCount(job) ? 'Needs inventory action' : 'No ordering needed' }}</small>
+        </article>
+        <article class="summary-card app-surface">
+          <span>Ready Parts</span>
+          <strong>{{ readyPartsCount(job) }} / {{ job.parts.length }}</strong>
+          <small>{{ job.parts.length ? job.partsReadiness : 'No job parts yet' }}</small>
+        </article>
+        <article class="summary-card app-surface">
+          <span>Open Reminders</span>
+          <strong>{{ openTaskCount() }}</strong>
+          <small>{{ openTaskCount() ? 'Checkpoints remain' : 'No open reminders' }}</small>
+        </article>
+        <article class="summary-card app-surface">
           <span>Purchase Orders</span>
           <strong>{{ job.purchaseOrders.length }}</strong>
-          <small>{{ job.purchaseOrders.length ? 'Linked through job parts' : 'No linked POs' }}</small>
+          <small>{{ poSummaryLabel(job) }}</small>
         </article>
-        <article class="summary-card glass-surface">
+        <article class="summary-card app-surface">
           <span>Schedule</span>
           <strong>{{ formatShortDate(job.installDate) }}</strong>
-          <small>{{ job.schedules.length ? job.schedules[0].resource || 'Scheduled' : 'No schedule link' }}</small>
+          <small>{{ job.schedules.length ? job.schedules[0].resource || 'Scheduled' : 'Not scheduled' }}</small>
         </article>
       </section>
-
-      <section class="records-panel glass-surface">
-        <div class="panel-head">
-          <div>
-            <h2>Tasks</h2>
-            <div class="panel-meta">Parts readiness and pull workflow tasks for this job</div>
+      <section class="job-progress-strip app-surface">
+        @for (step of progressSteps; track step) {
+          <div
+            class="progress-step"
+            [ngClass]="progressStepClass(job, step.id)">
+            <span></span>
+            <strong>{{ step.label }}</strong>
           </div>
-          <ion-button size="small" fill="outline" [routerLink]="['/tasks']" [queryParams]="{ jobNumber: job.jobNumber, jobId: job.jobId }">
-            Open Tasks
-          </ion-button>
-        </div>
-
-        <div class="additional-message" *ngIf="taskMessage()">{{ taskMessage() }}</div>
-
-        <div class="task-list" *ngIf="tasks().length; else noTasks">
-          <article class="task-card" *ngFor="let task of tasks()" [class]="dueStateClass(task)">
-            <div class="task-main">
-              <div class="task-title-row">
-                <strong>{{ task.title }}</strong>
-                <span class="status-pill" [ngClass]="statusClass(task.status)">{{ label(task.status) }}</span>
-              </div>
-              <div class="task-meta">
-                {{ task.assignedRole || 'Inventory / Front Desk' }} · Owner {{ task.ownerRole || task.ownerUser || 'Inventory Manager' }} · Due {{ formatDate(task.dueDate) }}
-              </div>
-              <div class="task-warning" *ngIf="task.warning">{{ task.warning }}</div>
-              <div class="task-meta">{{ dueStateLabel(task) }} · Priority {{ label(task.priority) }}</div>
-              <label class="task-comment">
-                <span>Comments</span>
-                <textarea
-                  [ngModel]="task.comments || ''"
-                  (ngModelChange)="updateTaskComments(task, $event)"
-                  placeholder="Add notes before completing"></textarea>
-              </label>
-            </div>
-            <div class="task-actions">
-              <select
-                class="compact-select"
-                [ngModel]="task.status"
-                [disabled]="savingTask()"
-                (ngModelChange)="updateTaskStatus(task, $any($event))">
-                <option value="open">Open</option>
-                <option value="in_progress">In Progress</option>
-                <option value="completed">Completed</option>
-                <option value="cancelled">Cancelled</option>
-              </select>
-              <ion-button size="small" [disabled]="savingTask() || task.status === 'completed'" (click)="completeTask(task)">
-                Complete
-              </ion-button>
-              <ion-button size="small" fill="outline" [disabled]="savingTask()" (click)="saveTask(task, { comments: task.comments || '' }, 'Task comments saved.')">
-                Save Notes
-              </ion-button>
-            </div>
-          </article>
-        </div>
-        <ng-template #noTasks>
-          <div class="empty-state">No parts tasks are available yet. Add an install date and job-linked parts to generate readiness tasks.</div>
-        </ng-template>
+        }
       </section>
-
-      <section class="records-panel glass-surface">
+      <section class="records-panel app-surface" [class.collapsed]="!isSectionOpen('parts')">
         <div class="panel-head">
           <div>
-            <h2>Job Parts</h2>
-            <div class="panel-meta">Inventory needs / job-parts foundation records</div>
+            <h2>Parts for this Job</h2>
+            <div class="panel-meta">Order, tracking, receiving, labels, and pull status for this work order</div>
+          </div>
+          <div class="panel-actions">
+            <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="toggleSection('parts')">
+              {{ sectionToggleLabel('parts') }}
+            </button>
+            <button class="btn ui-button btn-primary btn-sm" type="button"
+              [disabled]="!orderableParts(job).length || savingPurchaseOrder()"
+              (click)="createPurchaseOrderDraft(job)">
+              Create PO
+            </button>
+            <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="toggleAdditionalPartForm(); openSection('additionalParts')">
+              Add Part
+            </button>
+            <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="printPullSheet(job)">
+              Print Pull Sheet
+            </button>
+            <button class="btn ui-button btn-outline-primary btn-sm" type="button" [disabled]="!receivedParts(job).length" (click)="printReceivedLabels(job)">
+              Print Labels
+            </button>
           </div>
         </div>
-
-        <div class="table-shell" *ngIf="job.parts.length; else noParts">
-          <table>
-            <thead>
-              <tr>
-                <th>Part</th>
-                <th>Vendor</th>
-                <th>Status</th>
-                <th>Needed</th>
-                <th>Ordered</th>
-                <th>Received</th>
-                <th>Pulled</th>
-                <th>Installed</th>
-                <th>PO</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr *ngFor="let part of job.parts">
-                <td>
-                  <strong>{{ part.partName }}</strong>
-                  <span>SKU {{ part.sku || 'N/A' }}</span>
-                </td>
-                <td>{{ part.vendor || 'No supplier' }}</td>
-                <td><span class="status-pill" [ngClass]="statusClass(part.status)">{{ part.status }}</span></td>
-                <td>{{ formatQty(part.qtyNeeded) }}</td>
-                <td>{{ formatQty(part.qtyOrdered) }}</td>
-                <td>{{ formatQty(part.qtyReceived) }}</td>
-                <td>{{ formatQty(part.qtyPulled) }}</td>
-                <td>{{ formatQty(part.qtyInstalled) }}</td>
-                <td>
-                  <a
-                    *ngIf="part.relatedPoIds.length"
-                    [routerLink]="['/purchase-orders']"
-                    [queryParams]="{ id: part.relatedPoIds[0] }">
-                    Open PO
-                  </a>
-                  <span *ngIf="!part.relatedPoIds.length">None</span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <ng-template #noParts>
-          <div class="empty-state">No job-linked part records matched this job yet.</div>
-        </ng-template>
-      </section>
-
-      <section class="records-panel glass-surface">
-        <div class="panel-head">
-          <div>
-            <h2>Purchase Orders</h2>
-            <div class="panel-meta">Connected by PO line needId, jobId, or jobNumber</div>
-          </div>
-        </div>
-
-        <div class="po-list" *ngIf="job.purchaseOrders.length; else noPurchaseOrders">
-          <article class="po-card" *ngFor="let po of job.purchaseOrders">
-            <div>
-              <strong>{{ po.order.id }}</strong>
-              <span>{{ po.vendor || 'No supplier' }} · {{ po.order.status }} · {{ poProgress(po.receivedQty, po.totalQty) }}</span>
+        @if (isSectionOpen('parts')) {
+          <div class="section-body">
+            @if (job.parts.length) {
+              <div class="table-shell">
+                <table>
+                  <colgroup>
+                  <col class="col-part" />
+                  <col class="col-vendor" />
+                  <col class="col-qty" />
+                  <col class="col-order-status" />
+                  <col class="col-carrier" />
+                  <col class="col-tracking" />
+                  <col class="col-shipping-status" />
+                  <col class="col-eta" />
+                  <col class="col-last-update" />
+                  <col class="col-next-action" />
+                  <col class="col-actions" />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>Part</th>
+                    <th>Vendor</th>
+                    <th>Qty</th>
+                    <th>Order</th>
+                    <th>Carrier</th>
+                    <th>Tracking #</th>
+                    <th>Shipping</th>
+                    <th>ETA</th>
+                    <th>Last Update</th>
+                    <th>Next Action</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (part of job.parts; track part) {
+                    <tr>
+                      <td>
+                        <strong>{{ part.partName }}</strong>
+                        <span>SKU {{ part.sku || 'N/A' }}</span>
+                      </td>
+                      <td>
+                        <strong>{{ part.vendor || 'No supplier' }}</strong>
+                        <span>{{ part.relatedPoIds.length ? 'PO linked' : 'No PO yet' }}</span>
+                      </td>
+                      <td class="qty-cell">
+                        <div class="qty-stack" aria-label="Part quantities">
+                          <span><b>Need</b> {{ formatQty(part.qtyNeeded) }}</span>
+                          <span><b>Ordered</b> {{ formatQty(part.qtyOrdered) }}</span>
+                          <span><b>Received</b> {{ formatQty(part.qtyReceived) }}</span>
+                          <span><b>Pulled</b> {{ formatQty(part.qtyPulled) }}</span>
+                          <span><b>Installed</b> {{ formatQty(part.qtyInstalled) }}</span>
+                        </div>
+                      </td>
+                      <td>
+                        <span class="status-pill" [ngClass]="partWorkflowClass(part)">{{ partOrderStatusLabel(part) }}</span>
+                        @if (part.relatedPoIds.length) {
+                          <a
+                            class="inline-action"
+                            (click)="openPurchaseOrderForPart(part)">
+                            View PO
+                          </a>
+                        }
+                      </td>
+                      <td>{{ partCarrierLabel(part) }}</td>
+                      <td>
+                        @if (partTrackingLabel(part) !== '--') {
+                          <a [href]="trackingUrl(partTrackingLabel(part))" target="_blank" rel="noreferrer">
+                            {{ partTrackingLabel(part) }}
+                          </a>
+                        } @else {
+                          --
+                        }
+                      </td>
+                      <td>
+                        <span class="tracking-status" [class.tracking-error]="partTrackingError(part)">
+                          {{ partTrackingStatusLabel(part) }}
+                        </span>
+                        @if (partTrackingError(part)) {
+                          <small>{{ partTrackingError(part) }}</small>
+                        }
+                      </td>
+                      <td>{{ partEtaLabel(part) }}</td>
+                      <td>{{ partLastTrackingUpdateLabel(part) }}</td>
+                      <td>
+                        <strong>{{ partNextActionLabel(part) }}</strong>
+                        <span>{{ partReceivedProgress(part) }} received</span>
+                      </td>
+                      <td class="part-actions">
+                        @if (!part.relatedPoIds.length) {
+                          <button class="btn ui-button btn-outline-primary btn-sm" type="button"
+                            [disabled]="savingPurchaseOrder()"
+                            (click)="createPurchaseOrderDraft(job)">
+                            Add Order
+                          </button>
+                        }
+                        @if (part.relatedPoIds.length) {
+                          <button class="btn ui-button btn-outline-primary btn-sm" type="button"
+                            (click)="openPurchaseOrderForPart(part)">
+                            Order Info
+                          </button>
+                        }
+                        @if (canSubmitOrderForPart(part)) {
+                          <button class="btn ui-button btn-outline-primary btn-sm" type="button"
+                            (click)="submitOrderForPart(part)">
+                            Mark Ordered
+                          </button>
+                        }
+                        @if (canRefreshPartTracking(part)) {
+                          <button class="btn ui-button btn-outline-primary btn-sm" type="button"
+                            (click)="refreshPartTracking(part)">
+                            Refresh Tracking
+                          </button>
+                        }
+                        @if (canReceivePart(part)) {
+                          <button class="btn ui-button btn-outline-primary btn-sm" type="button"
+                            (click)="receivePart(part)">
+                            Receive
+                          </button>
+                        }
+                        <button class="btn ui-button btn-outline-primary btn-sm" type="button" [disabled]="!isReceivedPart(part)" (click)="printPartLabel(job, part)">
+                          Label
+                        </button>
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
             </div>
-            <div class="po-meta">
-              <span>Order {{ po.lines[0].orderNumber || 'N/A' }}</span>
-              <span>Tracking {{ po.lines[0].trackingNumber || 'N/A' }}</span>
-              <span>ETA {{ formatShortDate(po.lines[0].etaDate) }}</span>
-              <span>Vendor invoice {{ po.lines[0].vendorInvoiceNumber || 'N/A' }}</span>
-            </div>
-            <ion-button size="small" fill="outline" [routerLink]="['/purchase-orders']" [queryParams]="{ id: po.order.id }">
-              Open PO
-            </ion-button>
-          </article>
+          } @else {
+            <div class="empty-state">No job-linked part records matched this job yet.</div>
+          }
         </div>
-        <ng-template #noPurchaseOrders>
-          <div class="empty-state">No purchase orders are linked to these job parts yet.</div>
-        </ng-template>
-      </section>
-
-      <section class="records-panel glass-surface">
-        <div class="panel-head">
-          <div>
-            <h2>Additional Parts</h2>
-            <div class="panel-meta">Parts added after quote or during active work</div>
-          </div>
-          <ion-button size="small" fill="outline" (click)="toggleAdditionalPartForm()">
+      }
+    </section>
+    <section class="records-panel app-surface" [class.collapsed]="!isSectionOpen('purchaseOrders')">
+      <div class="panel-head">
+        <div>
+          <h2>Supporting Purchase Orders</h2>
+          <div class="panel-meta">Formal vendor orders behind the parts above</div>
+        </div>
+        <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="toggleSection('purchaseOrders')">
+          {{ sectionToggleLabel('purchaseOrders') }}
+        </button>
+      </div>
+      @if (isSectionOpen('purchaseOrders')) {
+        <div class="section-body">
+          @if (job.purchaseOrders.length) {
+            <div class="po-list">
+              @for (po of job.purchaseOrders; track po) {
+                <article class="po-card">
+                  <div class="po-card-head">
+                    <div>
+                      <strong>{{ po.order.id }}</strong>
+                      <span>{{ po.vendor || 'No supplier' }} · {{ jobPurchaseOrderStatusLabel(po) }} · {{ poProgress(po.receivedQty, po.totalQty) }}</span>
+                    </div>
+                    <button class="btn ui-button btn-outline-primary btn-sm" type="button" [routerLink]="['/purchase-orders']" [queryParams]="{ id: po.order.id }">
+                      Open PO
+                    </button>
+                  </div>
+                  <div class="po-line-table">
+                    <div class="po-line-row po-line-head">
+                      <span>Part</span>
+                      <span>Order #</span>
+                      <span>Tracking</span>
+                      <span>ETA</span>
+                      <span>Vendor Invoice</span>
+                      <span>Received</span>
+                    </div>
+                    @for (line of po.lines; track line) {
+                      <div class="po-line-row">
+                        <span>
+                          <strong>{{ line.partName || 'Part' }}</strong>
+                          <small>SKU {{ line.sku || 'N/A' }}</small>
+                        </span>
+                        <span>{{ line.orderNumber || 'N/A' }}</span>
+                        <span>
+                          @if (line.trackingNumber) {
+                            <a [href]="trackingUrl(line.trackingNumber)" target="_blank" rel="noreferrer">
+                              {{ line.trackingNumber }}
+                            </a>
+                          } @else {
+                            N/A
+                          }
+                        </span>
+                        <span>{{ formatShortDate(line.etaDate) }}</span>
+                        <span>{{ line.vendorInvoiceNumber || 'N/A' }}</span>
+                        <span>{{ poLineProgress(line) }}</span>
+                      </div>
+                    }
+                  </div>
+                </article>
+              }
+            </div>
+          } @else {
+            <div class="empty-state">No purchase orders are linked to these job parts yet.</div>
+          }
+        </div>
+      }
+    </section>
+    <section class="records-panel app-surface" [class.collapsed]="!isSectionOpen('tasks')">
+      <div class="panel-head">
+        <div>
+          <h2>Job Reminders</h2>
+          <div class="panel-meta">Checkpoints that support parts readiness and job follow-through</div>
+        </div>
+        <div class="panel-actions">
+          <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="toggleSection('tasks')">
+            {{ sectionToggleLabel('tasks') }}
+          </button>
+          <button class="btn ui-button btn-outline-primary btn-sm" type="button" [routerLink]="['/tasks']" [queryParams]="{ jobNumber: job.jobNumber, jobId: job.jobId }">
+            Open Jobs
+          </button>
+        </div>
+      </div>
+      @if (isSectionOpen('tasks')) {
+        <div class="section-body">
+          @if (taskMessage()) {
+            <div class="additional-message">{{ taskMessage() }}</div>
+          }
+          @if (tasks().length) {
+            <div class="task-list">
+              @for (task of tasks(); track task) {
+                <article class="task-card" [class]="dueStateClass(task)">
+                  <div class="task-main">
+                    <div class="task-title-row">
+                      <strong>{{ task.title }}</strong>
+                      <span class="status-pill" [ngClass]="statusClass(task.status)">{{ label(task.status) }}</span>
+                    </div>
+                    <div class="task-meta">
+                      {{ dueStateLabel(task) }} · Due {{ formatDate(task.dueDate) }}
+                    </div>
+                    @if (task.warning) {
+                      <div class="task-warning">{{ task.warning }}</div>
+                    }
+                    <label class="task-comment">
+                      <span>Reminder Notes</span>
+                      <textarea class="form-control"
+                        [ngModel]="task.comments || ''"
+                        (ngModelChange)="updateTaskComments(task, $event)"
+                      placeholder="Add notes before completing"></textarea>
+                    </label>
+                  </div>
+                  <div class="task-actions">
+                    <select
+                      class="form-select compact-select"
+                      [ngModel]="task.status"
+                      [disabled]="savingTask()"
+                      (ngModelChange)="updateTaskStatus(task, $any($event))">
+                      <option value="open">Open</option>
+                      <option value="in_progress">In Progress</option>
+                      <option value="completed">Completed</option>
+                      <option value="cancelled">Cancelled</option>
+                    </select>
+                    <button class="btn ui-button btn-primary btn-sm" type="button" [disabled]="savingTask() || task.status === 'completed'" (click)="completeTask(task)">
+                      Complete Reminder
+                    </button>
+                    <button class="btn ui-button btn-outline-primary btn-sm" type="button" [disabled]="savingTask()" (click)="saveTask(task, { comments: task.comments || '' }, 'Reminder notes saved.')">
+                      Save Notes
+                    </button>
+                  </div>
+                </article>
+              }
+            </div>
+          } @else {
+            <div class="empty-state">No reminders are available yet. Add an install date and job-linked parts to generate readiness checkpoints.</div>
+          }
+        </div>
+      }
+    </section>
+    <section class="records-panel app-surface" [class.collapsed]="!isSectionOpen('additionalParts')">
+      <div class="panel-head">
+        <div>
+          <h2>Additional Parts</h2>
+          <div class="panel-meta">Parts added after quote or during active work</div>
+        </div>
+        <div class="panel-actions">
+          <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="toggleSection('additionalParts')">
+            {{ sectionToggleLabel('additionalParts') }}
+          </button>
+          <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="toggleAdditionalPartForm(); openSection('additionalParts')">
             {{ showAdditionalPartForm() ? 'Cancel' : 'Add Additional Part' }}
-          </ion-button>
+          </button>
         </div>
-
-        <div class="review-warning" *ngIf="needsAdditionalPartReview(job)">
-          All additional parts have not been reviewed and added to invoice yet.
+      </div>
+      @if (isSectionOpen('additionalParts')) {
+        <div class="section-body">
+          @if (needsAdditionalPartReview(job)) {
+            <div class="review-warning">
+              All additional parts have not been reviewed and added to invoice yet.
+            </div>
+          }
+          @if (additionalPartMessage()) {
+            <div class="additional-message">{{ additionalPartMessage() }}</div>
+          }
+          @if (showAdditionalPartForm()) {
+            <div class="additional-form">
+              <div class="ui-item">
+                <span class="ui-label">Part Name</span>
+                <ui-input aria-label="Part Name"
+                  [ngModel]="additionalPartDraft().partName"
+                  (ngModelChange)="setAdditionalPartDraft('partName', $event)"
+                  placeholder="Replacement bracket, wiring pigtail, hardware kit">
+                </ui-input>
+              </div>
+              <div class="ui-item">
+                <span class="ui-label">SKU</span>
+                <ui-input aria-label="SKU"
+                  [ngModel]="additionalPartDraft().sku"
+                  (ngModelChange)="setAdditionalPartDraft('sku', $event)">
+                </ui-input>
+              </div>
+              <div class="vendor-field">
+                <app-vendor-picker
+                  [vendorId]="additionalPartDraft().vendorId"
+                  [vendorName]="additionalPartDraft().vendor"
+                  (vendorChange)="setAdditionalPartVendor($event)">
+                </app-vendor-picker>
+              </div>
+              <div class="ui-item">
+                <span class="ui-label">Quantity</span>
+                <ui-input aria-label="Quantity"
+                  type="number"
+                  [ngModel]="additionalPartDraft().quantity"
+                  (ngModelChange)="setAdditionalPartDraft('quantity', $event)">
+                </ui-input>
+              </div>
+              <div class="ui-item">
+                <span class="ui-label">Cost</span>
+                <ui-input aria-label="Cost"
+                  type="number"
+                  [ngModel]="additionalPartDraft().cost"
+                  (ngModelChange)="setAdditionalPartDraft('cost', $event)">
+                </ui-input>
+              </div>
+              <div class="ui-item">
+                <span class="ui-label">Markup %</span>
+                <ui-input aria-label="Markup %"
+                  type="number"
+                  [ngModel]="additionalPartDraft().markup"
+                  (ngModelChange)="setAdditionalPartDraft('markup', $event)">
+                </ui-input>
+              </div>
+              <div class="ui-item">
+                <span class="ui-label">Customer Price</span>
+                <ui-input aria-label="Customer Price"
+                  type="number"
+                  [ngModel]="additionalPartDraft().customerPrice"
+                  (ngModelChange)="setAdditionalPartDraft('customerPrice', $event)">
+                </ui-input>
+              </div>
+              <label class="native-field">
+                <span>Approval Status</span>
+                <select class="form-select"
+                  [ngModel]="additionalPartDraft().approvalStatus"
+                  (ngModelChange)="setAdditionalPartDraft('approvalStatus', $any($event))">
+                  <option value="pending">Pending</option>
+                  <option value="approved">Approved</option>
+                  <option value="declined">Declined</option>
+                  <option value="not_required">Not Required</option>
+                </select>
+              </label>
+              <label class="native-field">
+                <span>Billing Status</span>
+                <select class="form-select"
+                  [ngModel]="additionalPartDraft().billingStatus"
+                  (ngModelChange)="setAdditionalPartDraft('billingStatus', $any($event))">
+                  <option value="not_added">Not Added</option>
+                  <option value="quote_update_needed">Quote Update Needed</option>
+                  <option value="invoice_update_needed">Invoice Update Needed</option>
+                  <option value="payment_needed">Payment Needed</option>
+                  <option value="added_to_invoice">Added To Invoice</option>
+                  <option value="paid">Paid</option>
+                </select>
+              </label>
+              <label class="native-field">
+                <span>Part Status</span>
+                <select class="form-select"
+                  [ngModel]="additionalPartDraft().status"
+                  (ngModelChange)="setAdditionalPartDraft('status', $any($event))">
+                  <option value="requested">Requested</option>
+                  <option value="ordered">Ordered</option>
+                  <option value="received">Received</option>
+                  <option value="installed">Installed</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+              </label>
+              <div class="ui-item wide-field">
+                <span class="ui-label">Reason / Notes</span>
+                <ui-input aria-label="Reason / Notes"
+                  [ngModel]="additionalPartDraft().reasonNotes"
+                  (ngModelChange)="setAdditionalPartDraft('reasonNotes', $event)"
+                  placeholder="Why this was added after the original quote">
+                </ui-input>
+              </div>
+              <div class="form-actions">
+                <button class="btn ui-button btn-primary btn-sm" type="button" [disabled]="savingAdditionalPart()" (click)="addAdditionalPart()">
+                  Save Additional Part
+                </button>
+              </div>
+            </div>
+          }
+          @if (job.additionalParts.length) {
+            <div class="table-shell">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Part</th>
+                    <th>Vendor</th>
+                    <th>Qty</th>
+                    <th>Cost</th>
+                    <th>Customer Price</th>
+                    <th>Approval</th>
+                    <th>Billing</th>
+                    <th>Review</th>
+                    <th>Added</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (part of job.additionalParts; track part) {
+                    <tr>
+                      <td>
+                        <strong>{{ part.partName }}</strong>
+                        <span>SKU {{ part.sku || 'N/A' }} · {{ label(part.status) }}</span>
+                      </td>
+                      <td>{{ part.vendor || 'No supplier' }}</td>
+                      <td>{{ formatQty(part.quantity) }}</td>
+                      <td>{{ formatCurrency(part.cost) }}</td>
+                      <td>{{ formatCurrency(part.customerPrice) }}</td>
+                      <td>
+                        <select
+                          class="form-select compact-select"
+                          [ngModel]="part.approvalStatus"
+                          [disabled]="savingAdditionalPart()"
+                          (ngModelChange)="updateAdditionalPart(part, { approvalStatus: $any($event) })">
+                          <option value="pending">Pending</option>
+                          <option value="approved">Approved</option>
+                          <option value="declined">Declined</option>
+                          <option value="not_required">Not Required</option>
+                        </select>
+                      </td>
+                      <td>
+                        <select
+                          class="form-select compact-select"
+                          [ngModel]="part.billingStatus"
+                          [disabled]="savingAdditionalPart()"
+                          (ngModelChange)="updateAdditionalPart(part, { billingStatus: $any($event) })">
+                          <option value="not_added">Not Added</option>
+                          <option value="quote_update_needed">Quote Update Needed</option>
+                          <option value="invoice_update_needed">Invoice Update Needed</option>
+                          <option value="payment_needed">Payment Needed</option>
+                          <option value="added_to_invoice">Added To Invoice</option>
+                          <option value="paid">Paid</option>
+                        </select>
+                      </td>
+                      <td>
+                        <span class="status-pill" [ngClass]="statusClass(part.invoiceReviewStatus)">
+                          {{ label(part.invoiceReviewStatus) }}
+                        </span>
+                        @if (part.invoiceReviewStatus !== 'reviewed') {
+                          <button
+                            type="button"
+                            class="text-action"
+                            [disabled]="savingAdditionalPart()"
+                            (click)="markAdditionalPartReviewed(part)">
+                            Mark reviewed
+                          </button>
+                        }
+                      </td>
+                      <td>
+                        <strong>{{ part.addedBy || 'Staff' }}</strong>
+                        <span>{{ formatDate(part.addedAt) }}</span>
+                      </td>
+                      <td>{{ part.reasonNotes || part.description || '-' }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          } @else {
+            <div class="empty-state">No additional parts have been added to this job.</div>
+          }
         </div>
-        <div class="additional-message" *ngIf="additionalPartMessage()">{{ additionalPartMessage() }}</div>
-
-        <div class="additional-form" *ngIf="showAdditionalPartForm()">
-          <ion-item lines="none">
-            <ion-label position="stacked">Part Name</ion-label>
-            <ion-input
-              [ngModel]="additionalPartDraft().partName"
-              (ngModelChange)="setAdditionalPartDraft('partName', $event)"
-              placeholder="Replacement bracket, wiring pigtail, hardware kit">
-            </ion-input>
-          </ion-item>
-          <ion-item lines="none">
-            <ion-label position="stacked">SKU</ion-label>
-            <ion-input
-              [ngModel]="additionalPartDraft().sku"
-              (ngModelChange)="setAdditionalPartDraft('sku', $event)">
-            </ion-input>
-          </ion-item>
-          <div class="vendor-field">
-            <app-vendor-picker
-              [vendorId]="additionalPartDraft().vendorId"
-              [vendorName]="additionalPartDraft().vendor"
-              (vendorChange)="setAdditionalPartVendor($event)">
-            </app-vendor-picker>
+      }
+    </section>
+    <section class="records-panel app-surface" [class.collapsed]="!isSectionOpen('attachments')">
+      <div class="panel-head">
+        <div>
+          <h2>Attachments</h2>
+          <div class="panel-meta">Receipts, vendor invoices, photos, and job documents</div>
+        </div>
+        <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="toggleSection('attachments')">
+          {{ sectionToggleLabel('attachments') }}
+        </button>
+      </div>
+      @if (isSectionOpen('attachments')) {
+        <div class="section-body">
+          @if (attachmentMessage()) {
+            <div class="additional-message">{{ attachmentMessage() }}</div>
+          }
+          <div class="attachment-form">
+            <label class="native-field">
+              <span>Attach To</span>
+              <select class="form-select"
+                [ngModel]="attachmentDraft().target"
+                (ngModelChange)="setAttachmentDraft('target', $event)">
+                <option value="job:">Job</option>
+                @for (part of job.parts; track part) {
+                  <option [value]="'jobPart:' + part.id">
+                    Job Part - {{ part.partName }}
+                  </option>
+                }
+                @for (part of job.additionalParts; track part) {
+                  <option [value]="'additionalPart:' + part.id">
+                    Additional Part - {{ part.partName }}
+                  </option>
+                }
+                @for (po of job.purchaseOrders; track po) {
+                  <option [value]="'purchaseOrder:' + po.order.id">
+                    Purchase Order - {{ po.order.id }}
+                  </option>
+                }
+              </select>
+            </label>
+            <label class="native-field">
+              <span>Category</span>
+              <select class="form-select"
+                [ngModel]="attachmentDraft().category"
+                (ngModelChange)="setAttachmentDraft('category', $any($event))">
+                <option value="receipt">Receipt</option>
+                <option value="vendor_invoice">Vendor Invoice</option>
+                <option value="photo">Photo</option>
+                <option value="document">Document</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+            <div class="ui-item">
+              <span class="ui-label">Notes</span>
+              <ui-input aria-label="Notes"
+                [ngModel]="attachmentDraft().description"
+                (ngModelChange)="setAttachmentDraft('description', $event)"
+                placeholder="Receipt for bumper brackets, install photo, vendor invoice">
+              </ui-input>
+            </div>
+            <label class="file-picker">
+              <span>{{ selectedAttachmentFile()?.name || 'Choose file' }}</span>
+              <input
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png,.heic,.heif,.doc,.docx,application/pdf,image/jpeg,image/png,image/heic,image/heif,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                (change)="setAttachmentFile($any($event.target))" />
+            </label>
+            <div class="form-actions">
+              <button class="btn ui-button btn-primary btn-sm" type="button" [disabled]="savingAttachment() || !selectedAttachmentFile()" (click)="uploadAttachment()">
+                Upload Attachment
+              </button>
+            </div>
           </div>
-          <ion-item lines="none">
-            <ion-label position="stacked">Quantity</ion-label>
-            <ion-input
-              type="number"
-              [ngModel]="additionalPartDraft().quantity"
-              (ngModelChange)="setAdditionalPartDraft('quantity', $event)">
-            </ion-input>
-          </ion-item>
-          <ion-item lines="none">
-            <ion-label position="stacked">Cost</ion-label>
-            <ion-input
-              type="number"
-              [ngModel]="additionalPartDraft().cost"
-              (ngModelChange)="setAdditionalPartDraft('cost', $event)">
-            </ion-input>
-          </ion-item>
-          <ion-item lines="none">
-            <ion-label position="stacked">Markup %</ion-label>
-            <ion-input
-              type="number"
-              [ngModel]="additionalPartDraft().markup"
-              (ngModelChange)="setAdditionalPartDraft('markup', $event)">
-            </ion-input>
-          </ion-item>
-          <ion-item lines="none">
-            <ion-label position="stacked">Customer Price</ion-label>
-            <ion-input
-              type="number"
-              [ngModel]="additionalPartDraft().customerPrice"
-              (ngModelChange)="setAdditionalPartDraft('customerPrice', $event)">
-            </ion-input>
-          </ion-item>
-          <label class="native-field">
-            <span>Approval Status</span>
-            <select
-              [ngModel]="additionalPartDraft().approvalStatus"
-              (ngModelChange)="setAdditionalPartDraft('approvalStatus', $any($event))">
-              <option value="pending">Pending</option>
-              <option value="approved">Approved</option>
-              <option value="declined">Declined</option>
-              <option value="not_required">Not Required</option>
-            </select>
-          </label>
-          <label class="native-field">
-            <span>Billing Status</span>
-            <select
-              [ngModel]="additionalPartDraft().billingStatus"
-              (ngModelChange)="setAdditionalPartDraft('billingStatus', $any($event))">
-              <option value="not_added">Not Added</option>
-              <option value="quote_update_needed">Quote Update Needed</option>
-              <option value="invoice_update_needed">Invoice Update Needed</option>
-              <option value="payment_needed">Payment Needed</option>
-              <option value="added_to_invoice">Added To Invoice</option>
-              <option value="paid">Paid</option>
-            </select>
-          </label>
-          <label class="native-field">
-            <span>Part Status</span>
-            <select
-              [ngModel]="additionalPartDraft().status"
-              (ngModelChange)="setAdditionalPartDraft('status', $any($event))">
-              <option value="requested">Requested</option>
-              <option value="ordered">Ordered</option>
-              <option value="received">Received</option>
-              <option value="installed">Installed</option>
-              <option value="cancelled">Cancelled</option>
-            </select>
-          </label>
-          <ion-item class="wide-field" lines="none">
-            <ion-label position="stacked">Reason / Notes</ion-label>
-            <ion-input
-              [ngModel]="additionalPartDraft().reasonNotes"
-              (ngModelChange)="setAdditionalPartDraft('reasonNotes', $event)"
-              placeholder="Why this was added after the original quote">
-            </ion-input>
-          </ion-item>
-          <div class="form-actions">
-            <ion-button size="small" [disabled]="savingAdditionalPart()" (click)="addAdditionalPart()">
-              Save Additional Part
-            </ion-button>
-          </div>
+          @if (job.attachments.length) {
+            <div class="table-shell">
+              <table>
+                <thead>
+                  <tr>
+                    <th>File</th>
+                    <th>Category</th>
+                    <th>Source</th>
+                    <th>Uploaded</th>
+                    <th>Notes</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (attachment of job.attachments; track attachment) {
+                    <tr>
+                      <td>
+                        <strong>{{ attachment.originalFileName || attachment.fileName }}</strong>
+                        <span>{{ attachment.contentType || 'file' }} · {{ formatBytes(attachment.size) }}</span>
+                      </td>
+                      <td>{{ label(attachment.category) }}</td>
+                      <td>{{ attachmentSourceLabel(attachment) }}</td>
+                      <td>
+                        <strong>{{ attachment.uploadedBy || 'Staff' }}</strong>
+                        <span>{{ formatDate(attachment.uploadedAt) }}</span>
+                      </td>
+                      <td>{{ attachment.description || '-' }}</td>
+                      <td>
+                        <a [href]="attachment.url" target="_blank" rel="noopener">Open</a>
+                        <button
+                          type="button"
+                          class="text-action"
+                          [disabled]="savingAttachment()"
+                          (click)="archiveAttachment(attachment)">
+                          Archive
+                        </button>
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          } @else {
+            <div class="empty-state">No files have been attached to this job yet.</div>
+          }
         </div>
-
-        <div class="table-shell" *ngIf="job.additionalParts.length; else noAdditionalParts">
-          <table>
-            <thead>
-              <tr>
-                <th>Part</th>
-                <th>Vendor</th>
-                <th>Qty</th>
-                <th>Cost</th>
-                <th>Customer Price</th>
-                <th>Approval</th>
-                <th>Billing</th>
-                <th>Review</th>
-                <th>Added</th>
-                <th>Notes</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr *ngFor="let part of job.additionalParts">
-                <td>
-                  <strong>{{ part.partName }}</strong>
-                  <span>SKU {{ part.sku || 'N/A' }} · {{ label(part.status) }}</span>
-                </td>
-                <td>{{ part.vendor || 'No supplier' }}</td>
-                <td>{{ formatQty(part.quantity) }}</td>
-                <td>{{ formatCurrency(part.cost) }}</td>
-                <td>{{ formatCurrency(part.customerPrice) }}</td>
-                <td>
-                  <select
-                    class="compact-select"
-                    [ngModel]="part.approvalStatus"
-                    [disabled]="savingAdditionalPart()"
-                    (ngModelChange)="updateAdditionalPart(part, { approvalStatus: $any($event) })">
-                    <option value="pending">Pending</option>
-                    <option value="approved">Approved</option>
-                    <option value="declined">Declined</option>
-                    <option value="not_required">Not Required</option>
-                  </select>
-                </td>
-                <td>
-                  <select
-                    class="compact-select"
-                    [ngModel]="part.billingStatus"
-                    [disabled]="savingAdditionalPart()"
-                    (ngModelChange)="updateAdditionalPart(part, { billingStatus: $any($event) })">
-                    <option value="not_added">Not Added</option>
-                    <option value="quote_update_needed">Quote Update Needed</option>
-                    <option value="invoice_update_needed">Invoice Update Needed</option>
-                    <option value="payment_needed">Payment Needed</option>
-                    <option value="added_to_invoice">Added To Invoice</option>
-                    <option value="paid">Paid</option>
-                  </select>
-                </td>
-                <td>
-                  <span class="status-pill" [ngClass]="statusClass(part.invoiceReviewStatus)">
-                    {{ label(part.invoiceReviewStatus) }}
-                  </span>
-                  <button
-                    type="button"
-                    class="text-action"
-                    *ngIf="part.invoiceReviewStatus !== 'reviewed'"
-                    [disabled]="savingAdditionalPart()"
-                    (click)="markAdditionalPartReviewed(part)">
-                    Mark reviewed
-                  </button>
-                </td>
-                <td>
-                  <strong>{{ part.addedBy || 'Staff' }}</strong>
-                  <span>{{ formatDate(part.addedAt) }}</span>
-                </td>
-                <td>{{ part.reasonNotes || part.description || '-' }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <ng-template #noAdditionalParts>
-          <div class="empty-state">No additional parts have been added to this job.</div>
-        </ng-template>
-      </section>
-
-      <section class="records-panel glass-surface">
+      }
+    </section>
+    <section class="detail-grid">
+      <article class="records-panel app-surface" [class.collapsed]="!isSectionOpen('documents')">
         <div class="panel-head">
           <div>
-            <h2>Attachments</h2>
-            <div class="panel-meta">Receipts, vendor invoices, photos, and job documents</div>
+            <h2>Documents</h2>
+            <div class="panel-meta">Quotes and invoices for this job</div>
           </div>
+          <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="toggleSection('documents')">
+            {{ sectionToggleLabel('documents') }}
+          </button>
         </div>
-
-        <div class="additional-message" *ngIf="attachmentMessage()">{{ attachmentMessage() }}</div>
-
-        <div class="attachment-form">
-          <label class="native-field">
-            <span>Attach To</span>
-            <select
-              [ngModel]="attachmentDraft().target"
-              (ngModelChange)="setAttachmentDraft('target', $event)">
-              <option value="job:">Job</option>
-              <option *ngFor="let part of job.parts" [value]="'jobPart:' + part.id">
-                Job Part - {{ part.partName }}
-              </option>
-              <option *ngFor="let part of job.additionalParts" [value]="'additionalPart:' + part.id">
-                Additional Part - {{ part.partName }}
-              </option>
-              <option *ngFor="let po of job.purchaseOrders" [value]="'purchaseOrder:' + po.order.id">
-                Purchase Order - {{ po.order.id }}
-              </option>
-            </select>
-          </label>
-          <label class="native-field">
-            <span>Category</span>
-            <select
-              [ngModel]="attachmentDraft().category"
-              (ngModelChange)="setAttachmentDraft('category', $any($event))">
-              <option value="receipt">Receipt</option>
-              <option value="vendor_invoice">Vendor Invoice</option>
-              <option value="photo">Photo</option>
-              <option value="document">Document</option>
-              <option value="other">Other</option>
-            </select>
-          </label>
-          <ion-item lines="none">
-            <ion-label position="stacked">Notes</ion-label>
-            <ion-input
-              [ngModel]="attachmentDraft().description"
-              (ngModelChange)="setAttachmentDraft('description', $event)"
-              placeholder="Receipt for bumper brackets, install photo, vendor invoice">
-            </ion-input>
-          </ion-item>
-          <label class="file-picker">
-            <span>{{ selectedAttachmentFile()?.name || 'Choose file' }}</span>
-            <input
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png,.heic,.heif,.doc,.docx,application/pdf,image/jpeg,image/png,image/heic,image/heif,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-              (change)="setAttachmentFile($any($event.target))" />
-          </label>
-          <div class="form-actions">
-            <ion-button size="small" [disabled]="savingAttachment() || !selectedAttachmentFile()" (click)="uploadAttachment()">
-              Upload Attachment
-            </ion-button>
+        @if (isSectionOpen('documents')) {
+          <div class="section-body">
+            @if (job.quotes.length || job.invoices.length) {
+              <div class="document-list">
+                @for (quote of job.quotes; track quote) {
+                  <a
+                    class="document-row"
+                    [routerLink]="documentRoute(quote.document.documentType, quote.document.id)">
+                    <span>Quote {{ quote.document.invoiceNumber }}</span>
+                    <strong>{{ documentStatusLabel(quote.document.stage, 'quote') }}</strong>
+                    <small>{{ formatCurrency(quote.document.total) }}</small>
+                  </a>
+                }
+                @for (invoice of job.invoices; track invoice) {
+                  <a
+                    class="document-row"
+                    [routerLink]="documentRoute(invoice.document.documentType, invoice.document.id)">
+                    <span>Invoice {{ invoice.document.invoiceNumber }}</span>
+                    <strong>{{ documentStatusLabel(invoice.document.stage, 'invoice') }}</strong>
+                    <small>{{ formatCurrency(invoice.document.total) }}</small>
+                  </a>
+                }
+              </div>
+            } @else {
+              <div class="empty-state">No related quote or invoice matched this job.</div>
+            }
           </div>
-        </div>
-
-        <div class="table-shell" *ngIf="job.attachments.length; else noAttachments">
-          <table>
-            <thead>
-              <tr>
-                <th>File</th>
-                <th>Category</th>
-                <th>Source</th>
-                <th>Uploaded</th>
-                <th>Notes</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr *ngFor="let attachment of job.attachments">
-                <td>
-                  <strong>{{ attachment.originalFileName || attachment.fileName }}</strong>
-                  <span>{{ attachment.contentType || 'file' }} · {{ formatBytes(attachment.size) }}</span>
-                </td>
-                <td>{{ label(attachment.category) }}</td>
-                <td>{{ attachmentSourceLabel(attachment) }}</td>
-                <td>
-                  <strong>{{ attachment.uploadedBy || 'Staff' }}</strong>
-                  <span>{{ formatDate(attachment.uploadedAt) }}</span>
-                </td>
-                <td>{{ attachment.description || '-' }}</td>
-                <td>
-                  <a [href]="attachment.url" target="_blank" rel="noopener">Open</a>
-                  <button
-                    type="button"
-                    class="text-action"
-                    [disabled]="savingAttachment()"
-                    (click)="archiveAttachment(attachment)">
-                    Archive
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <ng-template #noAttachments>
-          <div class="empty-state">No files have been attached to this job yet.</div>
-        </ng-template>
-      </section>
-
-      <section class="detail-grid">
-        <article class="records-panel glass-surface">
-          <div class="panel-head">
-            <div>
-              <h2>Quote / Invoice</h2>
-              <div class="panel-meta">Customer-facing billing records are shown read-only here</div>
-            </div>
-          </div>
-          <div class="document-list" *ngIf="job.quotes.length || job.invoices.length; else noDocuments">
-            <a
-              class="document-row"
-              *ngFor="let quote of job.quotes"
-              [routerLink]="documentRoute(quote.document.documentType, quote.document.id)">
-              <span>{{ quote.document.invoiceNumber }}</span>
-              <strong>{{ quote.document.stage }}</strong>
-              <small>{{ formatCurrency(quote.document.total) }}</small>
-            </a>
-            <a
-              class="document-row"
-              *ngFor="let invoice of job.invoices"
-              [routerLink]="documentRoute(invoice.document.documentType, invoice.document.id)">
-              <span>{{ invoice.document.invoiceNumber }}</span>
-              <strong>{{ invoice.document.stage }}</strong>
-              <small>{{ formatCurrency(invoice.document.total) }}</small>
-            </a>
-          </div>
-          <ng-template #noDocuments>
-            <div class="empty-state">No related quote or invoice matched this job.</div>
-          </ng-template>
-        </article>
-
-        <article class="records-panel glass-surface">
-          <div class="panel-head">
-            <div>
-              <h2>Schedule / Work Item</h2>
-              <div class="panel-meta">Operational context from schedule and dashboard cards</div>
-            </div>
-          </div>
-          <div class="context-list" *ngIf="job.schedules.length || job.workItems.length; else noContext">
-            <div class="context-row" *ngFor="let schedule of job.schedules">
-              <span>Schedule</span>
-              <strong>{{ formatDate(schedule.start) }}</strong>
-              <small>{{ schedule.resource || schedule.title || 'Scheduled install' }}</small>
-            </div>
-            <div class="context-row" *ngFor="let item of job.workItems">
-              <span>Work item</span>
-              <strong>{{ item.title }}</strong>
-              <small>{{ item.laneId || 'Dashboard' }}</small>
-            </div>
-          </div>
-          <ng-template #noContext>
-            <div class="empty-state">No schedule or work item context matched this job.</div>
-          </ng-template>
-        </article>
-      </section>
-
-      <section class="records-panel glass-surface" *ngIf="job.fallbackNotes.length">
+        }
+      </article>
+      <article class="records-panel app-surface" [class.collapsed]="!isSectionOpen('schedule')">
         <div class="panel-head">
           <div>
-            <h2>Compatibility Notes</h2>
-            <div class="panel-meta">Why some older records may only show partial context</div>
+            <h2>Schedule / Work Item</h2>
+            <div class="panel-meta">Install and workflow context</div>
           </div>
+          <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="toggleSection('schedule')">
+            {{ sectionToggleLabel('schedule') }}
+          </button>
         </div>
-        <ul class="notes-list">
-          <li *ngFor="let note of job.fallbackNotes">{{ note }}</li>
-        </ul>
-      </section>
-    </ng-container>
-  </div>
-</ion-content>
+        @if (isSectionOpen('schedule')) {
+          <div class="section-body">
+            @if (job.schedules.length || job.workItems.length) {
+              <div class="context-list">
+                @for (schedule of job.schedules; track schedule) {
+                  <div class="context-row">
+                    <span>Schedule</span>
+                    <strong>{{ formatDate(schedule.start) }}</strong>
+                    <small>{{ schedule.resource || schedule.title || 'Scheduled install' }}</small>
+                  </div>
+                }
+                @for (item of job.workItems; track item) {
+                  <div class="context-row">
+                    <span>Work item</span>
+                    <strong>{{ item.title }}</strong>
+                    <small>{{ item.laneId || 'Dashboard' }}</small>
+                  </div>
+                }
+              </div>
+            } @else {
+              <div class="empty-state">No schedule or work item context matched this job.</div>
+            }
+          </div>
+        }
+      </article>
+    </section>
+  }
+</div>
+</div>

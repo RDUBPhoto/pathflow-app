@@ -1,106 +1,122 @@
-<ion-modal [isOpen]="isOpen" (didDismiss)="close()">
+<ui-modal [isOpen]="isOpen" (didDismiss)="close()" label="Schedule">
   <ng-template>
-    <ion-header>
-      <ion-toolbar>
-        <ion-title>Schedule</ion-title>
-        <ion-buttons slot="end">
-          <ion-button (click)="close()">Close</ion-button>
-        </ion-buttons>
-      </ion-toolbar>
-    </ion-header>
-    <ion-content class="ion-padding glass-bg schedule-modal-content">
-      <div class="feedback-overlay" *ngIf="status()">
-        <div
-          class="page-feedback"
-          [class.success]="statusTone() === 'success'"
-          [class.error]="statusTone() === 'error'">
-          {{ status() }}
+    <header class="ui-header">
+      <div class="ui-toolbar">
+        <h1 class="ui-title">Schedule</h1>
+        <div class="ui-buttons" slot="end">
+          <button class="btn ui-button btn-primary" type="button" (click)="close()">Close</button>
         </div>
       </div>
+    </header>
+    <div class="ui-content app-padding app-content schedule-modal-content">
+      @if (status()) {
+        <div class="feedback-overlay">
+          <div
+            class="page-feedback"
+            [class.success]="statusTone() === 'success'"
+            [class.error]="statusTone() === 'error'">
+            {{ status() }}
+          </div>
+        </div>
+      }
 
-      <div class="schedule-shell glass-surface">
+      <div class="schedule-shell app-surface">
         <daypilot-scheduler
           #scheduler
           [config]="config"
           [events]="events()">
         </daypilot-scheduler>
       </div>
-      <ion-spinner name="crescent" *ngIf="loading()" style="margin-top:12px;"></ion-spinner>
-    </ion-content>
+      @if (loading()) {
+        <span class="spinner-border spinner-border-sm ui-spinner" role="status" aria-label="Loading" style="margin-top:12px;"></span>
+      }
+    </div>
   </ng-template>
-</ion-modal>
+</ui-modal>
 
-<ion-modal [isOpen]="editorOpen()" (didDismiss)="onEditorDidDismiss()">
+<ui-modal [isOpen]="editorOpen()" (didDismiss)="onEditorDidDismiss()" label="Appointment">
   <ng-template>
-    <ion-header>
-      <ion-toolbar>
-        <ion-title>Appointment</ion-title>
-        <ion-buttons slot="end">
-          <ion-button (click)="closeEditor()">Close</ion-button>
-        </ion-buttons>
-      </ion-toolbar>
-    </ion-header>
-    <ion-content class="ion-padding glass-bg modal-form-content">
-      <ion-item lines="full">
-        <ion-label>Block bay</ion-label>
-        <ion-checkbox slot="end" [checked]="editorBlocked()" (ionChange)="editorBlocked.set($event.detail.checked)"></ion-checkbox>
-      </ion-item>
-
-      <ion-item *ngIf="!editorBlocked()">
-        <ion-label position="stacked">Customer</ion-label>
-        <ion-select interface="popover" [value]="editorCustomerId()" (ionChange)="editorCustomerId.set($event.detail.value || null)">
-          <ion-select-option [value]="null">Unassigned</ion-select-option>
-          <ion-select-option *ngFor="let c of customers()" [value]="c.id">
-            {{ c.name || 'Unnamed' }}
-          </ion-select-option>
-        </ion-select>
-      </ion-item>
-
-      <ion-item *ngIf="editorBlocked()">
-        <ion-label position="stacked">Block label</ion-label>
-        <ion-input [ngModel]="editorTitle()" (ngModelChange)="editorTitle.set($event)"></ion-input>
-      </ion-item>
-      <div class="validation-error" *ngIf="editorBlocked() && !editorTitle().trim()">
-        Block label is required when blocking a bay.
+    <header class="ui-header">
+      <div class="ui-toolbar">
+        <h1 class="ui-title">Appointment</h1>
+        <div class="ui-buttons" slot="end">
+          <button class="btn ui-button btn-primary" type="button" (click)="closeEditor()">Close</button>
+        </div>
+      </div>
+    </header>
+    <div class="ui-content app-padding app-content modal-form-content">
+      <div class="ui-item">
+        <span class="ui-label">Block bay</span>
+        <ui-checkbox aria-label="Block bay" slot="end" [checked]="editorBlocked()" (controlChange)="editorBlocked.set($event.detail.checked)"></ui-checkbox>
       </div>
 
-      <ion-item>
-        <ion-label position="stacked">Notes</ion-label>
-        <ion-textarea autoGrow [ngModel]="editorNotes()" (ngModelChange)="editorNotes.set($event)"></ion-textarea>
-      </ion-item>
+      @if (!editorBlocked()) {
+        <div class="ui-item">
+          <span class="ui-label">Customer</span>
+          <select class="form-select" aria-label="Customer" [ngModel]="editorCustomerId()" (ngModelChange)="editorCustomerId.set($event || null)">
+            <option [ngValue]="null">Unassigned</option>
+            @for (c of customers(); track c) {
+              <option [ngValue]="c.id">
+                {{ c.name || 'Unnamed' }}
+              </option>
+            }
+          </select>
+        </div>
+      }
 
-      <ion-item>
-        <ion-label position="stacked">Start</ion-label>
-        <ion-input
+      @if (editorBlocked()) {
+        <div class="ui-item">
+          <span class="ui-label">Block label</span>
+          <ui-input aria-label="Block label" [ngModel]="editorTitle()" (ngModelChange)="editorTitle.set($event)"></ui-input>
+        </div>
+      }
+      @if (editorBlocked() && !editorTitle().trim()) {
+        <div class="validation-error">
+          Block label is required when blocking a bay.
+        </div>
+      }
+
+      <div class="ui-item">
+        <span class="ui-label">Notes</span>
+        <ui-textarea aria-label="Notes" autoGrow [ngModel]="editorNotes()" (ngModelChange)="editorNotes.set($event)"></ui-textarea>
+      </div>
+
+      <div class="ui-item">
+        <span class="ui-label">Start</span>
+        <ui-input aria-label="Start"
           type="datetime-local"
           [ngModel]="editorStart()"
           (ngModelChange)="editorStart.set($event || '')">
-        </ion-input>
-      </ion-item>
+        </ui-input>
+      </div>
 
-      <ion-item>
-        <ion-label position="stacked">End</ion-label>
-        <ion-input
+      <div class="ui-item">
+        <span class="ui-label">End</span>
+        <ui-input aria-label="End"
           type="datetime-local"
           [ngModel]="editorEnd()"
           (ngModelChange)="editorEnd.set($event || '')">
-        </ion-input>
-      </ion-item>
+        </ui-input>
+      </div>
 
-    </ion-content>
-    <ion-footer class="modal-form-footer">
-      <ion-toolbar>
+    </div>
+    <footer class="ui-footer modal-form-footer">
+      <div class="ui-toolbar">
         <div class="modal-footer-row">
           <div class="modal-footer-left">
-            <ion-button fill="outline" color="danger" *ngIf="editorId()" (click)="deleteEditor()">Delete</ion-button>
+            @if (editorId()) {
+              <button class="btn ui-button btn-outline-danger" type="button" (click)="deleteEditor()">Delete</button>
+            }
           </div>
           <div class="modal-footer-right">
-            <ion-button fill="outline" (click)="closeEditor()">Cancel</ion-button>
-            <ion-button (click)="saveEditor()" [disabled]="!canSaveEditor()">Save</ion-button>
+            <button class="btn ui-button btn-outline-primary" type="button" (click)="closeEditor()">Cancel</button>
+            <button class="btn ui-button btn-primary" type="button" (click)="saveEditor()" [disabled]="!canSaveEditor()">Save</button>
           </div>
         </div>
-        <div class="validation-error footer-validation" *ngIf="editorValidationError()">{{ editorValidationError() }}</div>
-      </ion-toolbar>
-    </ion-footer>
+        @if (editorValidationError()) {
+          <div class="validation-error footer-validation">{{ editorValidationError() }}</div>
+        }
+      </div>
+    </footer>
   </ng-template>
-</ion-modal>
+</ui-modal>

@@ -1,17 +1,16 @@
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import devSafety from './dev-safety.cjs';
 
 const root = process.cwd();
 const apiRoot = path.join(root, 'api');
 const scriptPath = path.resolve(process.argv[1] || path.join(root, 'scripts', 'dev-local.mjs'));
-const repoNodePath = path.join(root, 'node_modules', 'node', 'bin', 'node');
 const angularCliPath = path.join(root, 'node_modules', '@angular', 'cli', 'bin', 'ng.js');
 const API_BASE_URL = 'http://127.0.0.1:7071';
 const procs = [];
 let shuttingDown = false;
-const REQUIRED_NODE_MAJOR = 18;
-const REQUIRED_ANGULAR_NODE_MAJOR = 20;
+const REQUIRED_NODE_MAJOR = 22;
 const shouldSeedDemo =
   process.argv.includes('--seed-demo') ||
   process.env.PATHFLOW_SEED_DEMO === '1' ||
@@ -58,10 +57,9 @@ function run(cmd, args, opts = {}) {
   return p;
 }
 
-function nodeMajor(version = process.version) {
-  const v = String(version || '').replace(/^v/, '');
-  const parsed = Number.parseInt(v.split('.')[0], 10);
-  return Number.isFinite(parsed) ? parsed : NaN;
+function supportedNodeVersion(version = process.version) {
+  const [major, minor, patch] = String(version).replace(/^v/, '').split('.').map(Number);
+  return major === REQUIRED_NODE_MAJOR && (minor > 22 || minor === 22 && patch >= 3);
 }
 
 function nodeVersionFor(binary) {
@@ -75,24 +73,26 @@ function nodeVersionFor(binary) {
 }
 
 function findFunctionsNodeRuntime() {
+  const nvmRoot = path.join(process.env.HOME || '', '.nvm', 'versions', 'node');
+  const installed = fs.existsSync(nvmRoot) ? fs.readdirSync(nvmRoot)
+    .filter(version => version.startsWith('v22.'))
+    .sort((left, right) => right.localeCompare(left, undefined, { numeric: true }))
+    .map(version => path.join(nvmRoot, version, 'bin', 'node')) : [];
   const candidates = [
     process.env.PATHFLOW_FUNCTIONS_NODE,
     process.execPath,
-    path.join(process.env.HOME || '', '.nvm', 'versions', 'node', 'v18.20.8', 'bin', 'node'),
-    path.join(process.env.HOME || '', '.nvm', 'versions', 'node', 'v18.20.7', 'bin', 'node'),
-    path.join(process.env.HOME || '', '.nvm', 'versions', 'node', 'v18.19.1', 'bin', 'node')
+    ...installed
   ].filter(Boolean);
 
   for (const candidate of candidates) {
     const version = nodeVersionFor(candidate);
-    if (nodeMajor(version) === REQUIRED_NODE_MAJOR) return candidate;
+    if (supportedNodeVersion(version)) return candidate;
   }
   return '';
 }
 
 function assertFunctionsNodeVersion() {
-  const major = nodeMajor();
-  if (major === REQUIRED_NODE_MAJOR) return;
+  if (supportedNodeVersion()) return;
 
   const functionsNode = findFunctionsNodeRuntime();
   if (process.env.PATHFLOW_DEV_LOCAL_REEXEC !== '1' && functionsNode) {
@@ -101,40 +101,23 @@ function assertFunctionsNodeVersion() {
       stdio: 'inherit',
       env: {
         ...process.env,
+        PATH: path.dirname(functionsNode) + path.delimiter + process.env.PATH,
         PATHFLOW_DEV_LOCAL_REEXEC: '1'
       }
     });
     process.exit(result.status ?? 1);
   }
 
-  console.error(`[dev-local] Node ${process.version} is incompatible with Azure Functions worker in this repo.`);
+  console.error(`[dev-local] Node ${process.version} is incompatible with this project. Node 22.22.3 or a newer Node 22 patch is required.`);
   console.error(`[dev-local] Switch to Node ${REQUIRED_NODE_MAJOR} and run npm start again.`);
   console.error(`[dev-local] If you use nvm: nvm install ${REQUIRED_NODE_MAJOR} && nvm use ${REQUIRED_NODE_MAJOR}`);
   process.exit(1);
 }
 
 function angularServeCommand() {
-  const repoNodeVersion = nodeVersionFor(repoNodePath);
-  if (nodeMajor(repoNodeVersion) >= REQUIRED_ANGULAR_NODE_MAJOR && fs.existsSync(angularCliPath)) {
-    return {
-      cmd: repoNodePath,
-      args: [
-        angularCliPath,
-        'serve',
-        '--no-hmr',
-        '--proxy-config',
-        'proxy.conf.local.json',
-        '--port',
-        '4200',
-        '--host',
-        '0.0.0.0'
-      ]
-    };
-  }
-
   return {
-    cmd: 'ng',
-    args: ['serve', '--no-hmr', '--proxy-config', 'proxy.conf.local.json', '--port', '4200', '--host', '0.0.0.0']
+    cmd: process.execPath,
+    args: [angularCliPath, 'serve', '--no-hmr', '--proxy-config', 'proxy.conf.local.json', '--port', '4200', '--host', '0.0.0.0']
   };
 }
 
@@ -151,6 +134,8 @@ process.on('SIGINT', () => shutdown(0));
 process.on('SIGTERM', () => shutdown(0));
 
 const localValues = readLocalSettingsValues();
+// Functions inherits process environment as well as local.settings.json.
+devSafety.assertDevSafety({ ...localValues, ...process.env });
 const localDataBackend = String(localValues.DATA_BACKEND || localValues.STORAGE_BACKEND || '').trim().toLowerCase();
 const forceInventorySeed =
   process.argv.includes('--seed-inventory') ||
@@ -206,8 +191,10 @@ async function waitForFrontendApiProxy(timeoutMs = 90000) {
 }
 
 async function logEmailRuntimeStatus() {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
   try {
-    const res = await fetch(`${API_BASE_URL}/api/email`);
+    const res = await fetch(`${API_BASE_URL}/api/email`, { signal: controller.signal });
     if (!res.ok) {
       console.warn(`[dev-local] Could not read /api/email status (${res.status})`);
       return;
@@ -224,6 +211,8 @@ async function logEmailRuntimeStatus() {
     console.log(`[dev-local] Email runtime: mode=${mode} provider=${provider} readyForLive=${ready} from=${fromEmail || '(empty)'}`);
   } catch {
     console.warn('[dev-local] Could not read /api/email runtime status');
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 

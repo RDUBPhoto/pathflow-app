@@ -1,23 +1,17 @@
 import { ApplicationConfig, provideZoneChangeDetection } from '@angular/core';
 import { provideRouter, withInMemoryScrolling } from '@angular/router';
 import { routes } from './app.routes';
-import { provideIonicAngular } from '@ionic/angular/standalone';
-import { provideHttpClient, withInterceptors } from '@angular/common/http';
+import { provideHttpClient, withInterceptors, withXhr } from '@angular/common/http';
 import { tenantHeaderInterceptor } from './interceptors/tenant-header.interceptor';
 import { authExpiredInterceptor } from './interceptors/auth-expired.interceptor';
-import { actionToastInterceptor } from './interceptors/action-toast.interceptor';
-import { safeApiErrorInterceptor } from './interceptors/safe-api-error.interceptor';
-
 
 export const appConfig: ApplicationConfig = {
   providers: [
+    provideZoneChangeDetection(),
     provideRouter(routes, withInMemoryScrolling({ anchorScrolling: 'enabled' })),
-    provideIonicAngular(),
-    provideHttpClient(withInterceptors([
+    provideHttpClient(withXhr(), withInterceptors([
       tenantHeaderInterceptor,
-      authExpiredInterceptor,
-      safeApiErrorInterceptor,
-      actionToastInterceptor
+      authExpiredInterceptor
     ]))
   ]
 };

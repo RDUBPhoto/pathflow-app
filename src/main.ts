@@ -1,15 +1,15 @@
 import { bootstrapApplication } from '@angular/platform-browser';
-import { provideHttpClient, withInterceptors } from '@angular/common/http';
-import { provideRouter } from '@angular/router';
-import { provideIonicAngular } from '@ionic/angular/standalone';
-
 import AppComponent from './app/app.component';
-import { routes } from './app/app.routes';
-import { tenantHeaderInterceptor } from './app/interceptors/tenant-header.interceptor';
+import { appConfig } from './app/app.config';
 
 const CHUNK_RELOAD_GUARD_KEY = 'pathflow.chunk-reload.v1';
 
 if (typeof window !== 'undefined') {
+  try {
+    performance.mark('pathflow.app.bootstrap.start');
+  } catch {
+    // Performance markers are diagnostic only.
+  }
   window.addEventListener('error', event => {
     const message = String((event as ErrorEvent)?.message || '').toLowerCase();
     const isChunkError =
@@ -24,10 +24,4 @@ if (typeof window !== 'undefined') {
   });
 }
 
-bootstrapApplication(AppComponent, {
-  providers: [
-    provideIonicAngular(),
-    provideRouter(routes),
-    provideHttpClient(withInterceptors([tenantHeaderInterceptor]))
-  ]
-});
+bootstrapApplication(AppComponent, appConfig);

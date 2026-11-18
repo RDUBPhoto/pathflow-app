@@ -20,6 +20,7 @@ export interface AuthAccessState {
   registered: boolean;
   canBootstrap: boolean;
   isSuperAdmin: boolean;
+  areaAccess: Record<string, boolean>;
   locations: AuthLocation[];
   defaultLocationId: string;
   billingStatus: string;
@@ -68,6 +69,7 @@ export interface AccessProfileResponse {
     displayName?: string;
     roles?: string[];
     isSuperAdmin?: boolean;
+    areaAccess?: Record<string, boolean>;
     locations?: Array<{ id?: string; name?: string }>;
     defaultLocationId?: string;
     billingStatus?: string;

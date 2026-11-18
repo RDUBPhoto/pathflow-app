@@ -15,15 +15,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  regression:
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
+    uses: ./.github/workflows/regression.yml
+
   build_and_deploy_job:
+    needs: regression
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     name: Build and Deploy Job
     env:
       SWA_DEPLOY_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_WONDERFUL_GLACIER_0F45F5110 }}
     steps:
-      - uses: actions/checkout@v4
-
       - name: Validate SWA Deploy Token
         run: |
           if [ -z "${SWA_DEPLOY_TOKEN}" ]; then
@@ -32,6 +35,21 @@ jobs:
             exit 1
           fi
 
+      - name: Download verified frontend
+        uses: actions/download-artifact@v4
+        with:
+          name: pathflow-web-${{ github.sha }}
+          path: release/web
+
+      - name: Download verified Functions
+        uses: actions/download-artifact@v4
+        with:
+          name: pathflow-functions-${{ github.sha }}
+          path: release
+
+      - name: Extract verified Functions
+        run: unzip -q release/pathflow-functions.zip -d release/api
+
       - name: Build And Deploy
         id: builddeploy
         uses: Azure/static-web-apps-deploy@v1
@@ -39,12 +57,11 @@ jobs:
           azure_static_web_apps_api_token: ${{ env.SWA_DEPLOY_TOKEN }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: upload
-          app_location: "/"
-          app_build_command: |
-            npm ci
-            npm run build
-          api_location: "api"
-          output_location: "dist/web/browser"
+          app_location: "release/web"
+          api_location: "release/api"
+          output_location: ""
+          skip_app_build: true
+          skip_api_build: true
           production_branch: "main"
 
   close_pull_request_job:

@@ -3,7 +3,7 @@
 }
 
 .quote-response-content {
-  --background: radial-gradient(circle at 20% 20%, #10233f 0%, #071525 52%, #040b16 100%);
+  background: var(--tblr-bg-surface-secondary);
 }
 
 .quote-response-wrap {
@@ -16,11 +16,11 @@
 .quote-response-card {
   width: min(980px, 100%);
   padding: 28px;
-  border-radius: 16px;
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  background: rgba(10, 20, 35, 0.92);
-  color: #e2e8f0;
-  box-shadow: 0 12px 32px rgba(2, 6, 23, 0.45);
+  border-radius: var(--tblr-border-radius);
+  border: 1px solid var(--tblr-border-color);
+  background: var(--tblr-bg-surface);
+  color: var(--tblr-body-color);
+  box-shadow: var(--tblr-shadow-sm);
 }
 
 .status-pill {
@@ -32,18 +32,18 @@
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  background: rgba(148, 163, 184, 0.2);
-  color: #cbd5e1;
+  background: var(--tblr-secondary-lt);
+  color: var(--tblr-secondary-color);
 }
 
 .status-pill.accepted {
-  background: rgba(34, 197, 94, 0.18);
-  color: #86efac;
+  background: var(--tblr-success-lt);
+  color: var(--tblr-success);
 }
 
 .status-pill.declined {
-  background: rgba(245, 158, 11, 0.2);
-  color: #fcd34d;
+  background: var(--tblr-warning-lt);
+  color: var(--tblr-warning);
 }
 
 .quote-head {
@@ -68,7 +68,7 @@ h1 {
 
 .vehicle {
   margin: 0 0 14px;
-  color: #94a3b8;
+  color: var(--tblr-secondary-color);
   font-size: 17px;
 }
 
@@ -76,7 +76,7 @@ h1 {
   margin: 0 0 18px;
   font-size: 17px;
   line-height: 1.5;
-  color: #e2e8f0;
+  color: var(--tblr-body-color);
 }
 
 .quote-meta-grid {
@@ -87,10 +87,10 @@ h1 {
 }
 
 .meta-card {
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  border-radius: 12px;
+  border: 1px solid var(--tblr-border-color);
+  border-radius: var(--tblr-border-radius);
   padding: 12px;
-  background: rgba(15, 23, 42, 0.42);
+  background: var(--tblr-bg-surface-secondary);
 }
 
 .meta-card h3 {
@@ -98,20 +98,20 @@ h1 {
   font-size: 13px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #93c5fd;
+  color: var(--tblr-primary);
 }
 
 .meta-card p {
   margin: 0 0 4px;
   font-size: 14px;
-  color: #e2e8f0;
+  color: var(--tblr-body-color);
 }
 
 .line-items-card {
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  border-radius: 12px;
+  border: 1px solid var(--tblr-border-color);
+  border-radius: var(--tblr-border-radius);
   padding: 12px;
-  background: rgba(15, 23, 42, 0.42);
+  background: var(--tblr-bg-surface-secondary);
   margin-bottom: 14px;
 }
 
@@ -135,15 +135,15 @@ thead th {
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #cbd5e1;
+  color: var(--tblr-secondary-color);
   padding: 8px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.32);
+  border-bottom: 1px solid var(--tblr-border-color);
 }
 
 tbody td {
   padding: 8px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
-  color: #e2e8f0;
+  border-bottom: 1px solid var(--tblr-border-color);
+  color: var(--tblr-body-color);
   font-size: 14px;
 }
 
@@ -153,7 +153,7 @@ tbody td {
 
 .empty {
   text-align: center;
-  color: #94a3b8;
+  color: var(--tblr-secondary-color);
 }
 
 .totals {
@@ -167,7 +167,7 @@ tbody td {
   justify-content: space-between;
   gap: 12px;
   padding: 8px 10px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.24);
+  border-bottom: 1px solid var(--tblr-border-color);
 }
 
 .totals .total {
@@ -176,7 +176,7 @@ tbody td {
 
 .note {
   margin: 8px 0;
-  color: #cbd5e1;
+  color: var(--tblr-secondary-color);
   font-size: 14px;
 }
 
@@ -187,31 +187,42 @@ tbody td {
   margin: 16px 0 8px;
 }
 
-.action-btn {
-  display: inline-block;
-  padding: 10px 14px;
-  border-radius: 8px;
-  font-weight: 700;
-  text-decoration: none;
-  color: #ffffff;
+.public-action-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(15 23 42 / 55%);
 }
 
-.action-btn.accept {
-  background: #16a34a;
+.public-action-dialog {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  width: min(400px, 100%);
+  padding: 30px;
+  border: 1px solid var(--tblr-border-color);
+  border-radius: var(--tblr-border-radius);
+  background: var(--tblr-bg-surface);
+  color: var(--tblr-body-color);
+  text-align: center;
+  box-shadow: var(--tblr-shadow-sm);
 }
 
-.action-btn.decline {
-  background: #ef4444;
+.public-action-dialog span {
+  color: var(--tblr-secondary-color);
 }
 
 .tracking {
   margin: 0 0 12px;
-  color: #93c5fd;
+  color: var(--tblr-primary);
   font-size: 14px;
 }
 
 .business {
   margin: 8px 0 0;
-  color: #cbd5e1;
+  color: var(--tblr-secondary-color);
   font-size: 14px;
 }

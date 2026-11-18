@@ -1,22 +1,7 @@
-import { Component, ElementRef, HostListener, ViewChild, computed, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import {
-  IonButton,
-  IonContent,
-  IonIcon,
-  IonItem,
-  IonLabel,
-  IonList,
-  IonModal,
-  IonPopover
-} from '@ionic/angular/standalone';
-import { addIcons } from 'ionicons';
-import {
-  businessOutline,
-  checkmarkCircleOutline,
-  chevronDownOutline,
-  searchOutline
-} from 'ionicons/icons';
+import { UiIcon } from '../../../ui/icons';
+import { UiModal, UiPopover } from '../../../ui/overlays';
+import { Component, ElementRef, HostListener, ViewChild, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+
 import { AuthService } from '../../../auth/auth.service';
 import { TenantContextService } from '../../../services/tenant-context.service';
 import { Router } from '@angular/router';
@@ -47,17 +32,12 @@ type SearchBucket = {
   selector: 'app-company-switcher',
   standalone: true,
   imports: [
-    CommonModule,
-    IonButton,
-    IonIcon,
-    IonPopover,
-    IonContent,
-    IonList,
-    IonItem,
-    IonLabel,
-    IonModal
-  ],
+    UiIcon,
+    UiPopover,
+    UiModal
+],
   templateUrl: './company-switcher.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./company-switcher.component.scss']
 })
 export class CompanySwitcherComponent {
@@ -108,12 +88,6 @@ export class CompanySwitcherComponent {
   });
 
   constructor() {
-    addIcons({
-      'business-outline': businessOutline,
-      'chevron-down-outline': chevronDownOutline,
-      'checkmark-circle-outline': checkmarkCircleOutline,
-      'search-outline': searchOutline
-    });
   }
 
   openMenu(event: Event): void {

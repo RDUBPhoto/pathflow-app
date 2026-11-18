@@ -1,272 +1,516 @@
-<ion-header class="glass-header">
-  <ion-toolbar>
-    <ion-buttons slot="start">
+<header class="ui-header app-header">
+  <div class="ui-toolbar">
+    <div class="ui-buttons" slot="start">
       <app-page-back-button></app-page-back-button>
-    </ion-buttons>
-    <ion-title>Inventory</ion-title>
+    </div>
+    <h1 class="ui-title">Parts Catalog</h1>
     <app-company-switcher></app-company-switcher>
-    <ion-buttons slot="end" class="ion-margin-end">
+    <div slot="end" class="ui-buttons me-2">
       <app-user-menu></app-user-menu>
-    </ion-buttons>
-  </ion-toolbar>
-</ion-header>
+    </div>
+  </div>
+</header>
 
-<ion-content class="ion-padding glass-bg inventory-content">
+<div class="ui-content app-padding app-content inventory-content">
   <div class="inventory-stack">
-    <section class="inventory-feedback" *ngIf="status() || error() || loading()">
-      <div class="feedback-row" *ngIf="loading()">Loading inventory...</div>
-      <div class="feedback-row success" *ngIf="!loading() && status()">{{ status() }}</div>
-      <div class="feedback-row error" *ngIf="!loading() && error()">{{ error() }}</div>
-    </section>
+    @if (status() || error()) {
+      <section class="inventory-feedback">
+        @if (!loading() && status()) {
+          <div class="feedback-row success">{{ status() }}</div>
+        }
+        @if (!loading() && error()) {
+          <div class="feedback-row error">{{ error() }}</div>
+        }
+      </section>
+    }
 
-    <section class="inventory-sections glass-surface">
-      <div class="panel-head">
-        <div>
-          <h2>Inventory Workflow</h2>
-          <div class="panel-meta">
-            {{ items().length }} stock item(s) · {{ allJobParts().length }} job-linked part(s) · {{ attentionParts().length }} need attention
-          </div>
-        </div>
-      </div>
-
-      <div class="section-tabs" role="tablist" aria-label="Inventory sections">
+    <section class="inventory-section-rail app-surface">
+      @for (section of inventorySections; track section) {
         <button
           type="button"
-          class="section-tab"
-          *ngFor="let section of inventorySections"
+          class="inventory-section-tab"
           [class.active]="activeSection() === section.id"
           (click)="setActiveSection(section.id)">
           <span>{{ section.label }}</span>
           <strong>{{ sectionCount(section.id) }}</strong>
         </button>
-      </div>
-
-      <div class="compat-note" *ngIf="legacyFallbackCount()">
-        {{ legacyFallbackCount() }} legacy paid-invoice part line(s) are mapped into this view until matching job-part records exist.
-      </div>
+      }
     </section>
 
-    <section class="job-parts-shell glass-surface" *ngIf="activeSection() !== 'stock'">
-      <div class="panel-head">
-        <div>
-          <h2>{{ activeSectionLabel() }}</h2>
-          <div class="panel-meta">
-            {{ activeJobParts().length }} part(s) · showing quantity needed, ordered, received, pulled, and installed
-          </div>
-        </div>
-        <ion-button
-          size="small"
-          fill="outline"
-          [disabled]="saving() || !selectedJobParts().length"
-          (click)="createPurchaseOrderDraft()">
-          Create PO Draft ({{ selectedJobParts().length }})
-        </ion-button>
+    <section class="inventory-section-context app-surface">
+      <div>
+        <p class="section-kicker">Parts Catalog</p>
+        <h1>{{ activeSectionLabel() }}</h1>
       </div>
-
-      <div class="job-part-list" *ngIf="activeJobParts().length; else noJobParts">
-        <article
-          class="job-part-row"
-          *ngFor="let row of activeJobParts(); trackBy: trackJobPart"
-          [class.needs-attention]="row.attentionReasons.length">
-          <label class="job-part-select" *ngIf="canCreatePoForPart(row); else noPoSelect">
-            <input
-              type="checkbox"
-              [checked]="isJobPartSelected(row)"
-              (change)="toggleJobPartSelection(row, $any($event.target).checked)" />
-          </label>
-          <ng-template #noPoSelect>
-            <div class="job-part-select-placeholder"></div>
-          </ng-template>
-          <div class="job-part-main">
-            <div class="job-part-title">
-              <span>{{ row.partName }}</span>
-              <span class="stock-pill" [ngClass]="jobPartStatusClass(row.status)">{{ jobPartStatusLabel(row.status) }}</span>
-            </div>
-            <div class="job-part-meta">
-              {{ row.jobNumber || row.jobId || 'Job TBD' }} · {{ row.customerName || 'Customer TBD' }} · {{ row.vehicle || 'Vehicle TBD' }}
-            </div>
-            <div class="job-part-meta">
-              SKU {{ row.sku || 'N/A' }} · {{ row.vendor || 'No supplier' }} · Install {{ row.installDate ? formatDateTime(row.installDate) : 'not scheduled' }}
-            </div>
-            <div class="attention-list" *ngIf="row.attentionReasons.length">
-              <span *ngFor="let reason of row.attentionReasons">{{ reason }}</span>
-            </div>
-          </div>
-
-          <div class="job-part-qty-grid">
-            <div>
-              <span>Needed</span>
-              <strong>{{ formatQty(row.qtyNeeded) }}</strong>
-            </div>
-            <div>
-              <span>Ordered</span>
-              <strong>{{ formatQty(row.qtyOrdered) }}</strong>
-            </div>
-            <div>
-              <span>Received</span>
-              <strong>{{ formatQty(row.qtyReceived) }}</strong>
-            </div>
-            <div>
-              <span>Pulled</span>
-              <strong>{{ formatQty(row.qtyPulled) }}</strong>
-            </div>
-            <div>
-              <span>Installed</span>
-              <strong>{{ formatQty(row.qtyInstalled) }}</strong>
-            </div>
-          </div>
-
-          <div class="job-part-actions">
-            <div class="panel-meta">{{ row.source === 'legacy-invoice' ? 'Invoice fallback' : 'Job-part foundation' }}</div>
-            <ion-button
-              size="small"
-              fill="outline"
-              [routerLink]="['/jobs/detail']"
-              [queryParams]="jobDetailQueryParams(row)">
-              Open Job
-            </ion-button>
-            <ion-button size="small" fill="outline" *ngIf="row.relatedInvoiceId" (click)="openJobPartSource(row)">
-              Open Invoice
-            </ion-button>
-          </div>
-        </article>
-      </div>
-
-      <ng-template #noJobParts>
-        <div class="empty-state">
-          No job-linked parts in this section yet. Schedule part requests and future job-part records will appear here.
-        </div>
-      </ng-template>
+      <p>{{ activeSectionHelper() }}</p>
     </section>
 
-    <section class="inventory-shell glass-surface" *ngIf="activeSection() === 'stock'">
-      <article class="parts-list-pane">
+    @if (activeSection() === 'job-parts' || activeSection() === 'to-order' || activeSection() === 'on-order' || activeSection() === 'received' || activeSection() === 'attention') {
+      <section class="job-parts-shell app-surface">
         <div class="panel-head">
           <div>
-            <h2>Parts</h2>
-            <div class="panel-meta">{{ filteredItems().length }} result(s) · {{ totalOnHand() }} units on hand</div>
-          </div>
-          <div class="panel-meta">{{ formatCurrency(totalInventoryValue()) }} total value</div>
-        </div>
-        <ion-item class="search-item" lines="none">
-          <ion-label position="stacked">Search Parts</ion-label>
-          <ion-input
-            [ngModel]="search()"
-            (ngModelChange)="setSearch($event)"
-            placeholder="Part name, SKU, category, supplier">
-          </ion-input>
-        </ion-item>
-
-        <div class="parts-list">
-          <div class="parts-loading" *ngIf="loading()">
-            <div class="parts-loading-label">Loading parts...</div>
-            <div class="part-skeleton-row" *ngFor="let _ of [1,2,3,4,5,6]">
-              <div class="part-skeleton-top">
-                <div class="part-skeleton-line name"></div>
-                <div class="part-skeleton-pill"></div>
-              </div>
-              <div class="part-skeleton-line meta"></div>
-              <div class="part-skeleton-line meta short"></div>
+            <h2>{{ activeSectionLabel() }}</h2>
+            <div class="panel-meta">
+              {{ activeJobParts().length }} part(s) · {{ activeSectionDescription() }}
             </div>
           </div>
-
-          <button
-            type="button"
-            class="part-row"
-            *ngFor="let item of pagedItems(); trackBy: trackInventoryItem"
-            [class.active]="isSelected(item)"
-            (click)="selectItem(item)">
-            <div class="part-row-top">
-              <div class="part-name">{{ item.name || 'Untitled part' }}</div>
-              <span class="stock-pill" [ngClass]="onHandClass(item)">{{ onHandLabel(item) }}</span>
-            </div>
-            <div class="part-meta">SKU {{ item.sku || 'N/A' }} · {{ item.vendor || 'No supplier' }}</div>
-            <div class="part-meta">
-              On order {{ item.onOrder }} · Cost {{ formatCurrency(item.unitCost || 0) }} · Price {{ formatCurrency(item.price || 0) }}
-            </div>
+          <button class="btn ui-button btn-outline-primary btn-sm" type="button"
+            [disabled]="saving() || !selectedJobParts().length"
+            (click)="createPurchaseOrderDraft()">
+            Create PO Draft ({{ selectedJobParts().length }})
           </button>
-          <div *ngIf="!loading() && !pagedItems().length" class="empty-state">No parts match your search.</div>
         </div>
+        @if (activeJobParts().length) {
+          <div class="job-part-list">
+            @for (row of activeJobParts(); track trackJobPart($index, row)) {
+              <article
+                class="job-part-row"
+                [class.needs-attention]="row.attentionReasons.length">
+                @if (canCreatePoForPart(row)) {
+                  <label class="job-part-select">
+                    <input class="form-check-input"
+                      type="checkbox"
+                      [checked]="isJobPartSelected(row)"
+                      (change)="toggleJobPartSelection(row, $any($event.target).checked)" />
+                  </label>
+                } @else {
+                  <div class="job-part-select-placeholder"></div>
+                }
+                <div class="job-part-main">
+                  <div class="job-part-title">
+                    <span>{{ row.partName }}</span>
+                    <span class="stock-pill" [ngClass]="workflowStatusClass(row)">{{ workflowStatusLabel(row) }}</span>
+                  </div>
+                  <div class="job-part-meta">
+                    {{ row.jobNumber || row.jobId || 'Job TBD' }} · {{ row.customerName || 'Customer TBD' }} · {{ row.vehicle || 'Vehicle TBD' }}
+                  </div>
+                  <div class="job-part-meta">
+                    SKU {{ row.sku || 'N/A' }} · {{ row.vendor || 'No supplier' }} · Install {{ row.installDate ? formatDateTime(row.installDate) : 'not scheduled' }}
+                  </div>
+                  @if (row.attentionReasons.length) {
+                    <div class="attention-list">
+                      @for (reason of row.attentionReasons; track reason) {
+                        <span>{{ reason }}</span>
+                      }
+                    </div>
+                  }
+                </div>
+                <div class="job-part-qty-grid">
+                  <div>
+                    <span>Needed</span>
+                    <strong>{{ formatQty(row.qtyNeeded) }}</strong>
+                  </div>
+                  <div>
+                    <span>Ordered</span>
+                    <strong>{{ formatQty(row.qtyOrdered) }}</strong>
+                  </div>
+                  <div>
+                    <span>Received</span>
+                    <strong>{{ formatQty(row.qtyReceived) }}</strong>
+                  </div>
+                  <div>
+                    <span>Pulled</span>
+                    <strong>{{ formatQty(row.qtyPulled) }}</strong>
+                  </div>
+                  <div>
+                    <span>Installed</span>
+                    <strong>{{ formatQty(row.qtyInstalled) }}</strong>
+                  </div>
+                </div>
+                <div class="job-part-actions">
+                  <div class="panel-meta">
+                    {{ row.source === 'legacy-invoice' ? 'From paid invoice' : 'Job part' }}
+                    @if (row.purchaseOrderId) {
+                      <span> · PO linked</span>
+                    }
+                  </div>
+                  <button class="btn ui-button btn-outline-primary btn-sm" type="button"
+                    [routerLink]="['/jobs/detail']"
+                    [queryParams]="jobDetailQueryParams(row)">
+                    Open Job
+                  </button>
+                  <button class="btn ui-button btn-outline-primary btn-sm" type="button"
+                    [routerLink]="['/tasks']"
+                    [queryParams]="jobDetailQueryParams(row)">
+                    Tasks
+                  </button>
+                  @if (row.relatedInvoiceId) {
+                    <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="openJobPartSource(row)">
+                      Open Invoice
+                    </button>
+                  }
+                </div>
+              </article>
+            }
+          </div>
+        } @else {
+          <div class="empty-state">
+            <strong>{{ emptyStateTitle() }}</strong>
+            <span>{{ emptyStateBody() }}</span>
+          </div>
+        }
+      </section>
+    }
 
-        <div class="table-pager" *ngIf="filteredItems().length > 0">
-          <ion-button size="small" fill="outline" (click)="prevPage()" [disabled]="page() <= 1">Previous</ion-button>
-          <span>Page {{ page() }} of {{ totalPages() }}</span>
-          <ion-button size="small" fill="outline" (click)="nextPage()" [disabled]="page() >= totalPages()">Next</ion-button>
-          <span>Showing {{ pageStart() }}-{{ pageEnd() }} of {{ filteredItems().length }}</span>
-        </div>
-      </article>
-
-      <article class="part-detail-pane">
-        <ng-container *ngIf="selectedItem() as selected; else noSelection">
+    @if (activeSection() === 'catalog' || activeSection() === 'stock') {
+      <section class="inventory-shell app-surface">
+        <article class="parts-table-pane">
           <div class="panel-head">
             <div>
-              <h2>{{ selected.name || selected.sku || 'Part' }}</h2>
-              <div class="panel-meta">Last updated {{ formatDateTime(selected.lastUpdated) }}</div>
+              <h2>{{ activeSectionLabel() }}</h2>
+              <div class="panel-meta">{{ filteredItems().length }} result(s) · {{ activeSectionDescription() }}</div>
             </div>
-            <span class="stock-pill" [ngClass]="onHandClass(selected)">{{ onHandLabel(selected) }}</span>
           </div>
-
-          <div class="detail-grid">
-            <ion-item class="detail-item" lines="none">
-              <ion-label position="stacked">Part Name</ion-label>
-              <ion-input [ngModel]="editor()?.name || ''" (ngModelChange)="setEditorText('name', $event)"></ion-input>
-            </ion-item>
-
-            <ion-item class="detail-item" lines="none">
-              <ion-label position="stacked">SKU / Part Number</ion-label>
-              <ion-input [ngModel]="editor()?.sku || ''" (ngModelChange)="setEditorText('sku', $event)"></ion-input>
-            </ion-item>
-
-            <div class="detail-item vendor-detail-item">
-              <app-vendor-picker
-                [vendorId]="editor()?.vendorId || ''"
-                [vendorName]="editor()?.vendor || ''"
-                (vendorChange)="setEditorVendor($event)">
-              </app-vendor-picker>
+          <div class="stock-toolbar">
+            <ui-input label="Search Parts"
+              [ngModel]="search()"
+              (ngModelChange)="setSearch($event)"
+              placeholder="Part name, SKU, category, supplier">
+            </ui-input>
+          </div>
+          <div class="inventory-table-wrap">
+            <table class="inventory-table">
+              <thead>
+                <tr>
+                  <th><button type="button" (click)="sortBy('name')">Part{{ sortIndicator('name') }}</button></th>
+                  <th><button type="button" (click)="sortBy('sku')">SKU{{ sortIndicator('sku') }}</button></th>
+                  <th><button type="button" (click)="sortBy('vendor')">Supplier{{ sortIndicator('vendor') }}</button></th>
+                  <th>Contact</th>
+                  <th><button type="button" (click)="sortBy('category')">Category{{ sortIndicator('category') }}</button></th>
+                  <th class="num"><button type="button" (click)="sortBy('onHand')">On Hand{{ sortIndicator('onHand') }}</button></th>
+                  <th class="num"><button type="button" (click)="sortBy('onOrder')">On Order{{ sortIndicator('onOrder') }}</button></th>
+                  <th class="num"><button type="button" (click)="sortBy('reorderAt')">Reorder{{ sortIndicator('reorderAt') }}</button></th>
+                  <th class="num"><button type="button" (click)="sortBy('unitCost')">Cost{{ sortIndicator('unitCost') }}</button></th>
+                  <th class="num"><button type="button" (click)="sortBy('price')">Price{{ sortIndicator('price') }}</button></th>
+                  <th class="num"><button type="button" (click)="sortBy('value')">Value{{ sortIndicator('value') }}</button></th>
+                  <th><button type="button" (click)="sortBy('lastUpdated')">Updated{{ sortIndicator('lastUpdated') }}</button></th>
+                </tr>
+              </thead>
+              <tbody>
+                @if (loading()) {
+                  <tr>
+                    <td colspan="12" class="inventory-loading-cell">
+                      <div class="inventory-loading-panel">
+                        <div class="inventory-loading-head">
+                          <span class="loading-spinner" aria-hidden="true"></span>
+                          <div>
+                            <strong>Loading parts</strong>
+                            <span>Pulling inventory records, supplier details, and stock counts...</span>
+                          </div>
+                        </div>
+                        <div class="skeleton-table" aria-hidden="true">
+                          @for (row of [1,2,3,4,5,6]; track row) {
+                            <div class="skeleton-row">
+                              <span></span>
+                              <span></span>
+                              <span></span>
+                              <span></span>
+                              <span></span>
+                            </div>
+                          }
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                }
+                @for (item of pagedItems(); track trackInventoryItem($index, item)) {
+                  <tr
+                    [class.selected]="isSelected(item)"
+                    (click)="openItemDetails(item)">
+                    <td class="part-cell"><strong>{{ item.name || 'Untitled part' }}</strong></td>
+                    <td>{{ item.sku || '--' }}</td>
+                    <td>{{ item.vendor || '--' }}</td>
+                    <td class="contact-cell">
+                      @if (vendorForItem(item); as vendor) {
+                        @if (vendor.phone) {
+                          <span class="contact-row">
+                            <a [href]="phoneHref(vendor.phone)" (click)="$event.stopPropagation()">{{ vendor.phone }}</a>
+                          </span>
+                        } @else {
+                          <span>Phone --</span>
+                        }
+                        @if (vendor.email) {
+                          <a
+                            [href]="emailHref(vendor.email)"
+                            (click)="$event.stopPropagation()">
+                            {{ vendor.email }}
+                          </a>
+                        } @else {
+                          <span>Email --</span>
+                        }
+                        @if (vendor.website) {
+                          <a
+                            class="contact-link"
+                            [href]="websiteHref(vendor.website)"
+                            target="_blank"
+                            rel="noreferrer"
+                            [title]="vendor.website"
+                            (click)="$event.stopPropagation()">
+                            {{ compactWebsite(vendor.website) }}
+                          </a>
+                        } @else {
+                          <span>Web --</span>
+                        }
+                      } @else {
+                        <span>Phone --</span>
+                        <span>Email --</span>
+                        <span>Web --</span>
+                      }
+                    </td>
+                    <td>{{ item.category || '--' }}</td>
+                    <td class="num">{{ item.onHand || 0 }}</td>
+                    <td class="num">{{ item.onOrder || 0 }}</td>
+                    <td class="num">{{ item.reorderAt || 0 }}</td>
+                    <td class="num">{{ formatCurrency(item.unitCost || 0) }}</td>
+                    <td class="num">{{ formatCurrency(item.price || 0) }}</td>
+                    <td class="num">{{ formatCurrency((item.onHand || 0) * (item.unitCost || 0)) }}</td>
+                    <td>{{ item.lastUpdated ? formatDateTime(item.lastUpdated) : '--' }}</td>
+                  </tr>
+                }
+                @if (!loading() && !pagedItems().length) {
+                  <tr>
+                    <td colspan="12" class="table-state">
+                      <strong>{{ search() ? 'No parts match your search' : emptyStateTitle() }}</strong>
+                      <span>{{ search() ? 'Try another part name, SKU, category, or supplier.' : emptyStateBody() }}</span>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+          @if (filteredItems().length > 0) {
+            <div class="table-pager">
+              <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="prevPage()" [disabled]="page() <= 1">Previous</button>
+              <span>Page {{ page() }} of {{ totalPages() }}</span>
+              <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="nextPage()" [disabled]="page() >= totalPages()">Next</button>
+              <span>Showing {{ pageStart() }}-{{ pageEnd() }} of {{ filteredItems().length }}</span>
             </div>
-
-            <ion-item class="detail-item" lines="none">
-              <ion-label position="stacked">Category</ion-label>
-              <ion-input [ngModel]="editor()?.category || ''" (ngModelChange)="setEditorText('category', $event)"></ion-input>
-            </ion-item>
-
-            <ion-item class="detail-item" lines="none">
-              <ion-label position="stacked">On Hand</ion-label>
-              <ion-input type="number" [ngModel]="editor()?.onHand ?? 0" (ngModelChange)="setEditorNumber('onHand', $event)"></ion-input>
-            </ion-item>
-
-            <ion-item class="detail-item" lines="none">
-              <ion-label position="stacked">Reorder Threshold</ion-label>
-              <ion-input type="number" [ngModel]="editor()?.reorderAt ?? 0" (ngModelChange)="setEditorNumber('reorderAt', $event)"></ion-input>
-            </ion-item>
-
-            <ion-item class="detail-item" lines="none">
-              <ion-label position="stacked">On Order</ion-label>
-              <ion-input type="number" [ngModel]="editor()?.onOrder ?? 0" (ngModelChange)="setEditorNumber('onOrder', $event)"></ion-input>
-            </ion-item>
-
-            <ion-item class="detail-item" lines="none">
-              <ion-label position="stacked">Unit Cost</ion-label>
-              <ion-input type="number" [ngModel]="editor()?.unitCost ?? 0" (ngModelChange)="setEditorNumber('unitCost', $event)"></ion-input>
-            </ion-item>
-
-            <ion-item class="detail-item" lines="none">
-              <ion-label position="stacked">Unit Price (Customer)</ion-label>
-              <ion-input type="number" [ngModel]="editor()?.price ?? 0" (ngModelChange)="setEditorNumber('price', $event)"></ion-input>
-            </ion-item>
+          }
+        </article>
+        @if (itemModalOpen()) {
+          <div class="inventory-modal-backdrop" (click)="closeItemDetails()">
+            <article class="inventory-modal" (click)="$event.stopPropagation()">
+              @if (selectedItem(); as selected) {
+                <div class="modal-head">
+                  <div>
+                    <h2>{{ selected.name || selected.sku || 'Part' }}</h2>
+                    <div class="panel-meta">Last updated {{ selected.lastUpdated ? formatDateTime(selected.lastUpdated) : '--' }}</div>
+                  </div>
+                  <button type="button" class="modal-close" (click)="closeItemDetails()">Close</button>
+                </div>
+                <div class="detail-grid">
+                  <div class="ui-item detail-item">
+                    <span class="ui-label">Part Name</span>
+                    <ui-input aria-label="Part Name" [ngModel]="editor()?.name || ''" (ngModelChange)="setEditorText('name', $event)"></ui-input>
+                  </div>
+                  <div class="ui-item detail-item">
+                    <span class="ui-label">SKU / Part Number</span>
+                    <ui-input aria-label="SKU / Part Number" [ngModel]="editor()?.sku || ''" (ngModelChange)="setEditorText('sku', $event)"></ui-input>
+                  </div>
+                  <div class="detail-item vendor-detail-item">
+                    <app-vendor-picker
+                      [vendorId]="editor()?.vendorId || ''"
+                      [vendorName]="editor()?.vendor || ''"
+                      (vendorChange)="setEditorVendor($event)">
+                    </app-vendor-picker>
+                  </div>
+                  <div class="ui-item detail-item">
+                    <span class="ui-label">Supplier Contact</span>
+                    <ui-input aria-label="Supplier Contact" [ngModel]="editor()?.vendorContactName || ''" (ngModelChange)="setEditorVendorText('vendorContactName', $event)"></ui-input>
+                  </div>
+                  <div class="ui-item detail-item">
+                    <span class="ui-label">Supplier Phone</span>
+                    <ui-input aria-label="Supplier Phone" [ngModel]="editor()?.vendorPhone || ''" (ngModelChange)="setEditorVendorText('vendorPhone', $event)"></ui-input>
+                  </div>
+                  <div class="ui-item detail-item">
+                    <span class="ui-label">Supplier Email</span>
+                    <ui-input aria-label="Supplier Email" type="email" [ngModel]="editor()?.vendorEmail || ''" (ngModelChange)="setEditorVendorText('vendorEmail', $event)"></ui-input>
+                  </div>
+                  <div class="ui-item detail-item">
+                    <span class="ui-label">Supplier Website</span>
+                    <ui-input aria-label="Supplier Website" [ngModel]="editor()?.vendorWebsite || ''" (ngModelChange)="setEditorVendorText('vendorWebsite', $event)"></ui-input>
+                  </div>
+                  <div class="ui-item detail-item">
+                    <span class="ui-label">Supplier Account #</span>
+                    <ui-input aria-label="Supplier Account #" [ngModel]="editor()?.vendorAccountNumber || ''" (ngModelChange)="setEditorVendorText('vendorAccountNumber', $event)"></ui-input>
+                  </div>
+                  <div class="ui-item detail-item">
+                    <span class="ui-label">Category</span>
+                    <ui-input aria-label="Category" [ngModel]="editor()?.category || ''" (ngModelChange)="setEditorText('category', $event)"></ui-input>
+                  </div>
+                  <div class="ui-item detail-item">
+                    <span class="ui-label">On Hand</span>
+                    <ui-input aria-label="On Hand" type="number" [ngModel]="editor()?.onHand ?? 0" (ngModelChange)="setEditorNumber('onHand', $event)"></ui-input>
+                  </div>
+                  <div class="ui-item detail-item">
+                    <span class="ui-label">Reorder Threshold</span>
+                    <ui-input aria-label="Reorder Threshold" type="number" [ngModel]="editor()?.reorderAt ?? 0" (ngModelChange)="setEditorNumber('reorderAt', $event)"></ui-input>
+                  </div>
+                  <div class="ui-item detail-item">
+                    <span class="ui-label">On Order</span>
+                    <ui-input aria-label="On Order" type="number" [ngModel]="editor()?.onOrder ?? 0" (ngModelChange)="setEditorNumber('onOrder', $event)"></ui-input>
+                  </div>
+                  <div class="ui-item detail-item">
+                    <span class="ui-label">Unit Cost</span>
+                    <ui-input aria-label="Unit Cost" type="number" [ngModel]="editor()?.unitCost ?? 0" (ngModelChange)="setEditorNumber('unitCost', $event)"></ui-input>
+                  </div>
+                  <div class="ui-item detail-item">
+                    <span class="ui-label">Unit Price (Customer)</span>
+                    <ui-input aria-label="Unit Price (Customer)" type="number" [ngModel]="editor()?.price ?? 0" (ngModelChange)="setEditorNumber('price', $event)"></ui-input>
+                  </div>
+                </div>
+                <div class="detail-actions">
+                  <button class="btn ui-button btn-outline-primary" type="button" (click)="closeItemDetails()">Cancel</button>
+                  <button class="btn ui-button btn-primary" type="button" [disabled]="saving() || !hasSelectedChanges()" (click)="saveSelectedItem()">
+                    {{ saving() ? 'Saving...' : 'Save Part' }}
+                  </button>
+                </div>
+              } @else {
+                <div class="empty-state">No part selected.</div>
+              }
+            </article>
           </div>
+        }
+      </section>
+    }
 
-          <div class="detail-actions">
-            <ion-button [disabled]="saving() || !hasSelectedChanges()" (click)="saveSelectedItem()">
-              {{ saving() ? 'Saving...' : 'Save Part' }}
-            </ion-button>
+    @if (activeSection() === 'purchase-orders') {
+      <section class="inventory-shell app-surface">
+        <article class="parts-table-pane">
+          <div class="panel-head">
+            <div>
+              <h2>Purchase Orders</h2>
+              <div class="panel-meta">{{ purchaseOrders().length }} order(s) · {{ activeSectionDescription() }}</div>
+            </div>
+            <button class="btn ui-button btn-primary btn-sm" type="button" routerLink="/purchase-orders">Open PO Workspace</button>
           </div>
-        </ng-container>
+          <div class="po-summary-grid">
+            <article>
+              <span>Draft POs</span>
+              <strong>{{ purchaseOrdersByStatus('draft').length }}</strong>
+            </article>
+            <article>
+              <span>Ordered POs</span>
+              <strong>{{ purchaseOrdersByStatus('ordered').length }}</strong>
+            </article>
+            <article>
+              <span>Partial / Attention</span>
+              <strong>{{ purchaseOrdersByStatus('attention').length }}</strong>
+            </article>
+            <article>
+              <span>Received POs</span>
+              <strong>{{ purchaseOrdersByStatus('received').length }}</strong>
+            </article>
+          </div>
+          <div class="inventory-table-wrap">
+            <table class="inventory-table">
+              <thead>
+                <tr>
+                  <th>Vendor</th>
+                  <th>Status</th>
+                  <th>Lines</th>
+                  <th>Received</th>
+                  <th>Tracking</th>
+                  <th>Updated</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (order of purchaseOrders(); track order) {
+                  <tr>
+                    <td><strong>{{ order.supplier || 'Unassigned Supplier' }}</strong></td>
+                    <td><span class="stock-pill" [ngClass]="purchaseOrderStatusClass(order)">{{ purchaseOrderStatusLabel(order) }}</span></td>
+                    <td>{{ order.lineCount || order.lines.length }}</td>
+                    <td>{{ purchaseOrderProgress(order) }}</td>
+                    <td>{{ purchaseOrderTrackingSummary(order) }}</td>
+                    <td>{{ order.updatedAt ? formatDateTime(order.updatedAt) : '--' }}</td>
+                    <td>
+                      <button class="btn ui-button btn-outline-primary btn-sm" type="button" [routerLink]="['/purchase-orders']" [queryParams]="{ id: order.id }">
+                        View PO
+                      </button>
+                    </td>
+                  </tr>
+                }
+                @if (!purchaseOrders().length) {
+                  <tr>
+                    <td colspan="7" class="table-state">
+                      <strong>{{ emptyStateTitle() }}</strong>
+                      <span>{{ emptyStateBody() }}</span>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+    }
 
-        <ng-template #noSelection>
-          <div class="empty-state">No parts found yet. Import inventory from Admin Settings first.</div>
-        </ng-template>
-      </article>
-    </section>
+    @if (activeSection() === 'vendors') {
+      <section class="inventory-shell app-surface">
+        <article class="parts-table-pane">
+          <div class="panel-head">
+            <div>
+              <h2>Vendors</h2>
+              <div class="panel-meta">{{ vendors().length }} supplier record(s) · {{ activeSectionDescription() }}</div>
+            </div>
+          </div>
+          <div class="inventory-table-wrap">
+            <table class="inventory-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Contact</th>
+                  <th>Phone</th>
+                  <th>Email</th>
+                  <th>Website</th>
+                  <th>Account #</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (vendor of vendors(); track vendor) {
+                  <tr>
+                    <td><strong>{{ vendor.name || '--' }}</strong></td>
+                    <td>{{ vendor.contactName || '--' }}</td>
+                    <td>
+                      @if (vendor.phone) {
+                        <a [href]="phoneHref(vendor.phone)">{{ vendor.phone }}</a>
+                      } @else {
+                        --
+                      }
+                    </td>
+                    <td>
+                      @if (vendor.email) {
+                        <a [href]="emailHref(vendor.email)">{{ vendor.email }}</a>
+                      } @else {
+                        --
+                      }
+                    </td>
+                    <td>
+                      @if (vendor.website) {
+                        <a [href]="websiteHref(vendor.website)" target="_blank" rel="noreferrer">
+                          {{ compactWebsite(vendor.website) }}
+                        </a>
+                      } @else {
+                        --
+                      }
+                    </td>
+                    <td>{{ vendor.accountNumber || '--' }}</td>
+                  </tr>
+                }
+                @if (!vendors().length) {
+                  <tr>
+                    <td colspan="6" class="table-state">
+                      <strong>{{ emptyStateTitle() }}</strong>
+                      <span>{{ emptyStateBody() }}</span>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+    }
   </div>
-</ion-content>
+</div>

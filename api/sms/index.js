@@ -1,12 +1,15 @@
 const { SmsClient } = require("@azure/communication-sms");
 const { TableClient, isSqlBackendEnabled } = require("../_shared/table-client");
-const { randomUUID } = require("crypto");
+const { createHash, randomUUID } = require("crypto");
 const { resolveTenantId, sanitizeTenantId } = require("../_shared/tenant");
 const { requirePrincipal } = require("../_shared/auth");
 
 const SMS_TABLE = "smsmessages";
+const SMS_CONSENTS_TABLE = "smsconsents";
 const SENDER_TABLE = "smssenders";
 const CUSTOMERS_TABLE = "customers";
+const SETTINGS_TABLE = "appsettings";
+const BUSINESS_PROFILE_KEY = "business.profile";
 const LOOKUP_PARTITION = "lookup";
 const SENDER_DEFAULT_ROW_KEY = "default";
 
@@ -78,6 +81,11 @@ function queryParam(req, key) {
   }
 }
 
+function isLoopbackRequest(req) {
+  const host = (readHeader(req && req.headers, "x-forwarded-host") || readHeader(req && req.headers, "host")).toLowerCase();
+  return host.startsWith("localhost") || host.startsWith("127.0.0.1") || host.startsWith("[::1]");
+}
+
 function escapedFilterValue(value) {
   return asString(value).replace(/'/g, "''");
 }
@@ -105,6 +113,12 @@ function phoneLookupKey(value) {
   return normalizeE164(value).replace(/\D+/g, "");
 }
 
+function phoneConsentRowKey(value) {
+  const key = phoneLookupKey(value);
+  if (!key) return "";
+  return `phone-${key}`.slice(0, 220);
+}
+
 function normalizeCustomerPhone(value) {
   const digits = asString(value).replace(/\D+/g, "");
   if (!digits) return "";
@@ -128,6 +142,14 @@ function inboundKeywordCategory(message) {
   return { category: "", keyword };
 }
 
+function isOptedInStatus(value) {
+  return ["opted-in", "opted_in", "confirmed", "subscribed"].includes(asString(value).toLowerCase());
+}
+
+function isOptedOutStatus(value) {
+  return ["opted-out", "opted_out", "unsubscribed", "stopped"].includes(asString(value).toLowerCase());
+}
+
 function normalizeDeliveryStatus(rawStatus, direction, simulated) {
   if (asString(direction).toLowerCase() === "inbound") return "received";
   if (asBool(simulated)) return "delivered";
@@ -139,6 +161,60 @@ function normalizeDeliveryStatus(rawStatus, direction, simulated) {
   if (raw.includes("receive")) return "received";
   if (raw.includes("queue") || raw.includes("sent") || raw.includes("submit") || raw.includes("accept") || raw.includes("out")) return "queued";
   return "unknown";
+}
+
+function stableMessageRowKey(direction, providerMessageId) {
+  const id = asString(providerMessageId);
+  if (!id) return "";
+  return String(`sms-${asString(direction) || "message"}-${id}`)
+    .toLowerCase()
+    .replace(/[^a-z0-9._:-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 220);
+}
+
+async function messageExists(client, tenantId, id) {
+  const rowKey = asString(id);
+  if (!rowKey) return false;
+  try {
+    await client.getEntity(tenantId, rowKey);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function findRecentInboundDuplicate(client, tenantId, payload) {
+  const message = asString(payload && payload.message).toLowerCase();
+  const fromKey = phoneLookupKey(payload && payload.from);
+  const toKey = phoneLookupKey(payload && payload.to);
+  if (!message || !fromKey || !toKey) return null;
+
+  const createdAtMs = Date.parse(asString(payload && payload.createdAt)) || Date.now();
+  const safeTenant = escapedFilterValue(tenantId);
+  const iter = client.listEntities({
+    queryOptions: {
+      filter: `PartitionKey eq '${safeTenant}' and direction eq 'inbound'`
+    }
+  });
+
+  let closest = null;
+  let closestDelta = Number.POSITIVE_INFINITY;
+  for await (const entity of iter) {
+    const existing = toMessage(entity);
+    if (asString(existing.message).toLowerCase() !== message) continue;
+    if (phoneLookupKey(existing.from) !== fromKey || phoneLookupKey(existing.to) !== toKey) continue;
+
+    const existingAtMs = Date.parse(asString(existing.createdAt));
+    if (!Number.isFinite(existingAtMs)) continue;
+    const delta = Math.abs(existingAtMs - createdAtMs);
+    if (delta > 120000 || delta >= closestDelta) continue;
+    closest = existing;
+    closestDelta = delta;
+  }
+
+  return closest;
 }
 
 function normalizedSenderFromEntity(entity) {
@@ -162,6 +238,43 @@ function pickPhone(value) {
 function firstNonEmpty(values) {
   for (const value of values) {
     const text = asString(value);
+    if (text) return text;
+  }
+  return "";
+}
+
+function firstPhone(values) {
+  for (const value of values) {
+    const phone = pickPhone(value);
+    if (phone) return phone;
+  }
+  return "";
+}
+
+function extractMessageText(data) {
+  const source = data && typeof data === "object" ? data : {};
+  const candidates = [
+    source.message,
+    source.text,
+    source.content,
+    source.messageBody,
+    source.body,
+    source.smsMessage,
+    source.smsMessageContent
+  ];
+  for (const candidate of candidates) {
+    if (candidate && typeof candidate === "object") {
+      const nested = firstNonEmpty([
+        candidate.message,
+        candidate.text,
+        candidate.content,
+        candidate.body,
+        candidate.value
+      ]);
+      if (nested) return nested;
+      continue;
+    }
+    const text = asString(candidate);
     if (text) return text;
   }
   return "";
@@ -256,6 +369,46 @@ function toMessage(entity) {
   };
 }
 
+function messageDisplayKey(item) {
+  const providerId = asString(item && item.providerMessageId);
+  const direction = asString(item && item.direction).toLowerCase();
+  const createdAtMs = Date.parse(asString(item && item.createdAt));
+  const tenMinuteBucket = Number.isFinite(createdAtMs) ? Math.round(createdAtMs / 600000) : "";
+  if (direction !== "inbound" && providerId) return `${direction}:provider:${providerId}`;
+
+  return [
+    direction,
+    asString(item && item.customerId),
+    pickPhone(item && item.from),
+    pickPhone(item && item.to),
+    asString(item && item.message).toLowerCase(),
+    tenMinuteBucket
+  ].join("|");
+}
+
+function chooseDisplayMessage(existing, candidate) {
+  if (!existing) return candidate;
+  const existingStatus = normalizeDeliveryStatus(existing.deliveryStatus || existing.deliveryStatusRaw, existing.direction, existing.simulated);
+  const candidateStatus = normalizeDeliveryStatus(candidate.deliveryStatus || candidate.deliveryStatusRaw, candidate.direction, candidate.simulated);
+  if (existingStatus !== "delivered" && candidateStatus === "delivered") return candidate;
+  if (existingStatus === "queued" && candidateStatus === "received") return candidate;
+  if (asBool(existing.read) && !asBool(candidate.read)) return candidate;
+  const existingTs = Date.parse(asString(existing.createdAt));
+  const candidateTs = Date.parse(asString(candidate.createdAt));
+  if (Number.isFinite(existingTs) && Number.isFinite(candidateTs) && candidateTs < existingTs) return candidate;
+  return existing;
+}
+
+function dedupeMessagesForDisplay(items) {
+  const byKey = new Map();
+  for (const item of Array.isArray(items) ? items : []) {
+    const key = messageDisplayKey(item) || asString(item && item.id);
+    if (!key) continue;
+    byKey.set(key, chooseDisplayMessage(byKey.get(key), item));
+  }
+  return Array.from(byKey.values());
+}
+
 function sortByCreatedDesc(a, b) {
   const ta = Date.parse(asString(a.createdAt));
   const tb = Date.parse(asString(b.createdAt));
@@ -272,7 +425,9 @@ function sortByCreatedAsc(a, b) {
 function toThreadSummaries(messages) {
   const map = new Map();
   for (const item of messages) {
-    const key = asString(item.customerId) || asString(item.from) || asString(item.to) || asString(item.id);
+    const threadPhone = messageConversationPhone(item);
+    const phoneKey = phoneLookupKey(threadPhone);
+    const key = phoneKey ? `phone:${phoneKey}` : (asString(item.customerId) || asString(item.id));
     if (!key) continue;
     const ts = Date.parse(asString(item.createdAt));
     const unread = item.direction === "inbound" && !item.read ? 1 : 0;
@@ -287,7 +442,7 @@ function toThreadSummaries(messages) {
         latestMessage: item.message || "",
         latestAt: item.createdAt || new Date().toISOString(),
         latestDirection: item.direction === "inbound" ? "inbound" : "outbound",
-        customerPhone: item.direction === "inbound" ? (item.from || null) : (item.to || null),
+        customerPhone: threadPhone || null,
         latestDeliveryStatus,
         latestDeliveryError,
         unread,
@@ -302,7 +457,7 @@ function toThreadSummaries(messages) {
       existing.latestMessage = item.message || "";
       existing.latestAt = item.createdAt || existing.latestAt;
       existing.latestDirection = item.direction === "inbound" ? "inbound" : "outbound";
-      existing.customerPhone = item.direction === "inbound" ? (item.from || null) : (item.to || null);
+      existing.customerPhone = threadPhone || existing.customerPhone;
       existing.latestDeliveryStatus = latestDeliveryStatus;
       existing.latestDeliveryError = latestDeliveryError;
       if (item.customerId) existing.customerId = item.customerId;
@@ -346,6 +501,45 @@ async function getSenderTableClient() {
 
 async function getCustomersTableClient() {
   return getTableClient(CUSTOMERS_TABLE);
+}
+
+async function getSettingsTableClient() {
+  return getTableClient(SETTINGS_TABLE);
+}
+
+async function getSmsConsentsTableClient() {
+  return getTableClient(SMS_CONSENTS_TABLE);
+}
+
+function customerSafeBrandFallback(value) {
+  const brand = asString(value);
+  return brand && brand.toLowerCase() !== "pathflow" ? brand : "";
+}
+
+function businessNameFromSettingsEntity(entity) {
+  const profile = asObject(entity && entity.valueJson);
+  return customerSafeBrandFallback(profile && profile.companyName);
+}
+
+async function getBusinessBrandName(settingsClient, tenantId) {
+  const candidates = [
+    tenantId,
+    process.env.DEFAULT_TENANT_ID,
+    "primary-location",
+    "main"
+  ]
+    .map(value => sanitizeTenantId(value))
+    .filter((value, index, all) => value && all.indexOf(value) === index);
+
+  for (const candidate of candidates) {
+    try {
+      const entity = await settingsClient.getEntity(candidate, BUSINESS_PROFILE_KEY);
+      const companyName = businessNameFromSettingsEntity(entity);
+      if (companyName) return companyName;
+    } catch (_) {}
+  }
+
+  return customerSafeBrandFallback(process.env.WIDGET_BRAND_NAME) || "Your service team";
 }
 
 async function getTenantSenderConfig(senderClient, tenantId) {
@@ -518,16 +712,33 @@ async function listAllMessages(client, tenantId) {
   for await (const entity of iter) {
     out.push(toMessage(entity));
   }
-  return out;
+  return dedupeMessagesForDisplay(out);
 }
 
 async function saveMessage(client, tenantId, payload) {
   const now = new Date().toISOString();
-  const id = asString(payload.id) || randomUUID();
   const createdAt = asString(payload.createdAt) || now;
   const direction = asString(payload.direction).toLowerCase() === "inbound" ? "inbound" : "outbound";
   const deliveryStatus = normalizeDeliveryStatus(payload.deliveryStatus || payload.deliveryStatusRaw, direction, payload.simulated);
   const deliveryUpdatedAt = asString(payload.deliveryUpdatedAt) || now;
+
+  if (direction === "inbound") {
+    const duplicate = await findRecentInboundDuplicate(client, tenantId, {
+      ...payload,
+      createdAt,
+      direction
+    });
+    if (duplicate) {
+      return {
+        id: duplicate.id,
+        createdAt: duplicate.createdAt,
+        deliveryStatus: duplicate.deliveryStatus,
+        duplicate: true
+      };
+    }
+  }
+
+  const id = asString(payload.id) || randomUUID();
   await client.upsertEntity(
     {
       partitionKey: tenantId,
@@ -569,35 +780,139 @@ function customerPhoneFromEntity(entity) {
   return pickPhone(asString(entity && entity.phone));
 }
 
+function messageConversationPhone(item) {
+  const direction = asString(item && item.direction).toLowerCase();
+  return direction === "inbound"
+    ? firstPhone([item && item.from, item && item.to])
+    : firstPhone([item && item.to, item && item.from]);
+}
+
+function customerUpdatedTime(entity) {
+  const candidates = [
+    entity && entity.updatedAt,
+    entity && entity.createdAt,
+    entity && entity.timestamp
+  ];
+  for (const value of candidates) {
+    const ts = Date.parse(asString(value));
+    if (Number.isFinite(ts)) return ts;
+  }
+  return 0;
+}
+
+function normalizedCustomerFromEntity(entity) {
+  if (!entity) return null;
+  const id = asString(entity.rowKey);
+  if (!id) return null;
+  return {
+    id,
+    name: customerNameFromEntity(entity),
+    phone: customerPhoneFromEntity(entity),
+    phoneKey: phoneLookupKey(entity.phone),
+    updatedTs: customerUpdatedTime(entity),
+    smsConsentStatus: asString(entity.smsConsentStatus),
+    smsConsentConfirmedAt: asString(entity.smsConsentConfirmedAt),
+    smsConsentUpdatedAt: asString(entity.smsConsentUpdatedAt),
+    smsConsentSource: asString(entity.smsConsentSource)
+  };
+}
+
+function chooseCanonicalCustomer(current, byPhone) {
+  if (!current) return byPhone || null;
+  if (!byPhone) return current;
+  if (current.id === byPhone.id) return current;
+  const currentPhoneKey = phoneLookupKey(current.phone);
+  const byPhoneKey = phoneLookupKey(byPhone.phone);
+  if (currentPhoneKey && byPhoneKey && currentPhoneKey === byPhoneKey) {
+    return (Number(byPhone.updatedTs) || 0) >= (Number(current.updatedTs) || 0) ? byPhone : current;
+  }
+  return current;
+}
+
+async function buildCustomerPhoneIndex(customersClient, tenantId) {
+  const out = new Map();
+  const safeTenant = escapedFilterValue(tenantId);
+  const iter = customersClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${safeTenant}'` } });
+  for await (const entity of iter) {
+    const customer = normalizedCustomerFromEntity(entity);
+    if (!customer || !customer.phoneKey) continue;
+    const existing = out.get(customer.phoneKey);
+    if (!existing || (Number(customer.updatedTs) || 0) >= (Number(existing.updatedTs) || 0)) {
+      out.set(customer.phoneKey, customer);
+    }
+  }
+  return out;
+}
+
 async function findCustomerById(customersClient, tenantId, customerId) {
   const id = asString(customerId);
   if (!id) return null;
   try {
     const entity = await customersClient.getEntity(tenantId, id);
-    return {
-      id,
-      name: customerNameFromEntity(entity),
-      phone: customerPhoneFromEntity(entity)
-    };
+    return normalizedCustomerFromEntity(entity);
   } catch {
     return null;
   }
 }
 
+async function getPhoneConsent(consentsClient, tenantId, phone) {
+  const rowKey = phoneConsentRowKey(phone);
+  if (!rowKey) return null;
+  try {
+    return await consentsClient.getEntity(tenantId, rowKey);
+  } catch (_) {
+    return null;
+  }
+}
+
+async function reconcileCustomerPhoneConsent(consentsClient, tenantId, phone, customer) {
+  if (!customer || !customer.id || !isOptedInStatus(customer.smsConsentStatus)) return;
+  const rowKey = phoneConsentRowKey(phone || customer.phone);
+  const phoneE164 = normalizeE164(phone || customer.phone);
+  if (!rowKey || !phoneE164) return;
+
+  const existing = await getPhoneConsent(consentsClient, tenantId, phoneE164);
+  if (existing && isOptedOutStatus(existing.status)) return;
+  if (existing && isOptedInStatus(existing.status)) return;
+
+  const when = asString(customer.smsConsentConfirmedAt || customer.smsConsentUpdatedAt) || new Date().toISOString();
+  await consentsClient.upsertEntity(
+    {
+      partitionKey: tenantId,
+      rowKey,
+      phoneE164,
+      phoneKey: rowKey.replace(/^phone-/, ""),
+      status: "opted-in",
+      confirmedAt: when,
+      revokedAt: "",
+      customerId: asString(customer.id),
+      customerName: asString(customer.name),
+      source: asString(customer.smsConsentSource) || "customer-record",
+      updatedAt: new Date().toISOString()
+    },
+    "Merge"
+  );
+}
+
 async function hydrateMessagesWithCustomerData(customersClient, tenantId, messages) {
   if (!Array.isArray(messages) || !messages.length) return;
   const cache = new Map();
+  const phoneIndex = await buildCustomerPhoneIndex(customersClient, tenantId);
   for (const item of messages) {
     const customerId = asString(item && item.customerId);
-    if (!customerId) continue;
-
-    if (!cache.has(customerId)) {
+    if (customerId && !cache.has(customerId)) {
       cache.set(customerId, await findCustomerById(customersClient, tenantId, customerId));
     }
-    const customer = cache.get(customerId);
+    const directCustomer = customerId ? cache.get(customerId) : null;
+    const messagePhone = messageConversationPhone(item);
+    const phoneCustomer = phoneIndex.get(phoneLookupKey(messagePhone));
+    const customer = chooseCanonicalCustomer(directCustomer, phoneCustomer);
     if (!customer) continue;
 
-    if (!asString(item.customerName) && customer.name) {
+    if (customer.id) {
+      item.customerId = customer.id;
+    }
+    if (customer.name) {
       item.customerName = customer.name;
     }
     if (asString(item.direction).toLowerCase() === "inbound" && !asString(item.from) && customer.phone) {
@@ -630,21 +945,71 @@ async function markRead(client, tenantId, id) {
   return true;
 }
 
-async function findCustomerByPhone(customersClient, tenantId, phone) {
-  const normalized = normalizeCustomerPhone(phone);
-  if (!normalized) return null;
+async function clearTenantSmsHistory(client, tenantId) {
   const safeTenant = escapedFilterValue(tenantId);
-  const iter = customersClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${safeTenant}'` } });
+  const rows = [];
+  const iter = client.listEntities({ queryOptions: { filter: `PartitionKey eq '${safeTenant}'` } });
   for await (const entity of iter) {
-    const candidatePhone = normalizeCustomerPhone(entity.phone);
-    if (!candidatePhone || candidatePhone !== normalized) continue;
-    return {
-      id: asString(entity.rowKey),
-      name: customerNameFromEntity(entity),
-      phone: customerPhoneFromEntity(entity)
-    };
+    rows.push({
+      partitionKey: asString(entity.partitionKey),
+      rowKey: asString(entity.rowKey)
+    });
   }
-  return null;
+  let deleted = 0;
+  for (const row of rows) {
+    if (!row.partitionKey || !row.rowKey) continue;
+    try {
+      await client.deleteEntity(row.partitionKey, row.rowKey);
+      deleted += 1;
+    } catch (err) {
+      if (err && (err.statusCode === 404 || err.code === "ResourceNotFound")) continue;
+      throw err;
+    }
+  }
+  return deleted;
+}
+
+async function findCustomerByPhone(customersClient, tenantId, phone) {
+  const key = phoneLookupKey(phone);
+  if (!key) return null;
+  const phoneIndex = await buildCustomerPhoneIndex(customersClient, tenantId);
+  return phoneIndex.get(key) || null;
+}
+
+async function captureUnknownSmsLead(customers, sms, tenantId, inbound) {
+  const phone = normalizeE164(inbound.fromNumber);
+  if (!phone || !inbound.id) return;
+  const key = createHash("sha256").update(phone).digest("hex").slice(0, 32);
+  const customerId = `sms-contact-${key}`;
+  const leadId = `sms-lead-${key}`;
+  const [lanes, workItems] = await Promise.all([getTableClient("lanes"), getTableClient("workitems")]);
+  let leadLane;
+  const filter = `PartitionKey eq '${tenantId}'`;
+  for await (const lane of lanes.listEntities({ queryOptions: { filter } })) {
+    if (lane.stageKey === "lead" || /^leads?$/i.test(asString(lane.name))) {
+      leadLane = lane.rowKey;
+      break;
+    }
+  }
+  if (!leadLane) {
+    leadLane = "sms-intake-leads";
+    await lanes.upsertEntity({ partitionKey: tenantId, rowKey: leadLane, stageKey: "lead",
+      name: "Leads", isSystem: true, sort: 100 }, "Merge");
+  }
+  const now = new Date().toISOString();
+  const customerName = `SMS inquiry ending ${phone.slice(-4)}`;
+  for (const [client, row] of [
+    [customers, { rowKey: customerId, name: customerName, phone, email: "", creator: "SMS intake" }],
+    [workItems, { rowKey: leadId, laneId: leadLane, title: customerName, customerId, customerName,
+      source: "sms", leadSource: "sms", channel: "sms", contactPhone: phone, message: inbound.message }]
+  ]) {
+    try {
+      await client.createEntity({ ...row, partitionKey: tenantId, createdAt: now, updatedAt: now });
+    } catch (error) {
+      if (error.statusCode !== 409) throw error;
+    }
+  }
+  await sms.upsertEntity({ partitionKey: tenantId, rowKey: inbound.id, customerId, customerName }, "Merge");
 }
 
 async function resolveTenantFromCustomerPhone(customersClient, phone) {
@@ -675,7 +1040,7 @@ async function resolveTenantFromCustomerPhone(customersClient, phone) {
 
 async function applyInboundConsentKeyword(customersClient, tenantId, customerId, message, timestamp) {
   const keyword = inboundKeywordCategory(message);
-  if (!keyword.category || !customerId) return;
+  if (!keyword.category || !customerId) return keyword;
   const when = asString(timestamp) || new Date().toISOString();
 
   if (keyword.category === "opt-in") {
@@ -692,7 +1057,7 @@ async function applyInboundConsentKeyword(customersClient, tenantId, customerId,
       },
       "Merge"
     );
-    return;
+    return keyword;
   }
 
   if (keyword.category === "opt-out") {
@@ -709,7 +1074,7 @@ async function applyInboundConsentKeyword(customersClient, tenantId, customerId,
       },
       "Merge"
     );
-    return;
+    return keyword;
   }
 
   if (keyword.category === "help") {
@@ -723,6 +1088,183 @@ async function applyInboundConsentKeyword(customersClient, tenantId, customerId,
       },
       "Merge"
     );
+  }
+  return keyword;
+}
+
+async function upsertPhoneConsent(consentsClient, tenantId, phone, keyword, customer, timestamp) {
+  const category = keyword && keyword.category;
+  if (category !== "opt-in" && category !== "opt-out") return;
+  const rowKey = phoneConsentRowKey(phone);
+  const phoneE164 = normalizeE164(phone);
+  if (!rowKey || !phoneE164) return;
+
+  const when = asString(timestamp) || new Date().toISOString();
+  const status = category === "opt-in" ? "opted-in" : "opted-out";
+  const patch = {
+    partitionKey: tenantId,
+    rowKey,
+    phoneE164,
+    phoneKey: rowKey.replace(/^phone-/, ""),
+    status,
+    keyword: asString(keyword.keyword),
+    lastKeywordAt: when,
+    updatedAt: when,
+    source: "sms-webhook",
+    customerId: customer && customer.id ? asString(customer.id) : "",
+    customerName: customer && customer.name ? asString(customer.name) : ""
+  };
+  if (category === "opt-in") {
+    patch.confirmedAt = when;
+    patch.revokedAt = "";
+  } else {
+    patch.revokedAt = when;
+  }
+
+  await consentsClient.upsertEntity(patch, "Merge");
+}
+
+function buildConsentKeywordReply(category, brandName) {
+  const brand = customerSafeBrandFallback(brandName) || "Your service team";
+  if (category === "opt-in") {
+    return `${brand}: Thank you, your SMS updates are confirmed. We can now text you about your service request. Reply STOP to opt out, HELP for help.`;
+  }
+  if (category === "opt-out") {
+    return `${brand}: You're opted out and will no longer receive SMS updates. Reply START to opt back in.`;
+  }
+  if (category === "help") {
+    return `${brand}: Help is available from your service team. Reply STOP to opt out, START to opt in. Msg&data rates may apply.`;
+  }
+  return "";
+}
+
+async function sendKeywordAutoReply(context, senderClient, smsClient, settingsClient, tenantId, inbound) {
+  const keyword = inboundKeywordCategory(inbound && inbound.message);
+  if (!keyword.category) return null;
+  const replyMessage = buildConsentKeywordReply(keyword.category, await getBusinessBrandName(settingsClient, tenantId));
+  const to = pickPhone(inbound && inbound.fromNumber);
+  const from = pickPhone(inbound && inbound.toNumber);
+  if (!replyMessage || !to || !from) throw new Error("Keyword auto-reply is missing a valid sender or recipient number.");
+
+  const senderConfig = await getTenantSenderConfig(senderClient, tenantId);
+  const status = getConfigStatus(tenantId, senderConfig);
+  if (status.mode === "azure" && !status.readyForLive) {
+    throw new Error("Live SMS is not configured for keyword auto-replies.");
+  }
+  let simulated = true;
+  let providerMessageId = "";
+  let provider = status.provider;
+  let deliveryStatus = "delivered";
+  let deliveryStatusRaw = "keyword-auto-reply";
+  let providerErrorCode = "";
+  let providerErrorMessage = "";
+
+  if (status.mode === "azure" && status.readyForLive) {
+    const client = new SmsClient(asString(process.env.ACS_CONNECTION_STRING));
+    const sendResult = await client.send({
+      from,
+      to: [to],
+      message: replyMessage
+    }, {
+      enableDeliveryReport: true,
+      tag: `keyword:${tenantId}`.slice(0, 256)
+    });
+    const first = Array.isArray(sendResult)
+      ? sendResult[0]
+      : (Array.isArray(sendResult && sendResult.results) ? sendResult.results[0] : sendResult);
+    const successful = first && typeof first.successful === "boolean" ? first.successful : true;
+    if (!successful) {
+      const reason = asString(first && (first.errorMessage || first.errorCode || first.code)) || "Unknown provider error";
+      logError(context, "[sms][keyword-auto-reply][provider-rejected]", reason);
+      throw new Error(`Keyword auto-reply rejected by SMS provider: ${reason}`);
+    }
+    simulated = false;
+    providerMessageId = first && first.messageId ? asString(first.messageId) : "";
+    provider = "azure-communication-services";
+    deliveryStatusRaw = asString(first && (first.deliveryStatus || first.status || "Queued")) || "Queued";
+    deliveryStatus = normalizeDeliveryStatus(deliveryStatusRaw, "outbound", false);
+    providerErrorCode = asString(first && first.errorCode);
+    providerErrorMessage = asString(first && first.errorMessage);
+  } else {
+    logInfo(context, "[sms][keyword-auto-reply][mock] tenant=%s to=%s message=%s", tenantId, to, replyMessage);
+  }
+
+  const now = new Date().toISOString();
+  const saved = await saveMessage(smsClient, tenantId, {
+    id: asString(inbound && inbound.replyId),
+    customerId: asString(inbound && inbound.customerId),
+    customerName: asString(inbound && inbound.customerName),
+    direction: "outbound",
+    from,
+    to,
+    message: replyMessage,
+    read: true,
+    readAt: now,
+    simulated,
+    provider,
+    providerMessageId,
+    deliveryStatus,
+    deliveryStatusRaw,
+    deliveryUpdatedAt: now,
+    deliveredAt: deliveryStatus === "delivered" ? now : "",
+    failedAt: deliveryStatus === "failed" ? now : "",
+    providerErrorCode,
+    providerErrorMessage
+  });
+
+  return {
+    id: saved.id,
+    providerMessageId,
+    deliveryStatus: saved.deliveryStatus,
+    simulated
+  };
+}
+
+async function sendAndRecordKeywordReply(context, senderClient, smsClient, settingsClient, tenantId, inboundId, inbound) {
+  const keyword = inboundKeywordCategory(inbound && inbound.message);
+  if (!keyword.category) return null;
+
+  const replyId = stableMessageRowKey("keyword-reply", inboundId);
+  if (replyId && await messageExists(smsClient, tenantId, replyId)) {
+    await smsClient.upsertEntity({
+      partitionKey: tenantId,
+      rowKey: inboundId,
+      keywordReplyStatus: "sent",
+      keywordReplyId: replyId,
+      keywordReplyError: "",
+      keywordReplyUpdatedAt: new Date().toISOString()
+    }, "Merge");
+    return { id: replyId, deliveryStatus: "queued", simulated: false };
+  }
+
+  try {
+    const reply = await sendKeywordAutoReply(context, senderClient, smsClient, settingsClient, tenantId, {
+      ...inbound,
+      replyId
+    });
+    if (!reply) throw new Error("Keyword auto-reply was not created.");
+    await smsClient.upsertEntity({
+      partitionKey: tenantId,
+      rowKey: inboundId,
+      keywordReplyStatus: "sent",
+      keywordReplyId: reply.id,
+      keywordReplyError: "",
+      keywordReplyUpdatedAt: new Date().toISOString()
+    }, "Merge");
+    return reply;
+  } catch (err) {
+    try {
+      await smsClient.upsertEntity({
+        partitionKey: tenantId,
+        rowKey: inboundId,
+        keywordReplyStatus: "failed",
+        keywordReplyError: asString(err && err.message).slice(0, 500),
+        keywordReplyUpdatedAt: new Date().toISOString()
+      }, "Merge");
+    } catch (recordError) {
+      logError(context, "[sms][keyword-auto-reply][record-failed]", recordError);
+    }
+    throw err;
   }
 }
 
@@ -780,6 +1322,27 @@ async function resolveTenantFromSmsHistoryBySenderNumber(smsClient, senderNumber
   return bestTenant;
 }
 
+async function resolveTenantForInboundMessage(senderClient, smsClient, customersClient, toNumber, fromNumber) {
+  const senderTenantId = await resolveTenantFromIncomingNumber(senderClient, toNumber);
+  if (senderTenantId) return senderTenantId;
+
+  if (fromNumber) {
+    const customerTenantId = await resolveTenantFromCustomerPhone(customersClient, fromNumber);
+    if (customerTenantId) return customerTenantId;
+  }
+
+  const historyTenantId = await resolveTenantFromSmsHistoryBySenderNumber(smsClient, toNumber);
+  if (historyTenantId) return historyTenantId;
+
+  const normalizedIncoming = pickPhone(toNumber);
+  const normalizedEnvSender = pickPhone(process.env.ACS_SMS_FROM);
+  if (normalizedIncoming && normalizedEnvSender && normalizedIncoming === normalizedEnvSender) {
+    return sanitizeTenantId(asString(process.env.DEFAULT_TENANT_ID) || "main");
+  }
+
+  return "";
+}
+
 async function updateMessagesByProviderMessageId(client, tenantId, providerMessageId, patch) {
   const safeTenant = escapedFilterValue(tenantId);
   const safeProviderMessageId = escapedFilterValue(providerMessageId);
@@ -823,47 +1386,124 @@ function buildSubscriptionValidationResponse(events) {
   return null;
 }
 
-async function processInboundEvent(senderClient, smsClient, customersClient, event) {
+async function processInboundEvent(context, senderClient, smsClient, customersClient, settingsClient, consentsClient, event) {
   const data = eventDataOf(event);
-  const toNumber = pickPhone(firstNonEmpty([
+  const eventType = eventTypeOf(event);
+  const providerMessageId = asString(firstNonEmpty([data.messageId, data.id, event.id]));
+  const toNumber = firstPhone([
     data.to,
     data.toPhoneNumber,
     data.destinationPhoneNumber,
+    data.receiver,
+    data.receiverPhoneNumber,
     data.recipient,
+    data.recipientPhoneNumber,
     data.phoneNumber
-  ]));
-  const fromNumber = pickPhone(firstNonEmpty([
+  ]);
+  const fromNumber = firstPhone([
     data.from,
     data.fromPhoneNumber,
+    data.senderPhoneNumber,
     data.sender,
-    data.originator
-  ]));
-  const message = asString(firstNonEmpty([data.message, data.text, data.content]));
-  if (!toNumber || !message) return false;
+    data.originator,
+    data.originatorPhoneNumber
+  ]);
+  const message = extractMessageText(data);
+  if (!toNumber || !message) {
+    logInfo(
+      context,
+      "[sms][webhook][ignored-inbound] missing required fields type=%s to=%s from=%s hasMessage=%s dataKeys=%s",
+      eventType,
+      toNumber ? "yes" : "no",
+      fromNumber ? "yes" : "no",
+      message ? "yes" : "no",
+      Object.keys(data || {}).join(",")
+    );
+    return {
+      processed: false,
+      reason: "missing-required-fields",
+      eventType,
+      providerMessageId,
+      hasToNumber: !!toNumber,
+      hasFromNumber: !!fromNumber,
+      hasMessage: !!message,
+      dataKeys: Object.keys(data || {})
+    };
+  }
 
-  let tenantId = await resolveTenantFromIncomingNumber(senderClient, toNumber);
+  const tenantId = await resolveTenantForInboundMessage(senderClient, smsClient, customersClient, toNumber, fromNumber);
   if (!tenantId) {
-    tenantId = await resolveTenantFromSmsHistoryBySenderNumber(smsClient, toNumber);
+    logInfo(
+      context,
+      "[sms][webhook][ignored-inbound] tenant unresolved type=%s to=%s from=%s messageId=%s",
+      eventType,
+      toNumber || "",
+      fromNumber || "",
+      providerMessageId
+    );
+    return {
+      processed: false,
+      reason: "tenant-unresolved",
+      eventType,
+      providerMessageId,
+      hasToNumber: !!toNumber,
+      hasFromNumber: !!fromNumber,
+      hasMessage: !!message
+    };
   }
-  if (!tenantId && fromNumber) {
-    tenantId = await resolveTenantFromCustomerPhone(customersClient, fromNumber);
+
+  const inboundRowKey = stableMessageRowKey("inbound", providerMessageId);
+  let existingInbound = null;
+  if (inboundRowKey) {
+    try { existingInbound = await smsClient.getEntity(tenantId, inboundRowKey); } catch (_) {}
   }
-  if (!tenantId) {
-    const normalizedIncoming = pickPhone(toNumber);
-    const normalizedEnvSender = pickPhone(process.env.ACS_SMS_FROM);
-    if (normalizedIncoming && normalizedEnvSender && normalizedIncoming === normalizedEnvSender) {
-      tenantId = sanitizeTenantId(asString(process.env.DEFAULT_TENANT_ID) || "main");
+  if (existingInbound) {
+    const existingKeyword = inboundKeywordCategory(asString(existingInbound.message) || message);
+    if (!existingKeyword.category && !asString(existingInbound.customerId)) {
+      await captureUnknownSmsLead(customersClient, smsClient, tenantId, { id: inboundRowKey, fromNumber, message });
     }
+    let autoReply = null;
+    if (existingKeyword.category && asString(existingInbound.keywordReplyStatus) !== "sent") {
+      autoReply = await sendAndRecordKeywordReply(context, senderClient, smsClient, settingsClient, tenantId, inboundRowKey, {
+        customerId: asString(existingInbound.customerId),
+        customerName: asString(existingInbound.customerName),
+        fromNumber: asString(existingInbound.fromNumber) || fromNumber,
+        toNumber: asString(existingInbound.toNumber) || toNumber,
+        message: asString(existingInbound.message) || message
+      });
+    }
+    logInfo(
+      context,
+      "[sms][webhook][duplicate-inbound] tenant=%s messageId=%s",
+      tenantId,
+      providerMessageId
+    );
+    return {
+      processed: true,
+      duplicate: true,
+      tenantId,
+      eventType,
+      providerMessageId,
+      inboundId: inboundRowKey,
+      customerMatched: null,
+      keywordCategory: existingKeyword.category || null,
+      keyword: existingKeyword.keyword || null,
+      autoReplySent: asString(existingInbound.keywordReplyStatus) === "sent" || !!autoReply,
+      autoReplyId: autoReply ? autoReply.id : asString(existingInbound.keywordReplyId) || null,
+      autoReplyDeliveryStatus: autoReply ? autoReply.deliveryStatus : null,
+      autoReplySimulated: autoReply ? !!autoReply.simulated : null
+    };
   }
-  if (!tenantId) return false;
 
   const customer = await findCustomerByPhone(customersClient, tenantId, fromNumber);
-  const providerMessageId = asString(firstNonEmpty([data.messageId, data.id, event.id]));
   const createdAt = asString(firstNonEmpty([data.receivedTimestamp, data.receivedOn, event.time, event.eventTime])) || new Date().toISOString();
+  const keyword = inboundKeywordCategory(message);
   if (customer && customer.id) {
     await applyInboundConsentKeyword(customersClient, tenantId, customer.id, message, createdAt);
   }
-  await saveMessage(smsClient, tenantId, {
+  await upsertPhoneConsent(consentsClient, tenantId, fromNumber, keyword, customer, createdAt);
+  const saved = await saveMessage(smsClient, tenantId, {
+    id: inboundRowKey,
     customerId: customer ? customer.id : "",
     customerName: customer ? customer.name : "",
     direction: "inbound",
@@ -877,14 +1517,46 @@ async function processInboundEvent(senderClient, smsClient, customersClient, eve
     provider: "azure-communication-services",
     providerMessageId,
     deliveryStatus: "received",
-    deliveryStatusRaw: asString(eventTypeOf(event)),
+    deliveryStatusRaw: asString(eventType),
     deliveryUpdatedAt: createdAt,
     deliveredAt: "",
     failedAt: "",
     providerErrorCode: "",
     providerErrorMessage: ""
   });
-  return true;
+  if (!keyword.category && (!customer || asString(customer.id).startsWith("sms-contact-"))) {
+    await captureUnknownSmsLead(customersClient, smsClient, tenantId, { id: saved.id, fromNumber, message });
+  }
+  const autoReply = await sendAndRecordKeywordReply(context, senderClient, smsClient, settingsClient, tenantId, saved.id, {
+    customerId: customer ? customer.id : "",
+    customerName: customer ? customer.name : "",
+    fromNumber,
+    toNumber,
+    message
+  });
+  logInfo(
+    context,
+    "[sms][webhook][inbound-processed] tenant=%s customer=%s keyword=%s autoReply=%s inboundId=%s",
+    tenantId,
+    customer && customer.id ? "matched" : "unmatched",
+    keyword.category || "none",
+    autoReply ? "sent" : "not-sent",
+    saved.id
+  );
+  return {
+    processed: true,
+    tenantId,
+    eventType,
+    providerMessageId,
+    inboundId: saved.id,
+    customerMatched: !!(customer && customer.id),
+    keywordCategory: keyword.category || null,
+    keyword: keyword.keyword || null,
+    autoReplySent: !!autoReply,
+    autoReplyId: autoReply ? autoReply.id : null,
+    autoReplyDeliveryStatus: autoReply ? autoReply.deliveryStatus : null,
+    autoReplySimulated: autoReply ? !!autoReply.simulated : null
+  };
 }
 
 async function processDeliveryEvent(senderClient, smsClient, event) {
@@ -941,11 +1613,6 @@ async function processDeliveryEvent(senderClient, smsClient, event) {
 }
 
 async function handleWebhook(context, req, bodyRaw) {
-  if (!webhookAuthorized(req)) {
-    context.res = json(401, { error: "Unauthorized webhook request." });
-    return;
-  }
-
   const events = extractWebhookEvents(bodyRaw);
   if (!events.length) {
     context.res = json(400, { error: "Webhook payload must contain one or more events." });
@@ -958,47 +1625,75 @@ async function handleWebhook(context, req, bodyRaw) {
     return;
   }
 
+  if (!webhookAuthorized(req)) {
+    context.res = json(401, { error: "Unauthorized webhook request." });
+    return;
+  }
+
   const senderClient = await getSenderTableClient();
   const smsClient = await getSmsTableClient();
   const customersClient = await getCustomersTableClient();
+  const settingsClient = await getSettingsTableClient();
+  const consentsClient = await getSmsConsentsTableClient();
 
   let inboundProcessed = 0;
   let deliveryEvents = 0;
   let deliveryUpdated = 0;
   let ignored = 0;
   let errors = 0;
+  const details = [];
 
   for (const event of events) {
     const type = eventTypeOf(event).toLowerCase();
     try {
       if (type.includes("smsreceived")) {
-        const ok = await processInboundEvent(senderClient, smsClient, customersClient, event);
-        if (ok) inboundProcessed += 1;
+        const result = await processInboundEvent(context, senderClient, smsClient, customersClient, settingsClient, consentsClient, event);
+        details.push(result);
+        if (result && result.processed) inboundProcessed += 1;
         else ignored += 1;
         continue;
       }
 
       if (type.includes("smsdeliveryreportreceived") || type.includes("deliveryreport")) {
         deliveryEvents += 1;
-        deliveryUpdated += await processDeliveryEvent(senderClient, smsClient, event);
+        const updated = await processDeliveryEvent(senderClient, smsClient, event);
+        deliveryUpdated += updated;
+        details.push({
+          processed: updated > 0,
+          eventType: eventTypeOf(event),
+          providerMessageId: asString(firstNonEmpty([eventDataOf(event).messageId, eventDataOf(event).id, event.id])),
+          deliveryUpdated: updated
+        });
         continue;
       }
 
       ignored += 1;
+      details.push({
+        processed: false,
+        reason: "unsupported-event-type",
+        eventType: eventTypeOf(event)
+      });
     } catch (err) {
       errors += 1;
       logError(context, "[sms][webhook][error]", err);
+      details.push({
+        processed: false,
+        reason: "error",
+        eventType: eventTypeOf(event),
+        error: String((err && err.message) || err)
+      });
     }
   }
 
-  context.res = json(200, {
-    ok: true,
+  context.res = json(errors ? 500 : 200, {
+    ok: errors === 0,
     webhook: true,
     inboundProcessed,
     deliveryEvents,
     deliveryUpdated,
     ignored,
-    errors
+    errors,
+    details
   });
 }
 
@@ -1036,6 +1731,8 @@ module.exports = async function (context, req) {
     const smsTable = await getSmsTableClient();
     const senderTable = await getSenderTableClient();
     const customersTable = await getCustomersTableClient();
+    const settingsTable = await getSettingsTableClient();
+    const consentsTable = await getSmsConsentsTableClient();
     const senderConfig = await getTenantSenderConfig(senderTable, tenantId);
     const status = getConfigStatus(tenantId, senderConfig);
 
@@ -1057,8 +1754,9 @@ module.exports = async function (context, req) {
         return;
       }
 
-      const all = await listAllMessages(smsTable, tenantId);
+      let all = await listAllMessages(smsTable, tenantId);
       await hydrateMessagesWithCustomerData(customersTable, tenantId, all);
+      all = dedupeMessagesForDisplay(all);
       const rawLimit = Number(queryParam(req, "limit"));
       const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : 0;
 
@@ -1077,11 +1775,18 @@ module.exports = async function (context, req) {
           context.res = json(400, { error: "customerId is required for scope=customer." });
           return;
         }
+        const customer = await findCustomerById(customersTable, tenantId, customerId);
+        const customerPhoneKey = phoneLookupKey(customer && customer.phone);
+        const resolvedCustomerId = asString(customer && customer.id) || customerId;
         let items = all
-          .filter(item => item.customerId === customerId)
+          .filter(item => {
+            if (item.customerId === resolvedCustomerId || item.customerId === customerId) return true;
+            if (!customerPhoneKey) return false;
+            return phoneLookupKey(messageConversationPhone(item)) === customerPhoneKey;
+          })
           .sort(sortByCreatedAsc);
         if (limit > 0) items = items.slice(Math.max(0, items.length - limit));
-        context.res = json(200, { ok: true, tenantId, scope, customerId, items });
+        context.res = json(200, { ok: true, tenantId, scope, customerId: resolvedCustomerId, items });
         return;
       }
 
@@ -1159,6 +1864,21 @@ module.exports = async function (context, req) {
       return;
     }
 
+    if (op === "clearhistory" || op === "clear-history") {
+      if (!isLoopbackRequest(req)) {
+        context.res = json(403, { error: "SMS history reset is only available from localhost." });
+        return;
+      }
+      if (!Array.isArray(principal.userRoles) || !principal.userRoles.includes("admin")) {
+        context.res = json(403, { error: "Admin role is required to clear SMS history." });
+        return;
+      }
+
+      const deleted = await clearTenantSmsHistory(smsTable, tenantId);
+      context.res = json(200, { ok: true, tenantId, deleted });
+      return;
+    }
+
     const requestTo = asString(body.to);
     const requestMessage = asString(body.message);
     const requestCustomerId = asString(body.customerId);
@@ -1172,7 +1892,7 @@ module.exports = async function (context, req) {
 
     if (op === "logincoming" || op === "log-incoming" || inferredInbound) {
       const message = requestMessage;
-      const customerId = requestCustomerId;
+      let customerId = requestCustomerId;
       if (!message) {
         context.res = json(400, { error: "message is required for logIncoming." });
         return;
@@ -1182,9 +1902,14 @@ module.exports = async function (context, req) {
         return;
       }
 
-      const customerRecord = await findCustomerById(customersTable, tenantId, customerId);
+      const requestedCustomerRecord = await findCustomerById(customersTable, tenantId, customerId);
+      const customerPhone = asString(body.from) || asString(requestedCustomerRecord && requestedCustomerRecord.phone);
+      const phoneCustomerRecord = await findCustomerByPhone(customersTable, tenantId, customerPhone);
+      const customerRecord = chooseCanonicalCustomer(requestedCustomerRecord, phoneCustomerRecord);
+      if (customerRecord && customerRecord.id) {
+        customerId = customerRecord.id;
+      }
       const customerName = requestCustomerName || asString(customerRecord && customerRecord.name);
-      const customerPhone = asString(body.from) || asString(customerRecord && customerRecord.phone);
 
       const saved = await saveMessage(smsTable, tenantId, {
         customerId,
@@ -1207,6 +1932,21 @@ module.exports = async function (context, req) {
         providerErrorMessage: ""
       });
       await applyInboundConsentKeyword(customersTable, tenantId, customerId, message, saved.createdAt);
+      await upsertPhoneConsent(
+        consentsTable,
+        tenantId,
+        customerPhone,
+        inboundKeywordCategory(message),
+        { id: customerId, name: customerName },
+        saved.createdAt
+      );
+      const autoReply = await sendAndRecordKeywordReply(context, senderTable, smsTable, settingsTable, tenantId, saved.id, {
+        customerId,
+        customerName,
+        fromNumber: customerPhone,
+        toNumber: status.fromNumber || "",
+        message
+      });
 
       context.res = json(200, {
         ok: true,
@@ -1217,15 +1957,17 @@ module.exports = async function (context, req) {
         direction: "inbound",
         id: saved.id,
         createdAt: saved.createdAt,
-        deliveryStatus: saved.deliveryStatus
+        deliveryStatus: saved.deliveryStatus,
+        autoReplySent: !!autoReply,
+        autoReplyId: autoReply ? autoReply.id : null
       });
       return;
     }
 
     const to = requestTo;
     const message = requestMessage;
-    const customerId = requestCustomerId;
-    const customerName = requestCustomerName;
+    let customerId = requestCustomerId;
+    let customerName = requestCustomerName;
 
     if (!to || !message) {
       context.res = json(400, { error: "`to` and `message` are required." });
@@ -1239,6 +1981,15 @@ module.exports = async function (context, req) {
       context.res = json(400, { error: "Message is too long (max 1000 characters in this endpoint)." });
       return;
     }
+
+    const requestedCustomerRecord = customerId ? await findCustomerById(customersTable, tenantId, customerId) : null;
+    const phoneCustomerRecord = await findCustomerByPhone(customersTable, tenantId, to);
+    const customerRecord = chooseCanonicalCustomer(requestedCustomerRecord, phoneCustomerRecord);
+    if (customerRecord && customerRecord.id) {
+      customerId = customerRecord.id;
+      customerName = customerRecord.name || customerName;
+    }
+    await reconcileCustomerPhoneConsent(consentsTable, tenantId, to, customerRecord);
 
     let simulated = true;
     let providerMessageId = "";
@@ -1261,6 +2012,9 @@ module.exports = async function (context, req) {
         from: status.fromNumber,
         to: [to],
         message
+      }, {
+        enableDeliveryReport: true,
+        tag: `customer:${customerId || "unknown"}`.slice(0, 256)
       });
 
       const first = Array.isArray(sendResult)

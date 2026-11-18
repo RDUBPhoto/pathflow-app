@@ -7,6 +7,9 @@ export type WorkItem = {
   title: string;
   laneId: string;
   customerId?: string;
+  invoiceId?: string;
+  jobId?: string;
+  dashboardHidden?: boolean;
   customerName?: string;
   source?: string;
   leadSource?: string;
@@ -28,13 +31,22 @@ export type WorkItem = {
   updatedAt?: string;
   checkedInAt?: string;
   completedAt?: string;
+  pickedUpAt?: string;
   calendarOverrideAt?: string;
   isPaused?: boolean;
   pausedAt?: string;
   lastWorkResumedAt?: string;
   workDurationMs?: number;
+  activeWorkDurationMs?: number;
+  workClockState?: 'not-started' | 'working' | 'after-hours' | 'paused' | 'completed';
   pauseDurationMs?: number;
 };
+
+export type WorkClockAction = 'check-in' | 'start' | 'pause' | 'resume';
+
+export function workItemDocumentRef(item: WorkItem): string {
+  return item.invoiceId?.trim() || item.title?.match(/\[doc=([^\]]+)\]/i)?.[1]?.trim() || '';
+}
 
 @Injectable({ providedIn: 'root' })
 export class WorkItemsApi {
@@ -44,12 +56,18 @@ export class WorkItemsApi {
     return this.http.get<WorkItem[]>('/api/workitems');
   }
 
-  create(title: string, laneId: string): Observable<{ ok: boolean; id: string }> {
-    return this.http.post<{ ok: boolean; id: string }>('/api/workitems', { title, laneId });
+  create(title: string, laneId: string, intake?: { source: 'phone'; message: string; customerId: string }): Observable<{ ok: boolean; id: string }> {
+    return this.http.post<{ ok: boolean; id: string }>('/api/workitems', { title, laneId, ...intake });
   }
 
-  update(body: Partial<WorkItem> & { id: string }): Observable<{ ok: boolean; id: string; moved?: boolean }> {
+  update(body: Partial<WorkItem> & { id: string; workClockAction?: WorkClockAction; markPickedUp?: boolean }): Observable<{ ok: boolean; id: string; moved?: boolean }> {
     return this.http.post<{ ok: boolean; id: string; moved?: boolean }>('/api/workitems', body);
+  }
+
+  setDashboardHidden(id: string, dashboardHidden: boolean): Observable<{ ok: boolean; id: string }> {
+    return this.http.post<{ ok: boolean; id: string }>('/api/workitems', { op: 'set-dashboard-visibility', id, dashboardHidden }, {
+      headers: { 'x-skip-action-toast': '1' }
+    });
   }
 
   reorder(laneId: string, ids: string[]): Observable<{ ok: boolean }> {

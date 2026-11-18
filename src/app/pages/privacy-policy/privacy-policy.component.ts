@@ -1,12 +1,12 @@
-import { CommonModule } from '@angular/common';
-import { Component } from '@angular/core';
-import { IonContent } from '@ionic/angular/standalone';
+
+import { Component, ChangeDetectionStrategy } from '@angular/core';
 
 @Component({
   selector: 'app-privacy-policy',
   standalone: true,
-  imports: [CommonModule, IonContent],
+  imports: [],
   templateUrl: './privacy-policy.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./privacy-policy.component.scss']
 })
 export default class PrivacyPolicyComponent {}

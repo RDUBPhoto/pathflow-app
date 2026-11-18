@@ -1,142 +1,169 @@
-<ion-header class="glass-header">
-  <ion-toolbar>
-    <ion-buttons slot="start">
+<header class="ui-header app-header">
+  <div class="ui-toolbar">
+    <div class="ui-buttons" slot="start">
       <app-page-back-button></app-page-back-button>
-    </ion-buttons>
-    <ion-title>User Settings</ion-title>
+    </div>
+    <h1 class="ui-title">User Settings</h1>
     <app-company-switcher></app-company-switcher>
     <div class="toolbar-actions" slot="end">
       <app-user-menu></app-user-menu>
     </div>
-  </ion-toolbar>
-</ion-header>
+  </div>
+</header>
 
-<ion-content class="glass-bg ion-padding settings-content">
-  <ion-card class="glass-surface">
-    <ion-card-header>
-      <ion-card-title>
-        <ion-icon name="person-circle-outline"></ion-icon>
+<div class="ui-content app-content app-padding settings-content">
+  <div class="card ui-card app-surface">
+    <div class="card-header ui-card-header">
+      <h2 class="card-title ui-card-title">
+        <ui-icon name="user-circle"></ui-icon>
         Profile
-      </ion-card-title>
-    </ion-card-header>
-    <ion-card-content>
+      </h2>
+    </div>
+    <div class="card-body ui-card-content">
       <input #avatarFileInput type="file" accept="image/*" hidden (change)="onAvatarFileSelected($event)" />
 
       <div class="profile-line">
-        <ion-avatar>
+        <span class="avatar ui-avatar">
           <img [src]="avatarUrl || 'https://placehold.co/80x80/png'" alt="Avatar preview" />
-        </ion-avatar>
+        </span>
         <div>
           <div class="name">{{ auth.user()?.displayName || 'User' }}</div>
           <div class="meta">{{ auth.user()?.identityProvider }}</div>
-          <ion-badge color="success" *ngIf="auth.isAuthenticated()">authenticated</ion-badge>
+          @if (auth.isAuthenticated()) {
+            <span class="ui-badge" uiBadge color="success">authenticated</span>
+          }
         </div>
       </div>
 
       <div class="avatar-actions">
-        <ion-button size="small" (click)="avatarFileInput.click()">Upload Avatar</ion-button>
-        <ion-button size="small" fill="outline" [disabled]="!avatarUrl" (click)="clearAvatar()">Remove Avatar</ion-button>
+        <button class="btn ui-button btn-primary btn-sm" type="button" (click)="avatarFileInput.click()">Upload Avatar</button>
+        <button class="btn ui-button btn-outline-primary btn-sm" type="button" [disabled]="!avatarUrl" (click)="clearAvatar()">Remove Avatar</button>
       </div>
       <div class="help-text">Upload JPG, PNG, or WEBP (max 5MB).</div>
-      <div class="help-text success" *ngIf="avatarUploadMessage">{{ avatarUploadMessage }}</div>
+      @if (avatarUploadMessage) {
+        <div class="help-text success">{{ avatarUploadMessage }}</div>
+      }
 
       <div class="form-stack">
-        <ion-item>
-          <ion-label position="stacked">Email</ion-label>
-          <ion-input [(ngModel)]="email" placeholder="name@company.com"></ion-input>
-        </ion-item>
-        <div class="validation-error" *ngIf="hasProfileChanges() && !isEmailValid()">
-          Enter a valid email address.
+        <div class="ui-item">
+          <span class="ui-label">Email</span>
+          <ui-input aria-label="Email" [(ngModel)]="email" placeholder="name@company.com"></ui-input>
+        </div>
+        @if (hasProfileChanges() && !isEmailValid()) {
+          <div class="validation-error">
+            Enter a valid email address.
+          </div>
+        }
+
+        <div class="ui-item">
+          <span class="ui-label">Avatar URL (optional)</span>
+          <ui-input aria-label="Avatar URL (optional)" [(ngModel)]="avatarUrl" placeholder="https://.../avatar.png"></ui-input>
+        </div>
+      </div>
+
+      <div class="action-row">
+        <button class="btn ui-button btn-primary" type="button" (click)="saveProfile()" [disabled]="!canSaveProfile()">Save Profile</button>
+      </div>
+      @if (!canSaveProfile()) {
+        <div class="help-text">Save is enabled after a valid change is made.</div>
+      }
+    </div>
+  </div>
+
+  <div class="card ui-card app-surface">
+    <div class="card-header ui-card-header">
+      <h2 class="card-title ui-card-title">
+        <ui-icon name="key"></ui-icon>
+        Password
+      </h2>
+    </div>
+    <div class="card-body ui-card-content">
+      <div class="form-stack">
+        <div class="ui-item">
+          <span class="ui-label">Current password</span>
+          <ui-input aria-label="Current password" type="password" [(ngModel)]="currentPassword"></ui-input>
         </div>
 
-        <ion-item>
-          <ion-label position="stacked">Avatar URL (optional)</ion-label>
-          <ion-input [(ngModel)]="avatarUrl" placeholder="https://.../avatar.png"></ion-input>
-        </ion-item>
+        <div class="ui-item">
+          <span class="ui-label">New password</span>
+          <ui-input aria-label="New password" type="password" [(ngModel)]="newPassword"></ui-input>
+        </div>
+
+        <div class="ui-item">
+          <span class="ui-label">Confirm new password</span>
+          <ui-input aria-label="Confirm new password" type="password" [(ngModel)]="confirmPassword"></ui-input>
+        </div>
       </div>
 
       <div class="action-row">
-        <ion-button (click)="saveProfile()" [disabled]="!canSaveProfile()">Save Profile</ion-button>
+        <button class="btn ui-button btn-outline-primary" type="button" (click)="savePassword()" [disabled]="!canSavePassword()">Update Password</button>
       </div>
-      <div class="help-text" *ngIf="!canSaveProfile()">Save is enabled after a valid change is made.</div>
-    </ion-card-content>
-  </ion-card>
+      @if (hasPasswordChanges() && !passwordFieldsComplete()) {
+        <div class="validation-error">
+          Complete all password fields.
+        </div>
+      }
+      @if (passwordFieldsComplete() && !newPasswordStrongEnough()) {
+        <div class="validation-error">
+          New password must be at least 8 characters.
+        </div>
+      }
+      @if (passwordFieldsComplete() && newPasswordStrongEnough() && !passwordsMatch()) {
+        <div class="validation-error">
+          New password and confirmation must match.
+        </div>
+      }
+    </div>
+  </div>
 
-  <ion-card class="glass-surface">
-    <ion-card-header>
-      <ion-card-title>
-        <ion-icon name="key-outline"></ion-icon>
-        Password
-      </ion-card-title>
-    </ion-card-header>
-    <ion-card-content>
-      <div class="form-stack">
-        <ion-item>
-          <ion-label position="stacked">Current password</ion-label>
-          <ion-input type="password" [(ngModel)]="currentPassword"></ion-input>
-        </ion-item>
+  @if (canManagePasskeys()) {
+    <div class="card ui-card app-surface">
+      <div class="card-header ui-card-header">
+        <h2 class="card-title ui-card-title">
+          <ui-icon name="key"></ui-icon>
+          Biometrics / Passkey
+        </h2>
+      </div>
+      <div class="card-body ui-card-content">
+        @if (passkeysSupported()) {
+          <div class="help-text">
+            Use Touch ID / Windows Hello to sign in with biometrics on this device.
+          </div>
+        }
+        @if (!passkeysSupported()) {
+          <div class="validation-error">
+            This browser/device does not support passkeys.
+          </div>
+        }
+        @if (passkeysSupported() && hasPasskey()) {
+          <div class="passkey-enabled-badge">
+            <ui-icon name="circle-check"></ui-icon>
+            <span>Enabled</span>
+          </div>
+        }
+        @if (passkeysSupported() && !hasPasskey()) {
+          <div class="help-text">Status: Not enabled</div>
+        }
+        <div class="action-row">
+          @if (!hasPasskey()) {
+            <button class="btn ui-button btn-primary" type="button" (click)="enablePasskey()" [disabled]="passkeyBusy || !passkeysSupported()">
+              {{ passkeyBusy ? 'Enabling...' : 'Enable Biometrics' }}
+            </button>
+          }
+          <button class="btn ui-button btn-outline-danger" type="button"
+            (click)="removePasskey()"
+            [disabled]="passkeyBusy || !hasPasskey()">
+            Remove Biometrics
+          </button>
+        </div>
+        @if (passkeyMessage) {
+          <div class="help-text">{{ passkeyMessage }}</div>
+        }
+      </div>
+    </div>
+  }
 
-        <ion-item>
-          <ion-label position="stacked">New password</ion-label>
-          <ion-input type="password" [(ngModel)]="newPassword"></ion-input>
-        </ion-item>
-
-        <ion-item>
-          <ion-label position="stacked">Confirm new password</ion-label>
-          <ion-input type="password" [(ngModel)]="confirmPassword"></ion-input>
-        </ion-item>
-      </div>
-
-      <div class="action-row">
-        <ion-button fill="outline" (click)="savePassword()" [disabled]="!canSavePassword()">Update Password</ion-button>
-      </div>
-      <div class="validation-error" *ngIf="hasPasswordChanges() && !passwordFieldsComplete()">
-        Complete all password fields.
-      </div>
-      <div class="validation-error" *ngIf="passwordFieldsComplete() && !newPasswordStrongEnough()">
-        New password must be at least 8 characters.
-      </div>
-      <div class="validation-error" *ngIf="passwordFieldsComplete() && newPasswordStrongEnough() && !passwordsMatch()">
-        New password and confirmation must match.
-      </div>
-    </ion-card-content>
-  </ion-card>
-
-  <ion-card class="glass-surface" *ngIf="canManagePasskeys()">
-    <ion-card-header>
-      <ion-card-title>
-        <ion-icon name="key-outline"></ion-icon>
-        Biometrics / Passkey
-      </ion-card-title>
-    </ion-card-header>
-    <ion-card-content>
-      <div class="help-text" *ngIf="passkeysSupported()">
-        Use Touch ID / Windows Hello to sign in with biometrics on this device.
-      </div>
-      <div class="validation-error" *ngIf="!passkeysSupported()">
-        This browser/device does not support passkeys.
-      </div>
-      <div class="passkey-enabled-badge" *ngIf="passkeysSupported() && hasPasskey()">
-        <ion-icon name="checkmark-circle-outline"></ion-icon>
-        <span>Enabled</span>
-      </div>
-      <div class="help-text" *ngIf="passkeysSupported() && !hasPasskey()">Status: Not enabled</div>
-
-      <div class="action-row">
-        <ion-button *ngIf="!hasPasskey()" (click)="enablePasskey()" [disabled]="passkeyBusy || !passkeysSupported()">
-          {{ passkeyBusy ? 'Enabling...' : 'Enable Biometrics' }}
-        </ion-button>
-        <ion-button
-          fill="outline"
-          color="danger"
-          (click)="removePasskey()"
-          [disabled]="passkeyBusy || !hasPasskey()">
-          Remove Biometrics
-        </ion-button>
-      </div>
-      <div class="help-text" *ngIf="passkeyMessage">{{ passkeyMessage }}</div>
-    </ion-card-content>
-  </ion-card>
-
-  <div class="status" *ngIf="statusMessage">{{ statusMessage }}</div>
-</ion-content>
+  @if (statusMessage) {
+    <div class="status">{{ statusMessage }}</div>
+  }
+</div>

@@ -36,6 +36,29 @@ export const roleGuard: CanActivateFn = async (route, state) => {
   return router.createUrlTree(['/forbidden']);
 };
 
+export const areaAccessGuard: CanActivateFn = async (route, state) => {
+  const auth = inject(AuthService);
+  const router = inject(Router);
+
+  await auth.bootstrap();
+
+  if (!auth.isAuthenticated()) {
+    return router.createUrlTree(['/login'], {
+      queryParams: { redirect: state.url }
+    });
+  }
+
+  const rawArea = route.data?.['area'];
+  const areas = Array.isArray(rawArea)
+    ? rawArea.map(area => String(area || '').trim()).filter(Boolean)
+    : [String(rawArea || '').trim()].filter(Boolean);
+  if (!areas.length || areas.some(area => auth.hasAreaAccess(area))) {
+    return true;
+  }
+
+  return router.createUrlTree(['/forbidden']);
+};
+
 export const registeredGuard: CanActivateFn = async (_route, state) => {
   const auth = inject(AuthService);
   const router = inject(Router);

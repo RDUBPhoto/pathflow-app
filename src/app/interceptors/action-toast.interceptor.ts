@@ -1,6 +1,6 @@
+import { ToastController } from '../ui/overlays';
 import { HttpEvent, HttpInterceptorFn, HttpResponse } from '@angular/common/http';
 import { inject } from '@angular/core';
-import { ToastController } from '@ionic/angular';
 import { Observable, tap } from 'rxjs';
 
 type ToastTone = 'success' | 'danger' | 'medium';

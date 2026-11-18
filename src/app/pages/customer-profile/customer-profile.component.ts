@@ -1,42 +1,11 @@
-import { Component, ElementRef, HostListener, OnDestroy, OnInit, ViewChild, computed, inject, signal } from '@angular/core';
+import { UiBadge, UiInput, UiTextarea } from '../../ui/controls';
+import { UiIcon } from '../../ui/icons';
+import { UiModal } from '../../ui/overlays';
+import { Component, ElementRef, HostListener, OnDestroy, OnInit, ViewChild, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import {
-  IonBadge,
-  IonButton,
-  IonButtons,
-  IonContent,
-  IonHeader,
-  IonIcon,
-  IonInput,
-  IonItem,
-  IonLabel,
-  IonModal,
-  IonSelect,
-  IonSelectOption,
-  IonSpinner,
-  IonTextarea,
-  IonTitle,
-  IonToolbar
-} from '@ionic/angular/standalone';
-import { addIcons } from 'ionicons';
-import {
-  carOutline,
-  calendarOutline,
-  chatbubbleEllipsesOutline,
-  addOutline,
-  documentTextOutline,
-  mailOutline,
-  paperPlaneOutline,
-  personOutline,
-  arrowBackOutline,
-  saveOutline,
-  cashOutline,
-  trashOutline,
-  ellipsisVerticalOutline
-} from 'ionicons/icons';
 import { Subscription, finalize, firstValueFrom } from 'rxjs';
 import { CustomersApi, Customer, DuplicateCandidate, DuplicateReason } from '../../services/customers-api.service';
 import { SmsApiService, SmsDeliveryStatus, SmsMessage } from '../../services/sms-api.service';
@@ -52,7 +21,7 @@ import { UserMenuComponent } from '../../components/user/user-menu/user-menu.com
 import { PageBackButtonComponent } from '../../components/navigation/page-back-button/page-back-button.component';
 import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
 import { formatLocalDateTime, toLocalDateTimeInput, toLocalDateTimeStorage } from '../../utils/datetime-local';
-import { formatUsPhoneInput } from '../../utils/phone-format';
+import { formatUsPhoneInput, normalizePhoneToE164 } from '../../utils/phone-format';
 import { environment } from '../../../environments/environment';
 
 type CustomerTab = 'vehicle' | 'schedule' | 'invoices' | 'sms' | 'email';
@@ -121,27 +90,17 @@ type CustomerNoteHistoryEntry = {
   imports: [
     CommonModule,
     FormsModule,
-    IonHeader,
-    IonToolbar,
-    IonTitle,
-    IonButtons,
-    IonContent,
-    IonButton,
-    IonIcon,
-    IonItem,
-    IonLabel,
-    IonModal,
-    IonInput,
-    IonSelect,
-    IonSelectOption,
-    IonTextarea,
-    IonSpinner,
-    IonBadge,
+    UiIcon,
+    UiModal,
+    UiInput,
+    UiTextarea,
+    UiBadge,
     UserMenuComponent,
     PageBackButtonComponent,
     CompanySwitcherComponent
   ],
   templateUrl: './customer-profile.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./customer-profile.component.scss']
 })
 export default class CustomerProfileComponent implements OnInit, OnDestroy {
@@ -306,19 +265,19 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   );
 
   readonly tabs: Array<{ key: CustomerTab; label: string; icon: string }> = [
-    { key: 'vehicle', label: 'Vehicle', icon: 'car-outline' },
-    { key: 'schedule', label: 'Scheduled', icon: 'calendar-outline' },
-    { key: 'invoices', label: 'Quotes & Invoices', icon: 'cash-outline' },
-    { key: 'sms', label: 'SMS History', icon: 'chatbubble-ellipses-outline' },
-    { key: 'email', label: 'Email History', icon: 'mail-outline' }
+    { key: 'vehicle', label: 'Vehicle', icon: 'car' },
+    { key: 'schedule', label: 'Scheduled', icon: 'calendar-event' },
+    { key: 'invoices', label: 'Quotes & Invoices', icon: 'cash' },
+    { key: 'sms', label: 'SMS History', icon: 'message-dots' },
+    { key: 'email', label: 'Email History', icon: 'mail' }
   ];
   readonly mobileTabs: Array<{ key: CustomerMobileTab; label: string; icon: string }> = [
-    { key: 'profile', label: 'Profile', icon: 'person-outline' },
-    { key: 'vehicle', label: 'Vehicle', icon: 'car-outline' },
-    { key: 'schedule', label: 'Scheduled', icon: 'calendar-outline' },
-    { key: 'invoices', label: 'Quotes & Invoices', icon: 'cash-outline' },
-    { key: 'sms', label: 'SMS', icon: 'chatbubble-ellipses-outline' },
-    { key: 'email', label: 'Email', icon: 'mail-outline' }
+    { key: 'profile', label: 'Profile', icon: 'user' },
+    { key: 'vehicle', label: 'Vehicle', icon: 'car' },
+    { key: 'schedule', label: 'Scheduled', icon: 'calendar-event' },
+    { key: 'invoices', label: 'Quotes & Invoices', icon: 'cash' },
+    { key: 'sms', label: 'SMS', icon: 'message-dots' },
+    { key: 'email', label: 'Email', icon: 'mail' }
   ];
   readonly docsFilter = signal<CustomerDocsFilter>('open');
   readonly refundSubmitting = signal(false);
@@ -498,21 +457,6 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   ];
 
   constructor() {
-    addIcons({
-      'person-outline': personOutline,
-      'car-outline': carOutline,
-      'calendar-outline': calendarOutline,
-      'document-text-outline': documentTextOutline,
-      'chatbubble-ellipses-outline': chatbubbleEllipsesOutline,
-      'mail-outline': mailOutline,
-      'add-outline': addOutline,
-      'paper-plane-outline': paperPlaneOutline,
-      'arrow-back-outline': arrowBackOutline,
-      'save-outline': saveOutline,
-      'cash-outline': cashOutline,
-      'trash-outline': trashOutline,
-      'ellipsis-vertical-outline': ellipsisVerticalOutline
-    });
   }
 
   ngOnInit(): void {
@@ -666,8 +610,8 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     this.validationAttempted.set(true);
     const first = this.firstName.trim();
     const last = this.lastName.trim();
-    const phone = this.phone.trim();
-    const secondaryPhone = this.secondaryPhone.trim();
+    const phone = normalizePhoneToE164(this.phone);
+    const secondaryPhone = this.secondaryPhone.trim() ? normalizePhoneToE164(this.secondaryPhone) : '';
     const email = this.email.trim();
     const secondaryEmail = this.secondaryEmail.trim();
     const year = this.vehicleYear.trim();
@@ -1181,7 +1125,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
       return;
     }
 
-    const to = this.normalizeE164(this.phone);
+    const to = normalizePhoneToE164(this.phone);
     if (!to) {
       this.smsError.set('Customer phone must be a valid US or E.164 number.');
       return;
@@ -1791,6 +1735,15 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     return parts.join(' • ');
   }
 
+  isFailedSms(message: SmsMessage): boolean {
+    return message.direction === 'outbound' && this.smsDeliveryStatus(message) === 'failed';
+  }
+
+  smsFailureReason(message: SmsMessage): string {
+    const reason = String(message.providerErrorMessage || message.providerErrorCode || '').trim();
+    return reason ? `Not Delivered - ${reason}` : 'Not Delivered';
+  }
+
   trackSms(_index: number, msg: SmsMessage): string {
     return msg.id;
   }
@@ -1933,7 +1886,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
 
   tabIcon(tab: CustomerTab): string {
     const current = this.tabs.find(item => item.key === tab);
-    return current?.icon || 'document-text-outline';
+    return current?.icon || 'file-text';
   }
 
   onAddressChange(value: string | null | undefined): void {
@@ -2330,8 +2283,8 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     const byId = new Map<string, SmsMessage>();
     const mergedInput = [...secondary, ...primary];
     for (const item of mergedInput) {
-      const key = item.id || `${item.direction}:${item.createdAt}:${item.message}`;
-      byId.set(key, item);
+      const key = this.smsDisplayKey(item);
+      byId.set(key, this.chooseSmsDisplayMessage(byId.get(key), item));
     }
     return Array.from(byId.values()).sort((a, b) => {
       const ta = Date.parse(a.createdAt || '');
@@ -2341,6 +2294,36 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
       if (Number.isFinite(tb)) return 1;
       return String(a.id || '').localeCompare(String(b.id || ''));
     });
+  }
+
+  private chooseSmsDisplayMessage(existing: SmsMessage | undefined, candidate: SmsMessage): SmsMessage {
+    if (!existing) return candidate;
+    const existingStatus = String(existing.deliveryStatus || existing.deliveryStatusRaw || '').toLowerCase();
+    const candidateStatus = String(candidate.deliveryStatus || candidate.deliveryStatusRaw || '').toLowerCase();
+    if (!existingStatus.includes('deliver') && candidateStatus.includes('deliver')) return candidate;
+    if (existingStatus.includes('queue') && candidateStatus.includes('receive')) return candidate;
+    if (existing.read && !candidate.read) return candidate;
+    const existingTs = Date.parse(existing.createdAt || '');
+    const candidateTs = Date.parse(candidate.createdAt || '');
+    if (Number.isFinite(existingTs) && Number.isFinite(candidateTs) && candidateTs < existingTs) return candidate;
+    return existing;
+  }
+
+  private smsDisplayKey(item: SmsMessage): string {
+    const providerId = String(item.providerMessageId || '').trim();
+    const direction = String(item.direction || '').trim().toLowerCase();
+    if (providerId) return `${direction}:provider:${providerId}`;
+
+    const createdAtMs = Date.parse(item.createdAt || '');
+    const tenMinuteBucket = Number.isFinite(createdAtMs) ? Math.floor(createdAtMs / 600000) : '';
+    return [
+      direction,
+      String(item.customerId || '').trim(),
+      this.normalizeE164(item.from || ''),
+      this.normalizeE164(item.to || ''),
+      String(item.message || '').trim().toLowerCase(),
+      tenMinuteBucket
+    ].join('|');
   }
 
   private readSmsCache(customerId: string): SmsMessage[] {
@@ -2969,11 +2952,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   }
 
   private normalizeE164(value: string): string | null {
-    const digits = (value || '').replace(/\D+/g, '');
-    if (digits.length === 10) return `+1${digits}`;
-    if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
-    if (digits.length >= 8 && digits.length <= 15) return `+${digits}`;
-    return null;
+    return normalizePhoneToE164(value) || null;
   }
 
   private cleanVinValue(value: unknown): string {

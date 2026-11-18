@@ -1,11 +1,7 @@
-import { Component, signal, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { UiInput } from '../../ui/controls';
+import { Component, signal, computed, ChangeDetectionStrategy } from '@angular/core';
+
 import { FormsModule } from '@angular/forms';
-import {
-  IonHeader, IonToolbar, IonTitle, IonContent, IonButton,
-  IonButtons,
-  IonItem, IonLabel, IonInput, IonSpinner
-} from '@ionic/angular/standalone';
 import { Router } from '@angular/router';
 import { CustomersApi, Customer } from '../../services/customers-api.service';
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
@@ -27,15 +23,14 @@ type UICustomer = Customer & {
   selector: 'app-customers',
   standalone: true,
   imports: [
-    CommonModule, FormsModule,
-    IonHeader, IonToolbar, IonTitle, IonContent, IonButton,
-    IonButtons,
-    IonItem, IonLabel, IonInput, IonSpinner,
+    FormsModule,
+    UiInput,
     UserMenuComponent,
     PageBackButtonComponent,
     CompanySwitcherComponent
-  ],
+],
   templateUrl: './customers.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./customers.component.scss']
 })
 export default class CustomersComponent {

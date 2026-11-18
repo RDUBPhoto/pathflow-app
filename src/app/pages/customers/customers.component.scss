@@ -1,10 +1,8 @@
 :host {
-  display: block;
+  display: flex;
+  flex-direction: column;
   height: 100%;
-}
-
-.customers-content {
-  --padding-bottom: calc(96px + env(safe-area-inset-bottom));
+  min-height: 0;
 }
 
 .duplicates-bar {
@@ -13,7 +11,7 @@
   justify-content: space-between;
   gap: 12px;
   border: 1px solid var(--app-border-subtle);
-  border-left: 4px solid var(--ion-color-warning, #f5a623);
+  border-left: 4px solid var(--ui-color-warning, #f5a623);
   border-radius: 12px;
   padding: 10px 12px;
   margin-bottom: 10px;
@@ -51,7 +49,7 @@
   align-items: center;
 }
 
-.search-row ion-input {
+.search-row ui-input {
   min-width: 0;
   --padding-end: 12px;
 }

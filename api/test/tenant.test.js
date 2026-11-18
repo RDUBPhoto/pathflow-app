@@ -30,9 +30,9 @@ test("resolveTenantId falls back to DEFAULT_TENANT_ID when request does not incl
   else process.env.DEFAULT_TENANT_ID = original;
 });
 
-test("resolveTenantId falls back to tenant-unassigned when nothing is set", () => {
+test("resolveTenantId falls back to primary-location when nothing is set", () => {
   const original = process.env.DEFAULT_TENANT_ID;
   delete process.env.DEFAULT_TENANT_ID;
-  assert.equal(resolveTenantId({ headers: {}, query: {} }, {}), "tenant-unassigned");
+  assert.equal(resolveTenantId({ headers: {}, query: {} }, {}), "primary-location");
   if (original !== undefined) process.env.DEFAULT_TENANT_ID = original;
 });

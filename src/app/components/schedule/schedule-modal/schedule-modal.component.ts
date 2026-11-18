@@ -1,16 +1,16 @@
-import { Component, Input, Output, EventEmitter, ViewChild, signal, computed, OnDestroy, OnChanges, SimpleChanges } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { UiModal } from '../../../ui/overlays';
+import { UiCheckbox, UiInput, UiTextarea } from '../../../ui/controls';
+import { Component, Input, Output, EventEmitter, ViewChild, signal, computed, OnDestroy, OnChanges, SimpleChanges, ChangeDetectionStrategy } from '@angular/core';
+
 import { FormsModule } from '@angular/forms';
-import {
-  IonModal, IonHeader, IonToolbar, IonTitle, IonButtons, IonButton,
-  IonContent, IonItem, IonLabel, IonSelect, IonSelectOption, IonInput,
-  IonTextarea, IonCheckbox, IonSpinner, IonFooter
-} from '@ionic/angular/standalone';
 import { DayPilot, DayPilotModule, DayPilotSchedulerComponent } from '@daypilot/daypilot-lite-angular';
 import { CustomersApi, Customer } from '../../../services/customers-api.service';
 import { ScheduleApi, ScheduleItem } from '../../../services/schedule-api.service';
 import { AppSettingsApiService } from '../../../services/app-settings-api.service';
-import { formatLocalDateTime, toLocalDateTimeInput, toLocalDateTimeStorage } from '../../../utils/datetime-local';
+import { toLocalDateTimeInput, toLocalDateTimeStorage } from '../../../utils/datetime-local';
+import {
+  DEFAULT_SHOP_TIME_ZONE, normalizeShopTimeZone, SCHEDULE_SETTINGS_KEY, shopTimeMillis, shopWallTime
+} from '../../../utils/shop-time';
 
 type UICustomer = Customer & {
   vehicleYear?: string;
@@ -23,28 +23,32 @@ type ScheduleSettings = {
   bays: { id: string; name: string }[];
   openHour: number;
   closeHour: number;
+  timeZone: string;
   showWeekends: boolean;
   holidays: string[];
   federalYear: number;
   federalInitialized: boolean;
 };
-const SCHEDULE_SETTINGS_KEY = 'schedule.settings';
 
 @Component({
   selector: 'app-schedule-modal',
   standalone: true,
   imports: [
-    CommonModule, FormsModule, DayPilotModule,
-    IonModal, IonHeader, IonToolbar, IonTitle, IonButtons, IonButton,
-    IonContent, IonItem, IonLabel, IonSelect, IonSelectOption, IonInput,
-    IonTextarea, IonCheckbox, IonSpinner, IonFooter
-  ],
+    FormsModule,
+    DayPilotModule,
+    UiModal,
+    UiInput,
+    UiTextarea,
+    UiCheckbox
+],
   templateUrl: './schedule-modal.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./schedule-modal.component.scss']
 })
 export default class ScheduleModalComponent implements OnDestroy, OnChanges {
   @Input() isOpen: boolean = false;
   @Input() customerId: string | null = null;
+  @Input() workItemId: string | null = null;
 
   @Output() closed = new EventEmitter<void>();
   @Output() saved = new EventEmitter<void>();
@@ -76,7 +80,7 @@ export default class ScheduleModalComponent implements OnDestroy, OnChanges {
   private afterEditorDismissAction: (() => void) | null = null;
 
   config: DayPilot.SchedulerConfig = {
-    startDate: DayPilot.Date.today(),
+    startDate: new DayPilot.Date(shopWallTime(Date.now(), DEFAULT_SHOP_TIME_ZONE)).getDatePart(),
     days: 5,
     scale: 'Hour',
     cellDuration: 30,
@@ -175,9 +179,7 @@ export default class ScheduleModalComponent implements OnDestroy, OnChanges {
     private customersApi: CustomersApi,
     private scheduleApi: ScheduleApi,
     private settingsApi: AppSettingsApiService
-  ) {
-    this.loadSettings();
-  }
+  ) {}
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['isOpen'] && !this.isOpen) {
@@ -188,7 +190,7 @@ export default class ScheduleModalComponent implements OnDestroy, OnChanges {
       return;
     }
     if (this.isOpen) {
-      this.loadAll();
+      this.loadSettings();
     }
   }
 
@@ -247,8 +249,8 @@ export default class ScheduleModalComponent implements OnDestroy, OnChanges {
         : (cust ? `${cust.name || 'Unnamed'}${vehicle ? ' — ' + vehicle : ''}` : 'Unassigned');
       list.push({
         id: it.id,
-        start: it.start,
-        end: it.end,
+        start: shopWallTime(it.start, this.settings.timeZone),
+        end: shopWallTime(it.end, this.settings.timeZone),
         resource: it.resource,
         text,
         toolTip: it.notes || '',
@@ -291,8 +293,8 @@ export default class ScheduleModalComponent implements OnDestroy, OnChanges {
     notes?: string;
   }) {
     this.editorId.set(data.id);
-    this.editorStart.set(toLocalDateTimeInput(data.start));
-    this.editorEnd.set(toLocalDateTimeInput(data.end));
+    this.editorStart.set(toLocalDateTimeInput(shopWallTime(data.start, this.settings.timeZone)));
+    this.editorEnd.set(toLocalDateTimeInput(shopWallTime(data.end, this.settings.timeZone)));
     this.editorResource.set(data.resource);
     this.editorCustomerId.set(data.customerId || null);
     this.editorBlocked.set(!!data.isBlocked);
@@ -339,7 +341,7 @@ export default class ScheduleModalComponent implements OnDestroy, OnChanges {
       });
       return;
     }
-    this.scheduleApi.create(base).subscribe({
+    this.scheduleApi.create({ ...base, workItemId: this.workItemId || undefined }).subscribe({
       next: () => {
         this.afterEditorDismissAction = () => {
           this.loadAll();
@@ -382,20 +384,20 @@ export default class ScheduleModalComponent implements OnDestroy, OnChanges {
   private defaultSlot(): { start: string; end: string; resource: string } {
     const openHour = this.settings.openHour;
     const closeHour = this.settings.closeHour;
-    const start = new Date();
-    start.setMinutes(0, 0, 0);
-    if (start.getHours() < openHour) {
-      start.setHours(openHour, 0, 0, 0);
-    } else if (start.getHours() >= closeHour) {
-      start.setDate(start.getDate() + 1);
-      start.setHours(openHour, 0, 0, 0);
+    const start = new Date(`${shopWallTime(Date.now(), this.settings.timeZone)}Z`);
+    start.setUTCMinutes(0, 0, 0);
+    if (start.getUTCHours() >= closeHour) {
+      start.setUTCDate(start.getUTCDate() + 1);
+      start.setUTCHours(openHour, 0, 0, 0);
     }
-    const end = new Date(start.getTime() + 4 * 60 * 60 * 1000);
-    if (end.getHours() > closeHour) end.setHours(closeHour, 0, 0, 0);
+    if (start.getUTCHours() < openHour) start.setUTCHours(openHour, 0, 0, 0);
+    const closing = new Date(start);
+    closing.setUTCHours(closeHour, 0, 0, 0);
+    const end = new Date(Math.min(closing.getTime(), start.getTime() + 4 * 60 * 60 * 1000));
     const resource = (this.resources()[0]?.id || 'bay-1').toString();
     return {
-      start: formatLocalDateTime(start),
-      end: formatLocalDateTime(end),
+      start: start.toISOString().slice(0, 19),
+      end: end.toISOString().slice(0, 19),
       resource
     };
   }
@@ -416,6 +418,7 @@ export default class ScheduleModalComponent implements OnDestroy, OnChanges {
       ],
       openHour: 7,
       closeHour: 16,
+      timeZone: DEFAULT_SHOP_TIME_ZONE,
       showWeekends: false,
       holidays: [],
       federalYear: new Date().getFullYear(),
@@ -424,10 +427,10 @@ export default class ScheduleModalComponent implements OnDestroy, OnChanges {
   }
 
   private loadSettings() {
-    this.applySettings(this.defaultSettings());
     this.settingsApi.getValue<ScheduleSettings>(SCHEDULE_SETTINGS_KEY).subscribe(value => {
-      if (!value) return;
+      if (!this.isOpen) return;
       this.applySettings(this.normalizeSettings(value));
+      this.loadAll();
     });
   }
 
@@ -438,6 +441,7 @@ export default class ScheduleModalComponent implements OnDestroy, OnChanges {
       bays: Array.isArray(parsed.bays) && parsed.bays.length ? parsed.bays : base.bays,
       openHour: Number.isFinite(parsed.openHour) ? Number(parsed.openHour) : base.openHour,
       closeHour: Number.isFinite(parsed.closeHour) ? Number(parsed.closeHour) : base.closeHour,
+      timeZone: normalizeShopTimeZone(parsed.timeZone),
       showWeekends: typeof parsed.showWeekends === 'boolean' ? parsed.showWeekends : base.showWeekends,
       holidays: Array.isArray(parsed.holidays) ? parsed.holidays.map(v => String(v || '')) : base.holidays,
       federalYear: Number.isFinite(parsed.federalYear) ? Number(parsed.federalYear) : base.federalYear,
@@ -447,6 +451,7 @@ export default class ScheduleModalComponent implements OnDestroy, OnChanges {
 
   private applySettings(settings: ScheduleSettings): void {
     this.settings = settings;
+    this.config.startDate = new DayPilot.Date(shopWallTime(Date.now(), settings.timeZone)).getDatePart();
     this.resources.set(settings.bays.map(b => ({ id: b.id, name: b.name })));
     this.config.resources = this.resources();
     this.config.businessBeginsHour = settings.openHour;
@@ -486,7 +491,9 @@ export default class ScheduleModalComponent implements OnDestroy, OnChanges {
     if (!start || !end || !resource) {
       return 'Start, end, and bay are required.';
     }
-    if (Date.parse(start) >= Date.parse(end)) {
+    const startMs = shopTimeMillis(start, this.settings.timeZone);
+    const endMs = shopTimeMillis(end, this.settings.timeZone);
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs >= endMs) {
       return 'End must be after start.';
     }
     if (this.editorBlocked() && !this.editorTitle().trim()) {

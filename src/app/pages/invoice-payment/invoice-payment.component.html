@@ -1,125 +1,244 @@
-<ion-content class="invoice-payment-content">
+<div class="ui-content invoice-payment-content">
   <div class="invoice-payment-wrap">
-    <section class="invoice-payment-card">
-      <div class="invoice-header">
-        <div class="company-block">
-          <img *ngIf="businessLogoUrl()" [src]="businessLogoUrl()" alt="Company logo" class="company-logo">
-          <div class="company-name">{{ detail()?.businessName || businessName() }}</div>
-          <div class="muted-line" *ngFor="let line of businessAddressLines()">{{ line }}</div>
-          <div class="muted-line" *ngIf="detail()?.businessPhone"><strong>Phone:</strong> {{ detail()?.businessPhone }}</div>
-          <div class="muted-line" *ngIf="detail()?.businessEmail">{{ detail()?.businessEmail }}</div>
+    @if (staffCharge) {
+      <a class="btn btn-outline-secondary mb-3" [routerLink]="['/invoices', invoiceId()]">Back to Invoice</a>
+    }
+    @if (fromCustomerPortal()) {
+      <a class="btn btn-outline-secondary mb-3"
+      [routerLink]="['/visit', tenantId()]" [fragment]="publicToken()">Back to your visit</a>
+    }
+    @if (paymentComplete()) {
+      <section class="card invoice-payment-card paid-confirmation">
+        <div class="paid-icon" aria-hidden="true"><ui-icon name="check"></ui-icon></div>
+        <p class="status-pill paid">{{ returnCredit() > 0 ? 'Balance Closed' : 'Payment Received' }}</p>
+        <h1>{{ returnCredit() > 0 ? 'No balance due' : (staffCharge ? 'Invoice paid' : 'Your invoice is paid') }}</h1>
+        @if (!staffCharge && returnCredit() === 0) {
+          <p class="paid-message">{{ paidConfirmationMessage() }}</p>
+        }
+        <div class="paid-summary">
+          <div>
+            <span>Invoice</span>
+            <strong>{{ invoiceNumber() }}</strong>
+          </div>
+          <div>
+            <span>Customer</span>
+            <strong>{{ customerName() }}</strong>
+          </div>
+          <div>
+            <span>Vehicle</span>
+            <strong>{{ vehicle() }}</strong>
+          </div>
+          <div>
+            <span>Amount paid</span>
+            <strong>{{ money(confirmedPaidAmount() ?? displayPaid()) }}</strong>
+          </div>
+          @if (returnCredit() > 0) {
+            <div><span>Return credit</span><strong>{{ money(returnCredit()) }}</strong></div>
+          }
         </div>
+        @if (!staffCharge) {
+          <p class="next-step">
+            You can close this page. If anything needs to change before scheduling, contact {{ businessName() }} directly.
+          </p>
+        }
+        @if (statusMessage()) {
+          <p class="status-message" role="status">{{ statusMessage() }}</p>
+        }
+      </section>
+    } @else {
+      <section class="card invoice-payment-card">
+        <div class="invoice-header">
+          <div class="company-block">
+            @if (businessLogoUrl()) {
+              <img [src]="businessLogoUrl()" alt="Company logo" class="company-logo">
+            }
+            <div class="company-name">{{ detail()?.businessName || businessName() }}</div>
+            @for (line of businessAddressLines(); track line) {
+              <div class="muted-line">{{ line }}</div>
+            }
+            @if (detail()?.businessPhone) {
+              <div class="muted-line"><strong>Phone:</strong> {{ detail()?.businessPhone }}</div>
+            }
+            @if (detail()?.businessEmail) {
+              <div class="muted-line">{{ detail()?.businessEmail }}</div>
+            }
+          </div>
+          <div class="invoice-meta">
+            <h1>{{ staffCharge ? 'Charge Card' : 'INVOICE' }}</h1>
+            <div><strong>Invoice #:</strong> {{ invoiceNumber() }}</div>
+            @if (detail()?.issueDate) {
+              <div><strong>Invoice date:</strong> {{ detail()?.issueDate }}</div>
+            }
+          </div>
+        </div>
+        <div class="billto-block">
+          <div class="billto-title">Bill To</div>
+          <div class="billto-name">{{ customerName() }}</div>
+          @for (line of customerAddressLines(); track line) {
+            <div class="muted-line">{{ line }}</div>
+          }
+          @if (detail()?.customerPhone) {
+            <div class="muted-line"><strong>Phone:</strong> {{ detail()?.customerPhone }}</div>
+          }
+          @if (detail()?.customerEmail) {
+            <div class="muted-line">{{ detail()?.customerEmail }}</div>
+          }
+          <div class="muted-line"><strong>Vehicle:</strong> {{ vehicle() }}</div>
+        </div>
+        @if (lineItems().length) {
+          <div class="invoice-line-items">
+            <table class="table table-vcenter invoice-table">
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>Description</th>
+                  <th>Qty</th>
+                  <th>Price</th>
+                  <th>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (item of lineItems(); track item) {
+                  <tr>
+                    <td>{{ item.type === 'labor' ? 'Labor' : 'Part' }}</td>
+                    <td>{{ item.description }}</td>
+                    <td>{{ item.quantity }}</td>
+                    <td>{{ money(item.unitPrice) }}</td>
+                    <td>{{ money(item.lineTotal) }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+        @if (detail()?.customerNote) {
+          <div class="invoice-comments">
+            <h3>Comments</h3>
+            <p>{{ detail()?.customerNote }}</p>
+          </div>
+        }
+        <div class="checkout-layout">
+          <section class="totals-panel" aria-labelledby="summary-heading">
+            <h2 id="summary-heading">Invoice summary</h2>
+            <div class="totals-row">
+              <span>Subtotal</span>
+              <strong>{{ money(displaySubtotal()) }}</strong>
+            </div>
+            <div class="totals-row">
+              <span>Tax</span>
+              <strong>{{ money(displayTax()) }}</strong>
+            </div>
+            <div class="totals-row">
+              <span>Invoice total</span>
+              <strong>{{ money(displayTotal()) }}</strong>
+            </div>
+            @if (returnCredit() > 0) {
+              <div class="totals-row">
+                <span>Return Credit</span>
+                <strong>−{{ money(returnCredit()) }}</strong>
+              </div>
+            }
+            @if (displayPaid() > 0) {
+              <div class="totals-row">
+                <span>Paid to date</span>
+                <strong>{{ money(displayPaid()) }}</strong>
+              </div>
+            }
+            @if (dueDate()) {
+              <div class="totals-row">
+                <span>Due date</span>
+                <strong>{{ dueDate() }}</strong>
+              </div>
+            }
+            <div class="totals-row grand">
+              <span>Amount due now</span>
+              <strong>{{ money(displayDue()) }}</strong>
+            </div>
+          </section>
+          <section class="payment-panel" aria-labelledby="payment-heading">
+            <header class="payment-heading">
+              <h2 id="payment-heading">{{ isPaylynx() ? 'Secure card payment' : 'Payment' }}</h2>
+              @if (isPaylynx() && paylynxMode() === 'test') {
+                <span class="sandbox-label">Sandbox · Test cards only</span>
+              }
+            </header>
+            @if (isAuthorizeNet()) {
+              <div class="card-form">
+                <label>
+                  <span>Cardholder Name</span>
+                  <input class="form-control" type="text" [ngModel]="cardholderName()" (ngModelChange)="cardholderName.set($event)" placeholder="Jane Customer">
+                </label>
+                <label>
+                  <span>Card Number</span>
+                  <input class="form-control" type="text" inputmode="numeric" [ngModel]="cardNumber()" (ngModelChange)="cardNumber.set($event)" placeholder="4111111111111111">
+                </label>
+                <div class="card-form-row">
+                  <label>
+                    <span>Exp Month</span>
+                    <input class="form-control" type="text" inputmode="numeric" [ngModel]="expiryMonth()" (ngModelChange)="expiryMonth.set($event)" placeholder="12">
+                  </label>
+                  <label>
+                    <span>Exp Year</span>
+                    <input class="form-control" type="text" inputmode="numeric" [ngModel]="expiryYear()" (ngModelChange)="expiryYear.set($event)" placeholder="2030">
+                  </label>
+                  <label>
+                    <span>CVV</span>
+                    <input class="form-control" type="password" inputmode="numeric" [ngModel]="cardCode()" (ngModelChange)="cardCode.set($event)" placeholder="123">
+                  </label>
+                  <label>
+                    <span>ZIP</span>
+                    <input class="form-control" type="text" inputmode="numeric" [ngModel]="billingZip()" (ngModelChange)="billingZip.set($event)" placeholder="78154">
+                  </label>
+                </div>
+                <p class="help-text">Sandbox example card: 4111111111111111, any future expiry, CVV 123.</p>
+              </div>
+            }
+            @if (isPaylynx() && (publicToken() || staffCharge) && displayDue() > 0) {
+              <div class="hosted-card-form">
+                <div #paylynxCardFields class="paylynx-fields" [class.fields-ready]="paylynxReady()"></div>
+                @if (!paylynxReady() && !paylynxError() && !gatewayPending()) {
+                  <p class="help-text" role="status">Loading secure card fields…</p>
+                }
+                @if (paylynxError()) {
+                  <button class="btn btn-outline-secondary" type="button" (click)="retrySecureFields()">Reload secure card fields</button>
+                }
+              </div>
+            }
+            <button
+              type="button"
+              class="btn btn-primary w-100 pay-button"
+              [disabled]="!canCheckout() || paymentState() === 'processing' || paymentState() === 'paid'"
+              (click)="checkoutAndPay()">
+              {{ paymentState() === 'processing' ? 'Processing…' : (staffCharge ? 'Charge ' + money(displayDue())
+              : (isAuthorizeNet() || isPaylynx() ? 'Pay Invoice' : 'Checkout & Pay')) }}
+            </button>
+            @if (statusMessage()) {
+              <p class="status-message" [class.error]="paymentState() === 'error' || gatewayPending()"
+              [attr.role]="paymentState() === 'error' || gatewayPending() ? 'alert' : 'status'">{{ statusMessage() }}</p>
+            }
+            @if (invoiceLoading()) {
+              <p class="status-message" role="status">Loading invoice…</p>
+            }
+            @if (!canCheckout() && checkoutBlockedReason()) {
+              <p class="status-message error" role="alert">{{ checkoutBlockedReason() }}</p>
+            }
+            @if (invoiceError() || refreshedBalanceNeeded()) {
+              <button class="btn btn-outline-secondary" type="button"
+              (click)="loadRemoteSnapshot()">Refresh Invoice</button>
+            }
+          </section>
+        </div>
+      </section>
+    }
 
-        <div class="invoice-meta">
-          <h1>INVOICE</h1>
-          <div><strong>Invoice #:</strong> {{ invoiceNumber() }}</div>
-          <div><strong>Invoice Date:</strong> {{ detail()?.issueDate || '' }}</div>
-          <div *ngIf="dueDate()"><strong>Due Date:</strong> {{ dueDate() }}</div>
-        </div>
-      </div>
-
-      <div class="billto-block">
-        <div class="billto-title">Bill To</div>
-        <div class="billto-name">{{ customerName() }}</div>
-        <div class="muted-line" *ngFor="let line of customerAddressLines()">{{ line }}</div>
-        <div class="muted-line" *ngIf="detail()?.customerPhone"><strong>Phone:</strong> {{ detail()?.customerPhone }}</div>
-        <div class="muted-line" *ngIf="detail()?.customerEmail">{{ detail()?.customerEmail }}</div>
-        <div class="muted-line"><strong>Vehicle:</strong> {{ vehicle() }}</div>
-      </div>
-
-      <table class="invoice-table" *ngIf="lineItems().length">
-        <thead>
-          <tr>
-            <th>Item</th>
-            <th>Description</th>
-            <th>Qty</th>
-            <th>Price</th>
-            <th>Amount</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr *ngFor="let item of lineItems()">
-            <td>{{ item.type === 'labor' ? 'Labor' : 'Part' }}</td>
-            <td>{{ item.description }}</td>
-            <td>{{ item.quantity }}</td>
-            <td>{{ money(item.unitPrice) }}</td>
-            <td>{{ money(item.lineTotal) }}</td>
-          </tr>
-        </tbody>
-      </table>
-
-      <div class="totals-panel">
-        <div class="totals-row">
-          <span>Subtotal:</span>
-          <strong>{{ money(displaySubtotal()) }}</strong>
-        </div>
-        <div class="totals-row">
-          <span>Tax:</span>
-          <strong>{{ money(displayTax()) }}</strong>
-        </div>
-        <div class="totals-row grand">
-          <span>Invoice Total:</span>
-          <strong>{{ money(displayTotal()) }}</strong>
-        </div>
-        <div class="totals-row" *ngIf="displayPaid() > 0">
-          <span>Paid To Date:</span>
-          <strong>{{ money(displayPaid()) }}</strong>
-        </div>
-        <div class="totals-row grand">
-          <span>Amount Due Now:</span>
-          <strong>{{ money(displayDue()) }}</strong>
-        </div>
-        <div class="totals-row" *ngIf="dueDate()">
-          <span>Due Date:</span>
-          <strong>{{ dueDate() }}</strong>
-        </div>
-      </div>
-
-      <div class="card-form" *ngIf="isAuthorizeNet()">
-        <label>
-          <span>Cardholder Name</span>
-          <input type="text" [ngModel]="cardholderName()" (ngModelChange)="cardholderName.set($event)" placeholder="Jane Customer">
-        </label>
-        <label>
-          <span>Card Number</span>
-          <input type="text" inputmode="numeric" [ngModel]="cardNumber()" (ngModelChange)="cardNumber.set($event)" placeholder="4111111111111111">
-        </label>
-        <div class="card-form-row">
-          <label>
-            <span>Exp Month</span>
-            <input type="text" inputmode="numeric" [ngModel]="expiryMonth()" (ngModelChange)="expiryMonth.set($event)" placeholder="12">
-          </label>
-          <label>
-            <span>Exp Year</span>
-            <input type="text" inputmode="numeric" [ngModel]="expiryYear()" (ngModelChange)="expiryYear.set($event)" placeholder="2030">
-          </label>
-          <label>
-            <span>CVV</span>
-            <input type="password" inputmode="numeric" [ngModel]="cardCode()" (ngModelChange)="cardCode.set($event)" placeholder="123">
-          </label>
-          <label>
-            <span>ZIP</span>
-            <input type="text" inputmode="numeric" [ngModel]="billingZip()" (ngModelChange)="billingZip.set($event)" placeholder="78154">
-          </label>
-        </div>
-        <p class="help-text">Sandbox example card: 4111111111111111, any future expiry, CVV 123.</p>
-      </div>
-
-      <button
-        type="button"
-        class="checkout-btn"
-        [disabled]="!canCheckout() || paymentState() === 'processing' || paymentState() === 'paid'"
-        (click)="checkoutAndPay()">
-        {{ paymentState() === 'paid' ? 'Paid' : (paymentState() === 'processing' ? 'Processing...' : (isAuthorizeNet() ? 'Pay Invoice' : 'Checkout & Pay')) }}
-      </button>
-
-      <div class="invoice-comments" *ngIf="detail()?.customerNote">
-        <h3>Comments</h3>
-        <p *ngIf="detail()?.customerNote">{{ detail()?.customerNote }}</p>
-      </div>
-
-      <p class="status-message" *ngIf="statusMessage()">{{ statusMessage() }}</p>
-      <p class="status-message error" *ngIf="!canCheckout() && checkoutBlockedReason()">{{ checkoutBlockedReason() }}</p>
-    </section>
   </div>
-</ion-content>
+  @if (paymentState() === 'processing') {
+    <div class="public-action-overlay" role="status" aria-live="assertive" aria-busy="true">
+      <div class="card public-action-dialog">
+        <div class="spinner-border text-primary" aria-hidden="true"></div>
+        <strong>Processing your payment...</strong>
+        <span>Please keep this page open until confirmation appears. Do not submit again.</span>
+      </div>
+    </div>
+  }
+</div>

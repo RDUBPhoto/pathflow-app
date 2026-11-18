@@ -124,6 +124,15 @@ export type ReportsTables = {
   jobTiming: ReportsJobTimingRow[];
   productionForecast: ReportsProductionForecastRow[];
   cashflowForecast: ReportsCashflowForecastRow[];
+  salesPeriods?: Array<{
+    periodType: 'month' | 'quarter' | 'year';
+    period: string;
+    invoices: number;
+    invoiced: number;
+    taxes: number;
+    collected: number;
+    refunded: number;
+  }>;
 };
 
 export type ReportsResponse = {

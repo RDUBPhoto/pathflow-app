@@ -1,625 +1,130 @@
-@import "@ionic/angular/css/core.css";
-@import "@ionic/angular/css/normalize.css";
-@import "@ionic/angular/css/structure.css";
-@import "@ionic/angular/css/typography.css";
-@import "@ionic/angular/css/display.css";
-@import "@ionic/angular/css/padding.css";
-@import "@ionic/angular/css/float-elements.css";
-@import "@ionic/angular/css/text-alignment.css";
-@import "@ionic/angular/css/text-transformation.css";
-@import "@ionic/angular/css/flex-utils.css";
+@use 'app/ui/icons';
 
-:root,
-html[data-theme='dark'] {
-  color-scheme: dark;
-  --brand-primary: #0a84ff;
-  --glass-blur: blur(18px);
-  --glass-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
-  --glass-border: rgba(255, 255, 255, 0.22);
-  --glass-sheen: rgba(255, 255, 255, 0.1);
-  --glass-tint: rgba(255, 255, 255, 0.04);
-  --app-bg-layer-1: radial-gradient(1200px 240px at 50% 18%, rgba(255, 255, 255, 0.05), transparent 60%);
-  --app-bg-layer-2: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.006));
-  --app-bg-solid: #111923;
-  --app-header-bg: linear-gradient(180deg, rgba(27, 35, 47, 0.97), rgba(21, 28, 39, 0.94));
-  --app-surface-bg: linear-gradient(180deg, rgba(31, 40, 53, 0.88), rgba(22, 30, 42, 0.8));
-  --app-text: #eef4fd;
-  --app-text-muted: #bcc8dc;
-  --app-title: #f3f8ff;
-  --app-border-subtle: rgba(255, 255, 255, 0.22);
-  --app-control-bg: rgba(255, 255, 255, 0.075);
-  --app-control-bg-hover: rgba(255, 255, 255, 0.135);
-  --app-control-bg-active: rgba(255, 255, 255, 0.2);
-  --app-control-shadow: 0 1px 8px rgba(0, 0, 0, 0.42);
-  --app-lane-bg: #1e2836;
-  --app-card-bg: #243041;
-  --app-surface-muted: #233040;
-  --app-scrollbar: rgba(255, 255, 255, 0.28);
-  --app-link: #8fd3ff;
-  --app-link-hover: #b5e3ff;
-  --app-nav-active-bg: rgba(10, 132, 255, 0.32);
-  --app-nav-active-bg-hover: rgba(10, 132, 255, 0.44);
-  --app-nav-active-border: rgba(130, 205, 255, 0.62);
-  --app-nav-active-text: #ecf6ff;
-  --app-interactive-hover-shadow: 0 4px 14px rgb(0 0 0 / 22%);
-  --app-interactive-hover-transform: translateY(-1px);
+// Tabler CSS is bundled by Angular from the pinned npm package.
+:root {
+  --brand-primary: var(--tblr-primary);
+  --app-bg-solid: var(--tblr-bg-surface-secondary);
+  --app-header-bg: var(--tblr-bg-surface);
+  --app-surface-bg: var(--tblr-bg-surface);
+  --app-text: var(--tblr-body-color);
+  --app-text-muted: var(--tblr-secondary-color);
+  --app-title: var(--tblr-body-color);
+  --app-border-subtle: var(--tblr-border-color);
+  --app-control-bg: var(--tblr-bg-forms);
+  --app-control-bg-hover: var(--tblr-bg-surface-secondary);
+  --app-control-bg-active: var(--tblr-bg-surface-secondary);
+  --app-control-shadow: none;
+  --app-lane-bg: var(--tblr-bg-surface-secondary);
+  --app-card-bg: var(--tblr-bg-surface);
+  --app-surface-muted: var(--tblr-bg-surface-secondary);
+  --app-link: var(--tblr-link-color);
+  --app-link-hover: var(--tblr-link-hover-color);
+  --app-nav-active-bg: color-mix(in srgb, var(--tblr-primary) 12%, transparent);
+  --app-nav-active-bg-hover: color-mix(in srgb, var(--tblr-primary) 18%, transparent);
+  --app-nav-active-border: transparent;
+  --app-nav-active-text: var(--tblr-primary);
+  --app-scrollbar: var(--tblr-border-color);
+  --surface-border: var(--tblr-border-color);
+  --surface-shadow: var(--tblr-shadow-sm);
+  --surface-blur: none;
+  --surface-tint: transparent;
+  --surface-sheen: transparent;
 
-  --ion-background-color: var(--app-bg-solid);
-  --ion-text-color: var(--app-text);
-  --ion-card-background: rgba(32, 41, 55, 0.92);
-  --ion-item-background: rgba(255, 255, 255, 0.07);
-  --ion-toolbar-background: transparent;
-  --ion-toolbar-color: var(--app-title);
-  --ion-border-color: var(--app-border-subtle);
-  --ion-color-step-50: #1e2836;
-  --ion-color-step-100: #212c3b;
-  --ion-color-medium: #b2bfd3;
-  --ion-color-medium-rgb: 178, 191, 211;
-  --ion-color-dark: #f1f5fb;
-  --ion-color-dark-rgb: 241, 245, 251;
+  --ui-color-primary: var(--tblr-primary);
+  --ui-color-primary-shade: var(--tblr-link-hover-color);
+  --ui-color-success: var(--tblr-success);
+  --ui-color-danger: var(--tblr-danger);
+  --ui-color-warning: var(--tblr-warning);
+  --ui-color-medium: var(--tblr-secondary-color);
+  --ui-text-color: var(--tblr-body-color);
+  --ui-background-color: var(--tblr-bg-surface);
 }
 
-html[data-theme='light'] {
-  color-scheme: light;
-  --brand-primary: #0a84ff;
-  --glass-blur: blur(18px);
-  --glass-shadow: 0 10px 28px rgba(15, 23, 42, 0.16);
-  --glass-border: rgba(15, 23, 42, 0.14);
-  --glass-sheen: rgba(255, 255, 255, 0.75);
-  --glass-tint: rgba(255, 255, 255, 0.52);
-  --app-bg-layer-1: radial-gradient(1200px 240px at 50% 18%, rgba(255, 255, 255, 0.82), transparent 60%);
-  --app-bg-layer-2: linear-gradient(180deg, rgba(255, 255, 255, 0.66), rgba(255, 255, 255, 0.24));
-  --app-bg-solid: #e8eef6;
-  --app-header-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.58));
-  --app-surface-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.62));
-  --app-text: #0f172a;
-  --app-text-muted: #475569;
-  --app-title: #0f172a;
-  --app-border-subtle: rgba(15, 23, 42, 0.16);
-  --app-control-bg: rgba(255, 255, 255, 0.66);
-  --app-control-bg-hover: rgba(255, 255, 255, 0.85);
-  --app-control-bg-active: rgba(255, 255, 255, 0.98);
-  --app-control-shadow: 0 1px 6px rgba(15, 23, 42, 0.14);
-  --app-lane-bg: #f2f5f9;
-  --app-card-bg: #ffffff;
-  --app-surface-muted: #ebf0f6;
-  --app-scrollbar: rgba(15, 23, 42, 0.22);
-  --app-link: #0a5ec7;
-  --app-link-hover: #0b4a9f;
-  --app-nav-active-bg: rgba(10, 132, 255, 0.14);
-  --app-nav-active-bg-hover: rgba(10, 132, 255, 0.22);
-  --app-nav-active-border: rgba(10, 132, 255, 0.32);
-  --app-nav-active-text: #0f172a;
-  --app-interactive-hover-shadow: 0 4px 14px rgb(15 23 42 / 18%);
-  --app-interactive-hover-transform: translateY(-1px);
-
-  --ion-background-color: var(--app-bg-solid);
-  --ion-text-color: var(--app-text);
-  --ion-card-background: rgba(255, 255, 255, 0.92);
-  --ion-item-background: rgba(255, 255, 255, 0.84);
-  --ion-toolbar-background: transparent;
-  --ion-toolbar-color: var(--app-title);
-  --ion-border-color: var(--app-border-subtle);
-  --ion-color-step-50: #f3f6fa;
-  --ion-color-step-100: #ebf0f6;
-  --ion-color-medium: #64748b;
-  --ion-color-medium-rgb: 100, 116, 139;
-  --ion-color-dark: #111827;
-  --ion-color-dark-rgb: 17, 24, 39;
-}
-
-html,
-body {
-  background: var(--app-bg-solid);
-  color: var(--app-text);
-}
-
-.glass-bg {
-  background: var(--app-bg-layer-1), var(--app-bg-layer-2), var(--app-bg-solid);
-  background-attachment: fixed;
-  color: var(--app-text);
-}
-
-.glass-header {
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  background: var(--app-header-bg);
-  border-bottom: 1px solid var(--glass-border);
-}
-
-.glass-surface {
-  background: var(--app-surface-bg), var(--glass-tint);
-  position: relative;
-  overflow: hidden;
-}
-
-.glass-surface::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(600px 80px at 20% -10%, var(--glass-sheen), transparent 60%);
-  pointer-events: none;
-}
-
-ion-toolbar {
-  --background: var(--ion-toolbar-background);
-  --color: var(--ion-toolbar-color);
-}
-
-ion-toolbar ion-title {
-  color: var(--app-title);
-}
-
-@media (max-width: 980px) {
-  .glass-header ion-toolbar ion-title {
-    position: static;
-    text-align: left;
-    left: auto;
-    right: auto;
-    transform: none;
-    width: auto;
-    padding-inline-start: 6px;
-    padding-inline-end: 0;
-    margin-inline-start: 0;
-  }
-}
-
-a {
-  color: var(--app-link);
-}
-
-a:hover {
-  color: var(--app-link-hover);
-}
-
-/* Global click affordance: pointer + consistent hover interaction */
-:where(
-  a[href],
-  button:not(:disabled),
-  [role='button']:not([aria-disabled='true']),
-  input[type='button']:not(:disabled),
-  input[type='submit']:not(:disabled),
-  input[type='reset']:not(:disabled),
-  label[for],
-  summary,
-  ion-button:not([disabled]),
-  ion-fab-button:not([disabled]),
-  ion-item[button]:not([disabled]),
-  ion-segment-button:not([disabled]),
-  ion-toggle:not([disabled]),
-  th,
-  .clickable,
-  .invoice-card-button,
-  .invoice-card-link,
-  .message-row-btn,
-  .thread-row,
-  .data-row,
-  .activity-link,
-  .card-name-link,
-  .notes-toggle-link,
-  .messages-see-all,
-  .toolbar-chip,
-  .tab-rail-btn,
-  .header-link,
-  .notification-trigger,
-  .register-cta,
-  .inline-register-link,
-  .inline-link-btn,
-  .link-btn,
-  .search-clear,
-  .mobile-sms-summary
-) {
-  cursor: pointer;
-}
-
-:where(
-  button:disabled,
-  input[type='button']:disabled,
-  input[type='submit']:disabled,
-  input[type='reset']:disabled,
-  ion-button[disabled],
-  ion-fab-button[disabled],
-  ion-item[disabled],
-  ion-segment-button[disabled],
-  ion-toggle[disabled],
-  [aria-disabled='true']
-) {
-  cursor: not-allowed;
-}
-
-:where(
-  button,
-  input[type='button'],
-  input[type='submit'],
-  input[type='reset'],
-  ion-button,
-  ion-fab-button,
-  ion-item[button],
-  ion-segment-button,
-  .invoice-card-button,
-  .invoice-card-link,
-  .message-row-btn,
-  .thread-row,
-  .data-row,
-  .toolbar-chip,
-  .tab-rail-btn,
-  .messages-see-all,
-  .notification-trigger,
-  .register-cta,
-  .link-btn
-) {
-  transition: border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease, background-color 120ms ease, color 120ms ease;
-}
-
-:where(
-  button:not(:disabled),
-  input[type='button']:not(:disabled),
-  input[type='submit']:not(:disabled),
-  input[type='reset']:not(:disabled),
-  ion-button:not([disabled]),
-  ion-fab-button:not([disabled]),
-  ion-item[button]:not([disabled]),
-  ion-segment-button:not([disabled]),
-  .invoice-card-button,
-  .invoice-card-link,
-  .message-row-btn,
-  .thread-row,
-  .data-row,
-  .toolbar-chip,
-  .tab-rail-btn,
-  .messages-see-all,
-  .notification-trigger,
-  .register-cta,
-  .link-btn
-):hover {
-  border-color: var(--app-nav-active-border);
-  box-shadow: var(--app-interactive-hover-shadow);
-  transform: var(--app-interactive-hover-transform);
-}
-
-:where(
-  a[href],
-  .activity-link,
-  .card-name-link,
-  .notes-toggle-link,
-  .inline-register-link,
-  .inline-link-btn,
-  .search-clear
-):hover {
-  text-decoration: underline;
-  text-decoration-thickness: 1.5px;
-  text-underline-offset: 2px;
-}
-
-:where(
-  a[href],
-  button,
-  [role='button'],
-  input[type='button'],
-  input[type='submit'],
-  input[type='reset'],
-  ion-button,
-  ion-fab-button,
-  ion-item[button],
-  ion-segment-button,
-  .invoice-card-button,
-  .invoice-card-link,
-  .message-row-btn,
-  .thread-row,
-  .data-row,
-  .toolbar-chip,
-  .tab-rail-btn,
-  .messages-see-all,
-  .notification-trigger,
-  .register-cta,
-  .link-btn
-):focus-visible {
-  outline: 2px solid var(--app-link, #2563eb);
-  outline-offset: 1px;
-}
-
-ion-card {
-  color: var(--app-text);
-}
-
-ion-item {
-  --background: var(--ion-item-background);
-  --color: var(--app-text);
-  --border-color: var(--app-border-subtle);
-}
-
-ion-input,
-ion-select,
-ion-textarea,
-ion-datetime {
-  --color: var(--app-text);
-  --placeholder-color: var(--app-text-muted);
-}
-
-ion-button[fill='outline'] {
-  --border-width: 1px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-}
-
-html:not([data-theme='light']) ion-button[fill='outline']:not([color]),
-html:not([data-theme='light']) ion-button[fill='outline'][color='primary'] {
-  --color: #eaf3ff;
-  --border-color: color-mix(in srgb, var(--ion-color-primary, #0a84ff) 72%, var(--app-border-subtle));
-  --background: color-mix(in srgb, var(--ion-color-primary, #0a84ff) 18%, transparent);
-  --background-hover: color-mix(in srgb, var(--ion-color-primary, #0a84ff) 26%, transparent);
-  --background-activated: color-mix(in srgb, var(--ion-color-primary, #0a84ff) 32%, transparent);
-}
-
-html:not([data-theme='light']) ion-button[fill='outline'][color='success'] {
-  --color: #eafff3;
-  --border-color: color-mix(in srgb, var(--ion-color-success, #22c55e) 72%, var(--app-border-subtle));
-  --background: color-mix(in srgb, var(--ion-color-success, #22c55e) 17%, transparent);
-  --background-hover: color-mix(in srgb, var(--ion-color-success, #22c55e) 24%, transparent);
-  --background-activated: color-mix(in srgb, var(--ion-color-success, #22c55e) 30%, transparent);
-}
-
-html:not([data-theme='light']) ion-button[fill='outline'][color='danger'] {
-  --color: #ffeef0;
-  --border-color: color-mix(in srgb, var(--ion-color-danger, #ef4444) 72%, var(--app-border-subtle));
-  --background: color-mix(in srgb, var(--ion-color-danger, #ef4444) 17%, transparent);
-  --background-hover: color-mix(in srgb, var(--ion-color-danger, #ef4444) 24%, transparent);
-  --background-activated: color-mix(in srgb, var(--ion-color-danger, #ef4444) 30%, transparent);
-}
-
-html:not([data-theme='light']) ion-button[fill='outline'][color='warning'] {
-  --color: #fff9e8;
-  --border-color: color-mix(in srgb, var(--ion-color-warning, #f59e0b) 72%, var(--app-border-subtle));
-  --background: color-mix(in srgb, var(--ion-color-warning, #f59e0b) 17%, transparent);
-  --background-hover: color-mix(in srgb, var(--ion-color-warning, #f59e0b) 24%, transparent);
-  --background-activated: color-mix(in srgb, var(--ion-color-warning, #f59e0b) 30%, transparent);
-}
-
-html[data-theme='light'] ion-button[fill='outline']:not([color]),
-html[data-theme='light'] ion-button[fill='outline'][color='primary'] {
-  --color: #0b4da2;
-  --border-color: color-mix(in srgb, var(--ion-color-primary, #0a84ff) 55%, #8fb3db);
-  --background: color-mix(in srgb, var(--ion-color-primary, #0a84ff) 10%, #ffffff);
-  --background-hover: color-mix(in srgb, var(--ion-color-primary, #0a84ff) 15%, #ffffff);
-  --background-activated: color-mix(in srgb, var(--ion-color-primary, #0a84ff) 20%, #ffffff);
-}
-
-html[data-theme='light'] ion-button[fill='outline'][color='success'] {
-  --color: #0f5f2f;
-  --border-color: color-mix(in srgb, var(--ion-color-success, #22c55e) 55%, #92c9a8);
-  --background: color-mix(in srgb, var(--ion-color-success, #22c55e) 10%, #ffffff);
-  --background-hover: color-mix(in srgb, var(--ion-color-success, #22c55e) 15%, #ffffff);
-  --background-activated: color-mix(in srgb, var(--ion-color-success, #22c55e) 20%, #ffffff);
-}
-
-html[data-theme='light'] ion-button[fill='outline'][color='danger'] {
-  --color: #8e1f2a;
-  --border-color: color-mix(in srgb, var(--ion-color-danger, #ef4444) 55%, #d4a2ab);
-  --background: color-mix(in srgb, var(--ion-color-danger, #ef4444) 10%, #ffffff);
-  --background-hover: color-mix(in srgb, var(--ion-color-danger, #ef4444) 15%, #ffffff);
-  --background-activated: color-mix(in srgb, var(--ion-color-danger, #ef4444) 20%, #ffffff);
-}
-
-html[data-theme='light'] ion-button[fill='outline'][color='warning'] {
-  --color: #8c5a0a;
-  --border-color: color-mix(in srgb, var(--ion-color-warning, #f59e0b) 55%, #ddbf89);
-  --background: color-mix(in srgb, var(--ion-color-warning, #f59e0b) 10%, #ffffff);
-  --background-hover: color-mix(in srgb, var(--ion-color-warning, #f59e0b) 15%, #ffffff);
-  --background-activated: color-mix(in srgb, var(--ion-color-warning, #f59e0b) 20%, #ffffff);
-}
-
-ion-button[disabled] {
-  --opacity: 1;
-  opacity: 1;
-}
-
-html:not([data-theme='light']) ion-button[disabled]:not([fill]),
-html:not([data-theme='light']) ion-button[disabled][fill='solid'] {
-  --background: #3a4556;
-  --background-hover: #3a4556;
-  --background-activated: #3a4556;
-  --color: #c4cfde;
-}
-
-html:not([data-theme='light']) ion-button[disabled][fill='outline'] {
-  --background: rgba(148, 163, 184, 0.15);
-  --background-hover: rgba(148, 163, 184, 0.15);
-  --background-activated: rgba(148, 163, 184, 0.15);
-  --border-color: rgba(148, 163, 184, 0.4);
-  --color: #c4cfde;
-}
-
-html[data-theme='light'] ion-button[disabled]:not([fill]),
-html[data-theme='light'] ion-button[disabled][fill='solid'] {
-  --background: #c7ced9;
-  --background-hover: #c7ced9;
-  --background-activated: #c7ced9;
-  --color: #4b5563;
-}
-
-html[data-theme='light'] ion-button[disabled][fill='outline'] {
-  --background: rgba(148, 163, 184, 0.18);
-  --background-hover: rgba(148, 163, 184, 0.18);
-  --background-activated: rgba(148, 163, 184, 0.18);
-  --border-color: rgba(148, 163, 184, 0.5);
-  --color: #5b6472;
-}
-
-ion-button[disabled]::part(native) {
-  opacity: 1 !important;
-  filter: none !important;
-}
-
-html:not([data-theme='light']) ion-button[disabled]:not([fill])::part(native),
-html:not([data-theme='light']) ion-button[disabled][fill='solid']::part(native) {
-  background: #3a4556 !important;
-  color: #c4cfde !important;
-  -webkit-text-fill-color: #c4cfde !important;
-  border-color: rgba(148, 163, 184, 0.35) !important;
-}
-
-html:not([data-theme='light']) ion-button[disabled][fill='outline']::part(native) {
-  background: rgba(148, 163, 184, 0.15) !important;
-  color: #c4cfde !important;
-  -webkit-text-fill-color: #c4cfde !important;
-  border-color: rgba(148, 163, 184, 0.4) !important;
-}
-
-html:not([data-theme='light']) ion-button[disabled][fill='clear']::part(native) {
-  background: transparent !important;
-  color: #9fb0c8 !important;
-  -webkit-text-fill-color: #9fb0c8 !important;
-}
-
-html[data-theme='light'] ion-button[disabled]:not([fill])::part(native),
-html[data-theme='light'] ion-button[disabled][fill='solid']::part(native) {
-  background: #e6ebf2 !important;
-  color: #5a6474 !important;
-  -webkit-text-fill-color: #5a6474 !important;
-  border-color: #cbd4e1 !important;
-}
-
-html[data-theme='light'] ion-button[disabled][fill='outline']::part(native) {
-  background: rgba(148, 163, 184, 0.18) !important;
-  color: #5b6472 !important;
-  -webkit-text-fill-color: #5b6472 !important;
-  border-color: rgba(148, 163, 184, 0.5) !important;
-}
-
-html[data-theme='light'] ion-button[disabled][fill='clear']::part(native) {
-  background: transparent !important;
-  color: #6b7280 !important;
-  -webkit-text-fill-color: #6b7280 !important;
-}
-
-ion-content.glass-bg.ion-padding {
-  --padding-bottom: calc(72px + env(safe-area-inset-bottom));
-}
-
-ion-content.modal-form-content {
-  --padding-bottom: calc(96px + env(safe-area-inset-bottom));
-}
-
-ion-footer.modal-form-footer {
-  border-top: 1px solid var(--app-border-subtle);
-  background: var(--app-header-bg);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-}
-
-ion-footer.modal-form-footer ion-toolbar {
-  --background: transparent;
-  --border-width: 0;
-  --min-height: 64px;
-  --padding-start: 12px;
-  --padding-end: 12px;
-}
-
-/* Ionic applies toolbar vars to solid buttons in toolbars.
-   In modal footers this can invert text/background unexpectedly (e.g. transparent text). */
-ion-footer.modal-form-footer ion-button:not([fill]),
-ion-footer.modal-form-footer ion-button[fill='solid'],
-ion-footer.modal-form-footer ion-button.button-solid {
-  --ion-toolbar-color: var(--background);
-  --ion-toolbar-background: var(--color);
-}
-
-/* Global full-screen search overlay */
-ion-modal.global-search-modal {
-  --width: 100vw;
-  --min-width: 100vw;
-  --max-width: 100vw;
-  --width: 100dvw;
-  --min-width: 100dvw;
-  --max-width: 100dvw;
-  --height: 100vh;
-  --min-height: 100vh;
-  --max-height: 100vh;
-  --height: 100dvh;
-  --min-height: 100dvh;
-  --max-height: 100dvh;
-  --border-radius: 0;
-  --box-shadow: none;
-  --background: transparent;
-}
-
-ion-modal.global-search-modal::part(content) {
-  width: 100vw;
-  max-width: 100vw;
-  min-width: 100vw;
-  width: 100dvw;
-  max-width: 100dvw;
-  min-width: 100dvw;
-  height: 100vh;
-  max-height: 100vh;
-  min-height: 100vh;
-  height: 100dvh;
-  max-height: 100dvh;
-  min-height: 100dvh;
-  border-radius: 0;
-  box-shadow: none;
-  overflow: hidden;
-}
-
-html:not([data-theme='light']) ion-footer.modal-form-footer ion-button[disabled]:not([fill]),
-html:not([data-theme='light']) ion-footer.modal-form-footer ion-button[disabled][fill='solid'] {
-  --background: #3a4556;
-  --background-hover: #3a4556;
-  --background-activated: #3a4556;
-  --border-color: rgba(148, 163, 184, 0.35);
-  --color: #c4cfde;
-  --box-shadow: none;
-  opacity: 1;
-}
-
-html[data-theme='light'] ion-footer.modal-form-footer ion-button[disabled]:not([fill]),
-html[data-theme='light'] ion-footer.modal-form-footer ion-button[disabled][fill='solid'] {
-  --background: #e6ebf2;
-  --background-hover: #e6ebf2;
-  --background-activated: #e6ebf2;
-  --border-color: #cbd4e1;
-  --color: #5a6474;
-  --box-shadow: none;
-  opacity: 1;
-}
-
-.modal-footer-row {
+html, body, app-root, .app-root-layout { min-height: 100%; }
+body { margin: 0; background: var(--app-bg-solid); }
+app-root, .app-root-layout { display: block; }
+.app-content { background: var(--app-bg-solid); color: var(--app-text); }
+.app-surface { background: var(--app-surface-bg); border: 1px solid var(--app-border-subtle); }
+.app-header { background: var(--app-header-bg); border-bottom: 1px solid var(--app-border-subtle); }
+.app-padding { padding: 1rem; }
+.ui-header, .ui-footer { flex: none; position: relative; }
+.ui-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
+  gap: .65rem;
+  padding: .625rem 1rem;
+  min-height: 3.5rem;
+  color: var(--app-title);
+  background: var(--background, transparent);
 }
-
-.modal-footer-left,
-.modal-footer-right {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+.ui-title { flex: 1 1 auto; margin: 0; min-width: 0; font-size: 1.125rem; font-weight: 600; }
+.ui-buttons { display: inline-flex; align-items: center; gap: .375rem; flex: none; }
+.ui-buttons[slot="end"], .toolbar-actions { margin-inline-start: auto; }
+// Angular inserts routed hosts beside the outlet, outside the shell's scoped styles.
+app-internal-shell .page-pane > router-outlet + * {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
 }
-
-.modal-footer-right {
-  margin-left: auto;
+.ui-content { display: block; flex: 1 1 auto; min-height: 0; min-width: 0; overflow: auto; }
+.ui-no-scroll { overflow: hidden; }
+.ui-item { display: flex; align-items: center; flex-wrap: wrap; gap: .35rem .75rem; padding: .5rem 0; min-width: 0; }
+.ui-item > .ui-label:first-child { flex-basis: 100%; font-size: .875rem; font-weight: 500; }
+.ui-item > [slot="end"] { margin-inline-start: auto; }
+button.ui-item { width: 100%; padding: .45rem .75rem; text-align: start; }
+button.ui-item > .ui-label:first-child { flex-basis: auto; }
+.ui-list { display: block; }
+.ui-card { border-radius: var(--tblr-border-radius); }
+.ui-card-title { margin: 0; }
+.ui-card-title ui-icon { margin-inline-end: .375rem; }
+ui-input, ui-textarea, ui-select { display: block; min-width: 0; width: 100%; }
+ui-checkbox, ui-switch { display: inline-flex; }
+ui-icon { display: inline-block; width: 1.125em; height: 1.125em; flex: none; vertical-align: -.16em;
+  background: currentColor; mask-repeat: no-repeat; mask-position: center; mask-size: contain; }
+.ui-button { gap: .375rem; }
+.ui-badge {
+  color: var(--tblr-primary);
+  background: color-mix(in srgb, var(--tblr-primary) 10%, transparent);
 }
-
-.footer-validation {
-  margin: 0 12px 10px;
+.ui-badge[data-color="danger"] { color: var(--tblr-danger); background: color-mix(in srgb, var(--tblr-danger) 12%, transparent); }
+.ui-badge[data-color="success"] { color: var(--tblr-success); background: color-mix(in srgb, var(--tblr-success) 12%, transparent); }
+.ui-badge[data-color="warning"] { color: var(--tblr-warning); background: color-mix(in srgb, var(--tblr-warning) 12%, transparent); }
+.ui-spinner { color: var(--tblr-primary); }
+.ui-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  height: fit-content;
+  padding: 0;
+  border: 0;
+  border-radius: var(--tblr-border-radius-lg);
+  color: var(--app-text);
+  background: transparent;
+  width: min(100% - 2rem, var(--ui-dialog-width, 42rem));
+  max-height: min(92dvh, var(--ui-dialog-height, 100%));
+  box-shadow: var(--tblr-shadow-lg);
 }
-
-thead, th, tr, td {
-  padding: 6px;
+.ui-dialog[open] { display: block; }
+.ui-dialog:not([open]) { display: none; }
+.ui-dialog::backdrop {
+  background: var(--ui-dialog-backdrop, rgb(15 23 42 / 55%));
+  backdrop-filter: var(--ui-dialog-backdrop-filter, none);
 }
+.ui-dialog-content { overflow: auto; max-height: inherit; background: var(--app-surface-bg); }
+.ui-dialog .ui-header { position: sticky; top: 0; z-index: 2; background: var(--app-header-bg); border-bottom: 1px solid var(--app-border-subtle); }
+.ui-dialog .ui-footer { position: sticky; bottom: 0; z-index: 2; background: var(--app-header-bg); border-top: 1px solid var(--app-border-subtle); }
+.ui-popover-screen { position: fixed; inset: 0; z-index: 1059; }
+.ui-popover-panel { position: fixed; z-index: 1060; max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); overflow: auto; }
+.ui-toast { position: fixed; z-index: 1090; bottom: 1rem; left: 50%; transform: translateX(-50%); box-shadow: var(--tblr-shadow-lg); }
+.ui-toast[data-position="top"] { top: 1rem; bottom: auto; }
+.ui-toast[data-position="middle"] { top: 50%; bottom: auto; }
+:where(button, a[href], summary) { cursor: pointer; }
+:where(button, a[href], input, select, textarea):focus-visible { outline: 2px solid var(--tblr-primary); outline-offset: 2px; }
 
-/* Guard against hidden overlays/backdrops intercepting clicks. */
-ion-modal.overlay-hidden,
-ion-popover.overlay-hidden,
-ion-alert.overlay-hidden,
-ion-action-sheet.overlay-hidden,
-ion-loading.overlay-hidden,
-ion-picker.overlay-hidden {
-  pointer-events: none !important;
-}
-
-ion-backdrop:not(.backdrop-show) {
-  pointer-events: none !important;
+@media (max-width: 600px) {
+  .ui-toolbar { gap: .375rem; padding-inline: .625rem; flex-wrap: wrap; }
+  .ui-title { font-size: 1rem; }
+  .app-padding { padding: .75rem; }
 }

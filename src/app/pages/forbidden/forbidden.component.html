@@ -1,30 +1,30 @@
-<ion-header class="glass-header">
-  <ion-toolbar>
-    <ion-buttons slot="start">
+<header class="ui-header app-header">
+  <div class="ui-toolbar">
+    <div class="ui-buttons" slot="start">
       <app-page-back-button></app-page-back-button>
-    </ion-buttons>
-    <ion-title>Access</ion-title>
+    </div>
+    <h1 class="ui-title">Access</h1>
     <app-company-switcher></app-company-switcher>
-    <ion-buttons slot="end" class="ion-margin-end">
+    <div slot="end" class="ui-buttons me-2">
       <app-user-menu></app-user-menu>
-    </ion-buttons>
-  </ion-toolbar>
-</ion-header>
+    </div>
+  </div>
+</header>
 
-<ion-content class="glass-bg forbidden-page ion-padding">
-  <ion-card class="glass-surface forbidden-card">
-    <ion-card-header>
-      <ion-card-title>
-        <ion-icon name="lock-closed-outline"></ion-icon>
+<div class="ui-content app-content forbidden-page app-padding">
+  <div class="card ui-card app-surface forbidden-card">
+    <div class="card-header ui-card-header">
+      <h2 class="card-title ui-card-title">
+        <ui-icon name="lock"></ui-icon>
         Access denied
-      </ion-card-title>
-    </ion-card-header>
-    <ion-card-content>
+      </h2>
+    </div>
+    <div class="card-body ui-card-content">
       <p>Your account does not currently have permission to access this page.</p>
       <div class="actions">
-        <ion-button fill="outline" routerLink="/dashboard">Return to Dashboard</ion-button>
-        <ion-button color="danger" (click)="signOut()">Logout</ion-button>
+        <button class="btn ui-button btn-outline-primary" type="button" routerLink="/dashboard">Return to Dashboard</button>
+        <button class="btn ui-button btn-danger" type="button" (click)="signOut()">Logout</button>
       </div>
-    </ion-card-content>
-  </ion-card>
-</ion-content>
+    </div>
+  </div>
+</div>

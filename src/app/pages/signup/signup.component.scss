@@ -230,7 +230,7 @@
   opacity: 0.9;
 }
 
-.auth-panel ion-item {
+.auth-panel .ui-item {
   --background: rgba(55, 65, 81, 0.56);
   --border-color: transparent;
   --inner-border-width: 0;
@@ -241,7 +241,7 @@
   margin-top: 10px;
 }
 
-.auth-panel ion-item ion-label {
+.auth-panel .ui-item .ui-label {
   margin-bottom: 4px;
   font-size: 12px;
   opacity: 0.9;
@@ -330,7 +330,7 @@
   grid-template-columns: 1fr 1fr;
 }
 
-.step-actions ion-button {
+.step-actions .ui-button {
   min-height: 44px;
 }
 
@@ -343,7 +343,7 @@
   opacity: 0.86;
 }
 
-.secure-note ion-icon {
+.secure-note ui-icon {
   margin-top: 1px;
 }
 
@@ -361,7 +361,7 @@
 }
 
 .auth-hint.error {
-  color: var(--ion-color-danger, #d14343);
+  color: var(--ui-color-danger, #d14343);
 }
 
 @media (max-width: 880px) {

@@ -1,3 +1,7 @@
+const { makeShopCalendar, normalizeScheduleSettings, workClock } = require("../_shared/shop-hours");
+const { salesPeriods } = require("../_shared/sales-periods");
+const { listDocuments } = require("../service-documents");
+const { resolveStaff } = require("../_shared/staff-access");
 const { TableClient, isSqlBackendEnabled } = require("../_shared/table-client");
 const { resolveTenantId } = require("../_shared/tenant");
 let AzureTableClient = null;
@@ -23,11 +27,7 @@ try {
 
 const SETTINGS_TABLE = "appsettings";
 const SCHEDULE_SETTINGS_KEY = "schedule.settings";
-const DEFAULT_SCHEDULE_SETTINGS = {
-  openHour: 7,
-  closeHour: 16,
-  showWeekends: false
-};
+const DEFAULT_SCHEDULE_SETTINGS = normalizeScheduleSettings();
 const POWERBI_SETTING_KEYS = [
   "POWERBI_TENANT_ID",
   "POWERBI_CLIENT_ID",
@@ -219,25 +219,6 @@ function asPowerBiSettingValue(raw) {
   return asString(parsed);
 }
 
-function parseScheduleSettings(raw) {
-  const parsed = raw && typeof raw === "object" ? raw : {};
-  const openHourRaw = asNumber(parsed.openHour, NaN);
-  const closeHourRaw = asNumber(parsed.closeHour, NaN);
-  const fallback = DEFAULT_SCHEDULE_SETTINGS;
-  const openHour = Number.isFinite(openHourRaw)
-    ? clamp(Math.floor(openHourRaw), 0, 23)
-    : fallback.openHour;
-  let closeHour = Number.isFinite(closeHourRaw)
-    ? clamp(Math.floor(closeHourRaw), 1, 24)
-    : fallback.closeHour;
-  if (closeHour <= openHour) closeHour = Math.min(24, openHour + 1);
-  return {
-    openHour,
-    closeHour,
-    showWeekends: typeof parsed.showWeekends === "boolean" ? parsed.showWeekends : fallback.showWeekends
-  };
-}
-
 async function getSettingTableClient() {
   const conn = asString(process.env.STORAGE_CONNECTION_STRING);
   if (!conn && !isSqlBackendEnabled()) throw new Error("Missing STORAGE_CONNECTION_STRING");
@@ -319,14 +300,14 @@ async function readScheduleSettings(tenantId) {
     const mainValue = await readSettingValueFromClient(client, "main", SCHEDULE_SETTINGS_KEY);
     const merged = tenantValue != null ? tenantValue : mainValue;
     if (merged != null) {
-      resolved = parseScheduleSettings(merged);
+      resolved = normalizeScheduleSettings(merged);
     } else {
       const legacyClient = await getLegacySettingTableClient();
       if (legacyClient) {
         const legacyTenant = await readSettingValueFromClient(legacyClient, tenantId, SCHEDULE_SETTINGS_KEY);
         const legacyMain = await readSettingValueFromClient(legacyClient, "main", SCHEDULE_SETTINGS_KEY);
         const legacyMerged = legacyTenant != null ? legacyTenant : legacyMain;
-        if (legacyMerged != null) resolved = parseScheduleSettings(legacyMerged);
+        if (legacyMerged != null) resolved = normalizeScheduleSettings(legacyMerged);
       }
     }
   } catch (_) {}
@@ -704,6 +685,14 @@ function addDays(date, days) {
 function parseDate(value) {
   const raw = asString(value);
   if (!raw) return null;
+  const dateOnly = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (dateOnly) {
+    const year = Number(dateOnly[1]);
+    const month = Number(dateOnly[2]);
+    const day = Number(dateOnly[3]);
+    if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+    return new Date(year, month - 1, day, 0, 0, 0, 0);
+  }
   const parsed = Date.parse(raw);
   if (!Number.isFinite(parsed)) return null;
   return new Date(parsed);
@@ -1053,13 +1042,15 @@ function normalizeInventoryItem(entity) {
   };
 }
 
-function normalizeSchedule(entity) {
+function normalizeSchedule(entity, calendar) {
+  const start = calendar.parseAppointment(entity.start);
   return {
     id: asString(entity.rowKey),
     customerId: asString(entity.customerId),
     isBlocked: asBool(entity.isBlocked),
-    start: parseDate(entity.start),
-    end: parseDate(entity.end)
+    start,
+    end: calendar.parseAppointment(entity.end),
+    month: start ? calendar.appointmentMonth(start) : ""
   };
 }
 
@@ -1092,7 +1083,7 @@ function buildWindow(req) {
   };
 }
 
-function buildModel(raw) {
+function buildModel(raw, scheduleSettings) {
   const lanes = raw.lanes.map(entity => ({
     id: asString(entity.rowKey),
     name: asString(entity.name),
@@ -1219,13 +1210,15 @@ function buildModel(raw) {
       pausedAt: parseDate(entity.pausedAt),
       lastWorkResumedAt: parseDate(entity.lastWorkResumedAt),
       isPaused: asBool(entity.isPaused),
-      workDurationMs: Math.max(0, asNumber(entity.workDurationMs, 0))
+      workDurationMs: Math.max(0, asNumber(entity.workDurationMs, 0)),
+      workClockVersion: Number(entity.workClockVersion || 0)
     };
   });
 
   const events = raw.events.map(entity => normalizeEvent(entity, laneById));
   const purchaseOrders = raw.purchaseOrders.map(normalizePurchaseOrder);
-  const schedules = raw.schedule.map(normalizeSchedule);
+  const calendar = makeShopCalendar(scheduleSettings);
+  const schedules = raw.schedule.map(entity => normalizeSchedule(entity, calendar));
   const inventoryNeeds = raw.inventoryNeeds.map(normalizeInventoryNeed);
   const inventoryItems = raw.inventoryItems.map(normalizeInventoryItem);
 
@@ -1253,7 +1246,7 @@ function buildModel(raw) {
     schedules,
     inventoryNeeds,
     inventoryItems,
-    scheduleSettings: { ...DEFAULT_SCHEDULE_SETTINGS },
+    scheduleSettings,
     customers,
     communications
   };
@@ -1359,7 +1352,7 @@ function buildProductionForecast(model, window) {
 
   for (const schedule of model.schedules) {
     if (schedule.isBlocked || !schedule.start) continue;
-    const key = monthKey(schedule.start);
+    const key = schedule.month;
     const month = monthsMap.get(key);
     if (!month) continue;
     const customerKey = schedule.customerId ? `${schedule.customerId}:${key}` : "";
@@ -1674,6 +1667,7 @@ function buildSalesTrend(model, window) {
   for (const row of monthRows) {
     row.quote_amount = Number(row.quote_amount.toFixed(2));
     row.sales_amount = Number(row.sales_amount.toFixed(2));
+    if (row.sales_amount <= 0) row.cogs_amount = 0;
     row.cogs_amount = Number(row.cogs_amount.toFixed(2));
     row.gross_profit = Number((row.sales_amount - row.cogs_amount).toFixed(2));
     row.gross_margin_pct = row.sales_amount > 0
@@ -1753,76 +1747,14 @@ function buildCommunicationVolume(model, window) {
   );
 }
 
-function businessWindowElapsedMs(start, end, scheduleSettings) {
-  if (!(start instanceof Date) || !(end instanceof Date)) return 0;
-  const startMs = start.getTime();
-  const endMs = end.getTime();
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return 0;
-
-  const schedule = parseScheduleSettings(scheduleSettings || DEFAULT_SCHEDULE_SETTINGS);
-  const includeWeekends = !!schedule.showWeekends;
-  const openHour = schedule.openHour;
-  const closeHour = schedule.closeHour;
-
-  let totalMs = 0;
-  let cursor = new Date(startMs);
-  cursor.setHours(0, 0, 0, 0);
-  let dayCount = 0;
-  const maxDays = 3660;
-
-  while (cursor.getTime() < endMs && dayCount < maxDays) {
-    const day = cursor.getDay();
-    const isWeekend = day === 0 || day === 6;
-    if (includeWeekends || !isWeekend) {
-      const dayStart = new Date(cursor.getTime());
-      dayStart.setHours(openHour, 0, 0, 0);
-      const dayEnd = new Date(cursor.getTime());
-      dayEnd.setHours(closeHour, 0, 0, 0);
-
-      const overlapStart = Math.max(startMs, dayStart.getTime());
-      const overlapEnd = Math.min(endMs, dayEnd.getTime());
-      if (overlapEnd > overlapStart) totalMs += overlapEnd - overlapStart;
-    }
-    cursor.setDate(cursor.getDate() + 1);
-    dayCount += 1;
-  }
-
-  return totalMs;
-}
-
-function computeWorkItemEffectiveMs(item, now, scheduleSettings) {
-  if (!item) return 0;
-  const baseMs = Math.max(0, asNumber(item.workDurationMs, 0));
-  const checkedInAt = item.checkedInAt instanceof Date ? item.checkedInAt : null;
-  const completedAt = item.completedAt instanceof Date ? item.completedAt : null;
-  const pausedAt = item.pausedAt instanceof Date ? item.pausedAt : null;
-  const lastWorkResumedAt = item.lastWorkResumedAt instanceof Date ? item.lastWorkResumedAt : null;
-  const isPaused = !!item.isPaused || !!pausedAt;
-
-  const resumedAt = lastWorkResumedAt || checkedInAt;
-  const inFlightMs = (!completedAt && !isPaused && resumedAt)
-    ? businessWindowElapsedMs(resumedAt, now, scheduleSettings)
-    : 0;
-  const rawTimingMs = baseMs + inFlightMs;
-
-  const spanEnd = completedAt || pausedAt || now;
-  const businessWindowSpanMs = checkedInAt
-    ? businessWindowElapsedMs(checkedInAt, spanEnd, scheduleSettings)
-    : 0;
-
-  if (rawTimingMs > 0 && businessWindowSpanMs > 0) {
-    return Math.min(rawTimingMs, businessWindowSpanMs);
-  }
-  return Math.max(rawTimingMs, businessWindowSpanMs);
-}
-
 function buildJobTiming(model, scheduleSettings, window) {
   const rows = [];
   const msPerHour = 60 * 60 * 1000;
+  const calendar = makeShopCalendar(scheduleSettings);
   for (const item of model.workItems) {
     const anchorDate = item.completedAt || item.updatedAt || item.createdAt;
     if (!inRange(anchorDate, window.from, window.to)) continue;
-    const effectiveMs = computeWorkItemEffectiveMs(item, window.now, scheduleSettings);
+    const effectiveMs = workClock(item, calendar, window.now.getTime()).duration;
     if (effectiveMs <= 0) continue;
     rows.push({
       work_item_id: item.id,
@@ -2072,10 +2004,18 @@ module.exports = async function (context, req) {
       schedule,
       inventoryNeeds,
       inventoryItems
-    });
-    model.scheduleSettings = scheduleSettings;
+    }, scheduleSettings);
 
     const payload = buildPayload(model, window);
+    const staff = await resolveStaff(req, await getTableClient("useraccess"), tenantId);
+    if (staff.authorized) {
+      const [documents, payments] = await Promise.all([
+        listDocuments(tenantId),
+        getTableClient("paymentledger").then(client => listPartition(client, tenantId))
+      ]);
+      payload.tables.salesPeriods = salesPeriods(documents.map(row => row.document), payments,
+        isoDate(window.from), isoDate(window.to), scheduleSettings.timeZone);
+    }
     const scoped = responseByScope(scope, payload);
     if (!scoped) {
       context.res = json(400, {

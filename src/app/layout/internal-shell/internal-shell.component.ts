@@ -1,22 +1,9 @@
-import { Component, HostListener, OnDestroy, OnInit, computed, effect, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { ToastController } from '../../ui/overlays';
+import { UiIcon } from '../../ui/icons';
+import { Component, HostListener, OnDestroy, OnInit, computed, effect, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+
 import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
-import { ToastController } from '@ionic/angular';
-import { IonButton, IonIcon } from '@ionic/angular/standalone';
 import { Subscription, filter, firstValueFrom } from 'rxjs';
-import { addIcons } from 'ionicons';
-import {
-  barChartOutline,
-  calendarClearOutline,
-  checkmarkDoneOutline,
-  chatbubbleEllipsesOutline,
-  chevronBackOutline,
-  chevronForwardOutline,
-  cubeOutline,
-  gridOutline,
-  peopleOutline,
-  receiptOutline
-} from 'ionicons/icons';
 import { BrandSettingsService } from '../../services/brand-settings.service';
 import { BrandingApi } from '../../services/branding-api.service';
 import { ShellFooterComponent } from '../../components/layout/shell-footer/shell-footer.component';
@@ -26,6 +13,7 @@ import { BusinessProfileService } from '../../services/business-profile.service'
 import { AppSettingsApiService } from '../../services/app-settings-api.service';
 import { PaymentGatewayProviderKey, PaymentGatewaySettingsService } from '../../services/payment-gateway-settings.service';
 import { AccessAdminApiService } from '../../services/access-admin-api.service';
+import { JobTask, JobTaskOrderPart, JobTasksApiService } from '../../services/job-tasks-api.service';
 import { UserScopedSettingsService } from '../../services/user-scoped-settings.service';
 import { AdminSetupItem, AdminSetupProgressService } from '../../services/admin-setup-progress.service';
 import { AuthService } from '../../auth/auth.service';
@@ -57,19 +45,20 @@ type UnifiedInboxMessage = {
   createdAt: string;
 };
 
+type NavArea = 'dashboard' | 'quotes' | 'invoices' | 'jobs' | 'inventory' | 'purchase-orders' | 'tasks' | 'customers' | 'reports';
+
 @Component({
   selector: 'app-internal-shell',
   standalone: true,
   imports: [
-    CommonModule,
     RouterOutlet,
     RouterLink,
     RouterLinkActive,
-    IonButton,
-    IonIcon,
+    UiIcon,
     ShellFooterComponent
-  ],
+],
   templateUrl: './internal-shell.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./internal-shell.component.scss']
 })
 export class InternalShellComponent implements OnInit, OnDestroy {
@@ -87,6 +76,7 @@ export class InternalShellComponent implements OnInit, OnDestroy {
   private readonly settingsApi = inject(AppSettingsApiService);
   private readonly paymentGatewaySettings = inject(PaymentGatewaySettingsService);
   private readonly accessApi = inject(AccessAdminApiService);
+  private readonly jobTasksApi = inject(JobTasksApiService);
   private readonly toastController = inject(ToastController);
   private readonly userSettings = inject(UserScopedSettingsService);
   readonly auth = inject(AuthService);
@@ -97,6 +87,7 @@ export class InternalShellComponent implements OnInit, OnDestroy {
   readonly inboxLoading = signal(false);
   readonly inboxError = signal('');
   readonly unreadMessages = signal<UnifiedInboxMessage[]>([]);
+  readonly jobsAttentionCount = signal(0);
   readonly messageThreads = computed(() => this.buildThreads(this.unreadMessages()));
   readonly visibleMessageThreads = computed(() => this.messageThreads().slice(0, this.hubThreadLimit));
   readonly hasMoreMessageThreads = computed(() => this.messageThreads().length > this.hubThreadLimit);
@@ -175,22 +166,14 @@ export class InternalShellComponent implements OnInit, OnDestroy {
   quickUserRole: 'admin' | 'user' = 'user';
   private hasLoadedInbox = false;
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
+  private inventoryAlertTimer: ReturnType<typeof setInterval> | null = null;
   private routeSub: Subscription | null = null;
   private navLoadToken = 0;
+  private readonly seenUnreadMessageIds = new Set<string>();
+  private audioContext: AudioContext | null = null;
+  private audioUnlocked = false;
 
   constructor() {
-    addIcons({
-      'grid-outline': gridOutline,
-      'calendar-clear-outline': calendarClearOutline,
-      'checkmark-done-outline': checkmarkDoneOutline,
-      'cube-outline': cubeOutline,
-      'people-outline': peopleOutline,
-      'receipt-outline': receiptOutline,
-      'bar-chart-outline': barChartOutline,
-      'chevron-back-outline': chevronBackOutline,
-      'chevron-forward-outline': chevronForwardOutline,
-      'chatbubble-ellipses-outline': chatbubbleEllipsesOutline
-    });
 
     effect(() => {
       this.userSettings.scope();
@@ -212,7 +195,9 @@ export class InternalShellComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.updateMobileState();
     this.refreshInbox(false);
+    this.refreshPartsToOrderAlert();
     this.refreshTimer = setInterval(() => this.refreshInbox(true), 5000);
+    this.inventoryAlertTimer = setInterval(() => this.refreshPartsToOrderAlert(), 30000);
     if (this.auth.isAdmin()) {
       void this.setupProgress.refresh().then(() => {
         if (this.setupProgress.shouldPrompt()) {
@@ -240,6 +225,10 @@ export class InternalShellComponent implements OnInit, OnDestroy {
       clearInterval(this.refreshTimer);
       this.refreshTimer = null;
     }
+    if (this.inventoryAlertTimer) {
+      clearInterval(this.inventoryAlertTimer);
+      this.inventoryAlertTimer = null;
+    }
     this.routeSub?.unsubscribe();
   }
 
@@ -254,10 +243,105 @@ export class InternalShellComponent implements OnInit, OnDestroy {
     this.updateMobileState();
   }
 
+  @HostListener('document:click')
+  @HostListener('document:keydown')
+  unlockNotificationSound(): void {
+    if (this.audioUnlocked) return;
+    this.audioUnlocked = true;
+    this.ensureAudioContext();
+  }
+
   handleMessagesPanelClick(event: Event): void {
     if (!this.isMobile()) return;
     event.preventDefault();
     this.openMessagesScreen();
+  }
+
+  canAccess(area: NavArea): boolean {
+    return this.auth.hasAreaAccess(area);
+  }
+
+  canAccessQuotesInvoices(): boolean {
+    return this.auth.hasAreaAccess('quotes') || this.auth.hasAreaAccess('invoices');
+  }
+
+  private refreshPartsToOrderAlert(): void {
+    if (!this.auth.isAuthenticated() || !this.auth.hasAreaAccess('tasks')) {
+      this.jobsAttentionCount.set(0);
+      return;
+    }
+    this.jobTasksApi.list({ status: 'all' }).subscribe({
+      next: res => {
+        const tasks = Array.isArray(res?.tasks) ? res.tasks : [];
+        this.jobsAttentionCount.set(this.countOpenJobsNeedingAttention(tasks));
+      },
+      error: () => {
+        this.jobsAttentionCount.set(0);
+      }
+    });
+  }
+
+  private countOpenJobsNeedingAttention(tasks: JobTask[]): number {
+    const jobs = new Set<string>();
+    for (const task of tasks) {
+      if (!this.taskRequiresJobsNavAttention(task)) continue;
+      const key = [
+        task.relatedInvoiceId,
+        task.jobId,
+        task.jobNumber,
+        task.relatedScheduleId,
+        task.relatedWorkItemId
+      ]
+        .map(value => String(value || '').trim())
+        .find(Boolean) || String(task.id || '').trim();
+      if (key) jobs.add(key);
+    }
+    return jobs.size;
+  }
+
+  private taskRequiresJobsNavAttention(task: JobTask): boolean {
+    return this.taskRequiresPartsOrder(task) || this.scheduledPartsReminderIsDue(task);
+  }
+
+  private taskRequiresPartsOrder(task: JobTask): boolean {
+    if (!['open', 'in_progress'].includes(String(task.status || '').toLowerCase())) return false;
+    const parts = Array.isArray(task.orderParts) ? task.orderParts : [];
+    if (parts.length) return parts.some(part => this.partRequiresOrder(part));
+    const title = String(task.title || '').toLowerCase();
+    const warning = String(task.warning || '').toLowerCase();
+    return title.includes('order parts') || warning.includes('needs order') || warning.includes('parts to order');
+  }
+
+  private partRequiresOrder(part: JobTaskOrderPart): boolean {
+    const legacyStatus = String(part.status || '').toLowerCase();
+    const jobStatus = String(part.jobPartStatus || '').toLowerCase();
+    if (legacyStatus === 'cancelled') return false;
+    if (['received', 'pulled', 'installed', 'returned'].includes(jobStatus)) return false;
+
+    const qtyNeeded = this.asNumber(part.qtyNeeded);
+    const qtyOrdered = this.asNumber(part.qtyOrdered);
+    const qtyReceived = this.asNumber(part.qtyReceived);
+    const orderedOrReceived = Math.max(qtyOrdered, qtyReceived);
+    if (qtyNeeded > 0 && orderedOrReceived >= qtyNeeded) return false;
+    return legacyStatus === 'needs-order'
+      || legacyStatus === 'po-draft'
+      || jobStatus === 'quoted'
+      || jobStatus === 'backordered'
+      || qtyNeeded > orderedOrReceived;
+  }
+
+  private scheduledPartsReminderIsDue(task: JobTask): boolean {
+    if (!['open', 'in_progress'].includes(String(task.status || '').toLowerCase())) return false;
+    const taskType = String(task.taskType || '').toLowerCase();
+    if (taskType !== 'parts-readiness' && taskType !== 'parts-pull') return false;
+    const dueMs = Date.parse(String(task.dueDate || ''));
+    if (!Number.isFinite(dueMs)) return false;
+    return dueMs <= Date.now();
+  }
+
+  private asNumber(value: unknown): number {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
   }
 
   private refreshInbox(background: boolean): void {
@@ -274,14 +358,14 @@ export class InternalShellComponent implements OnInit, OnDestroy {
             const emailItems = (Array.isArray(emailRes.items) ? emailRes.items : []).map(item => this.toUnifiedEmail(item));
             const merged = [...smsItems, ...emailItems]
               .sort((a, b) => Date.parse(b.createdAt || '') - Date.parse(a.createdAt || ''));
-            this.unreadMessages.set(merged);
+            this.applyUnreadMessages(merged, background);
             this.inboxError.set('');
             this.inboxLoading.set(false);
             this.hasLoadedInbox = true;
           },
           error: () => {
             const smsItems = (Array.isArray(smsRes.items) ? smsRes.items : []).map(item => this.toUnifiedSms(item));
-            this.unreadMessages.set(smsItems);
+            this.applyUnreadMessages(smsItems, background);
             if (!background || !this.unreadMessages().length) {
               this.inboxError.set('Email inbox unavailable.');
             }
@@ -294,7 +378,7 @@ export class InternalShellComponent implements OnInit, OnDestroy {
         this.emailApi.listInbox(this.inboxFetchLimit).subscribe({
           next: emailRes => {
             const emailItems = (Array.isArray(emailRes.items) ? emailRes.items : []).map(item => this.toUnifiedEmail(item));
-            this.unreadMessages.set(emailItems);
+            this.applyUnreadMessages(emailItems, background);
             if (!background || !this.unreadMessages().length) {
               this.inboxError.set('SMS inbox unavailable.');
             }
@@ -313,6 +397,62 @@ export class InternalShellComponent implements OnInit, OnDestroy {
     });
   }
 
+  private applyUnreadMessages(items: UnifiedInboxMessage[], background: boolean): void {
+    const nextIds = new Set(items.map(item => item.id).filter(Boolean));
+    const hasNewUnread = this.hasLoadedInbox
+      && background
+      && items.some(item => item.id && !this.seenUnreadMessageIds.has(item.id));
+
+    this.unreadMessages.set(items);
+    this.seenUnreadMessageIds.clear();
+    nextIds.forEach(id => this.seenUnreadMessageIds.add(id));
+
+    if (hasNewUnread) {
+      this.playMessageNotificationSound();
+    }
+  }
+
+  private ensureAudioContext(): AudioContext | null {
+    if (typeof window === 'undefined') return null;
+    const AudioContextCtor = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextCtor) return null;
+    if (!this.audioContext) {
+      this.audioContext = new AudioContextCtor();
+    }
+    if (this.audioContext.state === 'suspended') {
+      void this.audioContext.resume().catch(() => {});
+    }
+    return this.audioContext;
+  }
+
+  private playMessageNotificationSound(): void {
+    const ctx = this.ensureAudioContext();
+    if (!ctx || ctx.state === 'suspended') return;
+
+    try {
+      const now = ctx.currentTime;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.16, now + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.28);
+      gain.connect(ctx.destination);
+
+      const first = ctx.createOscillator();
+      first.type = 'sine';
+      first.frequency.setValueAtTime(740, now);
+      first.connect(gain);
+      first.start(now);
+      first.stop(now + 0.14);
+
+      const second = ctx.createOscillator();
+      second.type = 'sine';
+      second.frequency.setValueAtTime(980, now + 0.08);
+      second.connect(gain);
+      second.start(now + 0.08);
+      second.stop(now + 0.28);
+    } catch (_) {}
+  }
+
   openThread(thread: MessageThread): void {
     if (!thread.messageIds.length) return;
     const targetIds = new Set(thread.messageIds);
@@ -328,16 +468,7 @@ export class InternalShellComponent implements OnInit, OnDestroy {
       });
     }
 
-    if (this.isMobile()) {
-      this.openMessagesScreen(thread.channel);
-      return;
-    }
-
-    if (thread.customerId) {
-      this.router.navigate(['/customers', thread.customerId], { queryParams: { tab: thread.channel } });
-      return;
-    }
-    this.openMessagesScreen(thread.channel);
+    this.openMessagesScreen(thread.channel, thread.customerId || undefined, thread.key);
   }
 
   relativeTimeLabel(iso: string): string {
@@ -356,9 +487,15 @@ export class InternalShellComponent implements OnInit, OnDestroy {
     return thread.key;
   }
 
-  openMessagesScreen(channel?: 'sms' | 'email'): void {
+  openMessagesScreen(channel?: 'sms' | 'email', customerId?: string, threadKey?: string): void {
     if (channel) {
-      this.router.navigate(['/messages'], { queryParams: { channel } });
+      this.router.navigate(['/messages'], {
+        queryParams: {
+          channel,
+          ...(customerId ? { customerId } : {}),
+          ...(!customerId && threadKey ? { threadKey } : {})
+        }
+      });
       return;
     }
     this.router.navigate(['/messages']);

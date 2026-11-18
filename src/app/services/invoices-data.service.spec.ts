@@ -60,7 +60,7 @@ describe('InvoicesDataService', () => {
     expect(service.forCustomer({ email: 'customer@example.com' }).length).toBe(1);
   });
 
-  it('converts an accepted quote into a draft invoice and cancels original quote', () => {
+  it('converts an accepted quote once and preserves the accepted original', () => {
     const quote = service.createDraftInvoice({
       documentType: 'quote',
       stage: 'accepted',
@@ -84,7 +84,9 @@ describe('InvoicesDataService', () => {
     expect(createdInvoice?.stage).toBe('draft');
 
     const refreshedQuote = service.getInvoiceById(quote.id);
-    expect(refreshedQuote?.stage).toBe('canceled');
+    expect(refreshedQuote?.stage).toBe('accepted');
+    expect(service.createInvoiceFromQuote(quote.id)?.id).toBe(createdInvoice?.id);
+    expect(service.invoiceDetails().filter(row => row.sourceQuoteId === quote.id).length).toBe(1);
   });
 
   it('records refunds in timeline without changing total', () => {
@@ -176,6 +178,6 @@ describe('InvoicesDataService', () => {
     expect(refunded).not.toBeNull();
     expect(refunded?.paidAmount).toBe(400);
     expect((refunded?.refundTransactions || []).length).toBe(1);
-    expect(refunded?.timeline.some(item => item.message.includes('Refund issued: $100.00. Scope reduced'))).toBeTrue();
+    expect(refunded?.timeline.some(item => item.message.includes('Refund issued for $100.00. Scope reduced'))).toBeTrue();
   });
 });

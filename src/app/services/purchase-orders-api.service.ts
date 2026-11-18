@@ -9,6 +9,8 @@ export type PurchaseOrderLine = {
   needId?: string;
   itemId?: string;
   relatedInventoryItemId?: string;
+  relatedInvoiceId?: string;
+  relatedInvoiceLineItemId?: string;
   jobId?: string;
   jobNumber?: string;
   partName: string;
@@ -22,11 +24,19 @@ export type PurchaseOrderLine = {
   unitCost?: number;
   orderNumber?: string;
   trackingNumber?: string;
+  carrier?: string;
+  trackingStatus?: string;
+  trackingStatusUpdatedAt?: string;
+  estimatedDeliveryDate?: string;
+  deliveredAt?: string;
+  trackingProvider?: string;
+  trackingProviderId?: string;
+  trackingLastError?: string;
   etaDate?: string;
   vendorInvoiceNumber?: string;
   note?: string;
   lineTotal?: number;
-  status?: 'ordered' | 'partial' | 'received';
+  status?: 'draft' | 'ordered' | 'partial' | 'received' | 'cancelled';
 };
 
 export type PurchaseOrder = {
@@ -59,9 +69,34 @@ export type PurchaseOrderReceiptLine = {
   qtyReceived: number;
   orderNumber?: string;
   trackingNumber?: string;
+  carrier?: string;
   etaDate?: string;
   vendorInvoiceNumber?: string;
   note?: string;
+};
+
+export type PurchaseOrderTrackingLine = {
+  lineId: string;
+  orderNumber?: string;
+  trackingNumber?: string;
+  carrier?: string;
+  etaDate?: string;
+  vendorInvoiceNumber?: string;
+  note?: string;
+};
+
+export type PurchaseOrderTrackingRefreshLine = {
+  lineId: string;
+  trackingNumber?: string;
+  carrier?: string;
+};
+
+export type PurchaseOrderTrackingRefreshResult = {
+  lineId: string;
+  ok: boolean;
+  trackingStatus?: string;
+  etaDate?: string;
+  error?: string;
 };
 
 @Injectable({ providedIn: 'root' })
@@ -92,6 +127,25 @@ export class PurchaseOrdersApiService {
     });
   }
 
+  updateTracking(id: string, lines: PurchaseOrderTrackingLine[]): Observable<{ ok: boolean; order: PurchaseOrder }> {
+    return this.http.post<{ ok: boolean; order: PurchaseOrder }>('/api/purchase-orders', {
+      op: 'updateTracking',
+      id,
+      lines
+    });
+  }
+
+  refreshTracking(
+    id: string,
+    lines: PurchaseOrderTrackingRefreshLine[]
+  ): Observable<{ ok: boolean; order: PurchaseOrder; tracking: PurchaseOrderTrackingRefreshResult[] }> {
+    return this.http.post<{ ok: boolean; order: PurchaseOrder; tracking: PurchaseOrderTrackingRefreshResult[] }>('/api/purchase-orders', {
+      op: 'refreshTracking',
+      id,
+      lines
+    });
+  }
+
   submit(id: string): Observable<{ ok: boolean; order: PurchaseOrder }> {
     return this.http.post<{ ok: boolean; order: PurchaseOrder }>('/api/purchase-orders', {
       op: 'submit',
@@ -110,6 +164,20 @@ export class PurchaseOrdersApiService {
   deleteDraft(id: string): Observable<{ ok: boolean; id: string }> {
     return this.http.post<{ ok: boolean; id: string }>('/api/purchase-orders', {
       op: 'deleteDraft',
+      id
+    });
+  }
+
+  cancel(id: string): Observable<{ ok: boolean; order: PurchaseOrder }> {
+    return this.http.post<{ ok: boolean; order: PurchaseOrder }>('/api/purchase-orders', {
+      op: 'cancel',
+      id
+    });
+  }
+
+  reopenDraft(id: string): Observable<{ ok: boolean; order: PurchaseOrder }> {
+    return this.http.post<{ ok: boolean; order: PurchaseOrder }>('/api/purchase-orders', {
+      op: 'reopenDraft',
       id
     });
   }

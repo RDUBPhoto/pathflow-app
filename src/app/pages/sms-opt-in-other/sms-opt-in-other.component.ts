@@ -1,12 +1,12 @@
-import { CommonModule } from '@angular/common';
-import { Component } from '@angular/core';
-import { IonContent } from '@ionic/angular/standalone';
+
+import { Component, ChangeDetectionStrategy } from '@angular/core';
 
 @Component({
   selector: 'app-sms-opt-in-other',
   standalone: true,
-  imports: [CommonModule, IonContent],
+  imports: [],
   templateUrl: './sms-opt-in-other.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./sms-opt-in-other.component.scss']
 })
 export default class SmsOptInOtherComponent {}

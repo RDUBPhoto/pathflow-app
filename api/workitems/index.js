@@ -1,12 +1,12 @@
 const { TableClient } = require("../_shared/table-client");
-const { EmailClient } = require("@azure/communication-email");
 const { randomUUID } = require("crypto");
 const { resolveTenantId } = require("../_shared/tenant");
 const { requirePrincipal } = require("../_shared/auth");
+const { makeShopCalendar, readShopHours, workClock } = require("../_shared/shop-hours");
+const { rememberPortalClosure } = require("../_shared/customer-portal");
 
 const T_ITEMS = "workitems";
 const T_EVENTS = "events";
-const T_CUSTOMERS = "customers";
 
 function pick(v, d = "") { return typeof v === "string" ? v : (v == null ? d : String(v)); }
 function num(v, d = 0) { const n = Number(v); return Number.isFinite(n) ? n : d; }
@@ -20,111 +20,6 @@ function flag(v, d = false) {
   }
   return d;
 }
-function kindOf(name) {
-  const s = String(name || "").toLowerCase();
-  if (/quote/.test(s)) return "quote";
-  if (/sched/.test(s)) return "scheduled";
-  if (/progress|in[- ]?progress/.test(s)) return "inprogress";
-  if (/ready|pickup|complete|completed|done/.test(s)) return "completed";
-  if (/lead/.test(s)) return "lead";
-  if (/invoice|invoiced|paid/.test(s)) return "invoiced";
-  return "other";
-}
-
-async function notify(context, laneName, workItem, customer) {
-  const k = kindOf(laneName);
-  const email = pick(customer && customer.email);
-  const phone = pick(customer && customer.phone);
-  const name = pick(customer && customer.name);
-  const title = pick(workItem && workItem.title);
-
-  let subj = "";
-  let body = "";
-  let sms = "";
-
-  if (k === "quote") {
-    subj = "Your quote is ready";
-    body = `Hi ${name || "there"}, your quote for "${title}" is ready. Reply to confirm or ask questions.`;
-    sms = `Your quote for "${title}" is ready. Check your email for details.`;
-  } else if (k === "scheduled") {
-    subj = "You're scheduled";
-    body = `Hi ${name || "there"}, your vehicle is scheduled for "${title}". We'll send drop-off instructions soon.`;
-    sms = `You're scheduled for "${title}". Watch for drop-off instructions.`;
-  } else if (k === "inprogress") {
-    subj = "Work in progress";
-    body = `Update: "${title}" is now in progress. We'll keep you posted.`;
-    sms = `Update: "${title}" is now in progress.`;
-  } else if (k === "completed") {
-    subj = "Ready for pickup";
-    body = `Great news: "${title}" is complete and ready for pickup. Reply to confirm a time.`;
-    sms = `"${title}" is complete and ready for pickup.`;
-  } else if (k === "invoiced") {
-    subj = "Invoice available";
-    body = `Your invoice for "${title}" is ready. You can pay online via the link provided.`;
-    sms = `Invoice for "${title}" is ready. Check your email for the link.`;
-  } else {
-    return;
-  }
-
-  if (email) await sendEmail(context, email, subj, body);
-  if (phone) await sendSms(context, phone, sms);
-}
-
-async function sendEmail(context, to, subject, text) {
-  const mode = String(process.env.EMAIL_MODE || "").trim().toLowerCase();
-  const from = process.env.EMAIL_FROM || process.env.FROM_EMAIL;
-  if (!from) return;
-  try {
-    if (mode === "azure") {
-      const conn = process.env.ACS_EMAIL_CONNECTION_STRING || process.env.COMMUNICATION_SERVICES_CONNECTION_STRING;
-      if (!conn) return;
-      const client = new EmailClient(conn);
-      const poller = await client.beginSend({
-        senderAddress: String(from).trim(),
-        content: {
-          subject: String(subject || "").trim(),
-          plainText: String(text || "").trim()
-        },
-        recipients: {
-          to: [{ address: String(to || "").trim() }]
-        }
-      });
-      const result = await poller.pollUntilDone();
-      context.log(`azure email ${String(result && result.status) || "unknown"}`);
-      return;
-    }
-
-    const key = process.env.SENDGRID_API_KEY;
-    if (!key) return;
-    const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ personalizations: [{ to: [{ email: to }] }], from: { email: from }, subject, content: [{ type: "text/plain", value: text }] })
-    });
-    context.log(`sendgrid ${res.status}`);
-  } catch (e) {
-    context.log(`email provider error ${String(e)}`);
-  }
-}
-
-async function sendSms(context, to, text) {
-  const sid = process.env.TWILIO_SID;
-  const token = process.env.TWILIO_TOKEN;
-  const from = process.env.FROM_PHONE;
-  if (!sid || !token || !from) return;
-  const body = new URLSearchParams({ From: from, To: to, Body: text });
-  try {
-    const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(sid)}/Messages.json`, {
-      method: "POST",
-      headers: { "Authorization": "Basic " + Buffer.from(`${sid}:${token}`).toString("base64"), "Content-Type": "application/x-www-form-urlencoded" },
-      body
-    });
-    context.log(`twilio ${res.status}`);
-  } catch (e) {
-    context.log(`twilio error ${String(e)}`);
-  }
-}
-
 module.exports = async function (context, req) {
   const method = (req.method || "GET").toUpperCase();
   const id = context.bindingData && context.bindingData.id ? String(context.bindingData.id) : "";
@@ -140,7 +35,6 @@ module.exports = async function (context, req) {
 
     const items = TableClient.fromConnectionString(conn, T_ITEMS);
     const events = TableClient.fromConnectionString(conn, T_EVENTS);
-    const customers = TableClient.fromConnectionString(conn, T_CUSTOMERS);
     try { await items.createTable(); } catch (_) {}
     try { await events.createTable(); } catch (_) {}
 
@@ -149,13 +43,20 @@ module.exports = async function (context, req) {
       const out = [];
       const filter = laneId ? `PartitionKey eq '${tenantId}' and laneId eq '${laneId.replace(/'/g,"''")}'` : `PartitionKey eq '${tenantId}'`;
       const iter = items.listEntities({ queryOptions: { filter } });
+      const now = Date.now();
+      let calendar;
       for await (const e of iter) {
         const createdAt = pick(e.createdAt) || (e.timestamp ? new Date(e.timestamp).toISOString() : "");
+        if (e.checkedInAt && !calendar) calendar = makeShopCalendar(await readShopHours(conn, tenantId));
+        const clock = calendar && e.checkedInAt ? workClock(e, calendar, now) : null;
         out.push({
           id: e.rowKey,
           title: pick(e.title),
           laneId: pick(e.laneId),
           customerId: pick(e.customerId),
+          invoiceId: pick(e.invoiceId),
+          jobId: pick(e.jobId),
+          dashboardHidden: flag(e.dashboardHidden),
           customerName: pick(e.customerName),
           source: pick(e.source),
           leadSource: pick(e.leadSource),
@@ -177,11 +78,14 @@ module.exports = async function (context, req) {
           updatedAt: pick(e.updatedAt),
           checkedInAt: pick(e.checkedInAt),
           completedAt: pick(e.completedAt),
+          pickedUpAt: pick(e.pickedUpAt),
           calendarOverrideAt: pick(e.calendarOverrideAt),
           isPaused: flag(e.isPaused, false),
           pausedAt: pick(e.pausedAt),
           lastWorkResumedAt: pick(e.lastWorkResumedAt),
           workDurationMs: num(e.workDurationMs, 0),
+          workClockState: clock?.state || "not-started",
+          activeWorkDurationMs: clock?.duration || 0,
           pauseDurationMs: num(e.pauseDurationMs, 0)
         });
       }
@@ -206,6 +110,11 @@ module.exports = async function (context, req) {
     if (method === "POST") {
       const b = req.body || {};
       const rid = pick(b.id);
+      const changeDashboardVisibility = b.op === "set-dashboard-visibility";
+      if (changeDashboardVisibility && (!rid || typeof b.dashboardHidden !== "boolean")) {
+        context.res = { status: 400, body: { error: "A card ID and dashboard visibility are required." } };
+        return;
+      }
       const title = pick(b.title).trim();
       const laneId = pick(b.laneId).trim();
       const customerId = pick(b.customerId).trim();
@@ -226,6 +135,11 @@ module.exports = async function (context, req) {
       const pauseDurationMs = Object.prototype.hasOwnProperty.call(b, "pauseDurationMs")
         ? num(b.pauseDurationMs, 0)
         : null;
+      const clockAction = pick(b.workClockAction);
+      if (clockAction && !["check-in", "start", "pause", "resume"].includes(clockAction)) {
+        context.res = { status: 400, body: { error: "Invalid work clock action." } };
+        return;
+      }
 
       if (!rid && (!title || !laneId)) { context.res = { status: 400, headers: { "content-type": "application/json" }, body: { error: "title and laneId required" } }; return; }
 
@@ -241,6 +155,9 @@ module.exports = async function (context, req) {
           title,
           laneId,
           customerId,
+          source: pick(b.source).trim() === "phone" ? "phone" : "",
+          leadSource: pick(b.source).trim() === "phone" ? "phone" : "",
+          message: pick(b.message).trim().slice(0, 1200),
           vin: "",
           vehicleYear: "",
           vehicleMake: "",
@@ -260,10 +177,32 @@ module.exports = async function (context, req) {
         context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true, id: rowKey } };
         return;
       } else {
-        const existing = await items.getEntity(tenantId, rid);
+        let existing = null;
+        try {
+          existing = await items.getEntity(tenantId, rid);
+        } catch (e) {
+          context.res = {
+            status: 404,
+            headers: { "content-type": "application/json" },
+            body: { error: "Work item not found", detail: "This card no longer exists for the current location. Refresh the dashboard and try again." }
+          };
+          return;
+        }
+        if (changeDashboardVisibility) {
+          await items.upsertEntity({ partitionKey: tenantId, rowKey: rid, dashboardHidden: b.dashboardHidden }, "Merge");
+          context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true, id: rid } };
+          return;
+        }
         const prevLane = pick(existing.laneId);
         const moved = laneId && laneId !== prevLane;
         const patch = { partitionKey: tenantId, rowKey: rid, updatedAt: new Date().toISOString() };
+        if (b.markPickedUp === true) {
+          if (!existing.jobId || !existing.completedAt) {
+            context.res = { status: 409, body: { error: "Complete this job before marking it picked up." } };
+            return;
+          }
+          patch.pickedUpAt = pick(existing.pickedUpAt) || patch.updatedAt;
+        }
         if (title) patch.title = title;
         if (laneId) patch.laneId = laneId;
         if (customerId) patch.customerId = customerId;
@@ -274,26 +213,59 @@ module.exports = async function (context, req) {
         if (vehicleTrim !== null) patch.vehicleTrim = vehicleTrim;
         if (checkedInAt !== null) patch.checkedInAt = checkedInAt;
         if (completedAt !== null) patch.completedAt = completedAt;
+        if (completedAt === "" && existing.completedAt) patch.pickedUpAt = "";
         if (calendarOverrideAt !== null) patch.calendarOverrideAt = calendarOverrideAt;
         if (isPaused !== null) patch.isPaused = isPaused;
         if (pausedAt !== null) patch.pausedAt = pausedAt;
         if (lastWorkResumedAt !== null) patch.lastWorkResumedAt = lastWorkResumedAt;
         if (workDurationMs !== null) patch.workDurationMs = workDurationMs;
         if (pauseDurationMs !== null) patch.pauseDurationMs = pauseDurationMs;
+
+        if (clockAction === "check-in" && checkedInAt && !existing.checkedInAt) {
+          Object.assign(patch, {
+            workClockVersion: 2, checkedInAt: patch.updatedAt,
+            isPaused: false, pausedAt: "", lastWorkResumedAt: "", workDurationMs: 0, pauseDurationMs: 0
+          });
+        } else if (clockAction === "check-in") {
+          context.res = { status: 409, body: { error: "This job has already been checked in." } };
+          return;
+        } else if (existing.checkedInAt && !existing.completedAt && (clockAction || completedAt || isPaused !== null)) {
+          const calendar = makeShopCalendar(await readShopHours(conn, tenantId));
+          const now = Date.parse(patch.updatedAt);
+          const clock = workClock(existing, calendar, now);
+          if (clockAction === "start" && clock.state === "not-started") {
+            Object.assign(patch, { lastWorkResumedAt: patch.updatedAt, pausedAt: "", isPaused: false, workClockVersion: 2 });
+          } else if ((clockAction === "pause" || isPaused === true) && ["working", "after-hours"].includes(clock.state)) {
+            Object.assign(patch, { lastWorkResumedAt: "", pausedAt: patch.updatedAt, isPaused: true,
+              workDurationMs: clock.duration, workClockVersion: 2 });
+          } else if ((clockAction === "resume" || isPaused === false) && clock.state === "paused" && !completedAt && checkedInAt !== "") {
+            const pausedSince = Date.parse(existing.pausedAt);
+            Object.assign(patch, { lastWorkResumedAt: patch.updatedAt, pausedAt: "", isPaused: false,
+              workDurationMs: clock.duration,
+              pauseDurationMs: num(existing.pauseDurationMs) + (Number.isFinite(pausedSince) ? Math.max(0, now - pausedSince) : 0),
+              workClockVersion: 2 });
+          } else if (clockAction) {
+            context.res = { status: 409, body: { error: "Refresh the job before changing its work clock." } };
+            return;
+          }
+          if (completedAt) {
+            Object.assign(patch, { workDurationMs: clock.duration, isPaused: false, pausedAt: "", lastWorkResumedAt: "" });
+          }
+        } else if (clockAction) {
+          context.res = { status: 409, body: { error: "Check in this job before starting work." } };
+          return;
+        }
         await items.upsertEntity(patch, "Merge");
+        if (b.markPickedUp === true && existing.invoiceId) {
+          await rememberPortalClosure(tenantId, existing.invoiceId).catch(() => {});
+        }
         if (moved) {
           let max = 0;
           const iter = items.listEntities({ queryOptions: { filter: `PartitionKey eq '${tenantId}' and laneId eq '${laneId.replace(/'/g,"''")}'` } });
           for await (const e of iter) max = Math.max(max, num(e.sort));
           await items.upsertEntity({ partitionKey: tenantId, rowKey: rid, sort: max + 10 }, "Merge");
           await events.upsertEntity({ partitionKey: tenantId, rowKey: randomUUID(), type: "moved", workItemId: rid, fromLaneId: prevLane, toLaneId: laneId, at: new Date().toISOString() }, "Merge");
-          try {
-            const cust = customerId ? await customers.getEntity(tenantId, customerId) : null;
-            const customer = cust ? { name: pick(cust.name), email: pick(cust.email), phone: pick(cust.phone) } : null;
-            await notify(context, laneId, { id: rid, title }, customer);
-          } catch (e) {
-            context.log(`notify error ${String(e)}`);
-          }
+
         }
         context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true, id: rid, moved } };
         return;
@@ -301,6 +273,15 @@ module.exports = async function (context, req) {
     }
 
     if (method === "DELETE" && id) {
+      try {
+        const item = await items.getEntity(tenantId, id);
+        if (item.jobId) {
+          context.res = { status: 409, body: { error: "Paid jobs remain in the service history." } };
+          return;
+        }
+      } catch (error) {
+        if (error.statusCode !== 404) throw error;
+      }
       await items.deleteEntity(tenantId, id);
       await events.upsertEntity({ partitionKey: tenantId, rowKey: randomUUID(), type: "deleted", workItemId: id, at: new Date().toISOString() }, "Merge");
       context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true } };

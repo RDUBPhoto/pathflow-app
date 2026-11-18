@@ -2,6 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import AppComponent from './app.component';
 import { AuthService } from './auth/auth.service';
 import { ThemeService } from './services/theme.service';
+import { BrandSettingsService } from './services/brand-settings.service';
 import { provideRouter } from '@angular/router';
 
 describe('AppComponent', () => {
@@ -12,13 +13,19 @@ describe('AppComponent', () => {
     } as unknown as AuthService;
 
     const themeStub = {} as ThemeService;
+    const brandingStub = {
+      loaded: () => false,
+      logoUrl: () => '',
+      hasCustomLogo: () => false
+    } as unknown as BrandSettingsService;
 
     await TestBed.configureTestingModule({
       imports: [AppComponent],
       providers: [
         provideRouter([]),
         { provide: AuthService, useValue: authStub },
-        { provide: ThemeService, useValue: themeStub }
+        { provide: ThemeService, useValue: themeStub },
+        { provide: BrandSettingsService, useValue: brandingStub }
       ]
     }).compileComponents();
   });

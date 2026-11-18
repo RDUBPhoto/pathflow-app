@@ -1,42 +1,48 @@
-<ion-header class="glass-header">
-  <ion-toolbar>
-    <ion-buttons slot="start">
+<header class="ui-header app-header">
+  <div class="ui-toolbar">
+    <div class="ui-buttons" slot="start">
       <app-page-back-button></app-page-back-button>
-    </ion-buttons>
-    <ion-title>Customers</ion-title>
-    <app-company-switcher></app-company-switcher>
-    <ion-buttons slot="end" class="ion-margin-end">
-      <app-user-menu></app-user-menu>
-    </ion-buttons>
-  </ion-toolbar>
-</ion-header>
-
-<ion-content class="ion-padding glass-bg customers-content">
-  <section class="duplicates-bar glass-surface" *ngIf="duplicateTotal() > 0">
-    <div class="duplicates-copy">
-      <strong>Duplicates found</strong>
-      <span>{{ duplicateTotal() }} potential duplicate pair{{ duplicateTotal() === 1 ? '' : 's' }}</span>
     </div>
-    <ion-button size="small" color="warning" (click)="openDuplicateReview()">Review</ion-button>
-  </section>
+    <h1 class="ui-title">Customers</h1>
+    <app-company-switcher></app-company-switcher>
+    <div slot="end" class="ui-buttons me-2">
+      <app-user-menu></app-user-menu>
+    </div>
+  </div>
+</header>
+
+<div class="ui-content app-padding app-content customers-content">
+  @if (duplicateTotal() > 0) {
+    <section class="duplicates-bar app-surface">
+      <div class="duplicates-copy">
+        <strong>Duplicates found</strong>
+        <span>{{ duplicateTotal() }} potential duplicate pair{{ duplicateTotal() === 1 ? '' : 's' }}</span>
+      </div>
+      <button class="btn ui-button btn-warning btn-sm" type="button" (click)="openDuplicateReview()">Review</button>
+    </section>
+  }
 
   <div class="customers-toolbar">
-    <ion-item class="search-item">
-      <ion-label position="stacked">Search</ion-label>
+    <div class="ui-item search-item">
+      <span class="ui-label">Search</span>
       <div class="search-row">
-        <ion-input
+        <ui-input
           placeholder="Name, phone, email, year/make/model"
           [ngModel]="searchTerm()"
           (ngModelChange)="onSearchChange($event)">
-        </ion-input>
-        <ion-button class="clear-search-btn" size="small" fill="clear" (click)="clearSearch()" [disabled]="!searchTerm()">Clear</ion-button>
+        </ui-input>
+        <button type="button" class="btn ui-button btn-ghost-primary btn-sm clear-search-btn" (click)="clearSearch()" [disabled]="!searchTerm()">Clear</button>
       </div>
-    </ion-item>
+    </div>
 
     <div class="toolbar-actions">
-      <ion-button size="small" (click)="openAdd()">Add Customer</ion-button>
-      <ion-spinner name="crescent" *ngIf="loading()"></ion-spinner>
-      <span class="status-text" *ngIf="!loading() && status()">{{ status() }}</span>
+      <button class="btn ui-button btn-primary btn-sm" type="button" (click)="openAdd()">Add Customer</button>
+      @if (loading()) {
+        <span class="spinner-border spinner-border-sm ui-spinner" role="status" aria-label="Loading"></span>
+      }
+      @if (!loading() && status()) {
+        <span class="status-text">{{ status() }}</span>
+      }
     </div>
   </div>
 
@@ -46,50 +52,66 @@
         <tr>
           <th (click)="setSort('name')">
             Name
-            <span *ngIf="sortKey() === 'name'">{{ sortDir() === 'asc' ? '▲' : '▼' }}</span>
+            @if (sortKey() === 'name') {
+              <span>{{ sortDir() === 'asc' ? '▲' : '▼' }}</span>
+            }
           </th>
           <th (click)="setSort('phone')">
             Phone
-            <span *ngIf="sortKey() === 'phone'">{{ sortDir() === 'asc' ? '▲' : '▼' }}</span>
+            @if (sortKey() === 'phone') {
+              <span>{{ sortDir() === 'asc' ? '▲' : '▼' }}</span>
+            }
           </th>
           <th (click)="setSort('email')">
             Email
-            <span *ngIf="sortKey() === 'email'">{{ sortDir() === 'asc' ? '▲' : '▼' }}</span>
+            @if (sortKey() === 'email') {
+              <span>{{ sortDir() === 'asc' ? '▲' : '▼' }}</span>
+            }
           </th>
           <th>Vehicle</th>
         </tr>
       </thead>
       <tbody>
-        <tr class="data-row" *ngFor="let c of pagedCustomers(); trackBy: trackCustomer" (click)="openEdit(c)">
-          <td>{{ c.name || 'Unnamed' }}</td>
-          <td>
-            <button
-              type="button"
-              class="phone-link-btn"
-              *ngIf="c.phone; else noCustomerPhone"
-              (click)="openSmsForCustomer(c, $event)">
-              {{ c.phone }}
-            </button>
-            <ng-template #noCustomerPhone>—</ng-template>
-          </td>
-          <td>{{ c.email || c.secondaryEmail || '—' }}</td>
-          <td>{{ vehicleSummaryFor(c) || '—' }}</td>
-        </tr>
-        <tr *ngIf="!loading() && !pagedCustomers().length">
-          <td class="empty-row" colspan="4">No customers found</td>
-        </tr>
+        @for (c of pagedCustomers(); track trackCustomer($index, c)) {
+          <tr class="data-row" (click)="openEdit(c)">
+            <td>{{ c.name || 'Unnamed' }}</td>
+            <td>
+              @if (c.phone) {
+                <button
+                  type="button"
+                  class="phone-link-btn"
+                  (click)="openSmsForCustomer(c, $event)">
+                  {{ c.phone }}
+                </button>
+              } @else {
+                —
+              }
+            </td>
+            <td>{{ c.email || c.secondaryEmail || '—' }}</td>
+            <td>{{ vehicleSummaryFor(c) || '—' }}</td>
+          </tr>
+        }
+        @if (!loading() && !pagedCustomers().length) {
+          <tr>
+            <td class="empty-row" colspan="4">No customers found</td>
+          </tr>
+        }
       </tbody>
     </table>
   </div>
 
-  <div class="table-pager" *ngIf="filtered().length > 0">
-    <ion-button size="small" fill="outline" (click)="prevPage()" [disabled]="page() <= 1">Previous</ion-button>
-    <span>Page {{ page() }} of {{ totalPages() }}</span>
-    <ion-button size="small" fill="outline" (click)="nextPage()" [disabled]="page() >= totalPages()">Next</ion-button>
-  </div>
+  @if (filtered().length > 0) {
+    <div class="table-pager">
+      <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="prevPage()" [disabled]="page() <= 1">Previous</button>
+      <span>Page {{ page() }} of {{ totalPages() }}</span>
+      <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="nextPage()" [disabled]="page() >= totalPages()">Next</button>
+    </div>
+  }
 
   <div class="summary-line">
     Showing {{ pageStart() }}-{{ pageEnd() }} of {{ filtered().length }}
-    <span *ngIf="searchTerm()"> for "{{ searchTerm() }}"</span>
+    @if (searchTerm()) {
+      <span> for "{{ searchTerm() }}"</span>
+    }
   </div>
-</ion-content>
+</div>

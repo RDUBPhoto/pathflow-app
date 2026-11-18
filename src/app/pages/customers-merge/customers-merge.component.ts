@@ -1,17 +1,8 @@
-import { Component, OnDestroy, OnInit, computed, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { UiBadge } from '../../ui/controls';
+import { Component, OnDestroy, OnInit, computed, signal, ChangeDetectionStrategy } from '@angular/core';
+
 import { ActivatedRoute, Router } from '@angular/router';
 import { Subscription, finalize } from 'rxjs';
-import {
-  IonBadge,
-  IonButton,
-  IonButtons,
-  IonContent,
-  IonHeader,
-  IonSpinner,
-  IonTitle,
-  IonToolbar
-} from '@ionic/angular/standalone';
 import {
   Customer,
   CustomersApi,
@@ -28,20 +19,13 @@ type CustomerMap = Record<string, Customer>;
   selector: 'app-customers-merge',
   standalone: true,
   imports: [
-    CommonModule,
-    IonHeader,
-    IonToolbar,
-    IonTitle,
-    IonButtons,
-    IonContent,
-    IonButton,
-    IonSpinner,
-    IonBadge,
+    UiBadge,
     UserMenuComponent,
     PageBackButtonComponent,
     CompanySwitcherComponent
-  ],
+],
   templateUrl: './customers-merge.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./customers-merge.component.scss']
 })
 export default class CustomersMergeComponent implements OnInit, OnDestroy {

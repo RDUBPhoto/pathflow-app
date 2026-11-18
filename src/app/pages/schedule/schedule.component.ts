@@ -1,11 +1,8 @@
-import { Component, ViewChild, signal, computed, AfterViewInit, OnDestroy, ElementRef } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { UiModal } from '../../ui/overlays';
+import { UiCheckbox, UiInput, UiTextarea } from '../../ui/controls';
+import { Component, ViewChild, signal, computed, AfterViewInit, OnDestroy, ElementRef, ChangeDetectionStrategy } from '@angular/core';
+
 import { FormsModule } from '@angular/forms';
-import {
-  IonHeader, IonToolbar, IonTitle, IonContent, IonButtons, IonButton,
-  IonModal, IonItem, IonLabel, IonSelect, IonSelectOption,
-  IonInput, IonTextarea, IonCheckbox, IonSpinner, IonFooter
-} from '@ionic/angular/standalone';
 import { ActivatedRoute } from '@angular/router';
 import { DayPilot, DayPilotModule, DayPilotMonthComponent, DayPilotSchedulerComponent } from '@daypilot/daypilot-lite-angular';
 import { CustomersApi, Customer } from '../../services/customers-api.service';
@@ -14,9 +11,18 @@ import { UserMenuComponent } from '../../components/user/user-menu/user-menu.com
 import { PageBackButtonComponent } from '../../components/navigation/page-back-button/page-back-button.component';
 import { AppSettingsApiService } from '../../services/app-settings-api.service';
 import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
-import { formatLocalDateTime, toLocalDateTimeInput, toLocalDateTimeStorage } from '../../utils/datetime-local';
+import { toLocalDateTimeInput, toLocalDateTimeStorage } from '../../utils/datetime-local';
+import {
+  DEFAULT_SHOP_TIME_ZONE, formatShopAppointment, normalizeShopTimeZone, SCHEDULE_SETTINGS_KEY,
+  shopCalendarIso, shopTimeMillis, shopWallTime
+} from '../../utils/shop-time';
 import { UserScopedSettingsService } from '../../services/user-scoped-settings.service';
 import { InvoicesDataService, InvoiceDetail } from '../../services/invoices-data.service';
+import { CustomerPortalApi } from '../../services/customer-portal-api.service';
+import { SmsApiService } from '../../services/sms-api.service';
+import { EmailApiService } from '../../services/email-api.service';
+import { BusinessProfileService } from '../../services/business-profile.service';
+import { firstValueFrom } from 'rxjs';
 
 type UICustomer = Customer & {
   vehicleYear?: string;
@@ -39,28 +45,30 @@ type ScheduleSettings = {
   bays: Bay[];
   openHour: number;
   closeHour: number;
+  timeZone?: string;
   showWeekends: boolean;
   holidays: string[];
   federalYear: number;
   federalInitialized: boolean;
 };
-const SCHEDULE_SETTINGS_KEY = 'schedule.settings';
 const SCHEDULE_VIEW_MODE_KEY = 'schedule.viewMode';
-const SCHEDULE_VIEW_ANCHOR_KEY = 'schedule.viewStart';
 
 @Component({
   selector: 'app-schedule',
   standalone: true,
   imports: [
-    CommonModule, FormsModule, DayPilotModule,
-    IonHeader, IonToolbar, IonTitle, IonContent, IonButtons, IonButton,
-    IonModal, IonItem, IonLabel, IonSelect, IonSelectOption,
-    IonInput, IonTextarea, IonCheckbox, IonSpinner, IonFooter,
+    FormsModule,
+    DayPilotModule,
+    UiModal,
+    UiInput,
+    UiTextarea,
+    UiCheckbox,
     UserMenuComponent,
     PageBackButtonComponent,
-    CompanySwitcherComponent,
-  ],
+    CompanySwitcherComponent
+],
   templateUrl: './schedule.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./schedule.component.scss']
 })
 export default class ScheduleComponent implements AfterViewInit, OnDestroy {
@@ -77,7 +85,6 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
   private readonly weekMinCellWidth = 172;
   private readonly dayCellWidth = 72;
   private readonly monthMinCellHeight = 84;
-  private readonly monthMaxCellHeight = 118;
   private readonly statusAutoDismissMs = 5000;
   private statusDismissTimer: ReturnType<typeof setTimeout> | null = null;
   private nowLineTimer: ReturnType<typeof setInterval> | null = null;
@@ -86,6 +93,8 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
 
   @ViewChild('scheduler') scheduler?: DayPilotSchedulerComponent;
   @ViewChild('month') month?: DayPilotMonthComponent;
+  @ViewChild('scheduleContent', { read: ElementRef }) scheduleContent?: ElementRef<HTMLElement>;
+  @ViewChild('scheduleControls', { read: ElementRef }) scheduleControls?: ElementRef<HTMLElement>;
   @ViewChild('scheduleShell', { read: ElementRef }) scheduleShell?: ElementRef<HTMLElement>;
 
   loading = signal(false);
@@ -113,6 +122,13 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
   editorRepeatCount = signal(1);
   editorError = signal('');
   private editorInitialSnapshot = signal('');
+  appointmentInfoModalOpen = signal(false);
+  appointmentInfoSchedule = signal<ScheduleItem | null>(null);
+  appointmentInfoSendEmail = signal(true);
+  appointmentInfoSendSms = signal(true);
+  appointmentInfoMessage = signal('');
+  appointmentInfoSending = signal(false);
+  appointmentInfoError = signal('');
 
   settingsOpen = signal(false);
   settingsBays = signal<Bay[]>([]);
@@ -120,6 +136,8 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
   settingsCloseHour = signal(16);
   settingsShowWeekends = signal(false);
   settingsHolidays = signal<string[]>([]);
+  readonly shopTimeZone = signal(DEFAULT_SHOP_TIME_ZONE);
+  private settingsLoaded = false;
   settingsFederalYear = signal(new Date().getFullYear());
   federalHolidayList = signal<{ date: string; name: string }[]>([]);
   newHolidayDate = signal('');
@@ -178,16 +196,16 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
   });
   readonly viewRangeLabel = computed(() => {
     const mode = this.viewMode();
-    const start = this.currentViewStartDate();
+    const anchor = this.currentViewAnchorDate();
     if (mode === 'month') {
-      return this.currentViewAnchorDate().toString('MMMM yyyy');
+      return anchor.toString('MMMM yyyy');
     }
     if (mode === 'week') {
-      const dayCount = this.settingsShowWeekends() ? 7 : 5;
-      const end = start.addDays(dayCount - 1);
+      const start = this.alignStartForMode(anchor, mode);
+      const end = start.addDays(this.weekDayCount(anchor) - 1);
       return `${start.toString('MMM d')} - ${end.toString('MMM d, yyyy')}`;
     }
-    return start.toString('dddd, MMM d, yyyy');
+    return anchor.toString('dddd, MMM d, yyyy');
   });
   readonly monthViewLabel = computed(() => this.currentViewAnchorDate().toString('MMMM yyyy'));
   readonly isMonthView = computed(() => this.viewMode() === 'month');
@@ -224,9 +242,9 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     headerHeight: 40,
     rowMarginTop: 10,
     rowMarginBottom: 10,
-    eventHeight: 60,
+    eventHeight: 80,
     heightSpec: 'Fixed',
-    height: 600,
+    height: 500,
     onTimeRangeSelected: args => {
       if (this.isHoliday(args.start)) {
         this.setStatusError('Closed for holiday.');
@@ -238,11 +256,13 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
       const end = args.end;
       const minEnd = start.addHours(4);
       const finalEnd = (end.getTime() - start.getTime()) < 4 * 60 * 60 * 1000 ? minEnd : end;
+      const planningCustomerId = this.planningCustomerId();
       this.openEditor({
         id: null,
         start: start.toString(),
         end: finalEnd.toString(),
-        resource: String(args.resource)
+        resource: String(args.resource),
+        customerId: planningCustomerId || undefined
       });
     },
     onEventClick: args => {
@@ -359,6 +379,8 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     eventResizeHandling: 'Disabled',
     timeRangeSelectedHandling: 'Disabled',
     weekStarts: 0,
+    headerHeight: 30,
+    cellHeight: this.monthMinCellHeight,
     eventHeight: 15,
     width: '100%',
     onBeforeCellRender: args => {
@@ -392,7 +414,8 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
       cellProps.headerFontColor = dayColor;
       cellProps.headerBackColor = 'transparent';
       const dayWeight = isToday ? 800 : 700;
-      const dayHtml = `<span style="font-weight:${dayWeight};color:${dayColor}">${day}</span>`;
+      const currentDate = isToday ? ' aria-current="date"' : '';
+      const dayHtml = `<span${currentDate} style="font-weight:${dayWeight};color:${dayColor}">${day}</span>`;
       const holidayHtml = holidayLabel
         ? `<div style="margin-top:1px;font-size:8px;line-height:1.1;color:${metaColor};max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${this.escapeHtml(holidayLabel)}</div>`
         : '';
@@ -450,12 +473,13 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     private settingsApi: AppSettingsApiService,
     private userSettings: UserScopedSettingsService,
     private invoicesData: InvoicesDataService,
+    private smsApi: SmsApiService,
+    private emailApi: EmailApiService,
+    private businessProfile: BusinessProfileService,
+    private customerPortal: CustomerPortalApi,
     private route: ActivatedRoute
   ) {
-    this.applySettings(this.defaultSettings());
     this.loadPersistedSettings();
-    this.loadPersistedCalendarView();
-    this.loadAll();
     this.route.queryParamMap.subscribe(params => {
       const id = params.get('customerId');
       const autoOpenRaw = (params.get('autoOpen') || '').trim().toLowerCase();
@@ -475,87 +499,54 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
 
   ngAfterViewInit() {
     this.applyViewConfig(false);
-    this.updateSchedulerHeight();
     this.startNowLineTimer();
-    if (this.scheduleShell?.nativeElement) {
-      this.resizeObserver = new ResizeObserver(() => {
-        this.applyViewConfig(false);
-        this.updateSchedulerHeight();
-      });
-      this.resizeObserver.observe(this.scheduleShell.nativeElement);
+    this.resizeObserver = new ResizeObserver(() => {
+      if (this.isMonthView()) this.scheduleMonthViewportHeightUpdate();
+      else this.applyViewConfig(false);
+    });
+    for (const element of [this.scheduleContent, this.scheduleControls, this.scheduleShell]) {
+      if (element) this.resizeObserver.observe(element.nativeElement);
     }
   }
 
   ngOnDestroy() {
-    if (this.resizeObserver && this.scheduleShell?.nativeElement) {
-      this.resizeObserver.unobserve(this.scheduleShell.nativeElement);
-      this.resizeObserver.disconnect();
-    }
-    this.resizeObserver = null;
+    this.resizeObserver?.disconnect();
+    if (this.monthViewportFrame !== null) cancelAnimationFrame(this.monthViewportFrame);
     this.clearStatusTimer();
     this.stopNowLineTimer();
     this.clearNowLineScrollListener();
   }
 
   private resizeObserver: ResizeObserver | null = null;
+  private monthViewportFrame: number | null = null;
 
-  private updateSchedulerHeight() {
-    if (this.viewMode() === 'month') {
-      this.hideNowLine();
-      return;
-    }
-    const shell = this.scheduleShell?.nativeElement;
-    if (!shell) {
-      this.hideNowLine();
-      return;
-    }
-    const height = Math.max(420, shell.clientHeight);
-    const rows = Math.max(1, this.resources().length);
-    const header = this.config.headerHeight ?? 40;
-    const timeHeaderRows = this.config.timeHeaders?.length ?? 1;
-    const timeHeaderHeight = 26 * timeHeaderRows;
-    const available = Math.max(240, height - header - timeHeaderHeight - 12);
-    const rowHeight = Math.max(80, Math.floor(available / rows));
-    const eventHeight = Math.max(40, rowHeight - ((this.config.rowMarginTop ?? 0) + (this.config.rowMarginBottom ?? 0)));
-    shell.style.setProperty('--row-height', `${rowHeight}px`);
-    this.config.height = height;
-    this.config.eventHeight = eventHeight;
-    if (this.scheduler?.control) {
-      this.scheduler.control.update({ height, heightSpec: 'Fixed', eventHeight });
-    }
-    this.syncNowLine();
-  }
-
-  private updateMonthViewportHeight(monthStart?: DayPilot.Date): void {
-    if (this.viewMode() !== 'month') return;
+  private updateMonthViewportHeight(): void {
+    if (!this.isMonthView()) return;
+    const content = this.scheduleContent?.nativeElement;
     const shell = this.scheduleShell?.nativeElement;
     const monthShell = shell?.querySelector<HTMLElement>('.month-shell');
-    if (!monthShell) return;
+    if (!content || !shell || !monthShell) return;
 
-    const anchor = (monthStart ? monthStart.getDatePart() : this.currentViewAnchorDate()).firstDayOfMonth();
-    const weekCount = this.resolveMonthWeekCount(anchor);
-    const effectiveRows = Math.max(5, weekCount);
-    const headerHeight = this.monthConfig.headerHeight ?? 32;
-    const shellHeight = Math.max(320, monthShell.clientHeight);
-    const usable = Math.max(240, shellHeight - headerHeight - 2);
-    const calculatedHeight = Math.floor(usable / effectiveRows);
-    const cellHeight = Math.min(this.monthMaxCellHeight, Math.max(this.monthMinCellHeight, calculatedHeight));
-
-    this.monthConfig.startDate = anchor;
+    const monthTop = monthShell.getBoundingClientRect().top - content.getBoundingClientRect().top + content.scrollTop;
+    const shellStyle = getComputedStyle(shell);
+    const monthStyle = getComputedStyle(monthShell);
+    const insets = parseFloat(getComputedStyle(content).paddingBottom) + parseFloat(shellStyle.paddingBottom)
+      + parseFloat(shellStyle.borderBottomWidth) + parseFloat(monthStyle.borderTopWidth)
+      + parseFloat(monthStyle.borderBottomWidth);
+    const available = content.clientHeight - monthTop - insets - (this.monthConfig.headerHeight ?? 30);
+    const weekCount = this.resolveMonthWeekCount(this.currentViewAnchorDate());
+    const cellHeight = Math.max(this.monthMinCellHeight, Math.floor(available / weekCount));
+    if (this.monthConfig.cellHeight === cellHeight) return;
     this.monthConfig.cellHeight = cellHeight;
-    if (this.month?.control) {
-      this.month.control.update({
-        startDate: anchor,
-        cellHeight,
-        width: '100%'
-      });
-    }
+    this.month?.control.update({ cellHeight });
   }
 
-  private scheduleMonthViewportHeightUpdate(monthStart?: DayPilot.Date): void {
-    const target = (monthStart ? monthStart.getDatePart() : this.currentViewAnchorDate()).firstDayOfMonth();
-    this.updateMonthViewportHeight(target);
-    requestAnimationFrame(() => this.updateMonthViewportHeight(target));
+  private scheduleMonthViewportHeightUpdate(): void {
+    if (this.monthViewportFrame !== null) return;
+    this.monthViewportFrame = requestAnimationFrame(() => {
+      this.monthViewportFrame = null;
+      this.updateMonthViewportHeight();
+    });
   }
 
   private resolveMonthWeekCount(monthStart: DayPilot.Date): number {
@@ -575,7 +566,7 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     if (this.viewMode() === mode) return;
     const anchor = this.currentViewAnchorDate();
     this.viewMode.set(mode);
-    this.persistCalendarView();
+    this.persistCalendarViewMode();
     this.applyViewConfig(true, anchor);
   }
 
@@ -585,8 +576,6 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     const next = mode === 'month'
       ? anchor.addMonths(-1)
       : (mode === 'week' ? anchor.addDays(-7) : anchor.addDays(-1));
-    this.viewAnchor.set(next.getDatePart().toString());
-    this.persistCalendarViewAnchor();
     this.applyViewConfig(true, next);
   }
 
@@ -596,21 +585,11 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     const next = mode === 'month'
       ? anchor.addMonths(1)
       : (mode === 'week' ? anchor.addDays(7) : anchor.addDays(1));
-    this.viewAnchor.set(next.getDatePart().toString());
-    this.persistCalendarViewAnchor();
     this.applyViewConfig(true, next);
   }
 
   jumpToToday(): void {
-    const today = this.localTodayDatePart();
-    const currentMode = this.viewMode();
-    if (currentMode === 'week' && !this.settingsShowWeekends() && this.isWeekendDay(today)) {
-      this.viewMode.set('day');
-      this.setStatusSuccess('Week view hides weekends. Switched to Day view for today.');
-    }
-    this.viewAnchor.set(today.toString());
-    this.persistCalendarView();
-    this.applyViewConfig(true, today);
+    this.applyViewConfig(true, this.localTodayDatePart());
   }
 
   isCalendarView(mode: CalendarViewMode): boolean {
@@ -628,6 +607,7 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
       ],
       openHour: 7,
       closeHour: 16,
+      timeZone: DEFAULT_SHOP_TIME_ZONE,
       showWeekends: false,
       holidays: [],
       federalYear: new Date().getFullYear(),
@@ -637,35 +617,17 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
 
   private loadPersistedSettings(): void {
     this.settingsApi.getValue<ScheduleSettings>(SCHEDULE_SETTINGS_KEY).subscribe(value => {
-      if (!value) return;
       this.applySettings(this.normalizeSettings(value));
+      this.settingsLoaded = true;
+      this.loadPersistedCalendarView();
+      this.loadAll();
     });
   }
 
   private loadPersistedCalendarView(): void {
-    const today = this.localTodayDatePart();
-    this.userSettings.getValue<string>(SCHEDULE_VIEW_MODE_KEY).subscribe({
-      next: modeValue => {
-        const parsedMode = this.parseCalendarViewMode(modeValue);
-        this.userSettings.getValue<string>(SCHEDULE_VIEW_ANCHOR_KEY).subscribe({
-          next: anchorValue => {
-            const parsedAnchor = this.parseCalendarViewAnchor(anchorValue, today);
-            this.viewMode.set(parsedMode);
-            this.viewAnchor.set(parsedAnchor.toString());
-            this.applyViewConfig(false, parsedAnchor);
-          },
-          error: () => {
-            this.viewMode.set(parsedMode);
-            this.viewAnchor.set(today.toString());
-            this.applyViewConfig(false, today);
-          }
-        });
-      },
-      error: () => {
-        this.viewMode.set('day');
-        this.viewAnchor.set(today.toString());
-        this.applyViewConfig(false, today);
-      }
+    this.userSettings.getValue<string>(SCHEDULE_VIEW_MODE_KEY).subscribe(mode => {
+      this.viewMode.set(this.parseCalendarViewMode(mode));
+      this.jumpToToday();
     });
   }
 
@@ -675,19 +637,6 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     return 'day';
   }
 
-  private parseCalendarViewAnchor(value: unknown, fallback: DayPilot.Date): DayPilot.Date {
-    const raw = String(value || '').trim();
-    if (!raw) return fallback;
-    try {
-      const parsed = new DayPilot.Date(raw).getDatePart();
-      const token = parsed.toString('yyyy-MM-dd');
-      if (!token || token === 'NaN-NaN-NaN') return fallback;
-      return parsed;
-    } catch {
-      return fallback;
-    }
-  }
-
   private normalizeSettings(value: unknown): ScheduleSettings {
     const parsed = value && typeof value === 'object' ? (value as Partial<ScheduleSettings>) : {};
     const base = this.defaultSettings();
@@ -695,6 +644,7 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
       bays: Array.isArray(parsed.bays) && parsed.bays.length ? parsed.bays : base.bays,
       openHour: Number.isFinite(parsed.openHour) ? Number(parsed.openHour) : base.openHour,
       closeHour: Number.isFinite(parsed.closeHour) ? Number(parsed.closeHour) : base.closeHour,
+      timeZone: normalizeShopTimeZone(parsed.timeZone),
       showWeekends: typeof parsed.showWeekends === 'boolean' ? parsed.showWeekends : base.showWeekends,
       holidays: Array.isArray(parsed.holidays) ? parsed.holidays.map(v => String(v || '')) : base.holidays,
       federalYear: Number.isFinite(parsed.federalYear) ? Number(parsed.federalYear) : base.federalYear,
@@ -702,11 +652,8 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     };
   }
 
-  private persistSettings(s: ScheduleSettings) {
-    this.settingsApi.setValue(SCHEDULE_SETTINGS_KEY, s).subscribe({ error: () => {} });
-  }
-
   private applySettings(s: ScheduleSettings) {
+    this.shopTimeZone.set(normalizeShopTimeZone(s.timeZone));
     this.settingsBays.set(s.bays);
     this.settingsOpenHour.set(s.openHour);
     this.settingsCloseHour.set(s.closeHour);
@@ -717,10 +664,7 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     this.federalHolidayList.set(fed);
     if (!s.federalInitialized && fed.length) {
       const merged = Array.from(new Set([...s.holidays, ...fed.map(f => f.date)])).sort();
-      s.holidays = merged;
-      s.federalInitialized = true;
       this.settingsHolidays.set(merged);
-      this.persistSettings(s);
     }
 
     const resources = s.bays.map(b => ({ id: b.id, name: b.name }));
@@ -739,7 +683,7 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
         businessWeekends: s.showWeekends
       });
     }
-    this.updateSchedulerHeight();
+    this.syncNowLine();
   }
 
   private applyViewConfig(ensureVisible: boolean, anchorDate?: DayPilot.Date): void {
@@ -749,15 +693,14 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     const start = this.alignStartForMode(anchor, mode);
 
     if (mode === 'month') {
-      const monthStart = anchor.firstDayOfMonth();
-      this.monthConfig.startDate = monthStart;
-      this.scheduleMonthViewportHeightUpdate(monthStart);
+      this.monthConfig.startDate = start;
+      this.month?.control.update({ startDate: start });
+      this.scheduleMonthViewportHeightUpdate();
       this.hideNowLine();
       return;
     }
 
-    const showWeekends = this.settingsShowWeekends();
-    const days = mode === 'week' ? (showWeekends ? 7 : 5) : 1;
+    const days = mode === 'week' ? this.weekDayCount(anchor) : 1;
     const scale: DayPilot.SchedulerConfig['scale'] = mode === 'week' ? 'Day' : 'Hour';
     const timeHeaders: DayPilot.SchedulerConfig['timeHeaders'] = mode === 'week'
       ? [
@@ -792,7 +735,7 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
         this.scrollToAnchor(anchor, mode);
       }
     }
-    this.updateSchedulerHeight();
+    this.syncNowLine();
   }
 
   private startNowLineTimer(): void {
@@ -842,14 +785,15 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
 
     const scrollable = shell.querySelector<HTMLElement>('.scheduler_default_scrollable');
     const matrix = shell.querySelector<HTMLElement>('.scheduler_default_matrix');
-    if (!scrollable || !matrix) {
+    const stage = scrollable?.closest<HTMLElement>('.scheduler-stage');
+    if (!scrollable || !matrix || !stage) {
       this.hideNowLine();
       return;
     }
 
     this.bindNowLineScrollListener(scrollable);
 
-    const now = new DayPilot.Date(formatLocalDateTime(new Date()));
+    const now = new DayPilot.Date(shopWallTime(Date.now(), this.shopTimeZone()));
     const visibleStart = control.visibleStart();
     const visibleEnd = control.visibleEnd();
     if (!visibleStart || !visibleEnd) {
@@ -871,12 +815,12 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
       return;
     }
 
-    const shellRect = shell.getBoundingClientRect();
+    const stageRect = stage.getBoundingClientRect();
     const matrixRect = matrix.getBoundingClientRect();
     const scrollRect = scrollable.getBoundingClientRect();
-    const left = Math.round(matrixRect.left - shellRect.left + pixels.left);
-    const minLeft = Math.round(scrollRect.left - shellRect.left);
-    const maxLeft = Math.round(scrollRect.right - shellRect.left);
+    const left = Math.round(matrixRect.left - stageRect.left + pixels.left);
+    const minLeft = Math.round(scrollRect.left - stageRect.left);
+    const maxLeft = Math.round(scrollRect.right - stageRect.left);
 
     if (!Number.isFinite(left) || left < minLeft - 2 || left > maxLeft + 2) {
       this.hideNowLine();
@@ -884,7 +828,7 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     }
 
     this.nowLineLeft.set(left);
-    this.nowLineTop.set(Math.round(scrollRect.top - shellRect.top));
+    this.nowLineTop.set(Math.round(scrollRect.top - stageRect.top));
     this.nowLineHeight.set(Math.max(0, Math.round(scrollRect.height)));
     this.nowLineLabel.set(this.formatNowLineLabel());
     this.showNowLine.set(true);
@@ -892,15 +836,11 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
 
   private formatNowLineLabel(): string {
     const now = new Date();
-    return now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    return now.toLocaleTimeString([], { timeZone: this.shopTimeZone(), hour: 'numeric', minute: '2-digit' });
   }
 
   private currentViewAnchorDate(): DayPilot.Date {
     return new DayPilot.Date(this.viewAnchor()).getDatePart();
-  }
-
-  private currentViewStartDate(): DayPilot.Date {
-    return this.alignStartForMode(this.currentViewAnchorDate(), this.viewMode());
   }
 
   private alignStartForMode(start: DayPilot.Date, mode: CalendarViewMode): DayPilot.Date {
@@ -932,9 +872,12 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     return day === 0 || day === 6;
   }
 
+  private weekDayCount(anchor: DayPilot.Date): number {
+    return this.settingsShowWeekends() || this.isWeekendDay(anchor) ? 7 : 5;
+  }
+
   private localTodayDatePart(): DayPilot.Date {
-    const now = new Date();
-    return DayPilot.Date.fromYearMonthDay(now.getFullYear(), now.getMonth() + 1, now.getDate()).getDatePart();
+    return new DayPilot.Date(shopWallTime(Date.now(), this.shopTimeZone())).getDatePart();
   }
 
   private resolveVisibleAnchor(start: DayPilot.Date, days: number, mode: CalendarViewMode, preferred?: DayPilot.Date): DayPilot.Date {
@@ -974,17 +917,8 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     setTimeout(schedule, 35);
   }
 
-  private persistCalendarView(): void {
-    this.persistCalendarViewMode();
-    this.persistCalendarViewAnchor();
-  }
-
   private persistCalendarViewMode(): void {
     this.userSettings.setValue(SCHEDULE_VIEW_MODE_KEY, this.viewMode()).subscribe({ error: () => {} });
-  }
-
-  private persistCalendarViewAnchor(): void {
-    this.userSettings.setValue(SCHEDULE_VIEW_ANCHOR_KEY, this.viewAnchor()).subscribe({ error: () => {} });
   }
 
   private loadAll() {
@@ -1018,19 +952,20 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     const map = this.customersById();
     const list: DayPilot.EventData[] = [];
     const nowMs = Date.now();
+    const timeZone = this.shopTimeZone();
     for (const it of this.items()) {
-      const plannedEndMs = this.toMillis(it.end);
-      const actualEndMs = this.toMillis(it.actualEnd || '');
-      const releasedMs = this.toMillis(it.bayReleasedAt || '');
+      const plannedEndMs = shopTimeMillis(it.end, timeZone);
+      const actualEndMs = shopTimeMillis(it.actualEnd, timeZone);
+      const releasedMs = shopTimeMillis(it.bayReleasedAt, timeZone);
       let effectiveEndMs = plannedEndMs;
       if (actualEndMs && (!effectiveEndMs || actualEndMs < effectiveEndMs)) effectiveEndMs = actualEndMs;
       if (releasedMs && (!effectiveEndMs || releasedMs < effectiveEndMs)) effectiveEndMs = releasedMs;
-      const startMs = this.toMillis(it.start);
-      if (!startMs || !effectiveEndMs || effectiveEndMs <= startMs) continue;
-      const effectiveEndIso = new Date(effectiveEndMs).toISOString();
+      const startMs = shopTimeMillis(it.start, timeZone);
+      if (!Number.isFinite(startMs) || !Number.isFinite(effectiveEndMs) || effectiveEndMs <= startMs) continue;
+      const end = effectiveEndMs === plannedEndMs ? shopWallTime(it.end, timeZone) : shopWallTime(effectiveEndMs, timeZone);
       const isCompleted = !!releasedMs && releasedMs <= nowMs;
       const completedAtLabel = isCompleted
-        ? new Date(releasedMs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+        ? new Date(releasedMs).toLocaleTimeString([], { timeZone, hour: 'numeric', minute: '2-digit' })
         : '';
       const cust = it.customerId ? map[it.customerId] : null;
       const vehicle = cust ? this.vehicleLabel(cust) : '';
@@ -1039,8 +974,8 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
         : (cust ? `${cust.name || 'Unnamed'}${vehicle ? ' — ' + vehicle : ''}` : 'Unassigned');
       list.push({
         id: it.id,
-        start: it.start,
-        end: effectiveEndIso,
+        start: shopWallTime(it.start, timeZone),
+        end,
         resource: it.resource,
         text,
         toolTip: it.notes || '',
@@ -1063,7 +998,7 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
   }
 
   private tryOpenFromQuery() {
-    if (!this.pendingCustomerId) return;
+    if (!this.settingsLoaded || !this.pendingCustomerId) return;
     if (!this.resources().length) return;
     const slot = this.defaultSlot();
     this.openEditor({
@@ -1083,6 +1018,23 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     this.planningCustomerId.set(null);
   }
 
+  openManualPlanningEditor(): void {
+    const customerId = this.planningCustomerId();
+    if (!customerId) return;
+    const slot = this.defaultSlotForCustomer(customerId);
+    this.setCalendarView('day');
+    this.openEditor({
+      id: null,
+      start: slot.start,
+      end: slot.end,
+      resource: slot.resource,
+      customerId,
+      isBlocked: false,
+      title: '',
+      notes: ''
+    });
+  }
+
   useSuggestedSlot(slot: SuggestedSlot): void {
     const customerId = this.planningCustomerId();
     if (!customerId) return;
@@ -1090,14 +1042,14 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     const busyRows = (this.items() || [])
       .filter(item => String(item.resource || '') === String(slot.resource || ''))
       .map(item => ({
-        startMs: this.toMillis(item.start),
-        endMs: this.toMillis(item.end)
+        startMs: this.appointmentWallMillis(item.start),
+        endMs: this.appointmentWallMillis(item.end)
       }))
       .filter(row => row.startMs > 0 && row.endMs > row.startMs)
       .sort((a, b) => a.startMs - b.startMs);
 
-    const slotStartMs = this.toMillis(toLocalDateTimeStorage(slot.start));
-    const slotEndMs = this.toMillis(toLocalDateTimeStorage(slot.end));
+    const slotStartMs = this.appointmentWallMillis(slot.start);
+    const slotEndMs = this.appointmentWallMillis(slot.end);
     const slotDurationMs = slotStartMs && slotEndMs && slotEndMs > slotStartMs
       ? Math.max(minimumDurationMs, slotEndMs - slotStartMs)
       : minimumDurationMs;
@@ -1107,10 +1059,10 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     const segments = (slot.segments && slot.segments.length
       ? slot.segments
       : (computedSegments || []).map(segment => ({
-          start: formatLocalDateTime(new Date(segment.startMs)),
-          end: formatLocalDateTime(new Date(segment.endMs))
+          start: new Date(segment.startMs).toISOString().slice(0, 19),
+          end: new Date(segment.endMs).toISOString().slice(0, 19)
         })))
-      .filter(segment => this.toMillis(segment.start) && this.toMillis(segment.end) > this.toMillis(segment.start));
+      .filter(segment => this.appointmentWallMillis(segment.start) && this.appointmentWallMillis(segment.end) > this.appointmentWallMillis(segment.start));
 
     if (!segments.length) {
       this.setStatusError('No valid business-hour slot is available for this suggestion. Try another option.');
@@ -1132,6 +1084,7 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     }));
 
     let index = 0;
+    let firstCreatedSchedule: ScheduleItem | null = null;
     const createNext = () => {
       if (index >= payloads.length) {
         this.clearPlanningCustomer();
@@ -1139,13 +1092,22 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
         this.editorOpen.set(false);
         this.loadAll();
         this.setStatusSuccess('Appointment scheduled from suggested slot.');
+        if (firstCreatedSchedule) this.queueAppointmentInfoPrompt(firstCreatedSchedule);
         return;
       }
 
       const payload = payloads[index];
       index += 1;
       this.scheduleApi.create(payload).subscribe({
-        next: () => createNext(),
+        next: res => {
+          if (!firstCreatedSchedule) {
+            firstCreatedSchedule = {
+              id: String(res?.id || ''),
+              ...payload
+            };
+          }
+          createNext();
+        },
         error: () => {
           this.setStatusError('Could not schedule from suggested slot. Please try again.');
         }
@@ -1165,7 +1127,7 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     const intervalMs = 30 * 60 * 1000;
     const durationMs = this.resolveSuggestedDurationMs(customerId);
     const effectiveDurationMs = Math.max(intervalMs, durationMs);
-    const now = new Date();
+    const now = new Date(this.appointmentWallMillis(Date.now()));
     const startSearch = this.roundUpToInterval(now, intervalMs);
     const dayLimit = 21;
     const byResource = new Map<string, Array<{ startMs: number; endMs: number }>>();
@@ -1175,8 +1137,8 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     for (const item of this.items()) {
       const resourceId = String(item.resource || '').trim();
       if (!resourceId || !byResource.has(resourceId)) continue;
-      const startMs = this.toMillis(item.start);
-      const endMs = this.toMillis(item.end);
+      const startMs = this.appointmentWallMillis(item.start);
+      const endMs = this.appointmentWallMillis(item.end);
       if (!startMs || !endMs || endMs <= startMs) continue;
       byResource.get(resourceId)!.push({ startMs, endMs });
     }
@@ -1188,8 +1150,8 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     const suggestions: SuggestedSlot[] = [];
     for (let dayOffset = 0; dayOffset < dayLimit && suggestions.length < limit; dayOffset++) {
       const day = new Date(startSearch);
-      day.setDate(day.getDate() + dayOffset);
-      const dayPilotDate = DayPilot.Date.fromYearMonthDay(day.getFullYear(), day.getMonth() + 1, day.getDate());
+      day.setUTCDate(day.getUTCDate() + dayOffset);
+      const dayPilotDate = DayPilot.Date.fromYearMonthDay(day.getUTCFullYear(), day.getUTCMonth() + 1, day.getUTCDate());
       if (!this.settingsShowWeekends() && this.isWeekendDay(dayPilotDate)) continue;
       if (this.isHoliday(dayPilotDate)) continue;
 
@@ -1198,9 +1160,9 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
         const resourceId = String(resource.id);
         const resourceName = String(resource.name || resource.id || 'Bay');
         const dayStart = new Date(day);
-        dayStart.setHours(openHour, 0, 0, 0);
+        dayStart.setUTCHours(openHour, 0, 0, 0);
         const dayEnd = new Date(day);
-        dayEnd.setHours(closeHour, 0, 0, 0);
+        dayEnd.setUTCHours(closeHour, 0, 0, 0);
 
         let cursorMs = Math.max(dayStart.getTime(), startSearch.getTime());
         const busyRows = byResource.get(resourceId) || [];
@@ -1215,19 +1177,19 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
             const hoursLabel = this.formatDurationHoursLabel(
               segments.reduce((sum, segment) => sum + Math.max(0, segment.endMs - segment.startMs), 0)
             );
-            const spansDays = startDate.toDateString() !== endDate.toDateString();
+            const spansDays = startDate.toISOString().slice(0, 10) !== endDate.toISOString().slice(0, 10);
             const endLabel = spansDays
-              ? `${endDate.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })} ${endDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
-              : endDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-            const label = `${startDate.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })} · ${startDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} - ${endLabel} · ${resourceName} · ${hoursLabel}`;
+              ? `${endDate.toLocaleDateString([], { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' })} ${endDate.toLocaleTimeString([], { timeZone: 'UTC', hour: 'numeric', minute: '2-digit' })}`
+              : endDate.toLocaleTimeString([], { timeZone: 'UTC', hour: 'numeric', minute: '2-digit' });
+            const label = `${startDate.toLocaleDateString([], { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' })} · ${startDate.toLocaleTimeString([], { timeZone: 'UTC', hour: 'numeric', minute: '2-digit' })} - ${endLabel} · ${resourceName} · ${hoursLabel}`;
             suggestions.push({
-              start: formatLocalDateTime(new Date(firstSegment.startMs)),
-              end: formatLocalDateTime(new Date(lastSegment.endMs)),
+              start: startDate.toISOString().slice(0, 19),
+              end: endDate.toISOString().slice(0, 19),
               resource: resourceId,
               label,
               segments: segments.map(segment => ({
-                start: formatLocalDateTime(new Date(segment.startMs)),
-                end: formatLocalDateTime(new Date(segment.endMs))
+                start: new Date(segment.startMs).toISOString().slice(0, 19),
+                end: new Date(segment.endMs).toISOString().slice(0, 19)
               }))
             });
             break;
@@ -1266,7 +1228,7 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     while (remainingMs > 0 && guard < 500) {
       guard += 1;
       const current = new Date(cursorMs);
-      const currentDay = DayPilot.Date.fromYearMonthDay(current.getFullYear(), current.getMonth() + 1, current.getDate());
+      const currentDay = DayPilot.Date.fromYearMonthDay(current.getUTCFullYear(), current.getUTCMonth() + 1, current.getUTCDate());
       if (!this.settingsShowWeekends() && this.isWeekendDay(currentDay)) {
         const nextStart = this.nextBusinessDayStartMs(current);
         if (!nextStart) return null;
@@ -1281,9 +1243,9 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
       }
 
       const dayStart = new Date(current);
-      dayStart.setHours(openHour, 0, 0, 0);
+      dayStart.setUTCHours(openHour, 0, 0, 0);
       const dayEnd = new Date(current);
-      dayEnd.setHours(closeHour, 0, 0, 0);
+      dayEnd.setUTCHours(closeHour, 0, 0, 0);
 
       if (cursorMs < dayStart.getTime()) cursorMs = dayStart.getTime();
       if (cursorMs >= dayEnd.getTime()) {
@@ -1316,14 +1278,14 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     const openHour = this.settingsOpenHour();
     if (!Number.isFinite(openHour)) return null;
     const cursor = new Date(fromDate);
-    cursor.setDate(cursor.getDate() + 1);
-    cursor.setHours(openHour, 0, 0, 0);
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+    cursor.setUTCHours(openHour, 0, 0, 0);
 
     for (let i = 0; i < 120; i++) {
       const day = new Date(cursor);
-      day.setDate(cursor.getDate() + i);
-      day.setHours(openHour, 0, 0, 0);
-      const pilotDay = DayPilot.Date.fromYearMonthDay(day.getFullYear(), day.getMonth() + 1, day.getDate());
+      day.setUTCDate(cursor.getUTCDate() + i);
+      day.setUTCHours(openHour, 0, 0, 0);
+      const pilotDay = DayPilot.Date.fromYearMonthDay(day.getUTCFullYear(), day.getUTCMonth() + 1, day.getUTCDate());
       if (!this.settingsShowWeekends() && this.isWeekendDay(pilotDay)) continue;
       if (this.isHoliday(pilotDay)) continue;
       return day.getTime();
@@ -1400,22 +1362,29 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
   }
 
   private defaultSlot(): { start: string; end: string; resource: string } {
+    return this.defaultSlotForCustomer('');
+  }
+
+  private defaultSlotForCustomer(customerId: string): { start: string; end: string; resource: string } {
     const openHour = this.settingsOpenHour();
     const closeHour = this.settingsCloseHour();
-    const start = new Date();
-    start.setMinutes(0, 0, 0);
-    if (start.getHours() < openHour) {
-      start.setHours(openHour, 0, 0, 0);
-    } else if (start.getHours() >= closeHour) {
-      start.setDate(start.getDate() + 1);
-      start.setHours(openHour, 0, 0, 0);
+    let start = new Date(this.appointmentWallMillis(Date.now()));
+    start.setUTCMinutes(0, 0, 0);
+    const day = new DayPilot.Date(start.toISOString().slice(0, 19)).getDatePart();
+    if (start.getUTCHours() >= closeHour || this.isHoliday(day) ||
+        (!this.settingsShowWeekends() && this.isWeekendDay(day))) {
+      const nextStart = this.nextBusinessDayStartMs(start);
+      if (nextStart !== null) start = new Date(nextStart);
     }
-    const end = new Date(start.getTime() + 4 * 60 * 60 * 1000);
-    if (end.getHours() > closeHour) end.setHours(closeHour, 0, 0, 0);
+    if (start.getUTCHours() < openHour) start.setUTCHours(openHour, 0, 0, 0);
+    const durationMs = customerId ? this.resolveSuggestedDurationMs(customerId) : 4 * 60 * 60 * 1000;
+    const closing = new Date(start);
+    closing.setUTCHours(closeHour, 0, 0, 0);
+    const end = new Date(Math.min(closing.getTime(), start.getTime() + Math.max(30 * 60 * 1000, durationMs)));
     const resource = (this.resources()[0]?.id || 'bay-1').toString();
     return {
-      start: formatLocalDateTime(start),
-      end: formatLocalDateTime(end),
+      start: start.toISOString().slice(0, 19),
+      end: end.toISOString().slice(0, 19),
       resource
     };
   }
@@ -1437,8 +1406,8 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     partRequests?: PartRequest[];
   }) {
     this.editorId.set(data.id);
-    this.editorStart.set(toLocalDateTimeInput(data.start));
-    this.editorEnd.set(toLocalDateTimeInput(data.end));
+    this.editorStart.set(toLocalDateTimeInput(shopWallTime(data.start, this.shopTimeZone())));
+    this.editorEnd.set(toLocalDateTimeInput(shopWallTime(data.end, this.shopTimeZone())));
     this.editorResource.set(data.resource);
     this.editorCustomerId.set(data.customerId || null);
     this.editorBlocked.set(!!data.isBlocked);
@@ -1509,11 +1478,22 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     const id = this.editorId();
 
     if (id) {
+      const existing = this.items().find(item => String(item.id || '') === String(id)) || null;
       this.scheduleApi.update({ id, ...base }).subscribe({
         next: () => {
           this.loadAll();
           this.editorOpen.set(false);
           this.setStatusSuccess('Appointment saved.');
+          this.queueAppointmentInfoPrompt({
+            id,
+            ...base,
+            appointmentInfoSentAt: existing?.appointmentInfoSentAt || '',
+            appointmentInfoSentVia: existing?.appointmentInfoSentVia || '',
+            appointmentInfoMessage: existing?.appointmentInfoMessage || '',
+            appointmentInfoSentScheduleStart: existing?.appointmentInfoSentScheduleStart || '',
+            appointmentInfoSentScheduleEnd: existing?.appointmentInfoSentScheduleEnd || '',
+            appointmentInfoSentResource: existing?.appointmentInfoSentResource || ''
+          });
         },
         error: () => {
           this.editorError.set('Could not save appointment. Try again.');
@@ -1523,9 +1503,21 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
       return;
     }
 
+    let firstCreatedSchedule: ScheduleItem | null = null;
     const createOne = (s: string, e: string) =>
       this.scheduleApi.create({ ...base, start: s, end: e }).subscribe({
-        next: () => { this.loadAll(); },
+        next: res => {
+          if (!firstCreatedSchedule) {
+            firstCreatedSchedule = {
+              id: String(res?.id || ''),
+              ...base,
+              start: s,
+              end: e
+            };
+            this.queueAppointmentInfoPrompt(firstCreatedSchedule);
+          }
+          this.loadAll();
+        },
         error: () => {
           this.editorError.set('Could not save appointment. Try again.');
           this.setStatusError('Could not save appointment.');
@@ -1533,6 +1525,9 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
       });
 
     createOne(start, end);
+    if (!id && customerId && customerId === this.planningCustomerId()) {
+      this.clearPlanningCustomer();
+    }
 
     if (repeatEvery > 0 && repeatCount > 1) {
       const s0 = new DayPilot.Date(start);
@@ -1548,6 +1543,266 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     this.editorOpen.set(false);
     this.editorPartsSourceHint.set('');
     this.setStatusSuccess('Appointment saved.');
+  }
+
+  private queueAppointmentInfoPrompt(schedule: ScheduleItem): void {
+    if (!schedule || schedule.isBlocked || !String(schedule.customerId || '').trim()) return;
+    if (this.isAppointmentInfoCurrent(schedule)) return;
+    window.setTimeout(() => this.openAppointmentInfoPrompt(schedule), 180);
+  }
+
+  private openAppointmentInfoPrompt(schedule: ScheduleItem): void {
+    const customer = this.customerForSchedule(schedule);
+    if (!customer) return;
+    this.appointmentInfoSchedule.set(schedule);
+    this.appointmentInfoSendEmail.set(!!String(customer.email || '').trim());
+    this.appointmentInfoSendSms.set(!!String(customer.phone || '').trim());
+    this.appointmentInfoMessage.set(this.defaultAppointmentInfoMessage(schedule));
+    this.appointmentInfoError.set('');
+    this.appointmentInfoModalOpen.set(true);
+  }
+
+  closeAppointmentInfoModal(): void {
+    if (this.appointmentInfoSending()) return;
+    this.appointmentInfoModalOpen.set(false);
+    this.appointmentInfoSchedule.set(null);
+    this.appointmentInfoError.set('');
+  }
+
+  appointmentInfoCustomer(): UICustomer | null {
+    const schedule = this.appointmentInfoSchedule();
+    return schedule ? this.customerForSchedule(schedule) : null;
+  }
+
+  appointmentInfoEmailAddress(): string {
+    return String(this.appointmentInfoCustomer()?.email || '').trim();
+  }
+
+  appointmentInfoPhoneNumber(): string {
+    return String(this.appointmentInfoCustomer()?.phone || '').trim();
+  }
+
+  appointmentInfoWhenLabel(): string {
+    const schedule = this.appointmentInfoSchedule();
+    return schedule ? this.appointmentTimeLabel(schedule) : '';
+  }
+
+  appointmentInfoSmsPreview(): string {
+    const message = String(this.appointmentInfoMessage() || '').trim();
+    return message;
+  }
+
+  appointmentInfoEmailPreview(): string {
+    const schedule = this.appointmentInfoSchedule();
+    const message = String(this.appointmentInfoMessage() || '').trim();
+    if (!schedule) return message;
+    return `${message}\n\nAppointment: ${this.appointmentTimeLabel(schedule)}\nGoogle Calendar and Outlook add-to-calendar links will be included.`;
+  }
+
+  appointmentInfoCanSend(): boolean {
+    if (this.appointmentInfoSending()) return false;
+    if (!this.appointmentInfoSchedule()) return false;
+    if (!String(this.appointmentInfoMessage() || '').trim()) return false;
+    return (this.appointmentInfoSendEmail() && !!this.appointmentInfoEmailAddress())
+      || (this.appointmentInfoSendSms() && !!this.appointmentInfoPhoneNumber());
+  }
+
+  private customerForSchedule(schedule: ScheduleItem | null): UICustomer | null {
+    const id = String(schedule?.customerId || '').trim();
+    return id ? (this.customersById()[id] || null) : null;
+  }
+
+  private isAppointmentInfoCurrent(schedule: ScheduleItem | null): boolean {
+    return !!schedule?.appointmentInfoSentAt;
+  }
+
+  private defaultAppointmentInfoMessage(schedule: ScheduleItem): string {
+    const customer = this.customerForSchedule(schedule);
+    const firstName = String(customer?.firstName || customer?.name?.split(/\s+/)[0] || 'there').trim();
+    return `Hi ${firstName}, your appointment with ${this.businessDisplayName()} is ${this.appointmentTimeLabel(schedule)}. If you need to change it, please call us.`;
+  }
+
+  private businessDisplayName(): string {
+    return String(this.businessProfile.companyName() || 'our team').trim() || 'our team';
+  }
+
+  private businessLocation(): string {
+    return String(this.businessProfile.companyAddress() || '').trim();
+  }
+
+  private appointmentTimeLabel(schedule: ScheduleItem): string {
+    return formatShopAppointment(schedule.start, schedule.end, this.shopTimeZone());
+  }
+
+  private calendarDateParam(value: string): string {
+    return shopCalendarIso(value, this.shopTimeZone()).replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+  }
+
+  private calendarDetails(schedule: ScheduleItem): string {
+    const customer = this.customerForSchedule(schedule);
+    const vehicle = customer ? this.vehicleLabel(customer) : '';
+    const lines = [
+      `Appointment with ${this.businessDisplayName()}.`,
+      customer?.name ? `Customer: ${customer.name}` : '',
+      vehicle ? `Vehicle: ${vehicle}` : '',
+      String(schedule.notes || '').trim() ? `Notes: ${String(schedule.notes || '').trim()}` : '',
+      'Call us if you need to change this appointment.'
+    ];
+    return lines.filter(Boolean).join('\n');
+  }
+
+  private googleCalendarUrl(schedule: ScheduleItem): string {
+    const start = this.calendarDateParam(schedule.start || '');
+    const end = this.calendarDateParam(schedule.end || schedule.start || '');
+    const params = new URLSearchParams({
+      action: 'TEMPLATE',
+      text: `${this.businessDisplayName()} appointment`,
+      dates: `${start}/${end}`,
+      details: this.calendarDetails(schedule),
+      location: this.businessLocation()
+    });
+    return `https://calendar.google.com/calendar/render?${params.toString()}`;
+  }
+
+  private outlookCalendarUrl(schedule: ScheduleItem): string {
+    const timeZone = this.shopTimeZone();
+    const params = new URLSearchParams({
+      path: '/calendar/action/compose',
+      rru: 'addevent',
+      subject: `${this.businessDisplayName()} appointment`,
+      startdt: shopCalendarIso(schedule.start, timeZone),
+      enddt: shopCalendarIso(schedule.end || schedule.start, timeZone),
+      body: this.calendarDetails(schedule),
+      location: this.businessLocation()
+    });
+    return `https://outlook.live.com/calendar/0/deeplink/compose?${params.toString()}`;
+  }
+
+  private appointmentEmailHtml(message: string, schedule: ScheduleItem, portalUrl: string): string {
+    const customer = this.customerForSchedule(schedule);
+    const vehicle = customer ? this.vehicleLabel(customer) : '';
+    const googleUrl = this.googleCalendarUrl(schedule);
+    const outlookUrl = this.outlookCalendarUrl(schedule);
+    return `<div style="font-family:Arial,Helvetica,sans-serif;line-height:1.55;color:#111827;">
+      <p>${this.escapeHtml(message)}</p>
+      <table style="border-collapse:collapse;margin:18px 0;width:100%;max-width:560px;">
+        <tr><td style="padding:8px 10px;border:1px solid #e5e7eb;font-weight:700;">Appointment</td><td style="padding:8px 10px;border:1px solid #e5e7eb;">${this.escapeHtml(this.appointmentTimeLabel(schedule))}</td></tr>
+        ${vehicle ? `<tr><td style="padding:8px 10px;border:1px solid #e5e7eb;font-weight:700;">Vehicle</td><td style="padding:8px 10px;border:1px solid #e5e7eb;">${this.escapeHtml(vehicle)}</td></tr>` : ''}
+        ${this.businessLocation() ? `<tr><td style="padding:8px 10px;border:1px solid #e5e7eb;font-weight:700;">Location</td><td style="padding:8px 10px;border:1px solid #e5e7eb;">${this.escapeHtml(this.businessLocation())}</td></tr>` : ''}
+      </table>
+      ${portalUrl ? `<p><a href="${this.escapeHtml(portalUrl)}">Open your service visit</a></p>` : ''}
+      <p>
+        <a href="${this.escapeHtml(googleUrl)}" style="display:inline-block;margin:0 10px 10px 0;padding:10px 14px;background:#2563eb;color:#fff;text-decoration:none;border-radius:6px;font-weight:700;">Add to Google Calendar</a>
+        <a href="${this.escapeHtml(outlookUrl)}" style="display:inline-block;margin:0 10px 10px 0;padding:10px 14px;background:#111827;color:#fff;text-decoration:none;border-radius:6px;font-weight:700;">Add to Outlook Calendar</a>
+      </p>
+    </div>`;
+  }
+
+  async sendAppointmentInfo(): Promise<void> {
+    const schedule = this.appointmentInfoSchedule();
+    const customer = this.appointmentInfoCustomer();
+    if (!schedule || !customer) {
+      this.appointmentInfoError.set('Missing appointment details.');
+      return;
+    }
+    const message = String(this.appointmentInfoMessage() || '').trim();
+    if (!message) {
+      this.appointmentInfoError.set('Enter a message before sending.');
+      return;
+    }
+    if (this.appointmentInfoSending()) return;
+    const sendEmail = this.appointmentInfoSendEmail();
+    const sendSms = this.appointmentInfoSendSms();
+    const email = this.appointmentInfoEmailAddress();
+    const phone = this.appointmentInfoPhoneNumber();
+    if ((sendEmail && !email) || (sendSms && !phone)) {
+      this.appointmentInfoError.set('A selected channel is missing customer contact information.');
+      return;
+    }
+    if (!sendEmail && !sendSms) {
+      this.appointmentInfoError.set('Choose Email, SMS, or both.');
+      return;
+    }
+    this.appointmentInfoSending.set(true);
+    this.appointmentInfoError.set('');
+    const portalUrl = await this.customerPortal.appointmentUrl(schedule.workItemId);
+    const visitMessage = portalUrl ? `\n\nYour visit: ${portalUrl}` : '';
+    const sends: Array<Promise<'email' | 'sms'>> = [];
+    const customerId = String(customer.id || '').trim();
+    const customerName = String(customer.name || '').trim() || 'Customer';
+
+    if (sendEmail) {
+      const plain = `${message}\n\nAppointment: ${this.appointmentTimeLabel(schedule)}\n\nAdd to Google Calendar: ${this.googleCalendarUrl(schedule)}\nAdd to Outlook Calendar: ${this.outlookCalendarUrl(schedule)}${visitMessage}`;
+      sends.push(firstValueFrom(this.emailApi.sendToCustomer({
+        customerId,
+        customerName,
+        to: email,
+        subject: `${this.businessDisplayName()} appointment details`,
+        message: plain,
+        html: this.appointmentEmailHtml(message, schedule, portalUrl),
+        skipFooterTerms: true
+      })).then(() => 'email' as const));
+    }
+
+    if (sendSms) {
+      sends.push(firstValueFrom(this.smsApi.sendToCustomer({
+        customerId,
+        customerName,
+        to: phone,
+        message: message + visitMessage
+      })).then(() => 'sms' as const));
+    }
+
+    const settled = await Promise.allSettled(sends);
+    const sentVia = settled
+      .filter((result): result is PromiseFulfilledResult<'email' | 'sms'> => result.status === 'fulfilled')
+      .map(result => result.value);
+
+    if (!sentVia.length) {
+      const reason = settled.find(result => result.status === 'rejected') as PromiseRejectedResult | undefined;
+      this.appointmentInfoSending.set(false);
+      this.appointmentInfoError.set(String(reason?.reason?.message || reason?.reason || 'Could not send appointment info.'));
+      return;
+    }
+
+    const partialFailure = sentVia.length < sends.length
+      ? (settled.find(result => result.status === 'rejected') as PromiseRejectedResult | undefined)
+      : null;
+
+    try {
+      const sentAt = new Date().toISOString();
+      await firstValueFrom(this.scheduleApi.update({
+        id: schedule.id,
+        appointmentInfoSentAt: sentAt,
+        appointmentInfoSentVia: sentVia.join(','),
+        appointmentInfoMessage: message,
+        appointmentInfoSentScheduleStart: String(schedule.start || ''),
+        appointmentInfoSentScheduleEnd: String(schedule.end || ''),
+        appointmentInfoSentResource: String(schedule.resource || '')
+      }));
+      this.items.update(rows => (rows || []).map(row => String(row.id || '').trim() === String(schedule.id || '').trim()
+        ? {
+            ...row,
+            appointmentInfoSentAt: sentAt,
+            appointmentInfoSentVia: sentVia.join(','),
+            appointmentInfoMessage: message,
+            appointmentInfoSentScheduleStart: String(schedule.start || ''),
+            appointmentInfoSentScheduleEnd: String(schedule.end || ''),
+            appointmentInfoSentResource: String(schedule.resource || '')
+          }
+        : row
+      ));
+      this.appointmentInfoSending.set(false);
+      this.closeAppointmentInfoModal();
+      this.loadAll();
+      this.setStatusSuccess(partialFailure
+        ? `Scheduled info sent by ${sentVia.join(' and ')}. Another channel failed: ${String(partialFailure.reason?.message || partialFailure.reason || 'Unknown error')}.`
+        : 'Scheduled info sent.');
+    } catch (error: any) {
+      this.appointmentInfoError.set(error?.message || 'Sent, but could not update the schedule record.');
+    } finally {
+      this.appointmentInfoSending.set(false);
+    }
   }
 
   deleteEditor() {
@@ -1630,15 +1885,20 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
       bays: this.settingsBays().map(b => ({ id: b.id, name: (b.name || '').trim() || b.id })),
       openHour,
       closeHour,
+      timeZone: this.shopTimeZone(),
       showWeekends: !!this.settingsShowWeekends(),
       holidays: this.settingsHolidays(),
       federalYear: this.settingsFederalYear(),
       federalInitialized: true
     };
-    this.persistSettings(s);
-    this.applySettings(s);
-    this.settingsOpen.set(false);
-    this.setStatusSuccess('Schedule settings saved.');
+    this.settingsApi.setValue(SCHEDULE_SETTINGS_KEY, s).subscribe({
+      next: () => {
+        this.applySettings(s);
+        this.settingsOpen.set(false);
+        this.setStatusSuccess('Schedule settings saved.');
+      },
+      error: () => this.settingsError.set('Could not save schedule settings.')
+    });
   }
 
   private applySettingsPreview() {
@@ -1648,7 +1908,7 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     if (this.scheduler?.control) {
       this.scheduler.control.update({ resources });
     }
-    this.updateSchedulerHeight();
+    this.syncNowLine();
   }
 
   private isHoliday(date: DayPilot.Date): boolean {
@@ -1701,7 +1961,9 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     if (!start || !end || !resource) {
       return 'Start, end, and bay are required.';
     }
-    if (Date.parse(start) >= Date.parse(end)) {
+    const startMs = shopTimeMillis(start, this.shopTimeZone());
+    const endMs = shopTimeMillis(end, this.shopTimeZone());
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs >= endMs) {
       return 'End must be after start.';
     }
     if (this.editorBlocked() && !this.editorTitle().trim()) {
@@ -1849,7 +2111,7 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     if (this.scheduler?.control) {
       this.scheduler.control.update({ resources: baseResources });
     }
-    this.updateSchedulerHeight();
+    this.syncNowLine();
   }
 
   private formatPartRequestsForEditor(parts: PartRequest[]): string {
@@ -2028,6 +2290,10 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     const g = (n >> 8) & 255;
     const b = n & 255;
     return `rgba(${r}, ${g}, ${b}, ${normalizedAlpha})`;
+  }
+
+  private appointmentWallMillis(value: string | number): number {
+    return Date.parse(`${shopWallTime(value, this.shopTimeZone())}Z`) || 0;
   }
 
   private toMillis(value: string | null | undefined): number {

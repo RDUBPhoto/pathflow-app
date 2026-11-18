@@ -1,6 +1,8 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { map, Observable } from 'rxjs';
+import { AppSettingsApiService } from './app-settings-api.service';
+import { normalizeShopTimeZone, SCHEDULE_SETTINGS_KEY } from '../utils/shop-time';
 
 export type ScheduleItem = {
   id: string;
@@ -10,6 +12,7 @@ export type ScheduleItem = {
   bayReleasedAt?: string;
   resource: string;
   customerId?: string;
+  workItemId?: string;
   isBlocked?: boolean;
   title?: string;
   notes?: string;
@@ -20,13 +23,25 @@ export type ScheduleItem = {
     sku?: string;
     note?: string;
   }>;
+  appointmentInfoSentAt?: string;
+  appointmentInfoSentVia?: string;
+  appointmentInfoMessage?: string;
+  appointmentInfoSentScheduleStart?: string;
+  appointmentInfoSentScheduleEnd?: string;
+  appointmentInfoSentResource?: string;
   createdAt?: string;
   updatedAt?: string;
 };
 
 @Injectable({ providedIn: 'root' })
 export class ScheduleApi {
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient, private settingsApi: AppSettingsApiService) {}
+
+  getShopTimeZone(): Observable<string> {
+    return this.settingsApi.getValue<{ timeZone?: string }>(SCHEDULE_SETTINGS_KEY).pipe(
+      map(settings => normalizeShopTimeZone(settings?.timeZone))
+    );
+  }
 
   list(): Observable<ScheduleItem[]> {
     return this.http.get<ScheduleItem[]>('/api/schedule');

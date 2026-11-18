@@ -1,34 +1,10 @@
+import { UiBadge, UiInput, UiTextarea } from '../../ui/controls';
+import { UiIcon } from '../../ui/icons';
 import { CommonModule } from '@angular/common';
-import { Component, ElementRef, OnDestroy, OnInit, ViewChild, computed, inject, signal } from '@angular/core';
+import { Component, ElementRef, OnDestroy, OnInit, ViewChild, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
-import {
-  IonBadge,
-  IonButton,
-  IonButtons,
-  IonContent,
-  IonHeader,
-  IonIcon,
-  IonInput,
-  IonItem,
-  IonLabel,
-  IonSelect,
-  IonSelectOption,
-  IonSpinner,
-  IonTextarea,
-  IonTitle,
-  IonToolbar
-} from '@ionic/angular/standalone';
-import { addIcons } from 'ionicons';
-import {
-  chatbubbleEllipsesOutline,
-  arrowRedoOutline,
-  arrowUndoOutline,
-  mailOutline,
-  paperPlaneOutline,
-  searchOutline
-} from 'ionicons/icons';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { CustomersApi, Customer } from '../../services/customers-api.service';
 import { SmsApiService, SmsDeliveryStatus, SmsMessage, SmsThreadSummary } from '../../services/sms-api.service';
 import { EmailApiService, EmailMessage, EmailTemplate, EmailThreadSummary } from '../../services/email-api.service';
@@ -66,26 +42,16 @@ type ThreadView = {
   imports: [
     CommonModule,
     FormsModule,
-    IonHeader,
-    IonToolbar,
-    IonTitle,
-    IonButtons,
-    IonContent,
-    IonIcon,
-    IonButton,
-    IonItem,
-    IonLabel,
-    IonSelect,
-    IonSelectOption,
-    IonInput,
-    IonTextarea,
-    IonBadge,
-    IonSpinner,
+    UiIcon,
+    UiInput,
+    UiTextarea,
+    UiBadge,
     UserMenuComponent,
     PageBackButtonComponent,
     CompanySwitcherComponent
   ],
   templateUrl: './messages.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./messages.component.scss']
 })
 export default class MessagesComponent implements OnInit, OnDestroy {
@@ -97,11 +63,16 @@ export default class MessagesComponent implements OnInit, OnDestroy {
   private readonly emailApi = inject(EmailApiService);
   private readonly customersApi = inject(CustomersApi);
   private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
   private readonly auth = inject(AuthService);
   private readonly tenantContext = inject(TenantContextService);
   private readonly branding = inject(BrandSettingsService);
   private readonly businessProfile = inject(BusinessProfileService);
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
+  private feedbackTimer: ReturnType<typeof setTimeout> | null = null;
+  private deepLinkCustomerId = '';
+  private deepLinkThreadKey = '';
+  private deepLinkApplied = false;
 
   readonly activeChannel = signal<Channel>('sms');
   readonly loadingThreads = signal(false);
@@ -153,14 +124,6 @@ export default class MessagesComponent implements OnInit, OnDestroy {
   readonly selectedEmailMessages = computed(() => this.emailMessages());
 
   ngOnInit(): void {
-    addIcons({
-      'chatbubble-ellipses-outline': chatbubbleEllipsesOutline,
-      'mail-outline': mailOutline,
-      'arrow-undo-outline': arrowUndoOutline,
-      'arrow-redo-outline': arrowRedoOutline,
-      'paper-plane-outline': paperPlaneOutline,
-      'search-outline': searchOutline
-    });
 
     const queryChannel = String(this.route.snapshot.queryParamMap.get('channel') || '').toLowerCase();
     if (queryChannel === 'email') {
@@ -168,6 +131,8 @@ export default class MessagesComponent implements OnInit, OnDestroy {
     } else if (queryChannel === 'sms') {
       this.activeChannel.set('sms');
     }
+    this.deepLinkCustomerId = String(this.route.snapshot.queryParamMap.get('customerId') || '').trim();
+    this.deepLinkThreadKey = String(this.route.snapshot.queryParamMap.get('threadKey') || '').trim();
 
     this.loadCustomers();
     this.loadEmailTemplates();
@@ -180,6 +145,7 @@ export default class MessagesComponent implements OnInit, OnDestroy {
       clearInterval(this.refreshTimer);
       this.refreshTimer = null;
     }
+    this.clearFeedbackTimer();
   }
 
   setChannel(channel: Channel): void {
@@ -226,6 +192,13 @@ export default class MessagesComponent implements OnInit, OnDestroy {
 
     this.selectedEmailTemplateId = '';
     this.loadEmailMessages(thread.customerId);
+  }
+
+  goToCustomerProfile(thread: ThreadView, event?: Event): void {
+    event?.preventDefault();
+    event?.stopPropagation();
+    if (!thread.customerId) return;
+    void this.router.navigate(['/customers', thread.customerId]);
   }
 
   canSendMessage(): boolean {
@@ -371,6 +344,12 @@ export default class MessagesComponent implements OnInit, OnDestroy {
     return this.deliveryClass(thread.latestSmsDeliveryStatus || 'queued');
   }
 
+  threadHasFailedDelivery(thread: ThreadView): boolean {
+    return thread.channel === 'sms'
+      && thread.latestDirection === 'outbound'
+      && this.deliveryClass(thread.latestSmsDeliveryStatus || 'queued') === 'failed';
+  }
+
   messageDeliveryLabel(message: SmsMessage): string {
     return this.deliveryLabel(this.deliveryStatusOf(message));
   }
@@ -388,19 +367,27 @@ export default class MessagesComponent implements OnInit, OnDestroy {
     return parts.join(' • ');
   }
 
+  isFailedSmsMessage(message: SmsMessage): boolean {
+    return message.direction === 'outbound' && this.deliveryStatusOf(message) === 'failed';
+  }
+
+  messageFailureReason(message: SmsMessage): string {
+    const reason = String(message.providerErrorMessage || message.providerErrorCode || '').trim();
+    return reason ? `Not Delivered - ${reason}` : 'Not Delivered';
+  }
+
   private sendSmsMessage(selected: ThreadView): void {
     const message = this.outgoingMessage.trim();
     if (!message) return;
 
     const to = this.normalizeE164(selected.displayContact || '');
     if (!to) {
-      this.error.set('Customer phone is missing or invalid.');
+      this.showError('Customer phone is missing or invalid.');
       return;
     }
 
     this.sending.set(true);
-    this.error.set('');
-    this.status.set('');
+    this.clearFeedback();
     this.smsApi.sendToCustomer({
       customerId: selected.customerId || '',
       customerName: selected.displayName,
@@ -410,13 +397,13 @@ export default class MessagesComponent implements OnInit, OnDestroy {
       next: res => {
         this.sending.set(false);
         this.outgoingMessage = '';
-        this.status.set(res.simulated ? 'Mock SMS logged.' : 'SMS sent.');
+        this.showStatus(res.simulated ? 'Mock SMS logged.' : 'SMS sent.');
         if (selected.customerId) this.loadSmsMessages(selected.customerId, false);
         this.refreshThreads(false);
       },
       error: err => {
         this.sending.set(false);
-        this.error.set(this.extractError(err, 'Failed to send SMS.'));
+        this.showError(this.extractError(err, 'Failed to send SMS.'));
       }
     });
   }
@@ -430,21 +417,20 @@ export default class MessagesComponent implements OnInit, OnDestroy {
     const textMessage = html ? this.htmlToPlainText(message) : message;
 
     if (!this.isValidEmail(to)) {
-      this.error.set('Recipient email is missing or invalid.');
+      this.showError('Recipient email is missing or invalid.');
       return;
     }
     if (!subject) {
-      this.error.set('Email subject is required.');
+      this.showError('Email subject is required.');
       return;
     }
     if (!textMessage) {
-      this.error.set('Email message cannot be empty.');
+      this.showError('Email message cannot be empty.');
       return;
     }
 
     this.sending.set(true);
-    this.error.set('');
-    this.status.set('');
+    this.clearFeedback();
     this.emailApi.sendToCustomer({
       customerId: selected.customerId || '',
       customerName: selected.displayName,
@@ -456,15 +442,48 @@ export default class MessagesComponent implements OnInit, OnDestroy {
       next: () => {
         this.sending.set(false);
         this.outgoingMessage = '';
-        this.status.set('Email sent.');
+        this.showStatus('Email sent.');
         if (selected.customerId) this.loadEmailMessages(selected.customerId, false);
         this.refreshThreads(false);
       },
       error: err => {
         this.sending.set(false);
-        this.error.set(this.extractError(err, 'Failed to send email.'));
+        this.showError(this.extractError(err, 'Failed to send email.'));
       }
     });
+  }
+
+  private showStatus(message: string): void {
+    this.error.set('');
+    this.status.set(message);
+    this.scheduleFeedbackClear(3500);
+  }
+
+  private showError(message: string): void {
+    this.status.set('');
+    this.error.set(message);
+    this.scheduleFeedbackClear(7000);
+  }
+
+  private clearFeedback(): void {
+    this.clearFeedbackTimer();
+    this.error.set('');
+    this.status.set('');
+  }
+
+  private scheduleFeedbackClear(delayMs: number): void {
+    this.clearFeedbackTimer();
+    this.feedbackTimer = setTimeout(() => {
+      this.status.set('');
+      this.error.set('');
+      this.feedbackTimer = null;
+    }, delayMs);
+  }
+
+  private clearFeedbackTimer(): void {
+    if (!this.feedbackTimer) return;
+    clearTimeout(this.feedbackTimer);
+    this.feedbackTimer = null;
   }
 
   private loadCustomers(): void {
@@ -531,6 +550,11 @@ export default class MessagesComponent implements OnInit, OnDestroy {
 
     const selectedId = this.selectedThreadId();
     const selected = selectedId ? all.find(thread => thread.id === selectedId) || null : null;
+    const requested = this.findDeepLinkedThread(all);
+    if (requested && (!selected || selected.id !== requested.id)) {
+      this.selectThread(requested);
+      return;
+    }
     if (!selected) {
       this.selectThread(all[0]);
       return;
@@ -540,6 +564,16 @@ export default class MessagesComponent implements OnInit, OnDestroy {
       if (selected.channel === 'sms') this.loadSmsMessages(selected.customerId, false);
       if (selected.channel === 'email') this.loadEmailMessages(selected.customerId, false);
     }
+  }
+
+  private findDeepLinkedThread(threads: ThreadView[]): ThreadView | null {
+    if (this.deepLinkApplied || (!this.deepLinkCustomerId && !this.deepLinkThreadKey)) return null;
+    const requested = threads.find(thread => {
+      if (this.deepLinkCustomerId && thread.customerId === this.deepLinkCustomerId) return true;
+      return !!this.deepLinkThreadKey && thread.key === this.deepLinkThreadKey;
+    }) || null;
+    if (requested) this.deepLinkApplied = true;
+    return requested;
   }
 
   private loadSmsMessages(customerId: string, showSpinner = true): void {
@@ -846,7 +880,8 @@ export default class MessagesComponent implements OnInit, OnDestroy {
     if (status === 'delivered') return 'Delivered';
     if (status === 'failed') return 'Failed';
     if (status === 'received') return 'Received';
-    return 'Queued';
+    if (status === 'queued') return 'Queued';
+    return 'Unknown';
   }
 
   private deliveryClass(status: SmsDeliveryStatus): string {

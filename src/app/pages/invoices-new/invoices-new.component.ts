@@ -1,9 +1,8 @@
+import { ToastController } from '../../ui/overlays';
 import { CommonModule } from '@angular/common';
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
-import { ToastController } from '@ionic/angular';
-import { IonButton, IonButtons, IonContent, IonHeader, IonSpinner, IonTitle, IonToolbar } from '@ionic/angular/standalone';
 import { firstValueFrom } from 'rxjs';
 import { AuthService } from '../../auth/auth.service';
 import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
@@ -22,12 +21,16 @@ import {
   InvoiceDraftPayload,
   InvoicesDataService
 } from '../../services/invoices-data.service';
+import { InvoiceResponseApiService } from '../../services/invoice-response-api.service';
 import { InventoryApiService, InventoryItem } from '../../services/inventory-api.service';
 import { Lane, LanesApi } from '../../services/lanes-api.service';
 import { PaymentGatewaySettingsService } from '../../services/payment-gateway-settings.service';
+import { CustomerPortalApi } from '../../services/customer-portal-api.service';
+import { QuoteResponseApiService } from '../../services/quote-response-api.service';
 import { SmsApiService } from '../../services/sms-api.service';
 import { TenantContextService } from '../../services/tenant-context.service';
-import { WorkItem, WorkItemsApi } from '../../services/workitems-api.service';
+import { WorkItem, WorkItemsApi, workItemDocumentRef } from '../../services/workitems-api.service';
+import { normalizePhoneToE164 } from '../../utils/phone-format';
 import { environment } from '../../../environments/environment';
 
 type StatusTone = 'neutral' | 'success' | 'error';
@@ -69,18 +72,12 @@ type CustomerPrefill = {
   imports: [
     CommonModule,
     FormsModule,
-    IonHeader,
-    IonToolbar,
-    IonTitle,
-    IonButtons,
-    IonButton,
-    IonSpinner,
-    IonContent,
     PageBackButtonComponent,
     CompanySwitcherComponent,
     UserMenuComponent
   ],
   templateUrl: './invoices-new.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./invoices-new.component.scss']
 })
 export default class InvoicesNewComponent {
@@ -98,6 +95,9 @@ export default class InvoicesNewComponent {
   private readonly businessProfile = inject(BusinessProfileService);
   private readonly settingsApi = inject(AppSettingsApiService);
   private readonly inventoryApi = inject(InventoryApiService);
+  private readonly invoiceResponseApi = inject(InvoiceResponseApiService);
+  private readonly quoteResponseApi = inject(QuoteResponseApiService);
+  private readonly customerPortal = inject(CustomerPortalApi);
   private readonly toastController = inject(ToastController);
   private readonly tenantContext = inject(TenantContextService);
 
@@ -139,7 +139,7 @@ export default class InvoicesNewComponent {
   readonly quoteLineItems = signal<InvoiceLineItem[]>([]);
 
   readonly sendEmail = signal(true);
-  readonly sendSms = signal(false);
+  readonly sendSms = signal(true);
   readonly selectedEmailTargets = signal<string[]>([]);
   readonly selectedPhoneTargets = signal<string[]>([]);
 
@@ -147,6 +147,7 @@ export default class InvoicesNewComponent {
   readonly customerNote = signal('');
 
   private pendingCustomerId = '';
+  private sourceWorkItemId = '';
   private readonly customerPrefill = signal<CustomerPrefill | null>(null);
   private lastToastKey = '';
   private lastToastAt = 0;
@@ -228,7 +229,9 @@ export default class InvoicesNewComponent {
 
   readonly availablePhoneTargets = computed(() => {
     const customer = this.selectedCustomer();
-    const values = [customer?.phone, customer?.mobile].map(value => String(value || '').trim()).filter(Boolean);
+    const values = [customer?.phone, customer?.mobile]
+      .map(value => normalizePhoneToE164(value) || String(value || '').trim())
+      .filter(Boolean);
     return Array.from(new Set(values));
   });
 
@@ -285,6 +288,7 @@ export default class InvoicesNewComponent {
 
     this.route.queryParamMap.subscribe(params => {
       this.pendingCustomerId = (params.get('customerId') || '').trim();
+      this.sourceWorkItemId = (params.get('workItemId') || '').trim();
       this.documentType.set(this.parseDocumentType(params.get('type')));
       const prefill: CustomerPrefill = {
         name: (params.get('customerName') || '').trim(),
@@ -453,8 +457,11 @@ export default class InvoicesNewComponent {
     this.sending.set(true);
     this.clearStatus();
     try {
-      const html = this.previewHtml();
-      const subject = this.resolveMergeTags(this.templateSubject());
+      if (this.documentType() === 'quote') await this.publishQuoteSnapshot();
+      else await this.publishInvoicePaymentSnapshot();
+      const portalUrl = this.publicRouteUrl(await this.customerPortal.issueLink(draft.id));
+      const html = this.buildPreviewHtml({ emailSafeLogo: true, portalUrl });
+      const subject = this.resolveMergeTags(this.templateSubject(), portalUrl);
       const sends: Array<{ channel: 'email' | 'sms'; promise: Promise<unknown> }> = [];
 
       if (this.sendEmail() && this.selectedEmailTargets().length) {
@@ -476,15 +483,17 @@ export default class InvoicesNewComponent {
       }
 
       if (this.sendSms() && this.selectedPhoneTargets().length) {
-        const smsBody = this.buildSmsMessage();
+        const smsBody = this.buildSmsMessage(portalUrl);
         for (const target of this.selectedPhoneTargets()) {
+          const to = normalizePhoneToE164(target);
+          if (!to) continue;
           sends.push({
             channel: 'sms',
             promise: firstValueFrom(
               this.smsApi.sendToCustomer({
                 customerId: String(customer.id || '').trim(),
                 customerName: this.customerDisplayName(customer),
-                to: target,
+                to,
                 message: smsBody
               })
             )
@@ -507,52 +516,66 @@ export default class InvoicesNewComponent {
       const emailFailureReason = outcomes
         .filter(row => row.channel === 'email' && row.result.status === 'rejected')
         .map(row => this.extractSendFailureReason((row.result as PromiseRejectedResult).reason))
-        .find(Boolean);
+        .find(Boolean) || '';
       const smsFailureReason = outcomes
         .filter(row => row.channel === 'sms' && row.result.status === 'rejected')
         .map(row => this.extractSendFailureReason((row.result as PromiseRejectedResult).reason))
-        .find(Boolean);
+        .find(Boolean) || '';
 
       if (!emailSuccess && !smsSuccess) {
-        this.setStatus(`Could not send ${this.documentLabelLower()}.`, 'error');
+        this.setStatus(this.composeSendFailureMessage(emailFailureReason, smsFailureReason, attemptedEmail, attemptedSms), 'error');
         return;
       }
 
-      const sentDraft = this.invoicesData.saveInvoice({
-        ...draft,
-        stage: 'sent',
-        template: this.templateDisplayName(),
-        staffNote: this.staffNote(),
-        customerNote: this.customerNote()
-      });
-      const sent = sentDraft.stage === 'sent'
-        ? sentDraft
-        : (this.invoicesData.setStage(sentDraft.id, 'sent', `${this.documentLabel()} sent to customer.`) || sentDraft);
-      await this.ensureDashboardCardForSentDocument(customer, sent);
-      this.draftSavedAt.set(sent.updatedAt || new Date().toISOString());
-
+      let deliveryMessage = `${this.documentLabel()} sent successfully.`;
+      let deliveryTone: StatusTone = 'success';
       if (emailSuccess && smsSuccess) {
-        this.setStatus(`${this.documentLabel()} sent successfully.`, 'success');
+        deliveryMessage = `${this.documentLabel()} sent successfully.`;
       } else if (emailSuccess && attemptedSms && !smsSuccess) {
-        this.setStatus(
-          `${this.documentLabel()} sent by email. SMS failed${smsFailureReason ? ` (${smsFailureReason})` : ''}.`,
-          'error'
-        );
+        deliveryMessage = `${this.documentLabel()} sent by email. SMS may not have completed${smsFailureReason ? ` (${smsFailureReason})` : ''}.`;
+        deliveryTone = 'neutral';
       } else if (smsSuccess && attemptedEmail && !emailSuccess) {
+        deliveryMessage = `${this.documentLabel()} sent by SMS. Email may not have completed${emailFailureReason ? ` (${emailFailureReason})` : ''}.`;
+        deliveryTone = 'neutral';
+      }
+
+      try {
+        const sentDraft = this.invoicesData.saveInvoice({
+          ...draft,
+          stage: 'sent',
+          template: this.templateDisplayName(),
+          staffNote: this.staffNote(),
+          customerNote: this.customerNote()
+        });
+        const sent = sentDraft.stage === 'sent'
+          ? sentDraft
+          : (this.invoicesData.setStage(sentDraft.id, 'sent', `${this.documentLabel()} sent to customer.`) || sentDraft);
+        await this.syncDocumentCard(customer, sent);
+        this.draftSavedAt.set(sent.updatedAt || new Date().toISOString());
+        this.setStatus(deliveryMessage, deliveryTone);
+        if (sent.documentType === 'quote') {
+          await this.router.navigate(['/quotes', sent.id]);
+        } else {
+          await this.router.navigate(['/invoices', sent.id]);
+        }
+      } catch (postSendError) {
+        const reason = this.extractSendFailureReason(postSendError);
+        console.warn(`${this.documentLabel()} delivery succeeded, but post-send update failed.`, postSendError);
         this.setStatus(
-          `${this.documentLabel()} sent by SMS. Email failed${emailFailureReason ? ` (${emailFailureReason})` : ''}.`,
-          'error'
+          reason
+            ? `${deliveryMessage} Local update warning: ${reason}.`
+            : `${deliveryMessage} Local update warning: the dashboard or saved status did not finish updating.`,
+          'neutral'
         );
-      } else {
-        this.setStatus(`${this.documentLabel()} sent successfully.`, 'success');
       }
-      if (sent.documentType === 'quote') {
-        await this.router.navigate(['/quotes', sent.id]);
-      } else {
-        await this.router.navigate(['/invoices', sent.id]);
-      }
-    } catch {
-      this.setStatus(`Could not send ${this.documentLabelLower()}.`, 'error');
+    } catch (error) {
+      const reason = this.extractSendFailureReason(error);
+      this.setStatus(
+        reason
+          ? `Could not send ${this.documentLabelLower()}: ${reason}.`
+          : `Could not send ${this.documentLabelLower()}. Check the API logs for details.`,
+        'error'
+      );
     } finally {
       this.sending.set(false);
     }
@@ -690,6 +713,9 @@ export default class InvoicesNewComponent {
       this.draftSavedAt.set(created.updatedAt || new Date().toISOString());
       this.currentDraft.set(created);
       this.setStatus(`${this.documentLabel()} saved as draft.`, 'success');
+      if (created.documentType === 'invoice' && this.sourceWorkItemId) {
+        await this.syncDocumentCard(customer, created, this.sourceWorkItemId);
+      }
       return created;
     }
 
@@ -697,6 +723,10 @@ export default class InvoicesNewComponent {
     if (!existing) {
       this.draftId.set(null);
       return this.ensureDraftSaved();
+    }
+    if (this.currentDraft()?.updatedAt !== existing.updatedAt || this.currentDraft()?.stage !== existing.stage) {
+      this.setStatus('This draft changed in another session. Review the saved draft before sending it.', 'error');
+      return null;
     }
 
     const updated = this.invoicesData.saveInvoice({
@@ -1037,7 +1067,7 @@ export default class InvoicesNewComponent {
     return Number.isFinite(parsed) ? parsed : 0;
   }
 
-  private async ensureDashboardCardForSentDocument(customer: Customer, detail: InvoiceDetail): Promise<void> {
+  private async syncDocumentCard(customer: Customer, detail: InvoiceDetail, sourceWorkItemId = ''): Promise<void> {
     const customerId = String(customer.id || '').trim();
     if (!customerId) return;
     try {
@@ -1055,35 +1085,27 @@ export default class InvoicesNewComponent {
       const baseTitle = this.composeWorkItemTitle(customer);
       const title = `${baseTitle} — ${kind} ${number}${docRef ? ` [doc=${docRef}]` : ''}`;
 
-      const existingDocItem = (items || []).find(item =>
-        String(item.title || '').toLowerCase().includes(`[doc=${docRef.toLowerCase()}]`)
-      ) || null;
+      const existingDocItem = (items || []).find(item => workItemDocumentRef(item) === docRef);
+      if (existingDocItem) return;
 
-      const activeCustomerItem = (items || [])
-        .filter(item => String(item.customerId || '').trim() === customerId)
-        .sort((a, b) => this.asMillis(b.updatedAt || b.createdAt) - this.asMillis(a.updatedAt || a.createdAt))[0];
-
-      const itemToPatch = existingDocItem || activeCustomerItem || null;
+      const leadLaneIds = targetStage === 'quote' ? this.leadLaneIds(lanes) : new Set<string>();
+      const itemToPatch = (items || []).find(item =>
+        item.customerId === customerId && !item.jobId && !workItemDocumentRef(item) &&
+        (sourceWorkItemId
+          ? item.id === sourceWorkItemId && item.laneId === targetLane.id
+          : targetStage === 'quote' && (leadLaneIds.has(item.laneId) || item.laneId === targetLane.id))
+      );
 
       if (!itemToPatch) {
+        if (sourceWorkItemId) return;
         const created = await firstValueFrom(this.workItemsApi.create(title, targetLane.id));
         await firstValueFrom(this.workItemsApi.update({ id: created.id, customerId }));
         return;
       }
 
-      const patch: Partial<WorkItem> & { id: string } = {
-        id: itemToPatch.id,
-        laneId: targetLane.id
-      };
-      if (String(itemToPatch.customerId || '').trim() !== customerId) {
-        patch.customerId = customerId;
-      }
-      if (String(itemToPatch.title || '').trim() !== title) {
-        patch.title = title;
-      }
-      await firstValueFrom(this.workItemsApi.update(patch));
+      await firstValueFrom(this.workItemsApi.update({ id: itemToPatch.id, laneId: targetLane.id, title }));
     } catch {
-      // Do not block send flow if dashboard sync fails.
+      // Dashboard reconciliation can create the card if this update fails.
     }
   }
 
@@ -1102,7 +1124,7 @@ export default class InvoicesNewComponent {
     return vehicle ? `${name} (${vehicle})` : name;
   }
 
-  private buildPreviewHtml(): string {
+  private buildPreviewHtml(options?: { emailSafeLogo?: boolean; portalUrl?: string }): string {
     const isQuote = this.documentType() === 'quote';
     const customer = this.selectedCustomer();
     const customerName = this.customerDisplayName(customer);
@@ -1120,12 +1142,15 @@ export default class InvoicesNewComponent {
       ? `<p>Hi {{customer_name}},</p><p>Here is your quote for {{vehicle_summary}}.</p>`
       : `<p>Hi {{customer_name}},</p><p>Your invoice is ready for {{vehicle_summary}}.</p>`);
     const resolvedBody = this.normalizeHtmlHrefAttributes(
-      this.stripInlineQuoteActionLinks(this.resolveMergeTags(bodySource))
+      this.stripInlineQuoteActionLinks(this.resolveMergeTags(bodySource, options?.portalUrl))
     );
-    const signature = this.includeSignature() ? this.resolveMergeTags(this.emailSignature()) : '';
+    const signature = this.includeSignature() ? this.resolveMergeTags(this.emailSignature(), options?.portalUrl) : '';
     const terms = this.renderTermsHtml();
-    const logo = this.includeLogo() && this.logoUrl()
-      ? `<img src="${this.escapeHtmlAttribute(this.logoUrl())}" alt="${this.escapeHtmlAttribute(this.companyName())} logo" style="max-width:180px;height:auto;display:block;margin-bottom:14px;" />`
+    const previewLogoUrl = options?.emailSafeLogo
+      ? this.resolveEmailLogoUrl(this.logoUrl())
+      : this.resolvePreviewLogoUrl(this.logoUrl());
+    const logo = this.includeLogo() && previewLogoUrl
+      ? `<img src="${this.escapeHtmlAttribute(previewLogoUrl)}" alt="${this.escapeHtmlAttribute(this.companyName())} logo" style="max-width:180px;height:auto;display:block;margin-bottom:14px;" />`
       : '';
 
     const customerNoteHtml = noteToCustomer
@@ -1133,7 +1158,10 @@ export default class InvoicesNewComponent {
       : '';
     const lineItemsHtml = this.renderLineItemsHtml();
     const totalsHtml = this.renderTotalsHtml();
-    const quoteActionsHtml = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:14px 0 8px;width:100%;">
+    const portalAction = options?.portalUrl
+      ? `<p style="text-align:center;margin:16px 0;"><a href="${this.escapeHtmlAttribute(options.portalUrl)}" style="display:inline-block;padding:10px 16px;background:#1d4ed8;color:#fff;text-decoration:none;border-radius:6px;font-weight:700;">Open your visit</a></p>`
+      : '';
+    const quoteActionsHtml = portalAction || `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:14px 0 8px;width:100%;">
       <tr>
         <td align="center" style="text-align:center;vertical-align:middle;">
           <a href="${this.escapeHtmlAttribute(this.quoteActionUrl('accept'))}" style="display:inline-block;background:#1d4ed8;border:1px solid #1d4ed8;color:#ffffff !important;text-decoration:none;font-weight:700;font-size:16px;line-height:1;padding:10px 16px;border-radius:6px;margin-right:16px;">Accept Quote</a>
@@ -1141,7 +1169,7 @@ export default class InvoicesNewComponent {
         </td>
       </tr>
     </table>`;
-    const invoiceActionsHtml = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:14px 0 8px;width:100%;">
+    const invoiceActionsHtml = portalAction || `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:14px 0 8px;width:100%;">
       <tr>
         <td align="center" style="text-align:center;vertical-align:middle;">
           <a href="${this.escapeHtmlAttribute(this.invoicePaymentUrl())}" style="display:inline-block;background:#1d4ed8;border:1px solid #1d4ed8;color:#ffffff !important;text-decoration:none;font-weight:700;font-size:16px;line-height:1;padding:10px 16px;border-radius:6px;">Pay Invoice</a>
@@ -1195,17 +1223,39 @@ export default class InvoicesNewComponent {
     </div>`;
   }
 
-  private buildSmsMessage(): string {
-    const customer = this.selectedCustomer();
-    const customerName = this.customerDisplayName(customer);
-    if (this.documentType() === 'invoice') {
-      return `${this.companyName()}: Invoice ${this.quoteNumberDisplay()} is ready for ${customerName}. Pay: ${this.invoicePaymentUrl()}`;
-    }
-    return `${this.companyName()}: Quote ready for ${customerName}. View: ${this.quotePublicUrl()} | Accept: ${this.quoteActionUrl('accept')} | Decline: ${this.quoteActionUrl('decline')}`;
+  private buildSmsMessage(portalUrl: string): string {
+    return `${this.companyName()}: Your ${this.documentLabelLower()} ${this.quoteNumberDisplay()} is ready. Open your visit: ${portalUrl}`;
   }
 
   private quotePublicUrl(): string {
     return this.quoteActionUrl('view');
+  }
+
+  private async publishQuoteSnapshot(): Promise<void> {
+    const publicToken = this.publicToken();
+    const quotePayload = this.quotePublicPayload();
+    const published = await firstValueFrom(this.quoteResponseApi.publishSnapshot({
+      quoteId: quotePayload.quoteId,
+      publicToken,
+      tenantId: String(this.tenantContext.tenantId() || 'main').trim().toLowerCase() || 'main',
+      quoteNumber: quotePayload.quoteNumber,
+      customerName: quotePayload.customerName,
+      vehicle: quotePayload.vehicle,
+      businessName: quotePayload.businessName,
+      quoteData: quotePayload
+    }));
+    if (!published?.ok || published.publicToken !== publicToken || published.quoteId !== quotePayload.quoteId) {
+      throw new Error('Quote link publication was not confirmed. Nothing was sent.');
+    }
+
+  }
+
+  private publicToken(): string {
+    const cryptoApi = typeof crypto !== 'undefined' ? crypto : null;
+    if (cryptoApi && typeof cryptoApi.randomUUID === 'function') {
+      return cryptoApi.randomUUID().replace(/-/g, '');
+    }
+    return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 14)}`;
   }
 
   private quoteActionUrl(action: 'accept' | 'decline' | 'view'): string {
@@ -1227,9 +1277,29 @@ export default class InvoicesNewComponent {
     return this.publicRouteUrl(path, query);
   }
 
-  private quotePublicPayloadEncoded(): string {
-    try {
-      const payload = {
+  private quotePublicPayload(): {
+    quoteId: string;
+    quoteNumber: string;
+    customerName: string;
+    customerEmail: string;
+    customerPhone: string;
+    customerAddress: string;
+    vehicle: string;
+    businessName: string;
+    businessEmail: string;
+    businessPhone: string;
+    businessAddress: string;
+    businessLogoUrl: string;
+    issueDate: string;
+    dueDate: string;
+    description: string;
+    customerNote: string;
+    subtotal: number;
+    taxTotal: number;
+    total: number;
+    lineItems: Array<Record<string, string | number>>;
+  } {
+    return {
         quoteId: String(this.draftId() || 'preview').trim(),
         quoteNumber: this.quoteNumberDisplay(),
         customerName: this.customerDisplayName(this.selectedCustomer()),
@@ -1246,7 +1316,6 @@ export default class InvoicesNewComponent {
         dueDate: this.quoteExpirationDisplay(),
         description: '',
         customerNote: String(this.customerNote() || '').trim(),
-        staffNote: String(this.staffNote() || '').trim(),
         subtotal: this.quoteSubtotal(),
         taxTotal: this.quoteTaxTotal(),
         total: this.quoteGrandTotal(),
@@ -1262,6 +1331,11 @@ export default class InvoicesNewComponent {
           lineTotal: this.roundCurrency(Number(line.lineTotal || 0))
         }))
       };
+  }
+
+  private quotePublicPayloadEncoded(): string {
+    try {
+      const payload = this.quotePublicPayload();
       const json = JSON.stringify(payload);
       if (typeof TextEncoder !== 'undefined' && typeof btoa === 'function') {
         const bytes = new TextEncoder().encode(json);
@@ -1299,6 +1373,57 @@ export default class InvoicesNewComponent {
     return this.publicRouteUrl('/invoice-payment', query);
   }
 
+  private async publishInvoicePaymentSnapshot(): Promise<void> {
+    const id = this.draftId() || 'preview';
+    const tenantId = String(this.tenantContext.tenantId() || 'main').trim().toLowerCase() || 'main';
+    const publicToken = this.publicToken();
+    const number = this.quoteNumberDisplay();
+    const hostedPaymentLink = this.paymentSettings.createHostedPaymentLink(id, number) || '';
+    const paymentProvider = String(this.paymentSettings.defaultProvider()?.key || '').trim().toLowerCase();
+    const amount = this.formatMoney(this.quoteGrandTotal());
+    const invoiceData = this.invoicePaymentPayload();
+
+    await firstValueFrom(this.invoiceResponseApi.publishSnapshot({
+      invoiceId: id,
+      publicToken,
+      tenantId,
+      invoiceNumber: number,
+      customerName: this.customerDisplayName(this.selectedCustomer()),
+      customerEmail: String(this.selectedCustomer()?.email || '').trim(),
+      vehicle: this.customerVehicleSummary(this.selectedCustomer()) || 'Vehicle details pending',
+      businessName: this.companyName(),
+      amount,
+      dueDate: this.quoteExpirationDisplay(),
+      paymentUrl: hostedPaymentLink,
+      paymentProvider,
+      invoiceData
+    }));
+
+
+  }
+
+  private invoicePaymentPayload(): Record<string, unknown> {
+    return {
+      jobNumber: this.invoicesData.getInvoiceById(this.draftId() || '')?.jobNumber || '',
+      customerId: String(this.selectedCustomer()?.id || '').trim(),
+      subtotal: this.quoteSubtotal(),
+      taxTotal: this.quoteTaxTotal(),
+      total: this.quoteGrandTotal(),
+      lineItems: this.quoteLineItems().map(line => ({
+        id: String(line.id || '').trim(),
+        type: String(line.type || '').trim().toLowerCase(),
+        code: String(line.code || '').trim(),
+        description: String(line.description || '').trim(),
+        quantity: Number(line.quantity || 0),
+        unitPrice: this.roundCurrency(Number(line.unitPrice || 0)),
+        taxRate: this.roundCurrency(Number(line.taxRate || 0)),
+        lineSubtotal: this.roundCurrency(Number(line.lineSubtotal || 0)),
+        taxAmount: this.roundCurrency(Number(line.taxAmount || 0)),
+        lineTotal: this.roundCurrency(Number(line.lineTotal || 0))
+      }))
+    };
+  }
+
   private publicAppBaseUrl(): string {
     if (typeof window !== 'undefined' && window.location?.hostname) {
       const host = String(window.location.hostname || '').trim().toLowerCase();
@@ -1312,6 +1437,43 @@ export default class InvoicesNewComponent {
       return window.location.origin.replace(/\/+$/, '');
     }
     return '';
+  }
+
+  private resolveEmailLogoUrl(value: string): string {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (/^https?:\/\//i.test(raw)) return this.isPublicHttpsUrl(raw) ? raw : '';
+    const configured = String(environment.publicAppUrl || '').trim().replace(/\/+$/, '');
+    if (!configured || !this.isPublicHttpsUrl(configured)) return '';
+    if (raw.startsWith('/')) return `${configured}${raw}`;
+    return `${configured}/${raw}`;
+  }
+
+  private resolvePreviewLogoUrl(value: string): string {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (/^https?:\/\//i.test(raw)) return raw;
+    if (raw.startsWith('/')) return raw;
+    return `/${raw}`;
+  }
+
+  private isLoopbackUrl(value: string): boolean {
+    try {
+      const url = new URL(String(value || '').trim(), 'http://localhost');
+      const host = url.hostname.toLowerCase();
+      return host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1';
+    } catch {
+      return false;
+    }
+  }
+
+  private isPublicHttpsUrl(value: string): boolean {
+    try {
+      const url = new URL(String(value || '').trim());
+      return url.protocol === 'https:' && !this.isLoopbackUrl(url.href);
+    } catch {
+      return false;
+    }
   }
 
   private publicRouteUrl(path: string, query?: URLSearchParams): string {
@@ -1332,7 +1494,7 @@ export default class InvoicesNewComponent {
     }
   }
 
-  private resolveMergeTags(source: string): string {
+  private resolveMergeTags(source: string, portalUrl?: string): string {
     const customer = this.selectedCustomer();
     const values: Record<string, string> = {
       customer_name: this.customerDisplayName(customer),
@@ -1346,10 +1508,10 @@ export default class InvoicesNewComponent {
       quote_number: this.quoteNumberDisplay(),
       quote_date: this.quoteDateDisplay(),
       quote_expiration_date: this.quoteExpirationDisplay(),
-      quote_link: this.quotePublicUrl(),
-      quote_accept_url: this.quoteActionUrl('accept'),
-      quote_decline_url: this.quoteActionUrl('decline'),
-      invoice_pay_url: this.invoicePaymentUrl()
+      quote_link: portalUrl || this.quotePublicUrl(),
+      quote_accept_url: portalUrl || this.quoteActionUrl('accept'),
+      quote_decline_url: portalUrl || this.quoteActionUrl('decline'),
+      invoice_pay_url: portalUrl || this.invoicePaymentUrl()
     };
 
     return String(source || '').replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, (_match, key: string) => {
@@ -1567,24 +1729,58 @@ export default class InvoicesNewComponent {
 
   private extractSendFailureReason(error: unknown): string {
     const candidate = error as {
-      error?: { error?: string; message?: string; title?: string; detail?: string };
+      error?: { error?: string; message?: string; title?: string; detail?: string; errors?: unknown };
       message?: string;
       statusText?: string;
+      status?: number;
+      url?: string;
     };
+    const nestedErrors = candidate?.error?.errors
+      ? (Array.isArray(candidate.error.errors)
+        ? candidate.error.errors.join(', ')
+        : JSON.stringify(candidate.error.errors))
+      : '';
+    const genericServerError = /^server error$/i.test(String(candidate?.error?.error || '').trim());
     const raw =
-      candidate?.error?.error ||
+      (genericServerError ? '' : candidate?.error?.error) ||
+      candidate?.error?.detail ||
       candidate?.error?.message ||
       candidate?.error?.title ||
-      candidate?.error?.detail ||
+      nestedErrors ||
       candidate?.message ||
       candidate?.statusText ||
       '';
     const normalized = String(raw).trim();
-    if (!normalized) return '';
+    if (!normalized) {
+      const status = Number(candidate?.status || 0);
+      const url = String(candidate?.url || '').trim();
+      if (status && url) return `request failed with HTTP ${status} at ${url}`;
+      if (status) return `request failed with HTTP ${status}`;
+      return '';
+    }
     if (/verify|verified|verification/i.test(normalized)) return 'number not verified';
     if (/config|configured|from number|sender/i.test(normalized)) return 'sender not configured';
     if (/forbidden|unauthorized|401|403/i.test(normalized)) return 'not authorized';
+    if (/too\s*many\s*requests|\b429\b|rate limit|throttl/i.test(normalized)) {
+      return 'email service is rate limiting right now; retry in a moment';
+    }
+    if (/action must be/i.test(normalized) || /quoteId is required|publicToken is required/i.test(normalized)) {
+      return `quote link setup failed - ${normalized}`;
+    }
     return normalized;
+  }
+
+  private composeSendFailureMessage(
+    emailReason: string,
+    smsReason: string,
+    attemptedEmail: boolean,
+    attemptedSms: boolean
+  ): string {
+    const reasons: string[] = [];
+    if (attemptedEmail) reasons.push(`Email${emailReason ? `: ${emailReason}` : ' failed'}`);
+    if (attemptedSms) reasons.push(`SMS${smsReason ? `: ${smsReason}` : ' failed'}`);
+    if (!reasons.length) return `Could not send ${this.documentLabelLower()}: no delivery targets were attempted.`;
+    return `Could not send ${this.documentLabelLower()}. ${reasons.join(' · ')}.`;
   }
 
   private normalizeTaxRate(value: unknown): number {

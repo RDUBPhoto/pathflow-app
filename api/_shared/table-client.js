@@ -13,6 +13,7 @@ const GLOBAL_SQL_TABLES = new Set([
   "authchallenges",
   "authlocalaccounts",
   "authpasskeys",
+  "authpasswordresets",
   "authsessions",
   "useraccess",
   "tenants",
@@ -221,13 +222,29 @@ function poolKeyForConfig(config, keyHint = "") {
 
 function normalizeSqlPoolConfig(config) {
   if (!config) return null;
-  if (typeof config === "string") return config;
+  if (typeof config === "string") {
+    // A raw connection string bypasses the timeout defaults below when handed
+    // straight to mssql (its request timeout then falls back to 15 seconds).
+    // Parse it first so cold Azure SQL requests get the same explicit budget.
+    const parsed = sql.ConnectionPool.parseConnectionString(config);
+    const configuredRequestTimeout = Number(process.env.SQL_REQUEST_TIMEOUT_MS);
+    const configuredConnectionTimeout = Number(process.env.SQL_CONNECTION_TIMEOUT_MS);
+    return {
+      ...parsed,
+      requestTimeout: configuredRequestTimeout > 0
+        ? configuredRequestTimeout
+        : Number(parsed.requestTimeout) > 0 ? Number(parsed.requestTimeout) : 30000,
+      connectionTimeout: configuredConnectionTimeout > 0
+        ? configuredConnectionTimeout
+        : Number(parsed.connectionTimeout) > 0 ? Number(parsed.connectionTimeout) : 30000
+    };
+  }
   if (typeof config !== "object") return null;
   const conn = asString(config.connectionString);
   const server = asString(config.server);
   // Some local/prod paths may hand us { connectionString } without server.
   // mssql supports passing a raw connection string directly.
-  if (!server && conn) return conn;
+  if (!server && conn) return normalizeSqlPoolConfig(conn);
   return config;
 }
 
@@ -241,7 +258,9 @@ function isPoolUsable(pool) {
 function isRecoverableSqlError(err) {
   const message = asString(err && err.message).toLowerCase();
   const code = asString(err && (err.code || err.name)).toLowerCase();
+  const number = Number(err && (err.number || (err.originalError && err.originalError.info && err.originalError.info.number)));
   return (
+    [40197, 40501, 40613, 10928, 10929, 49918, 49919, 49920].includes(number) ||
     code.includes("connectionerror") ||
     code.includes("esocket") ||
     code.includes("econnreset") ||
@@ -263,6 +282,14 @@ async function invalidatePool(poolOrKey) {
     : asString(poolOrKey && poolOrKey.__pathflowPoolKey);
   if (!key) return;
   const existingPromise = poolByKey.get(key);
+  // A concurrent request may already have replaced the failed pool. Never
+  // evict or close that new pool on behalf of an older failed request.
+  if (typeof poolOrKey !== "string" && existingPromise) {
+    try {
+      if (await existingPromise !== poolOrKey) return;
+    } catch (_) {}
+    if (poolByKey.get(key) !== existingPromise) return;
+  }
   poolByKey.delete(key);
   schemaByPoolKey.delete(key);
   try {
@@ -311,8 +338,9 @@ async function getPoolForConfig(config, keyHint = "") {
 }
 
 async function withRecoveredPool(getPool, task) {
-  const pool = await getPool();
+  let pool;
   try {
+    pool = await getPool();
     return await task(pool);
   } catch (err) {
     if (!isRecoverableSqlError(err)) throw err;
@@ -320,6 +348,14 @@ async function withRecoveredPool(getPool, task) {
     const nextPool = await getPool();
     return task(nextPool);
   }
+}
+
+async function reacquireListPool(pool) {
+  const key = asString(pool && pool.__pathflowPoolKey);
+  if (!key || !pool.config) throw new Error("SQL list pool is missing its connection configuration.");
+  const activePool = await getPoolForConfig(pool.config, key);
+  await ensureSqlSchemaForPool(activePool, key);
+  return activePool;
 }
 
 async function getCatalogPool() {
@@ -780,6 +816,28 @@ function extractPartitionKeysFromAst(ast) {
   return null;
 }
 
+// Push only indexed key comparisons into SQL. Unknown predicates remain a
+// superset (1=1), particularly under OR; the original AST is still evaluated
+// below. Values are always parameters, never interpolated into SQL text.
+function buildSqlKeyPredicate(ast) {
+  const parameters = [];
+  function compile(node) {
+    if (!node) return "1=1";
+    if (node.type === "and" || node.type === "or") {
+      return `(${compile(node.left)} ${node.type.toUpperCase()} ${compile(node.right)})`;
+    }
+    const column = /^PartitionKey$/i.test(node.field) ? "partition_key"
+      : /^RowKey$/i.test(node.field) ? "row_key" : null;
+    if (!column || node.op !== "eq" || typeof node.value !== "string") return "1=1";
+    const name = `keyFilter${parameters.length}`;
+    parameters.push({ name, value: node.value, length: column === "partition_key" ? 128 : 256 });
+    return `${column} = @${name}`;
+  }
+  const clause = compile(ast);
+  // SQL Server allows at most 2100 parameters per request.
+  return parameters.length > 2000 ? { clause: "1=1", parameters: [] } : { clause, parameters };
+}
+
 class SqlEntityTableClient {
   constructor(tableName) {
     this.tableName = asString(tableName).toLowerCase();
@@ -929,7 +987,11 @@ WHERE table_name = @tableName
           partitionKey,
           rowKey
         };
-      } catch (_) {}
+      } catch (err) {
+        // A failed read is not evidence that the entity does not exist.
+        // Continuing here would overwrite existing fields with a partial merge.
+        if (err.statusCode !== 404) throw err;
+      }
     }
 
     await withRecoveredPool(
@@ -956,6 +1018,54 @@ WHEN NOT MATCHED THEN
     );
   }
 
+  async createEntity(entity) {
+    const payload = stripUndefined(entity || {});
+    const { partitionKey, rowKey } = payload;
+    if (!partitionKey || !rowKey) throw new Error("createEntity requires partitionKey and rowKey.");
+
+    try {
+      await withRecoveredPool(
+        () => this.resolvePoolForPartitionKey(partitionKey),
+        async pool => {
+          const request = pool.request();
+          request.input("tableName", sql.NVarChar(128), this.tableName);
+          request.input("partitionKey", sql.NVarChar(128), partitionKey);
+          request.input("rowKey", sql.NVarChar(256), rowKey);
+          request.input("entityJson", sql.NVarChar(sql.MAX), JSON.stringify(payload));
+          await request.query(`
+INSERT INTO dbo.${SQL_ENTITY_TABLE} (table_name, partition_key, row_key, entity_json, updated_at)
+VALUES (@tableName, @partitionKey, @rowKey, @entityJson, SYSUTCDATETIME());
+          `);
+        }
+      );
+    } catch (error) {
+      if (error.number === 2601 || error.number === 2627) error.statusCode = 409;
+      throw error;
+    }
+  }
+
+  async replaceIfRevision(entity, expectedRevision) {
+    const { partitionKey, rowKey } = entity;
+    const result = await withRecoveredPool(
+      () => this.resolvePoolForPartitionKey(partitionKey),
+      async pool => {
+        const request = pool.request();
+        request.input("tableName", sql.NVarChar(128), this.tableName);
+        request.input("partitionKey", sql.NVarChar(128), partitionKey);
+        request.input("rowKey", sql.NVarChar(256), rowKey);
+        request.input("entityJson", sql.NVarChar(sql.MAX), JSON.stringify(entity));
+        request.input("revision", sql.NVarChar(64), expectedRevision);
+        return request.query(`
+UPDATE dbo.${SQL_ENTITY_TABLE}
+SET entity_json = @entityJson, updated_at = SYSUTCDATETIME()
+WHERE table_name = @tableName AND partition_key = @partitionKey AND row_key = @rowKey
+  AND JSON_VALUE(entity_json, '$.revision') = @revision;
+        `);
+      }
+    );
+    return result.rowsAffected[0] === 1;
+  }
+
   async deleteEntity(partitionKey, rowKey) {
     await withRecoveredPool(
       () => this.resolvePoolForPartitionKey(partitionKey),
@@ -978,19 +1088,27 @@ WHERE table_name = @tableName
     const rawFilter = asString(filter);
     const ast = rawFilter ? parseFilter(rawFilter) : null;
     const partitionCandidates = extractPartitionKeysFromAst(ast);
-    const pools = await this.resolvePoolsForList(partitionCandidates);
+    const predicate = buildSqlKeyPredicate(ast);
+    const pools = await withRecoveredPool(
+      () => this.resolvePoolsForList(partitionCandidates),
+      async (resolved) => resolved
+    );
     const seen = new Set();
 
     for (const pool of pools) {
       const result = await withRecoveredPool(
-        async () => pool,
+        () => reacquireListPool(pool),
         async (activePool) => {
           const request = activePool.request();
           request.input("tableName", sql.NVarChar(128), this.tableName);
+          for (const parameter of predicate.parameters) {
+            request.input(parameter.name, sql.NVarChar(Math.max(parameter.length, parameter.value.length)), parameter.value);
+          }
           return request.query(`
 SELECT partition_key, row_key, entity_json, updated_at
 FROM dbo.${SQL_ENTITY_TABLE}
 WHERE table_name = @tableName
+  AND ${predicate.clause}
       `);
         }
       );
@@ -1021,6 +1139,14 @@ class TableClientProxy {
 }
 
 module.exports = {
+  async checkSqlReadiness() {
+    if (!shouldUseSqlBackend()) throw new Error('Readiness expects the SQL backend.');
+    return withRecoveredPool(getCatalogPool, async pool => {
+      const request = pool.request();
+      request.timeout = 5000;
+      await request.query('SELECT 1 AS ready');
+    });
+  },
   TableClient: TableClientProxy,
   isSqlBackendEnabled: shouldUseSqlBackend,
   ensureTenantSqlDatabase,
@@ -1039,6 +1165,13 @@ module.exports = {
     getConnectionStringDatabase,
     setConnectionStringDatabase,
     cloneSqlConfigWithDatabase,
-    catalogDatabaseName
+    catalogDatabaseName,
+    normalizeSqlPoolConfig,
+    withRecoveredPool,
+    reacquireListPool,
+    buildSqlKeyPredicate,
+    parseFilter,
+    SqlEntityTableClient,
+    poolByKey
   }
 };

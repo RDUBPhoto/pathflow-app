@@ -1,4 +1,4 @@
-<ion-content class="glass-bg auth-page">
+<div class="ui-content app-content auth-page">
   <div class="auth-shell">
     <aside class="marketing-panel">
       <div class="marketing-image"></div>
@@ -6,16 +6,17 @@
         <img src="/pathflow-logo.svg" alt="Pathflow" class="marketing-logo" />
         <p class="marketing-kicker">Pathflow Platform</p>
         <h2>Create your workspace and start your 7-day trial.</h2>
-        <p *ngIf="emailSignupEnabled(); else hostedOnlyCopy">
-          Use Microsoft, Google, or Email to create an account and launch your shop in minutes.
-        </p>
-        <ng-template #hostedOnlyCopy>
+        @if (emailSignupEnabled()) {
+          <p>
+            Use Microsoft, Google, or Email to create an account and launch your shop in minutes.
+          </p>
+        } @else {
           <p>Use Microsoft to create your account and launch your shop in minutes.</p>
-        </ng-template>
+        }
       </div>
     </aside>
 
-    <section class="auth-panel glass-surface">
+    <section class="auth-panel app-surface">
       <header class="auth-header">
         <p class="auth-kicker">Step {{ step() }} of 2</p>
         <h1>Create your account</h1>
@@ -37,217 +38,218 @@
         <button type="button" class="inline-link-btn" (click)="backToLogin()">Sign in</button>
       </p>
 
-      <section class="step-body" *ngIf="step() === 1">
-        <section class="form-card">
-          <div class="form-card-head">
-            <h2>Choose sign-up method</h2>
-          </div>
-
-          <div class="method-grid">
-            <button
-              *ngIf="emailSignupEnabled()"
-              type="button"
-              class="method-btn"
-              [class.active]="selectedMethod() === 'email'"
-              (click)="setMethod('email')">
-              <ion-icon name="key-outline"></ion-icon>
-              <span>{{ localEmailCredentialsEnabled() ? 'Email & Password' : 'Email' }}</span>
+      @if (step() === 1) {
+        <section class="step-body">
+          <section class="form-card">
+            <div class="form-card-head">
+              <h2>Choose sign-up method</h2>
+            </div>
+            <div class="method-grid">
+              @if (emailSignupEnabled()) {
+                <button
+                  type="button"
+                  class="method-btn"
+                  [class.active]="selectedMethod() === 'email'"
+                  (click)="setMethod('email')">
+                  <ui-icon name="key"></ui-icon>
+                  <span>{{ localEmailCredentialsEnabled() ? 'Email & Password' : 'Email' }}</span>
+                </button>
+              }
+              <button type="button" class="method-btn" [class.active]="selectedMethod() === 'aad'" (click)="setMethod('aad')">
+                <ui-icon name="shield-check"></ui-icon>
+                <span>{{ primaryProviderLabel() }}</span>
+              </button>
+              @if (googleEnabled()) {
+                <button
+                  type="button"
+                  class="method-btn"
+                  [class.active]="selectedMethod() === 'google'"
+                  (click)="setMethod('google')">
+                  <ui-icon name="brand-google"></ui-icon>
+                  <span>Google</span>
+                </button>
+              }
+            </div>
+          </section>
+          @if (selectedMethod() === 'email' && localEmailCredentialsEnabled()) {
+            <section class="form-card">
+              <div class="form-card-head">
+                <h2>Manual Sign-up</h2>
+              </div>
+              <div class="ui-item">
+                <span class="ui-label">Full name</span>
+                <ui-input aria-label="Full name"
+                  [value]="fullName()"
+                  (valueInput)="fullName.set($any($event.detail).value ?? '')"
+                  autocomplete="name"
+                  placeholder="Robert Warren">
+                </ui-input>
+              </div>
+              <div class="ui-item">
+                <span class="ui-label">Email</span>
+                <ui-input aria-label="Email"
+                  [value]="email()"
+                  (valueInput)="email.set($any($event.detail).value ?? '')"
+                  type="email"
+                  autocomplete="email"
+                  placeholder="you@company.com">
+                </ui-input>
+              </div>
+              <div class="ui-item">
+                <span class="ui-label">Phone</span>
+                <ui-input aria-label="Phone"
+                  [value]="phone()"
+                  (valueInput)="onPhoneInput($any($event.detail).value)"
+                  type="tel"
+                  inputmode="tel"
+                  autocomplete="tel"
+                  placeholder="(555) 123-4567">
+                </ui-input>
+              </div>
+              <div class="ui-item">
+                <span class="ui-label">Password</span>
+                <ui-input aria-label="Password"
+                  [value]="password()"
+                  (valueInput)="password.set($any($event.detail).value ?? '')"
+                  type="password"
+                  autocomplete="new-password"
+                  placeholder="Minimum 8 characters">
+                </ui-input>
+              </div>
+              <div class="ui-item">
+                <span class="ui-label">Confirm password</span>
+                <ui-input aria-label="Confirm password"
+                  [value]="confirmPassword()"
+                  (valueInput)="confirmPassword.set($any($event.detail).value ?? '')"
+                  type="password"
+                  autocomplete="new-password"
+                  placeholder="Re-enter password">
+                </ui-input>
+              </div>
+            </section>
+          }
+          @if (selectedMethod() !== 'email' || (selectedMethod() === 'email' && !localEmailCredentialsEnabled())) {
+            <section class="form-card">
+              <div class="form-card-head">
+                <h2>Provider Sign-up</h2>
+              </div>
+              <p class="provider-note">
+                You selected <strong>{{ selectedMethod() === 'email' ? 'Email' : (selectedMethod() === 'google' ? 'Google' : primaryProviderLabel()) }}</strong>.
+                Next, choose a plan. The provider sign-in prompt opens only after you continue.
+              </p>
+            </section>
+          }
+          <div class="step-actions single">
+            <button class="btn ui-button btn-primary btn-lg w-100" type="button" (click)="goToPlans()" [disabled]="auth.loading() || saving()">
+              Continue to Business Details
             </button>
-            <button type="button" class="method-btn" [class.active]="selectedMethod() === 'aad'" (click)="setMethod('aad')">
-              <ion-icon name="shield-checkmark-outline"></ion-icon>
-              <span>{{ primaryProviderLabel() }}</span>
+          </div>
+        </section>
+      }
+
+      @if (step() === 2) {
+        <section class="step-body">
+          <section class="form-card">
+            <div class="form-card-head">
+              <h2>Business Details</h2>
+            </div>
+            <div class="ui-item">
+              <span class="ui-label">Business name</span>
+              <ui-input aria-label="Business name"
+                [value]="businessName()"
+                (valueInput)="businessName.set($any($event.detail).value ?? '')"
+                autocomplete="organization"
+                placeholder="Exodus 4x4">
+              </ui-input>
+            </div>
+            <div class="ui-item">
+              <span class="ui-label">Business email</span>
+              <ui-input aria-label="Business email"
+                [value]="businessEmail()"
+                (valueInput)="businessEmail.set($any($event.detail).value ?? '')"
+                type="email"
+                autocomplete="email"
+                placeholder="service@yourcompany.com">
+              </ui-input>
+            </div>
+            <div class="ui-item">
+              <span class="ui-label">Business phone</span>
+              <ui-input aria-label="Business phone"
+                [value]="businessPhone()"
+                (valueInput)="onBusinessPhoneInput($any($event.detail).value)"
+                type="tel"
+                inputmode="tel"
+                autocomplete="tel"
+                placeholder="(555) 123-4567">
+              </ui-input>
+            </div>
+            <div class="ui-item">
+              <span class="ui-label">Business address</span>
+              <ui-input aria-label="Business address"
+                [value]="businessAddress()"
+                (valueInput)="businessAddress.set($any($event.detail).value ?? '')"
+                autocomplete="street-address"
+                placeholder="123 Main St, Schertz, TX">
+              </ui-input>
+            </div>
+            <div class="ui-item">
+              <span class="ui-label">Primary location name</span>
+              <ui-input aria-label="Primary location name"
+                [value]="locationName()"
+                (valueInput)="locationName.set($any($event.detail).value ?? '')"
+                placeholder="Main Shop">
+              </ui-input>
+            </div>
+          </section>
+          <section class="form-card review-card">
+            <div class="form-card-head">
+              <h2>Trial Start</h2>
+            </div>
+            <div class="review-row">
+              <span>Sign-up method</span>
+              <strong>
+                {{ selectedMethod() === 'email' ? (localEmailCredentialsEnabled() ? 'Email & Password' : 'Email') : (selectedMethod() === 'google' ? 'Google' : primaryProviderLabel()) }}
+              </strong>
+            </div>
+            <div class="review-row">
+              <span>Access</span>
+              <strong>7-Day Trial</strong>
+            </div>
+            <p class="review-note">
+              Your trial starts when you create the workspace. Billing can be added later from Business Admin.
+            </p>
+          </section>
+          <div class="step-actions split">
+            <button class="btn ui-button btn-outline-primary btn-lg" type="button" (click)="backToAccount()" [disabled]="auth.loading() || saving()">
+              Back
             </button>
-            <button
-              *ngIf="googleEnabled()"
-              type="button"
-              class="method-btn"
-              [class.active]="selectedMethod() === 'google'"
-              (click)="setMethod('google')">
-              <ion-icon name="logo-google"></ion-icon>
-              <span>Google</span>
+            <button class="btn ui-button btn-primary btn-lg" type="button" (click)="submitSignup()" [disabled]="auth.loading() || saving() || !businessDetailsValid()">
+              @if (saving()) {
+                <span class="spinner-border spinner-border-sm ui-spinner" role="status" aria-label="Loading" slot="start"></span>
+              }
+              {{ submitCta() }}
             </button>
           </div>
         </section>
-
-        <section class="form-card" *ngIf="selectedMethod() === 'email' && localEmailCredentialsEnabled()">
-          <div class="form-card-head">
-            <h2>Manual Sign-up</h2>
-          </div>
-
-          <ion-item>
-            <ion-label position="stacked">Full name</ion-label>
-            <ion-input
-              [value]="fullName()"
-              (ionInput)="fullName.set($any($event.detail).value ?? '')"
-              autocomplete="name"
-              placeholder="Robert Warren">
-            </ion-input>
-          </ion-item>
-
-          <ion-item>
-            <ion-label position="stacked">Email</ion-label>
-            <ion-input
-              [value]="email()"
-              (ionInput)="email.set($any($event.detail).value ?? '')"
-              type="email"
-              autocomplete="email"
-              placeholder="you@company.com">
-            </ion-input>
-          </ion-item>
-
-          <ion-item>
-            <ion-label position="stacked">Phone</ion-label>
-            <ion-input
-              [value]="phone()"
-              (ionInput)="onPhoneInput($any($event.detail).value)"
-              type="tel"
-              inputmode="tel"
-              autocomplete="tel"
-              placeholder="(555) 123-4567">
-            </ion-input>
-          </ion-item>
-
-          <ion-item>
-            <ion-label position="stacked">Password</ion-label>
-            <ion-input
-              [value]="password()"
-              (ionInput)="password.set($any($event.detail).value ?? '')"
-              type="password"
-              autocomplete="new-password"
-              placeholder="Minimum 8 characters">
-            </ion-input>
-          </ion-item>
-
-          <ion-item>
-            <ion-label position="stacked">Confirm password</ion-label>
-            <ion-input
-              [value]="confirmPassword()"
-              (ionInput)="confirmPassword.set($any($event.detail).value ?? '')"
-              type="password"
-              autocomplete="new-password"
-              placeholder="Re-enter password">
-            </ion-input>
-          </ion-item>
-        </section>
-
-        <section class="form-card" *ngIf="selectedMethod() !== 'email' || (selectedMethod() === 'email' && !localEmailCredentialsEnabled())">
-          <div class="form-card-head">
-            <h2>Provider Sign-up</h2>
-          </div>
-          <p class="provider-note">
-            You selected <strong>{{ selectedMethod() === 'email' ? 'Email' : (selectedMethod() === 'google' ? 'Google' : primaryProviderLabel()) }}</strong>.
-            Next, choose a plan. The provider sign-in prompt opens only after you continue.
-          </p>
-        </section>
-
-        <div class="step-actions single">
-          <ion-button expand="block" size="large" (click)="goToPlans()" [disabled]="auth.loading() || saving()">
-            Continue to Business Details
-          </ion-button>
-        </div>
-      </section>
-
-      <section class="step-body" *ngIf="step() === 2">
-        <section class="form-card">
-          <div class="form-card-head">
-            <h2>Business Details</h2>
-          </div>
-
-          <ion-item>
-            <ion-label position="stacked">Business name</ion-label>
-            <ion-input
-              [value]="businessName()"
-              (ionInput)="businessName.set($any($event.detail).value ?? '')"
-              autocomplete="organization"
-              placeholder="Exodus 4x4">
-            </ion-input>
-          </ion-item>
-
-          <ion-item>
-            <ion-label position="stacked">Business email</ion-label>
-            <ion-input
-              [value]="businessEmail()"
-              (ionInput)="businessEmail.set($any($event.detail).value ?? '')"
-              type="email"
-              autocomplete="email"
-              placeholder="service@yourcompany.com">
-            </ion-input>
-          </ion-item>
-
-          <ion-item>
-            <ion-label position="stacked">Business phone</ion-label>
-            <ion-input
-              [value]="businessPhone()"
-              (ionInput)="onBusinessPhoneInput($any($event.detail).value)"
-              type="tel"
-              inputmode="tel"
-              autocomplete="tel"
-              placeholder="(555) 123-4567">
-            </ion-input>
-          </ion-item>
-
-          <ion-item>
-            <ion-label position="stacked">Business address</ion-label>
-            <ion-input
-              [value]="businessAddress()"
-              (ionInput)="businessAddress.set($any($event.detail).value ?? '')"
-              autocomplete="street-address"
-              placeholder="123 Main St, Schertz, TX">
-            </ion-input>
-          </ion-item>
-
-          <ion-item>
-            <ion-label position="stacked">Primary location name</ion-label>
-            <ion-input
-              [value]="locationName()"
-              (ionInput)="locationName.set($any($event.detail).value ?? '')"
-              placeholder="Main Shop">
-            </ion-input>
-          </ion-item>
-        </section>
-
-        <section class="form-card review-card">
-          <div class="form-card-head">
-            <h2>Trial Start</h2>
-          </div>
-
-          <div class="review-row">
-            <span>Sign-up method</span>
-            <strong>
-              {{ selectedMethod() === 'email' ? (localEmailCredentialsEnabled() ? 'Email & Password' : 'Email') : (selectedMethod() === 'google' ? 'Google' : primaryProviderLabel()) }}
-            </strong>
-          </div>
-          <div class="review-row">
-            <span>Access</span>
-            <strong>7-Day Trial</strong>
-          </div>
-          <p class="review-note">
-            Your trial starts when you create the workspace. Billing can be added later from Business Admin.
-          </p>
-        </section>
-
-        <div class="step-actions split">
-          <ion-button fill="outline" size="large" (click)="backToAccount()" [disabled]="auth.loading() || saving()">
-            Back
-          </ion-button>
-          <ion-button size="large" (click)="submitSignup()" [disabled]="auth.loading() || saving() || !businessDetailsValid()">
-            <ion-spinner *ngIf="saving()" name="crescent" slot="start"></ion-spinner>
-            {{ submitCta() }}
-          </ion-button>
-        </div>
-      </section>
+      }
 
       <div class="secure-note">
-        <ion-icon name="key-outline"></ion-icon>
+        <ui-icon name="key"></ui-icon>
         <span>Email/password accounts use app-hosted secure sessions. Google and Microsoft continue through their provider flows.</span>
       </div>
 
-      <p class="auth-hint" *ngIf="hint()">{{ hint() }}</p>
-      <p class="auth-hint error" *ngIf="error()">{{ error() }}</p>
+      @if (hint()) {
+        <p class="auth-hint">{{ hint() }}</p>
+      }
+      @if (error()) {
+        <p class="auth-hint error">{{ error() }}</p>
+      }
 
-      <div class="loading" *ngIf="auth.loading() || saving()">
-        <ion-spinner name="crescent"></ion-spinner>
-      </div>
+      @if (auth.loading() || saving()) {
+        <div class="loading">
+          <span class="spinner-border spinner-border-sm ui-spinner" role="status" aria-label="Loading"></span>
+        </div>
+      }
     </section>
   </div>
-</ion-content>
+</div>

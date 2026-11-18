@@ -6,6 +6,7 @@ const { requirePrincipal } = require("../_shared/auth");
 const PURCHASE_ORDER_TABLE = "purchaseorders";
 const INVENTORY_TABLE = "inventoryitems";
 const NEEDS_TABLE = "inventoryneeds";
+const EASYPOST_TRACKERS_URL = "https://api.easypost.com/v2/trackers";
 
 function asString(value) {
   return value == null ? "" : String(value).trim();
@@ -111,6 +112,8 @@ function normalizeLine(raw, index) {
     needId: asString(source.needId),
     itemId: asString(source.itemId || source.relatedInventoryItemId),
     relatedInventoryItemId: asString(source.relatedInventoryItemId || source.itemId),
+    relatedInvoiceId: asString(source.relatedInvoiceId),
+    relatedInvoiceLineItemId: asString(source.relatedInvoiceLineItemId),
     jobId: asString(source.jobId),
     jobNumber: asString(source.jobNumber),
     partName,
@@ -125,10 +128,18 @@ function normalizeLine(raw, index) {
     orderNumber: asString(source.orderNumber),
     trackingNumber: asString(source.trackingNumber),
     etaDate: asString(source.etaDate),
+    carrier: asString(source.carrier),
+    trackingStatus: asString(source.trackingStatus),
+    trackingStatusUpdatedAt: asString(source.trackingStatusUpdatedAt),
+    estimatedDeliveryDate: asString(source.estimatedDeliveryDate),
+    deliveredAt: asString(source.deliveredAt),
+    trackingProvider: asString(source.trackingProvider),
+    trackingProviderId: asString(source.trackingProviderId),
+    trackingLastError: asString(source.trackingLastError),
     vendorInvoiceNumber: asString(source.vendorInvoiceNumber),
     note: asString(source.note || source.notes),
     lineTotal: Number((qty * unitCost).toFixed(2)),
-    status: qtyReceived >= qty ? "received" : (qtyReceived > 0 ? "partial" : "ordered")
+    status: asString(source.status) || (qtyReceived >= qty ? "received" : (qtyReceived > 0 ? "partial" : "draft"))
   };
 }
 
@@ -209,6 +220,8 @@ function lineFromNeed(need, index) {
     needId: asString(need.rowKey),
     itemId: asString(need.relatedInventoryItemId),
     relatedInventoryItemId: asString(need.relatedInventoryItemId),
+    relatedInvoiceId: asString(need.relatedInvoiceId),
+    relatedInvoiceLineItemId: asString(need.relatedInvoiceLineItemId),
     jobId: asString(need.jobId),
     jobNumber: asString(need.jobNumber),
     partName: asString(need.partName),
@@ -223,10 +236,18 @@ function lineFromNeed(need, index) {
     orderNumber: "",
     trackingNumber: "",
     etaDate: "",
+    carrier: "",
+    trackingStatus: "",
+    trackingStatusUpdatedAt: "",
+    estimatedDeliveryDate: "",
+    deliveredAt: "",
+    trackingProvider: "",
+    trackingProviderId: "",
+    trackingLastError: "",
     vendorInvoiceNumber: "",
     note: asString(need.note),
     lineTotal: Number((qty * unitCost).toFixed(2)),
-    status: "ordered"
+    status: "draft"
   };
 }
 
@@ -261,7 +282,8 @@ async function updateNeedOrderedQuantities(needsClient, tenantId, lines, purchas
     const currentOrdered = asNumber(existing && existing.qtyOrdered, 0);
     const currentReceived = asNumber(existing && existing.qtyReceived, 0);
     const qtyNeeded = Math.max(1, Math.floor(asNumber(existing && (existing.qtyNeeded || existing.qty), asNumber(line.qtyNeeded, line.qty))));
-    const qtyOrdered = Math.max(currentOrdered, currentOrdered + Math.max(0, Math.floor(asNumber(line.qty, 0))));
+    const lineStartingOrdered = Math.max(0, Math.floor(asNumber(line.qtyOrdered, currentOrdered)));
+    const qtyOrdered = Math.max(currentOrdered, lineStartingOrdered + Math.max(0, Math.floor(asNumber(line.qty, 0))));
     const isFullyReceived = currentReceived >= qtyNeeded;
     await needsClient.upsertEntity(
       {
@@ -272,6 +294,37 @@ async function updateNeedOrderedQuantities(needsClient, tenantId, lines, purchas
         qtyReceived: currentReceived,
         status: isFullyReceived ? "received" : "ordered",
         jobPartStatus: isFullyReceived ? "received" : "ordered",
+        purchaseOrderId: asString(purchaseOrderId),
+        updatedAt: now
+      },
+      "Merge"
+    );
+  }
+}
+
+async function revertNeedOrderedQuantities(needsClient, tenantId, lines, status, purchaseOrderId) {
+  const now = new Date().toISOString();
+  for (const line of lines) {
+    const needId = asString(line.needId);
+    if (!needId) continue;
+    let existing = null;
+    try {
+      existing = await needsClient.getEntity(tenantId, needId);
+    } catch (_) {}
+    const currentOrdered = Math.max(0, Math.floor(asNumber(existing && existing.qtyOrdered, asNumber(line.qtyOrdered, 0))));
+    const currentReceived = Math.max(0, asNumber(existing && existing.qtyReceived, 0));
+    const qtyNeeded = Math.max(1, Math.floor(asNumber(existing && (existing.qtyNeeded || existing.qty), asNumber(line.qtyNeeded, line.qty))));
+    const reversedQty = Math.max(0, Math.floor(asNumber(line.qty, 0)));
+    const qtyOrdered = Math.max(currentReceived, currentOrdered - reversedQty);
+    await needsClient.upsertEntity(
+      {
+        partitionKey: tenantId,
+        rowKey: needId,
+        qtyNeeded,
+        qtyOrdered,
+        qtyReceived: currentReceived,
+        status: normalizeNeedStatus(status),
+        jobPartStatus: normalizeJobPartStatus(status),
         purchaseOrderId: asString(purchaseOrderId),
         updatedAt: now
       },
@@ -378,6 +431,8 @@ async function applyInventoryAdjustments(inventoryClient, tenantId, lines, mode)
     } else if (mode === "receive") {
       nextOnHand += qty;
       nextOnOrder = Math.max(0, nextOnOrder - qty);
+    } else if (mode === "cancel") {
+      nextOnOrder = Math.max(0, nextOnOrder - qty);
     }
 
     item.onHand = nextOnHand;
@@ -423,6 +478,7 @@ function receiptRequestsFromBody(body, orderLines) {
       qty: Math.max(0, asNumber(source.qtyReceived != null ? source.qtyReceived : source.qty, 0)),
       orderNumber: asString(source.orderNumber),
       trackingNumber: asString(source.trackingNumber),
+      carrier: asString(source.carrier),
       etaDate: asString(source.etaDate),
       vendorInvoiceNumber: asString(source.vendorInvoiceNumber),
       note: asString(source.note)
@@ -440,6 +496,14 @@ function receiptRequestsFromBody(body, orderLines) {
       orderNumber: asString((requested && requested.orderNumber) || line.orderNumber),
       trackingNumber: asString((requested && requested.trackingNumber) || line.trackingNumber),
       etaDate: asString((requested && requested.etaDate) || line.etaDate),
+      carrier: asString((requested && requested.carrier) || line.carrier),
+      trackingStatus: asString(line.trackingStatus),
+      trackingStatusUpdatedAt: asString(line.trackingStatusUpdatedAt),
+      estimatedDeliveryDate: asString(line.estimatedDeliveryDate),
+      deliveredAt: asString(line.deliveredAt),
+      trackingProvider: asString(line.trackingProvider),
+      trackingProviderId: asString(line.trackingProviderId),
+      trackingLastError: asString(line.trackingLastError),
       vendorInvoiceNumber: asString((requested && requested.vendorInvoiceNumber) || line.vendorInvoiceNumber),
       note: asString((requested && requested.note) || line.note)
     };
@@ -459,11 +523,262 @@ function applyReceiptsToLines(lines, receipts) {
       orderNumber: asString(receipt.orderNumber),
       trackingNumber: asString(receipt.trackingNumber),
       etaDate: asString(receipt.etaDate),
+      carrier: asString(receipt.carrier),
+      trackingStatus: asString(line.trackingStatus),
+      trackingStatusUpdatedAt: asString(line.trackingStatusUpdatedAt),
+      estimatedDeliveryDate: asString(line.estimatedDeliveryDate),
+      deliveredAt: asString(line.deliveredAt),
+      trackingProvider: asString(line.trackingProvider),
+      trackingProviderId: asString(line.trackingProviderId),
+      trackingLastError: asString(line.trackingLastError),
       vendorInvoiceNumber: asString(receipt.vendorInvoiceNumber),
       note: asString(receipt.note),
       status: qtyReceived >= qty ? "received" : (qtyReceived > 0 ? "partial" : "ordered")
     };
   });
+}
+
+function hasReceivedQuantities(order) {
+  return (order.lines || []).some(line => asNumber(line.qtyReceived, 0) > 0);
+}
+
+function trackingUpdatesFromBody(body) {
+  const rawLines = Array.isArray(body.lines) ? body.lines : [];
+  return rawLines
+    .map(item => {
+      const source = item && typeof item === "object" ? item : {};
+      return {
+        lineId: asString(source.lineId),
+        orderNumber: asString(source.orderNumber),
+        trackingNumber: asString(source.trackingNumber),
+        etaDate: asString(source.etaDate),
+        carrier: asString(source.carrier),
+        vendorInvoiceNumber: asString(source.vendorInvoiceNumber),
+        note: asString(source.note)
+      };
+    })
+    .filter(item => item.lineId);
+}
+
+function applyTrackingUpdatesToLines(lines, updates) {
+  const byLineId = new Map(updates.map(item => [asString(item.lineId), item]));
+  return lines.map(line => {
+    const update = byLineId.get(asString(line.lineId));
+    if (!update) return line;
+    return {
+      ...line,
+      orderNumber: update.orderNumber,
+      trackingNumber: update.trackingNumber,
+      etaDate: update.etaDate,
+      carrier: update.carrier || asString(line.carrier),
+      trackingLastError: update.trackingNumber === asString(line.trackingNumber) ? asString(line.trackingLastError) : "",
+      vendorInvoiceNumber: update.vendorInvoiceNumber,
+      note: update.note || asString(line.note)
+    };
+  });
+}
+
+function trackingRefreshRequestsFromBody(body) {
+  const rawLines = Array.isArray(body.lines) ? body.lines : [];
+  return rawLines
+    .map(item => {
+      const source = item && typeof item === "object" ? item : {};
+      return {
+        lineId: asString(source.lineId),
+        trackingNumber: asString(source.trackingNumber),
+        carrier: asString(source.carrier)
+      };
+    })
+    .filter(item => item.lineId);
+}
+
+function normalizeEasyPostStatus(status) {
+  const value = asString(status).toLowerCase();
+  if (!value) return "";
+  if (value === "pre_transit") return "pre-transit";
+  if (value === "in_transit") return "in transit";
+  if (value === "out_for_delivery") return "out for delivery";
+  if (value === "available_for_pickup") return "available for pickup";
+  if (value === "return_to_sender") return "return to sender";
+  return value.replace(/_/g, " ");
+}
+
+function isoFromProviderDate(value) {
+  const raw = asString(value);
+  if (!raw) return "";
+  const ts = Date.parse(raw);
+  return Number.isFinite(ts) ? new Date(ts).toISOString() : raw;
+}
+
+function dateOnlyFromProviderDate(value) {
+  const iso = isoFromProviderDate(value);
+  if (!iso) return "";
+  const ts = Date.parse(iso);
+  if (!Number.isFinite(ts)) return iso;
+  return new Date(ts).toISOString().slice(0, 10);
+}
+
+function latestTrackingDetail(tracker) {
+  const details = Array.isArray(tracker && tracker.tracking_details) ? tracker.tracking_details : [];
+  if (!details.length) return null;
+  return details
+    .slice()
+    .sort((a, b) => Date.parse(asString(b.datetime)) - Date.parse(asString(a.datetime)))[0] || null;
+}
+
+function easyPostTestTracker(line) {
+  const trackingCode = asString(line && line.trackingNumber).toUpperCase();
+  const statuses = {
+    EZ1000000001: "pre-transit",
+    EZ2000000002: "in transit",
+    EZ3000000003: "out for delivery",
+    EZ4000000004: "delivered",
+    EZ5000000005: "return to sender",
+    EZ6000000006: "failure",
+    EZ7000000007: "unknown"
+  };
+  const trackingStatus = statuses[trackingCode];
+  if (!trackingStatus) {
+    if (/^EZ\d+$/i.test(trackingCode)) {
+      return {
+        ok: false,
+        error: "Unsupported EasyPost test tracking number. Use EZ1000000001, EZ2000000002, EZ3000000003, EZ4000000004, EZ5000000005, EZ6000000006, or EZ7000000007."
+      };
+    }
+    return null;
+  }
+
+  const now = new Date();
+  const eta = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+  const isDelivered = trackingStatus === "delivered";
+  return {
+    ok: true,
+    carrier: asString(line && line.carrier) || "USPS",
+    trackingStatus,
+    trackingStatusUpdatedAt: now.toISOString(),
+    estimatedDeliveryDate: isDelivered ? "" : eta.toISOString().slice(0, 10),
+    deliveredAt: isDelivered ? now.toISOString() : "",
+    trackingProvider: "easypost-test",
+    trackingProviderId: trackingCode,
+    etaDate: isDelivered ? "" : eta.toISOString().slice(0, 10),
+    trackingLastError: ""
+  };
+}
+
+async function fetchEasyPostTracker(line) {
+  const testTracker = easyPostTestTracker(line);
+  if (testTracker) return testTracker;
+
+  const apiKey = asString(process.env.EASYPOST_API_KEY);
+  if (!apiKey) {
+    return {
+      ok: false,
+      error: "EASYPOST_API_KEY is not configured. Tracking details are still saved manually."
+    };
+  }
+
+  const trackingCode = asString(line.trackingNumber);
+  if (!trackingCode) {
+    return { ok: false, error: "Tracking number is required before refreshing carrier status." };
+  }
+
+  const body = new URLSearchParams();
+  body.set("tracker[tracking_code]", trackingCode);
+  const carrier = asString(line.carrier);
+  if (carrier) body.set("tracker[carrier]", carrier);
+
+  const response = await fetch(EASYPOST_TRACKERS_URL, {
+    method: "POST",
+    headers: {
+      authorization: `Basic ${Buffer.from(`${apiKey}:`).toString("base64")}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: body.toString()
+  });
+
+  const text = await response.text();
+  let payload = {};
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch (_) {
+    payload = {};
+  }
+
+  if (!response.ok) {
+    const errors = Array.isArray(payload.errors) ? payload.errors : [];
+    const message = asString(payload.message)
+      || asString(payload.error && payload.error.message)
+      || asString(errors[0] && (errors[0].message || errors[0].field))
+      || asString(text)
+      || `EasyPost tracking request failed (${response.status}).`;
+    return { ok: false, error: message };
+  }
+
+  const tracker = payload && typeof payload === "object" ? payload : {};
+  const latest = latestTrackingDetail(tracker);
+  const estimatedDeliveryDate = dateOnlyFromProviderDate(
+    tracker.est_delivery_date || tracker.est_delivery_datetime || tracker.estimated_delivery_date
+  );
+  const deliveredAt = asString(tracker.status).toLowerCase() === "delivered"
+    ? isoFromProviderDate((latest && latest.datetime) || tracker.updated_at || tracker.created_at)
+    : "";
+
+  return {
+    ok: true,
+    carrier: asString(tracker.carrier),
+    trackingStatus: normalizeEasyPostStatus(tracker.status),
+    trackingStatusUpdatedAt: isoFromProviderDate((latest && latest.datetime) || tracker.updated_at || new Date().toISOString()),
+    estimatedDeliveryDate,
+    deliveredAt,
+    trackingProvider: "easypost",
+    trackingProviderId: asString(tracker.id),
+    etaDate: estimatedDeliveryDate,
+    trackingLastError: ""
+  };
+}
+
+async function refreshTrackingLines(lines, requests) {
+  const byLineId = new Map(requests.map(item => [asString(item.lineId), item]));
+  const nextLines = [];
+  const results = [];
+
+  for (const line of lines) {
+    const request = byLineId.get(asString(line.lineId));
+    if (!request) {
+      nextLines.push(line);
+      continue;
+    }
+
+    const trackingNumber = asString(request.trackingNumber || line.trackingNumber);
+    const carrier = asString(request.carrier || line.carrier);
+    const baseLine = { ...line, trackingNumber, carrier };
+    const result = await fetchEasyPostTracker(baseLine);
+    if (result.ok) {
+      const nextLine = {
+        ...baseLine,
+        carrier: result.carrier || carrier,
+        trackingStatus: result.trackingStatus,
+        trackingStatusUpdatedAt: result.trackingStatusUpdatedAt,
+        estimatedDeliveryDate: result.estimatedDeliveryDate,
+        deliveredAt: result.deliveredAt,
+        trackingProvider: result.trackingProvider,
+        trackingProviderId: result.trackingProviderId,
+        etaDate: result.etaDate || asString(baseLine.etaDate),
+        trackingLastError: ""
+      };
+      nextLines.push(nextLine);
+      results.push({ lineId: asString(line.lineId), ok: true, trackingStatus: nextLine.trackingStatus, etaDate: nextLine.etaDate });
+    } else {
+      const nextLine = {
+        ...baseLine,
+        trackingLastError: result.error
+      };
+      nextLines.push(nextLine);
+      results.push({ lineId: asString(line.lineId), ok: false, error: result.error });
+    }
+  }
+
+  return { lines: nextLines, results };
 }
 
 module.exports = async function (context, req) {
@@ -625,6 +940,96 @@ module.exports = async function (context, req) {
       return;
     }
 
+    if (op === "updatetracking" || op === "update-tracking" || op === "update-line-tracking") {
+      const id = asString(body.id);
+      if (!id) {
+        context.res = json(400, { error: "id is required." });
+        return;
+      }
+      let existing;
+      try {
+        existing = await purchaseClient.getEntity(tenantId, id);
+      } catch (_) {
+        context.res = json(404, { error: "Purchase order not found." });
+        return;
+      }
+
+      const order = toPurchaseOrder(existing);
+      if (!["draft", "ordered", "received"].includes(order.status)) {
+        context.res = json(400, { error: "Purchase order tracking can only be updated on active orders." });
+        return;
+      }
+
+      const updates = trackingUpdatesFromBody(body);
+      if (!updates.length) {
+        context.res = json(400, { error: "At least one line update is required." });
+        return;
+      }
+
+      const nextLines = applyTrackingUpdatesToLines(order.lines, updates);
+      const now = new Date().toISOString();
+      const summary = summarizeLines(nextLines);
+      await purchaseClient.upsertEntity(
+        {
+          partitionKey: tenantId,
+          rowKey: id,
+          linesJson: JSON.stringify(nextLines),
+          subtotal: summary.subtotal,
+          updatedAt: now
+        },
+        "Merge"
+      );
+
+      const saved = await purchaseClient.getEntity(tenantId, id);
+      context.res = json(200, { ok: true, order: toPurchaseOrder(saved) });
+      return;
+    }
+
+    if (op === "refreshtracking" || op === "refresh-tracking" || op === "refresh-line-tracking") {
+      const id = asString(body.id);
+      if (!id) {
+        context.res = json(400, { error: "id is required." });
+        return;
+      }
+      let existing;
+      try {
+        existing = await purchaseClient.getEntity(tenantId, id);
+      } catch (_) {
+        context.res = json(404, { error: "Purchase order not found." });
+        return;
+      }
+
+      const order = toPurchaseOrder(existing);
+      if (!["draft", "ordered", "received"].includes(order.status)) {
+        context.res = json(400, { error: "Purchase order tracking can only be refreshed on active orders." });
+        return;
+      }
+
+      const requests = trackingRefreshRequestsFromBody(body);
+      if (!requests.length) {
+        context.res = json(400, { error: "At least one tracking line is required." });
+        return;
+      }
+
+      const refreshed = await refreshTrackingLines(order.lines, requests);
+      const now = new Date().toISOString();
+      const summary = summarizeLines(refreshed.lines);
+      await purchaseClient.upsertEntity(
+        {
+          partitionKey: tenantId,
+          rowKey: id,
+          linesJson: JSON.stringify(refreshed.lines),
+          subtotal: summary.subtotal,
+          updatedAt: now
+        },
+        "Merge"
+      );
+
+      const saved = await purchaseClient.getEntity(tenantId, id);
+      context.res = json(200, { ok: true, order: toPurchaseOrder(saved), tracking: refreshed.results });
+      return;
+    }
+
     if (op === "submit" || op === "submit-order") {
       const id = asString(body.id);
       if (!id) {
@@ -646,11 +1051,18 @@ module.exports = async function (context, req) {
       }
 
       const now = new Date().toISOString();
+      const submittedLines = order.lines.map(line => ({
+        ...line,
+        status: asNumber(line.qtyReceived, 0) >= asNumber(line.qty, 0)
+          ? "received"
+          : (asNumber(line.qtyReceived, 0) > 0 ? "partial" : "ordered")
+      }));
       await purchaseClient.upsertEntity(
         {
           partitionKey: tenantId,
           rowKey: id,
           status: "ordered",
+          linesJson: JSON.stringify(submittedLines),
           submittedAt: now,
           updatedAt: now
         },
@@ -719,6 +1131,112 @@ module.exports = async function (context, req) {
       }));
       await applyNeedReceipts(needsClient, tenantId, receiptLines, id);
       await applyInventoryAdjustments(inventoryClient, tenantId, receiptLines, "receive");
+
+      const saved = await purchaseClient.getEntity(tenantId, id);
+      context.res = json(200, { ok: true, order: toPurchaseOrder(saved) });
+      return;
+    }
+
+    if (op === "cancel" || op === "cancel-order" || op === "cancelled") {
+      const id = asString(body.id);
+      if (!id) {
+        context.res = json(400, { error: "id is required." });
+        return;
+      }
+      let existing;
+      try {
+        existing = await purchaseClient.getEntity(tenantId, id);
+      } catch (_) {
+        context.res = json(404, { error: "Purchase order not found." });
+        return;
+      }
+
+      const order = toPurchaseOrder(existing);
+      if (!["draft", "ordered"].includes(order.status)) {
+        context.res = json(400, { error: "Only draft or ordered purchase orders can be cancelled." });
+        return;
+      }
+      if (hasReceivedQuantities(order)) {
+        context.res = json(400, { error: "Purchase orders with received quantities cannot be cancelled here. Receive/return handling is required." });
+        return;
+      }
+
+      const now = new Date().toISOString();
+      const cancelledLines = order.lines.map(line => ({ ...line, status: "cancelled" }));
+      await purchaseClient.upsertEntity(
+        {
+          partitionKey: tenantId,
+          rowKey: id,
+          status: "cancelled",
+          linesJson: JSON.stringify(cancelledLines),
+          cancelledAt: now,
+          updatedAt: now
+        },
+        "Merge"
+      );
+
+      const needIds = needIdsFromLines(order.lines);
+      if (needIds.length) {
+        if (order.status === "ordered") {
+          await revertNeedOrderedQuantities(needsClient, tenantId, order.lines, "needs-order", "");
+        } else {
+          await updateNeedStates(needsClient, tenantId, needIds, "needs-order", "");
+        }
+      }
+      if (order.status === "ordered") {
+        await applyInventoryAdjustments(inventoryClient, tenantId, order.lines, "cancel");
+      }
+
+      const saved = await purchaseClient.getEntity(tenantId, id);
+      context.res = json(200, { ok: true, order: toPurchaseOrder(saved) });
+      return;
+    }
+
+    if (op === "reopendraft" || op === "reopen-draft") {
+      const id = asString(body.id);
+      if (!id) {
+        context.res = json(400, { error: "id is required." });
+        return;
+      }
+      let existing;
+      try {
+        existing = await purchaseClient.getEntity(tenantId, id);
+      } catch (_) {
+        context.res = json(404, { error: "Purchase order not found." });
+        return;
+      }
+
+      const order = toPurchaseOrder(existing);
+      if (order.status !== "ordered") {
+        context.res = json(400, { error: "Only ordered purchase orders can be reopened as drafts." });
+        return;
+      }
+      if (hasReceivedQuantities(order)) {
+        context.res = json(400, { error: "Purchase orders with received quantities cannot be reopened as drafts." });
+        return;
+      }
+
+      const now = new Date().toISOString();
+      const draftLines = order.lines.map(line => ({ ...line, status: "draft" }));
+      const summary = summarizeLines(draftLines);
+      await purchaseClient.upsertEntity(
+        {
+          partitionKey: tenantId,
+          rowKey: id,
+          status: "draft",
+          linesJson: JSON.stringify(draftLines),
+          subtotal: summary.subtotal,
+          submittedAt: "",
+          updatedAt: now
+        },
+        "Merge"
+      );
+
+      const needIds = needIdsFromLines(order.lines);
+      if (needIds.length) {
+        await revertNeedOrderedQuantities(needsClient, tenantId, order.lines, "po-draft", id);
+      }
+      await applyInventoryAdjustments(inventoryClient, tenantId, order.lines, "cancel");
 
       const saved = await purchaseClient.getEntity(tenantId, id);
       context.res = json(200, { ok: true, order: toPurchaseOrder(saved) });

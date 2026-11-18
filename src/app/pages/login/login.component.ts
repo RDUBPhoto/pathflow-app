@@ -1,49 +1,43 @@
-import { Component, computed, effect, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { UiIcon } from '../../ui/icons';
+import { UiModal } from '../../ui/overlays';
+import { Component, computed, effect, ElementRef, inject, signal, viewChild, ChangeDetectionStrategy } from '@angular/core';
+
 import { FormsModule } from '@angular/forms';
-import {
-  IonButton,
-  IonContent,
-  IonIcon,
-  IonInput,
-  IonItem,
-  IonLabel,
-  IonSpinner
-} from '@ionic/angular/standalone';
 import { ActivatedRoute, Router } from '@angular/router';
-import { addIcons } from 'ionicons';
-import { eyeOffOutline, eyeOutline, keyOutline } from 'ionicons/icons';
 import { environment } from '../../../environments/environment';
 import { AuthService } from '../../auth/auth.service';
+import { normalizeAuthRedirect } from '../../auth/auth-redirect';
+import { StartupTelemetryService } from '../../services/startup-telemetry.service';
 
 @Component({
   selector: 'app-login',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
-    IonContent,
-    IonButton,
-    IonIcon,
-    IonItem,
-    IonLabel,
-    IonInput,
-    IonSpinner
-  ],
+    UiIcon,
+    UiModal
+],
   templateUrl: './login.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./login.component.scss']
 })
 export default class LoginComponent {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
+  private readonly telemetry = inject(StartupTelemetryService);
   readonly auth = inject(AuthService);
+  private readonly componentStartedAt = this.telemetry.now();
 
   private readonly isLocalHost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
   private readonly isLikelySwaCli = this.isLocalHost && window.location.port === '4280';
 
   readonly redirectTo = signal('/dashboard');
-  readonly devBypassEnabled = environment.auth.devBypass || this.isLocalHost;
-  readonly localServerMode = this.isLocalHost && !this.isLikelySwaCli;
+  readonly resetToken = signal(this.route.snapshot?.fragment?.match(/^reset_([a-f0-9]{64})$/)?.[1] || '');
+  readonly resetBusy = signal(false);
+  newPassword = '';
+  confirmPassword = '';
+  readonly devBypassEnabled = this.isLocalHost && environment.auth.devBypass;
+  readonly localServerMode = this.devBypassEnabled && !this.isLikelySwaCli;
   readonly passwordLoginEnabled = computed(() => this.auth.isLocalPasswordAuthEnabled() || this.localServerMode);
   readonly federatedProviders = computed(() => {
     const out: Array<{ key: string; label: string }> = [];
@@ -75,19 +69,18 @@ export default class LoginComponent {
   showPassword = false;
   enableBiometricsNextLogin = false;
   readonly biometricsPromptVisible = signal(false);
+  private readonly emailField = viewChild<ElementRef<HTMLInputElement>>('loginEmail');
+  private readonly passwordField = viewChild<ElementRef<HTMLInputElement>>('loginPassword');
   private readonly passkeyPrefStorageKey = 'pathflow.auth.passkey.pref';
   private readonly passkeyLastEmailStorageKey = 'pathflow.auth.passkey.last-email';
   private attemptedAutoPasskey = false;
+  private biometricPromptTracked = false;
+  private biometricPromptDismissed = false;
 
   constructor() {
-    addIcons({
-      'key-outline': keyOutline,
-      'eye-outline': eyeOutline,
-      'eye-off-outline': eyeOffOutline
-    });
 
     this.route.queryParamMap.subscribe(params => {
-      this.redirectTo.set(this.normalizeRedirect(params.get('redirect')));
+      this.redirectTo.set(normalizeAuthRedirect(params.get('redirect')));
       const inviteEmail = String(params.get('email') || '').trim();
       if (inviteEmail && !this.localLoginEmail) {
         this.localLoginEmail = inviteEmail;
@@ -100,6 +93,7 @@ export default class LoginComponent {
     effect(() => {
       if (!this.auth.initialized()) return;
       if (!this.auth.isAuthenticated()) return;
+      if (this.resetToken()) return;
       if (this.postLoginSetupBusy()) return;
       if (this.auth.needsRegistration() || this.auth.isAccessLocked()) {
         void this.router.navigate(['/register'], {
@@ -118,8 +112,33 @@ export default class LoginComponent {
     });
   }
 
+  async submitPasswordReset(): Promise<void> {
+    if (this.resetBusy()) return;
+    this.passwordResetError.set('');
+    if (this.newPassword.length < 8 || this.newPassword !== this.confirmPassword) {
+      this.passwordResetError.set('Use at least 8 characters and enter the same password in both fields.');
+      return;
+    }
+    this.resetBusy.set(true);
+    try {
+      const result = await this.auth.resetPassword(this.resetToken(), this.newPassword);
+      if (!result.ok) {
+        this.passwordResetError.set(result.error || 'Could not reset your password.');
+        return;
+      }
+      this.newPassword = '';
+      this.confirmPassword = '';
+      this.resetToken.set('');
+      this.passwordResetStatus.set('Password saved. Sign in with your new password.');
+      await this.router.navigate([], { queryParamsHandling: 'preserve', fragment: undefined, replaceUrl: true });
+    } finally {
+      this.resetBusy.set(false);
+    }
+  }
+
   onEmailInputChanged(): void {
     this.attemptedAutoPasskey = false;
+    this.biometricPromptDismissed = false;
     this.passwordLoginError.set('');
     this.passkeyLoginError.set('');
     this.passwordResetStatus.set('');
@@ -186,6 +205,7 @@ export default class LoginComponent {
       }
 
       if (this.enableBiometricsNextLogin && this.auth.isPasskeySupported()) {
+        this.localAuthHint.set('Saving biometric login on this device...');
         const enroll = await this.auth.registerPasskeyForCurrentUser();
         if (!enroll.ok) {
           this.passkeyLoginError.set(enroll.error || 'Could not enable biometrics on this device.');
@@ -193,6 +213,7 @@ export default class LoginComponent {
         }
         this.setBiometricPreference(this.localLoginEmail, true);
         this.setLastBiometricEmail(this.localLoginEmail);
+        this.localAuthHint.set(enroll.message || 'Biometric login saved on this device.');
       }
     } finally {
       this.postLoginSetupBusy.set(false);
@@ -251,17 +272,11 @@ export default class LoginComponent {
     }
   }
 
-  private normalizeRedirect(path: string | null): string {
-    const value = (path || '').trim();
-    if (!value.startsWith('/')) return '/dashboard';
-    if (value.startsWith('/.auth/')) return '/dashboard';
-    return value;
-  }
-
   private maybeAutoTriggerPasskey(): void {
+    if (this.resetToken()) return;
     if (!this.passwordLoginEnabled()) return;
     if (!this.auth.isPasskeySupported()) return;
-    if (this.passkeyLoginBusy() || this.auth.loading()) return;
+    if (this.passkeyLoginBusy() || this.biometricPromptDismissed) return;
     const email = String(this.localLoginEmail || '').trim().toLowerCase();
     if (!email) {
       this.biometricsPromptVisible.set(false);
@@ -271,6 +286,12 @@ export default class LoginComponent {
     const hasPromptPreference = this.getBiometricPreference(email) || rememberedEmail === email;
     const shouldPrompt = hasPromptPreference;
     this.biometricsPromptVisible.set(shouldPrompt);
+    if (shouldPrompt && !this.biometricPromptTracked) {
+      this.biometricPromptTracked = true;
+      this.telemetry.trackDuration('login.biometric_prompt.visible', this.componentStartedAt, {
+        authLoading: this.auth.loading()
+      });
+    }
     if (!shouldPrompt || this.attemptedAutoPasskey) return;
     // Show biometric prompt, but do not auto-submit. Auto-submit can loop
     // when sessions expire and the login page rehydrates repeatedly.
@@ -278,7 +299,15 @@ export default class LoginComponent {
   }
 
   usePasswordInstead(): void {
+    this.biometricPromptDismissed = true;
     this.biometricsPromptVisible.set(false);
+  }
+
+  onBiometricPromptDismissed(): void {
+    if (this.biometricsPromptVisible()) this.usePasswordInstead();
+    if (this.auth.isAuthenticated()) return;
+    const field = this.localLoginEmail.trim() ? this.passwordField() : this.emailField();
+    field?.nativeElement.focus();
   }
 
   changeBiometricEmail(): void {

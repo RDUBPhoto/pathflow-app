@@ -1,10 +1,25 @@
 const https = require("https");
-const { TableClient } = require("../_shared/table-client");
+const { gatewayConfig, hasNoCardSurcharge, chargeNonce, invoiceCheckoutProvider } = require("../_shared/paylynx");
+const { acquireInvoicePaymentLock } = require("../_shared/invoice-payment-lock");
+const { TableClient, isSqlBackendEnabled } = require("../_shared/table-client");
 const { resolveTenantId } = require("../_shared/tenant");
+const { resolveStaff } = require("../_shared/staff-access");
+const { recordInvoicePayment, invoiceBalance, invoicePreviouslyPaid, invoicePublishedTotal, getEntityIfExists, paymentAttemptKey } = require("../invoice-response");
+const { sendOutboundEmail } = require("../email");
+const { isPortalToken, portalTokenFromHeader, allowsPortalAction } = require("../_shared/customer-portal");
 
 const SETTINGS_TABLE = "appsettings";
+const INVOICES_TABLE = "invoiceresponses";
+const ATTEMPTS_TABLE = "invoicepaymentattempts";
 const PAYMENT_GATEWAY_SETTINGS_KEY = "billing.paymentProviders";
 const AUTHORIZE_NET_CREDENTIALS_KEY = "billing.paymentProviders.authorizeNetCredentials";
+const chargeErrors = {
+  permission: "PayLynx rejected the gateway credentials or Charge permission.",
+  card_token: "The card session expired. Enter the card details again.",
+  security_code: "The security code did not match. Check the card and try again.",
+  rejected: "PayLynx rejected this card payment. Check the card details or try another card.",
+  declined: "The card was declined. Try a different card or contact the card issuer."
+};
 
 function asString(value) {
   return value == null ? "" : String(value).trim();
@@ -155,7 +170,7 @@ function parseValue(raw) {
 function json(status, body) {
   return {
     status,
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", "cache-control": "no-store" },
     body
   };
 }
@@ -198,8 +213,8 @@ function splitCardholderName(value) {
 
 async function getTableClient(tableName) {
   const conn = asString(process.env.STORAGE_CONNECTION_STRING);
-  if (!conn) throw new Error("Missing STORAGE_CONNECTION_STRING");
-  const client = TableClient.fromConnectionString(conn, tableName);
+  if (!conn && !isSqlBackendEnabled()) throw new Error("Missing STORAGE_CONNECTION_STRING");
+  const client = TableClient.fromConnectionString(conn || "sql-backend", tableName);
   try {
     await client.createTable();
   } catch (_) {}
@@ -332,26 +347,64 @@ function pickAuthorizeError(responseBody) {
   return "Payment was declined or could not be processed.";
 }
 
-function pickAuthorizeDebugDetail(responseBody, httpStatus) {
-  const tx = asObject(responseBody && responseBody.transactionResponse);
-  const messages = asObject(responseBody && responseBody.messages);
-  const list = Array.isArray(messages.message) ? messages.message : [];
-  const firstMsg = asObject(list[0]);
-  const txErrors = Array.isArray(tx.errors) ? tx.errors : [];
-  const firstErr = asObject(txErrors[0]);
-  const parts = [
-    `http=${Number(httpStatus || 0) || 0}`,
-    `resultCode=${asString(messages.resultCode) || "-"}`,
-    `msgCode=${asString(firstMsg.code) || "-"}`,
-    `msgText=${asString(firstMsg.text || firstMsg.description) || "-"}`,
-    `txResponseCode=${asString(tx.responseCode) || "-"}`,
-    `txReasonCode=${asString(tx.responseReasonCode) || "-"}`,
-    `txReason=${asString(tx.responseReasonDescription) || "-"}`,
-    `txErrCode=${asString(firstErr.errorCode) || "-"}`,
-    `txErrText=${asString(firstErr.errorText) || "-"}`,
-    `raw=${asString(responseBody && responseBody.raw ? String(responseBody.raw).slice(0, 160) : "") || "-"}`
-  ];
-  return parts.join(" | ");
+async function chargeAuthorizeNet(endpoint, credentials, details) {
+  const name = splitCardholderName(details.cardholderName);
+  const payload = {
+    createTransactionRequest: {
+      merchantAuthentication: {
+        name: credentials.apiLoginId,
+        transactionKey: credentials.transactionKey
+      },
+      refId: details.attemptKey.slice(0, 20),
+      transactionRequest: {
+        transactionType: "authCaptureTransaction",
+        amount: details.amount.toFixed(2),
+        payment: {
+          creditCard: {
+            cardNumber: details.cardNumber,
+            expirationDate: `${details.expiryYear}-${details.expiryMonth}`,
+            cardCode: details.cardCode
+          }
+        },
+        order: {
+          invoiceNumber: details.invoiceNumber,
+          description: `Pathflow invoice ${details.invoiceNumber}`
+        },
+        billTo: {
+          firstName: name.firstName || "Customer",
+          lastName: name.lastName || ""
+        }
+      }
+    }
+  };
+
+  const response = await postJson(endpoint, payload);
+  const result = normalizeAuthorizeResult(response.body);
+  const tx = asObject(result.transactionResponse);
+  const responseCode = asString(tx.responseCode);
+  const transactionId = asString(tx.transId);
+  const validResponse = response.status >= 200 && response.status < 300;
+  if (!validResponse || responseCode !== "1" || !/^[1-9]\d*$/.test(transactionId) || tx.errors?.length) {
+    return validResponse && (responseCode === "2" || (responseCode === "3" && (!transactionId || transactionId === "0")))
+      ? { state: "declined", error: pickAuthorizeError(result) } : { state: "pending" };
+  }
+  return { state: "confirmed", transactionId, accountNumber: asString(tx.accountNumber).replace(/\D/g, "").slice(-4) };
+}
+
+function staffPaymentSnapshot(document, invoice, tenantId, invoiceId) {
+  const total = sanitizeAmount(document.total);
+  return {
+    ...invoice,
+    partitionKey: tenantId, rowKey: invoiceId, invoiceId,
+    invoiceNumber: document.invoiceNumber, customerName: document.customerName,
+    customerEmail: document.customerEmail, vehicle: document.vehicle, businessName: document.businessName,
+    dueDate: document.dueDate, snapshotPaymentProvider: "paylynx",
+    invoiceDataJson: JSON.stringify({
+      jobNumber: document.jobNumber, customerId: document.customerId, subtotal: document.subtotal,
+      taxTotal: document.taxTotal, total: total + sanitizeAmount(document.returnCreditAmount), lineItems: document.lineItems
+    }),
+    amount: Math.max(0, total - sanitizeAmount(document.paidAmount)).toFixed(2)
+  };
 }
 
 module.exports = async function (context, req) {
@@ -364,166 +417,314 @@ module.exports = async function (context, req) {
     return;
   }
 
-  if (method !== "POST") {
+  if (method !== "POST" && method !== "GET") {
     context.res = json(405, { ok: false, error: "Method not allowed." });
     return;
   }
 
-  const invoiceId = asString(body.invoiceId || body.id);
-  const invoiceNumber = asString(body.invoiceNumber || invoiceId || "");
-  const amount = sanitizeAmount(body.amount);
-  const cardNumber = onlyDigits(body.cardNumber);
-  const cardCode = onlyDigits(body.cardCode);
-  const expiryMonth = sanitizeMonth(body.expiryMonth);
-  const expiryYear = sanitizeYear(body.expiryYear);
-  const cardholderName = asString(body.cardholderName || body.customerName || "Customer");
-
+  const input = method === "GET" ? req.query : body;
+  const invoiceId = asString(input?.invoiceId || input?.id);
+  const publicToken = portalTokenFromHeader(req.headers) || asString(input?.publicToken);
+  const staffCharge = input?.staffCharge === true || (method === "GET" && input?.staffCharge === "true");
+  const requestedAmount = sanitizeAmount(body.amount);
   if (!invoiceId) {
     context.res = json(400, { ok: false, error: "invoiceId is required." });
     return;
   }
-  if (!amount) {
-    context.res = json(400, { ok: false, error: "Valid amount is required." });
+  if ((!staffCharge && !publicToken) || (method === "POST" && !requestedAmount)) {
+    context.res = json(400, { ok: false, error: "Open the latest payment link to pay this invoice." });
     return;
   }
-  if (cardNumber.length < 13 || cardNumber.length > 19) {
-    context.res = json(400, { ok: false, error: "Valid card number is required." });
-    return;
+
+  let releasePaymentLock;
+  let chargeAttempted = false;
+  try {
+    let actor;
+    if (staffCharge) {
+      const staff = await resolveStaff(req, await getTableClient("useraccess"), tenantId);
+      if (!staff.authorized) {
+        context.res = json(staff.actor ? 403 : 401, { ok: false, error: "A staff session is required to enter a card payment." });
+        return;
+      }
+      actor = staff.actor;
+    }
+    const invoiceClient = await getTableClient(INVOICES_TABLE);
+    let invoice = await getEntityIfExists(invoiceClient, tenantId, invoiceId);
+    const canUsePaymentLink = async () => invoice && (isPortalToken(publicToken)
+      ? await allowsPortalAction(tenantId, publicToken, "invoice", invoiceId)
+      : invoice.publicToken === publicToken);
+    if (!staffCharge && !await canUsePaymentLink()) {
+      context.res = json(404, { ok: false, error: "Invoice not found or payment link is invalid." });
+      return;
+    }
+    const attempts = method === "POST" ? await getTableClient(ATTEMPTS_TABLE) : null;
+    if (attempts) {
+      releasePaymentLock = await acquireInvoicePaymentLock(attempts, tenantId, invoiceId);
+      if (!releasePaymentLock) {
+        context.res = json(409, { ok: false, code: "payment_pending", error: "A payment action is already in progress for this invoice." });
+        return;
+      }
+      invoice = await getEntityIfExists(invoiceClient, tenantId, invoiceId);
+      if (!staffCharge && !await canUsePaymentLink()) {
+        context.res = json(404, { ok: false, error: "Invoice not found or payment link is invalid." });
+        return;
+      }
+      if (invoice?.pendingReversal) {
+        context.res = json(409, { ok: false, code: "payment_pending", error: "An invoice payment reversal is awaiting confirmation. Check the invoice before charging again." });
+        return;
+      }
+    }
+    const settingsClient = await getTableClient(SETTINGS_TABLE);
+    const paymentSettings = await getSettingValue(settingsClient, tenantId, PAYMENT_GATEWAY_SETTINGS_KEY);
+    const provider = invoiceCheckoutProvider(invoice || {}, paymentSettings, tenantId);
+    if (staffCharge && provider !== "paylynx") {
+      context.res = json(503, { ok: false, error: "Set PayLynx as the invoice gateway to enter a card payment here." });
+      return;
+    }
+    if (provider !== "paylynx" && (provider !== "authorize-net" || method === "GET")) {
+      context.res = json(404, { ok: false, error: "Invoice not found or payment link is invalid." });
+      return;
+    }
+
+    let needsStaffSnapshot = false;
+    if (staffCharge) {
+      const row = await getEntityIfExists(await getTableClient("servicedocuments"), tenantId, invoiceId);
+      const document = asObject(parseValue(row?.documentJson));
+      if (!row || row.deleted || document.documentType !== "invoice" || ["canceled", "expired", "declined"].includes(document.stage)) {
+        context.res = json(404, { ok: false, error: "This saved invoice is unavailable for a card payment." });
+        return;
+      }
+      needsStaffSnapshot = !invoice?.invoiceDataJson;
+      if (needsStaffSnapshot) invoice = staffPaymentSnapshot(document, invoice, tenantId, invoiceId);
+      else if (Math.round((sanitizeAmount(document.total) + sanitizeAmount(document.returnCreditAmount) -
+          sanitizeAmount(invoice.returnCreditAmount)) * 100) !== Math.round(invoicePublishedTotal(invoice) * 100)) {
+        context.res = json(409, { ok: false, code: "balance_changed", error: "The saved total differs from the checkout total. Send the updated invoice before charging it." });
+        return;
+      }
+    }
+
+    const source = asString(body.source);
+    const expiryMonth = sanitizeMonth(body.expiryMonth);
+    const expiryYear = sanitizeYear(body.expiryYear);
+    const cardholderName = provider === "paylynx"
+      ? asString(invoice.customerName) || "Customer"
+      : asString(body.cardholderName || body.customerName || "Customer");
+    const billingZip = asString(body.billingZip).slice(0, 10);
+    const cardNumber = onlyDigits(body.cardNumber);
+    const cardCode = onlyDigits(body.cardCode);
+    if (method === "POST") {
+      if (!expiryMonth || !expiryYear) {
+        context.res = json(400, { ok: false, error: "Valid expiration month/year are required." });
+        return;
+      }
+      if (provider === "paylynx" && (!/^nonce-[A-Za-z0-9]{1,20}$/.test(source) || body.cardNumber || body.cardCode)) {
+        context.res = json(400, { ok: false, error: "Enter your card in the PayLynx secure card fields." });
+        return;
+      }
+      if (provider === "authorize-net" && (cardNumber.length < 13 || cardNumber.length > 19 || cardCode.length < 3 || cardCode.length > 4)) {
+        context.res = json(400, { ok: false, error: "Valid card number and card code are required." });
+        return;
+      }
+    }
+
+    const paylynxProvider = Array.isArray(paymentSettings?.providers)
+      ? paymentSettings.providers.find(item => item?.key === "paylynx")
+      : null;
+    const paylynx = provider === "paylynx" && paylynxProvider?.connected === true
+      ? gatewayConfig(tenantId, paylynxProvider.mode) : null;
+    if (provider === "paylynx" && !paylynx) {
+      context.res = json(503, { ok: false, error: "PayLynx checkout is unavailable. Contact the shop." });
+      return;
+    }
+    if (method === "GET") {
+      const attempt = invoiceBalance(invoice) > 0
+        ? await getEntityIfExists(await getTableClient(ATTEMPTS_TABLE), tenantId, paymentAttemptKey(invoiceId, invoice))
+        : null;
+      const paymentPending = Boolean(invoice.pendingReversal || (attempt && attempt.state !== "confirmed"));
+      const snapshot = staffCharge ? {
+        invoiceId, invoiceNumber: invoice.invoiceNumber, invoiceData: parseValue(invoice.invoiceDataJson),
+        customerName: invoice.customerName, vehicle: invoice.vehicle, businessName: invoice.businessName,
+        dueDate: invoice.dueDate, paymentProvider: "paylynx", amount: invoiceBalance(invoice),
+        paidAmount: invoicePreviouslyPaid(invoice), returnCreditAmount: Number(invoice.returnCreditAmount || 0)
+      } : {};
+      context.res = json(200, { ok: true, tokenizationKey: paylynx.tokenizationKey, mode: paylynx.mode, ...snapshot,
+        ...(paymentPending ? { paymentPending: true } : {}) });
+      return;
+    }
+
+    const invoiceNumber = asString(invoice.invoiceNumber || invoiceId);
+    const invoiceData = asObject(parseValue(invoice.invoiceDataJson));
+    const amount = invoiceBalance(invoice);
+    const paid = invoicePreviouslyPaid(invoice);
+    // Re-sending the same balance leaves the attempt key stable.
+    const attemptKey = paymentAttemptKey(invoiceId, invoice);
+    const previousAttempt = await getEntityIfExists(attempts, tenantId, attemptKey);
+    if (previousAttempt) {
+      if (previousAttempt.state !== "confirmed") {
+        context.res = json(409, { ok: false, code: "payment_pending", error: "A payment is awaiting confirmation. Check the payment status before charging again." });
+        return;
+      }
+      const payment = asObject(parseValue(previousAttempt.paymentJson));
+      if (payment.paymentProvider !== provider) {
+        context.res = json(409, { ok: false, error: "This balance was already paid. Refresh the invoice." });
+        return;
+      }
+      const receiptSent = await finishConfirmedPayment(context, attempts, tenantId, attemptKey, payment, paid, publicToken);
+      context.res = json(200, paymentResult(payment, receiptSent));
+      return;
+    }
+    if (amount <= 0 || requestedAmount !== amount) {
+      context.res = json(409, { ok: false, code: "balance_changed", error: "The invoice balance changed. Refresh the invoice before paying." });
+      return;
+    }
+
+    let credentials;
+    let endpoint;
+    let mode = "test";
+    if (paylynx) {
+      mode = paylynx.mode;
+      if (!await hasNoCardSurcharge(paylynx)) {
+        context.res = json(503, { ok: false, code: "surcharge_unavailable", error: "Card checkout is unavailable because PayLynx card fees could not be verified." });
+        return;
+      }
+    } else {
+      const authorizeProvider = resolveAuthorizeProvider(paymentSettings);
+      if (!authorizeProvider.connected) {
+        context.res = json(400, { ok: false, error: "Authorize.net is not connected for this workspace." });
+        return;
+      }
+      const storedCredentials = await getSettingValue(settingsClient, tenantId, AUTHORIZE_NET_CREDENTIALS_KEY);
+      credentials = resolveCredentials(storedCredentials);
+      if (!credentials.apiLoginId || !credentials.transactionKey) {
+        context.res = json(400, { ok: false, error: "Authorize.net credentials are missing. Add API Login ID and Transaction Key in Admin > Payment Gateways." });
+        return;
+      }
+      mode = authorizeProvider.mode;
+      endpoint = mode === "live" ? "https://api2.authorize.net/xml/v1/request.api" : "https://apitest.authorize.net/xml/v1/request.api";
+    }
+
+    if (needsStaffSnapshot) await invoiceClient.upsertEntity(invoice, "Merge");
+    try {
+      await attempts.createEntity({
+        partitionKey: tenantId, rowKey: attemptKey, invoiceId, state: "processing",
+        amount, createdAt: new Date().toISOString()
+      });
+    } catch (error) {
+      if (error.statusCode !== 409) throw error;
+      context.res = json(409, { ok: false, error: "A payment is already being processed for this invoice." });
+      return;
+    }
+
+    const details = { source, amount, cardholderName, expiryMonth, expiryYear, billingZip, invoiceNumber, attemptKey, cardNumber, cardCode };
+    chargeAttempted = true;
+    const outcome = paylynx
+      ? await chargeNonce(paylynx, details)
+      : await chargeAuthorizeNet(endpoint, credentials, details);
+    if (outcome.state === "declined") {
+      await attempts.deleteEntity(tenantId, attemptKey);
+      const message = outcome.reason === "permission" && !staffCharge ? "Card checkout is unavailable. Contact the shop." : chargeErrors[outcome.reason];
+      context.res = json(outcome.reason === "permission" ? 503 : 400, {
+        ok: false, code: outcome.reason || "declined", error: message || outcome.error || chargeErrors.declined, provider
+      });
+      return;
+    }
+    if (outcome.state !== "confirmed") {
+      context.res = json(409, { ok: false, code: "payment_pending", error: "PayLynx has not confirmed the payment. Check the payment status before charging again." });
+      return;
+    }
+
+    const payment = {
+      mode,
+      ...(staffCharge ? { actor: { email: actor.email } } : {}),
+      invoiceId,
+      invoiceNumber,
+      jobNumber: asString(invoiceData.jobNumber),
+      customerId: asString(invoiceData.customerId),
+      customerName: asString(invoice.customerName),
+      customerEmail: asString(invoice.customerEmail),
+      vehicle: asString(invoice.vehicle),
+      businessName: asString(invoice.businessName),
+      lineItems: Array.isArray(invoiceData.lineItems) ? invoiceData.lineItems : [],
+      paymentAmount: amount,
+      paidAmount: Math.round((paid + amount) * 100) / 100,
+      paymentKind: paid > 0 ? "final" : "initial",
+      paymentProvider: provider,
+      paymentTransactionId: outcome.transactionId,
+      paymentAccountNumber: outcome.accountNumber
+    };
+    await attempts.upsertEntity({ partitionKey: tenantId, rowKey: attemptKey, state: "confirmed",
+      paymentJson: JSON.stringify(payment) }, "Merge");
+    const receiptSent = await finishConfirmedPayment(context, attempts, tenantId, attemptKey, payment, paid, publicToken);
+    context.res = json(200, paymentResult(payment, receiptSent));
+  } catch (err) {
+    context.log.error("Invoice payment could not be recorded.");
+    context.res = json(500, {
+      ok: false,
+      code: chargeAttempted ? "payment_pending" : "payment_unavailable",
+      error: chargeAttempted ? "Payment could not be confirmed. Check the payment status before charging again." : "Payment checkout is unavailable. Try again shortly."
+    });
+  } finally {
+    if (releasePaymentLock) await releasePaymentLock();
   }
-  if (!expiryMonth || !expiryYear) {
-    context.res = json(400, { ok: false, error: "Valid expiration month/year are required." });
-    return;
-  }
-  if (cardCode.length < 3 || cardCode.length > 4) {
-    context.res = json(400, { ok: false, error: "Valid card code is required." });
-    return;
+};
+
+async function finishConfirmedPayment(context, attempts, tenantId, attemptKey, payment, previouslyPaid, publicToken) {
+  if (previouslyPaid <= payment.paidAmount) await recordInvoicePayment(tenantId, payment);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payment.customerEmail || "")) return false;
+
+  const rowKey = `receipt-${attemptKey}`;
+  const receipt = { partitionKey: tenantId, rowKey, invoiceId: payment.invoiceId, state: "sending",
+    createdAt: new Date().toISOString() };
+  try {
+    await attempts.createEntity(receipt);
+  } catch (error) {
+    if (error.statusCode !== 409) {
+      context.log.warn("Could not queue the payment receipt.");
+      return false;
+    }
+    return (await getEntityIfExists(attempts, tenantId, rowKey))?.state === "sent";
   }
 
   try {
-    const settingsClient = await getTableClient(SETTINGS_TABLE);
-    const paymentSettings = await getSettingValue(settingsClient, tenantId, PAYMENT_GATEWAY_SETTINGS_KEY);
-    const authorizeProvider = resolveAuthorizeProvider(paymentSettings);
-    if (!authorizeProvider.connected) {
-      context.res = json(400, { ok: false, error: "Authorize.net is not connected for this workspace." });
-      return;
+    const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
+    let portalUrl = "";
+    if (isPortalToken(publicToken)) {
+      const localDevelopment = process.env.PATHFLOW_ENVIRONMENT === "development" && !process.env.WEBSITE_SITE_NAME;
+      const base = process.env.PUBLIC_APP_BASE_URL || process.env.APP_BASE_URL ||
+        (localDevelopment ? "http://localhost:4200" : "https://www.pathflow-app.com");
+      try {
+        const url = new URL(`/visit/${encodeURIComponent(tenantId)}#${publicToken}`, base);
+        if (["https:", "http:"].includes(url.protocol)) portalUrl = url.href;
+      } catch {}
     }
-
-    const storedCredentials = await getSettingValue(settingsClient, tenantId, AUTHORIZE_NET_CREDENTIALS_KEY);
-    const credentials = resolveCredentials(storedCredentials);
-    if (!credentials.apiLoginId || !credentials.transactionKey) {
-      context.res = json(400, { ok: false, error: "Authorize.net credentials are missing. Add API Login ID and Transaction Key in Admin > Payment Gateways." });
-      return;
-    }
-
-    const endpoint = authorizeProvider.mode === "live"
-      ? "https://api2.authorize.net/xml/v1/request.api"
-      : "https://apitest.authorize.net/xml/v1/request.api";
-
-    const name = splitCardholderName(cardholderName);
-    const payload = {
-      createTransactionRequest: {
-        merchantAuthentication: {
-          name: credentials.apiLoginId,
-          transactionKey: credentials.transactionKey
-        },
-        refId: invoiceId,
-        transactionRequest: {
-          transactionType: "authCaptureTransaction",
-          amount: amount.toFixed(2),
-          payment: {
-            creditCard: {
-              cardNumber,
-              expirationDate: `${expiryYear}-${expiryMonth}`,
-              cardCode
-            }
-          },
-          order: {
-            invoiceNumber: invoiceNumber || invoiceId,
-            description: `Pathflow invoice ${invoiceNumber || invoiceId}`
-          },
-          billTo: {
-            firstName: name.firstName || "Customer",
-            lastName: name.lastName || ""
-          }
-        }
-      }
-    };
-
-    const response = await postJson(endpoint, payload);
-    const result = normalizeAuthorizeResult(response.body);
-    const resultCode = asString(result?.messages?.resultCode).toLowerCase();
-    const isOk = resultCode === "ok";
-    const tx = asObject(result.transactionResponse);
-    const approved = asString(tx.responseCode) === "1";
-    const rawBody = asString(response && response.body && response.body.raw);
-    const rawApproved =
-      /<(?:[a-z0-9_]+:)?responseCode(?:\s[^>]*)?>\s*1\s*<\/(?:[a-z0-9_]+:)?responseCode>/i.test(rawBody)
-      || /"responseCode"\s*:\s*"?1"?/i.test(rawBody)
-      || /transaction has been approved/i.test(rawBody);
-    const rawHasTransId =
-      /<(?:[a-z0-9_]+:)?transId(?:\s[^>]*)?>\s*\d+\s*<\/(?:[a-z0-9_]+:)?transId>/i.test(rawBody);
-    const rawHasJsonTransId = /"transId"\s*:\s*"?\d+"?/i.test(rawBody);
-    const rawDeclined =
-      /<(?:[a-z0-9_]+:)?responseCode(?:\s[^>]*)?>\s*[234]\s*<\/(?:[a-z0-9_]+:)?responseCode>/i.test(rawBody)
-      || /"responseCode"\s*:\s*"?(?:2|3|4)"?/i.test(rawBody)
-      || /transaction has been declined/i.test(rawBody);
-    const txErrors = Array.isArray(tx.errors) ? tx.errors : [];
-    const explicitDecline = (asString(tx.responseCode) && asString(tx.responseCode) !== "1")
-      || txErrors.length > 0
-      || rawDeclined;
-
-    // In some sandbox/live edge responses, transactionResponse can be approved
-    // while the top-level messages block is not strictly "Ok".
-    const shouldTreatAsApproved =
-      !explicitDecline && (
-        approved
-      || (isOk && !!asString(tx.transId))
-      || (rawApproved && (rawHasTransId || rawHasJsonTransId || isOk))
-      || (
-        (rawHasTransId || rawHasJsonTransId)
-        && response.status >= 200
-        && response.status < 300
-      )
-      );
-
-    if (!shouldTreatAsApproved) {
-      const reason = pickAuthorizeError(result);
-      const detail = pickAuthorizeDebugDetail(result, response.status);
-      context.log.warn("Authorize.net declined", {
-        tenantId,
-        invoiceId,
-        mode: authorizeProvider.mode,
-        reason,
-        detail
-      });
-      context.res = json(400, {
-        ok: false,
-        error: reason,
-        detail,
-        provider: "authorize-net"
-      });
-      return;
-    }
-
-    context.res = json(200, {
-      ok: true,
-      provider: "authorize-net",
-      mode: authorizeProvider.mode,
-      invoiceId,
-      invoiceNumber,
-      amount: amount.toFixed(2),
-      transactionId: asString(tx.transId),
-      authCode: asString(tx.authCode),
-      avsResultCode: asString(tx.avsResultCode),
-      accountType: asString(tx.accountType),
-      accountNumber: asString(tx.accountNumber)
+    const sent = await sendOutboundEmail(context, tenantId, {
+      to: payment.customerEmail,
+      customerName: payment.customerName,
+      customerId: payment.customerId,
+      subject: `Payment receipt for ${payment.invoiceNumber}`,
+      message: `Hi ${payment.customerName || "there"}, ${payment.businessName || "the shop"} received your payment of ${money.format(payment.paymentAmount)} for invoice ${payment.invoiceNumber}. Transaction reference ${payment.paymentTransactionId}.${portalUrl ? ` Your visit: ${portalUrl}` : ""}`,
+      skipFooterTerms: true
     });
-  } catch (err) {
-    context.log.error(err);
-    context.res = json(500, {
-      ok: false,
-      error: "Payment processing failed.",
-      detail: asString(err && err.message)
-    });
+    await attempts.upsertEntity({ ...receipt, state: sent.simulated ? "simulated" : "sent" }, "Merge");
+    return !sent.simulated;
+  } catch {
+    context.log.warn("Payment was recorded but receipt delivery needs review.");
+    await attempts.upsertEntity({ ...receipt, state: "needs-review" }, "Merge").catch(() => {});
+    return false;
   }
-};
+}
+
+function paymentResult(payment, receiptSent) {
+  return {
+    ok: true,
+    provider: payment.paymentProvider,
+    mode: payment.mode,
+    invoiceId: payment.invoiceId,
+    invoiceNumber: payment.invoiceNumber,
+    amount: Number(payment.paymentAmount).toFixed(2),
+    paidAmount: payment.paidAmount,
+    receiptSent,
+    transactionId: payment.paymentTransactionId,
+    accountNumber: payment.paymentAccountNumber
+  };
+}

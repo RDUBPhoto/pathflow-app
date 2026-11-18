@@ -1,0 +1,138 @@
+<main class="visit-page">
+  @if (loading() && !visit()) {
+    <p class="visit-loading" role="status">Loading your visit…</p>
+  }
+  @if (error()) {
+    <section class="card error-card">
+      <div class="card-body">
+        <h1 class="h2">Your visit</h1>
+        <p role="alert">{{ error() }}</p>
+        <button type="button" class="btn btn-outline-primary" (click)="load()">Try again</button>
+      </div>
+    </section>
+  }
+  @if (visit(); as data) {
+    <header class="visit-header">
+      <p class="business-name">{{ data.businessName || 'Service shop' }}</p>
+      <h1>{{ data.vehicle || 'Your service visit' }}</h1>
+      @if (data.customerName) { <p>{{ data.customerName }}</p> }
+    </header>
+
+    <section class="card status-card">
+      <div class="card-body d-flex align-items-start justify-content-between flex-wrap gap-3">
+        <div>
+          <h2 class="h3 mb-2">Visit status</h2>
+          <span class="badge text-bg-primary">{{ data.progress }}</span>
+          @if (data.status === 'read-only') {
+            <p class="mb-0 mt-2">Paperwork is available through {{ data.expiresAt | date:'MMM d, y' }}.</p>
+          }
+        </div>
+        <button type="button" class="btn btn-outline-secondary" [disabled]="loading()" (click)="load()">Refresh</button>
+      </div>
+      @if (data.appointment; as appointment) {
+        <div class="card-body appointment">
+          <h2 class="h3 mb-2">Appointment</h2>
+          <div>{{ appointmentDate(appointment.start, appointment.timeZone) }}</div>
+          <div class="text-secondary">Ends {{ appointmentDate(appointment.end, appointment.timeZone) }}</div>
+        </div>
+      }
+    </section>
+
+    @if (message()) { <p class="alert alert-success my-3" role="status">{{ message() }}</p> }
+    <div class="visit-documents">
+      @if (data.quote; as quote) {
+        <section class="card">
+          <div class="card-header"><h2 class="card-title">Quote {{ quote.number }}</h2></div>
+          <div class="card-body">
+            <p class="text-secondary text-capitalize">{{ quote.stage === 'draft' ? 'Ready for review' : quote.stage }}</p>
+            @if (quote.lines.length) {
+              <ul class="visit-lines">
+                @for (line of quote.lines; track $index) {
+                  <li><span>{{ line.description }} <small class="text-secondary">× {{ line.quantity }}</small></span><span>{{ line.total | currency }}</span></li>
+                }
+              </ul>
+            }
+            <div class="visit-total"><span>Total</span><strong>{{ quote.total | currency }}</strong></div>
+            @if (quote.note) { <p class="visit-note">{{ quote.note }}</p> }
+            @if (decisionError()) { <p class="alert alert-danger mt-3" role="alert">{{ decisionError() }}</p> }
+            @if (quote.canRespond) {
+              <div class="visit-actions">
+                <button type="button" class="btn btn-primary" [disabled]="pendingDecision() || loading()" (click)="respond('accept')">
+                  {{ pendingDecision() === 'accept' ? 'Accepting…' : 'Accept Quote' }}
+                </button>
+                <button type="button" class="btn btn-outline-secondary" [disabled]="pendingDecision() || loading()" (click)="respond('decline')">
+                  {{ pendingDecision() === 'decline' ? 'Declining…' : 'Decline Quote' }}
+                </button>
+              </div>
+            }
+          </div>
+        </section>
+      }
+      @if (data.invoice; as invoice) {
+        <section class="card">
+          <div class="card-header"><h2 class="card-title">Invoice {{ invoice.number }}</h2></div>
+          <div class="card-body">
+            @if (invoice.dueDate) { <p class="text-secondary">Due {{ invoice.dueDate }}</p> }
+            @if (invoice.lines.length) {
+              <ul class="visit-lines">
+                @for (line of invoice.lines; track $index) {
+                  <li><span>{{ line.description }} <small class="text-secondary">× {{ line.quantity }}</small></span><span>{{ line.total | currency }}</span></li>
+                }
+              </ul>
+            }
+            <div class="visit-total"><span>Invoice total</span><strong>{{ invoice.total | currency }}</strong></div>
+            <div class="visit-total"><span>Balance due</span><strong>{{ invoice.balance | currency }}</strong></div>
+            @if (invoice.canPay) {
+              <div class="visit-actions">
+                <a class="btn btn-primary" [routerLink]="['/invoice-payment']"
+                   [queryParams]="{ invoiceId: invoice.id, tenantId: tenant() }" [fragment]="token()">Pay Invoice</a>
+              </div>
+            }
+          </div>
+        </section>
+      }
+    </div>
+
+    @if (data.payments.length) {
+      <section class="card mt-3">
+        <div class="card-header"><h2 class="card-title">Payment history</h2></div>
+        <div class="table-responsive">
+          <table class="table table-vcenter card-table">
+            <thead><tr><th scope="col">Date</th><th scope="col">Activity</th><th scope="col">Amount</th><th scope="col">Receipt</th></tr></thead>
+            <tbody>
+              @for (payment of data.payments; track $index) {
+                <tr>
+                  <td>{{ payment.date | date:'MMM d, y' }}</td>
+                  <td>{{ payment.kind }}</td>
+                  <td>{{ payment.amount | currency }}</td>
+                  <td>
+                    @if (payment.kind !== 'Void' && payment.kind !== 'Refund') {
+                      <button type="button" class="btn btn-sm btn-outline-secondary" (click)="downloadReceipt(payment, $index)">Download receipt</button>
+                    }
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </section>
+    }
+
+    @if (data.activity.length) {
+      <section class="card mt-3">
+        <div class="card-header"><h2 class="card-title">Visit history</h2></div>
+        <ul class="list-group list-group-flush">
+          @for (event of data.activity; track $index) {
+            <li class="list-group-item d-flex justify-content-between gap-3">
+              <span>{{ event.label }}</span><time class="text-secondary" [attr.datetime]="event.at">{{ event.at | date:'MMM d, y' }}</time>
+            </li>
+          }
+        </ul>
+      </section>
+    }
+
+    @if (!data.quote && !data.invoice && !data.appointment) {
+      <p class="text-secondary mt-3">Your quote or invoice will appear here once the shop shares it.</p>
+    }
+  }
+</main>

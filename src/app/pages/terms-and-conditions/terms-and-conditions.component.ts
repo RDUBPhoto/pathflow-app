@@ -1,12 +1,12 @@
-import { CommonModule } from '@angular/common';
-import { Component } from '@angular/core';
-import { IonContent } from '@ionic/angular/standalone';
+
+import { Component, ChangeDetectionStrategy } from '@angular/core';
 
 @Component({
   selector: 'app-terms-and-conditions',
   standalone: true,
-  imports: [CommonModule, IonContent],
+  imports: [],
   templateUrl: './terms-and-conditions.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./terms-and-conditions.component.scss']
 })
 export default class TermsAndConditionsComponent {}

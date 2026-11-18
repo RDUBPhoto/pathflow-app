@@ -13,12 +13,8 @@
 .messages-page {
   --padding-bottom: calc(16px + env(safe-area-inset-bottom));
   position: relative;
-}
-
-.messages-page::part(scroll) {
   display: flex;
   flex-direction: column;
-  min-height: 100%;
 }
 
 .feedback-overlay {
@@ -38,7 +34,7 @@
   grid-template-columns: minmax(280px, 330px) minmax(0, 1fr);
   gap: 12px;
   flex: 1 1 auto;
-  min-height: 0;
+  min-height: 20rem;
 }
 
 .threads-pane,
@@ -197,18 +193,22 @@
 }
 
 .thread-status {
-  font-size: 10px;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
   font-weight: 700;
   border-radius: 999px;
-  padding: 2px 6px;
   border: 1px solid transparent;
   line-height: 1;
 }
 
 .thread-status.queued {
-  color: #f59e0b;
-  border-color: color-mix(in srgb, #f59e0b 55%, transparent);
-  background: color-mix(in srgb, #f59e0b 16%, transparent);
+  color: #60a5fa;
+  border-color: color-mix(in srgb, #60a5fa 55%, transparent);
+  background: color-mix(in srgb, #60a5fa 16%, transparent);
 }
 
 .thread-status.delivered {
@@ -219,8 +219,8 @@
 
 .thread-status.failed {
   color: #ef4444;
-  border-color: color-mix(in srgb, #ef4444 55%, transparent);
-  background: color-mix(in srgb, #ef4444 16%, transparent);
+  border-color: #ef4444;
+  background: transparent;
 }
 
 .chat-pane {
@@ -251,6 +251,31 @@
   font-weight: 700;
 }
 
+.chat-name-link {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--app-text);
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.chat-name-link:hover,
+.chat-name-link:focus-visible {
+  color: var(--app-nav-active-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.chat-name-link:focus-visible {
+  outline: 2px solid var(--app-nav-active-border);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
 .chat-contact {
   font-size: 12px;
   color: var(--app-text-muted);
@@ -268,6 +293,7 @@
 
 .chat-row {
   display: flex;
+  align-items: flex-end;
 }
 
 .chat-row.outbound {
@@ -278,8 +304,22 @@
   justify-content: flex-start;
 }
 
-.chat-bubble {
+.chat-message-stack {
+  display: grid;
+  gap: 4px;
   max-width: min(640px, 88%);
+}
+
+.chat-row.outbound .chat-message-stack {
+  justify-items: end;
+}
+
+.chat-row.inbound .chat-message-stack {
+  justify-items: start;
+}
+
+.chat-bubble {
+  max-width: 100%;
   border-radius: 12px;
   border: 1px solid var(--app-border-subtle);
   background: var(--app-control-bg);
@@ -292,6 +332,33 @@
   color: var(--app-nav-active-text);
 }
 
+.chat-row.failed.outbound {
+  gap: 8px;
+}
+
+.chat-failed-icon {
+  width: 22px;
+  height: 22px;
+  margin-bottom: 7px;
+  border-radius: 999px;
+  border: 2px solid #ef4444;
+  color: #ef4444;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.chat-failure-reason {
+  color: #ef4444;
+  font-size: 12px;
+  font-weight: 700;
+  padding-right: 4px;
+  text-align: right;
+}
+
 .chat-meta {
   display: flex;
   align-items: center;
@@ -301,32 +368,6 @@
   font-size: 11px;
   opacity: 0.78;
   margin-bottom: 4px;
-}
-
-.chat-delivery {
-  border-radius: 999px;
-  padding: 2px 7px;
-  border: 1px solid transparent;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.chat-delivery.queued {
-  color: #f59e0b;
-  border-color: color-mix(in srgb, #f59e0b 55%, transparent);
-  background: color-mix(in srgb, #f59e0b 16%, transparent);
-}
-
-.chat-delivery.delivered {
-  color: #22c55e;
-  border-color: color-mix(in srgb, #22c55e 55%, transparent);
-  background: color-mix(in srgb, #22c55e 16%, transparent);
-}
-
-.chat-delivery.failed {
-  color: #ef4444;
-  border-color: color-mix(in srgb, #ef4444 55%, transparent);
-  background: color-mix(in srgb, #ef4444 16%, transparent);
 }
 
 .chat-message {
@@ -385,13 +426,13 @@
 }
 
 .page-feedback.success {
-  color: var(--ion-color-success, #22c55e);
+  color: var(--ui-color-success, #22c55e);
   border-color: color-mix(in srgb, #22c55e 45%, transparent);
   background: color-mix(in srgb, #22c55e 15%, transparent);
 }
 
 .page-feedback.error {
-  color: var(--ion-color-danger, #ef4444);
+  color: var(--ui-color-danger, #ef4444);
   border-color: color-mix(in srgb, #ef4444 45%, transparent);
   background: color-mix(in srgb, #ef4444 15%, transparent);
 }
@@ -403,7 +444,7 @@
   }
 
   .threads-pane {
-    max-height: 38vh;
+    max-height: max(16rem, 38dvh);
   }
 
   .chat-pane,

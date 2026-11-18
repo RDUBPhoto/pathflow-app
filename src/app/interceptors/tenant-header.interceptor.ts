@@ -19,7 +19,7 @@ export const tenantHeaderInterceptor: HttpInterceptorFn = (req, next) => {
 
   // Local Angular dev does not provide SWA principal headers, so pass a
   // dev-only identity envelope for local Functions.
-  if (isLocalHost() && user && !req.headers.has('x-ms-client-principal')) {
+  if (isLocalHost() && auth.state().source === 'dev' && user && !req.headers.has('x-ms-client-principal')) {
     headers['x-dev-user-email'] = user.email || '';
     headers['x-dev-user-name'] = user.displayName || user.email || '';
     headers['x-dev-user-id'] = user.id || user.email || '';

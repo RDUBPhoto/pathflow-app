@@ -1,69 +1,80 @@
-<ion-header class="glass-header">
-  <ion-toolbar>
-    <ion-buttons slot="start">
+<header class="ui-header app-header">
+  <div class="ui-toolbar">
+    <div class="ui-buttons" slot="start">
       <app-page-back-button></app-page-back-button>
-    </ion-buttons>
-    <ion-title>Quotes &amp; Invoices</ion-title>
+    </div>
+    <h1 class="ui-title">Quotes &amp; Invoices</h1>
     <app-company-switcher></app-company-switcher>
-    <ion-buttons slot="end" class="ion-margin-end">
+    <div slot="end" class="ui-buttons me-2">
       <app-user-menu></app-user-menu>
-    </ion-buttons>
-  </ion-toolbar>
-</ion-header>
+    </div>
+  </div>
+</header>
 
-<ion-content class="glass-bg invoices-content ion-padding">
+<div class="ui-content app-content invoices-content app-padding">
+  @if (documentSyncError()) {
+    <p role="alert">{{ documentSyncError() }}</p>
+  }
   <div class="invoices-stack">
     <section class="invoices-kpis" (click)="closeKpiMenu()">
-      <article
-        class="kpi-card glass-surface"
-        *ngFor="let kpi of kpis(); trackBy: trackKpi"
-        [class.menu-open]="isKpiMenuOpen(kpi.id)"
-        [class.tone-open]="kpi.tone === 'open'"
-        [class.tone-accepted]="kpi.tone === 'accepted'"
-        [class.tone-declined]="kpi.tone === 'declined'"
-        [class.tone-expired]="kpi.tone === 'expired'">
-        <div class="kpi-head">
-          <div class="kpi-label">{{ kpi.label }}</div>
-          <div class="kpi-menu-wrap" (click)="$event.stopPropagation()">
-            <button type="button" class="kpi-menu-trigger" (click)="toggleKpiMenu(kpi.id, $event)" aria-label="Change KPI timeframe">
-              ⋯
-            </button>
-            <div class="kpi-menu" *ngIf="isKpiMenuOpen(kpi.id)">
-              <button
-                type="button"
-                class="kpi-menu-item"
-                *ngFor="let option of kpiRangeOptions"
-                [class.active]="kpi.range === option.id"
-                (click)="setKpiRangeForCard(kpi.id, option.id)">
-                {{ option.label }}
+      @for (kpi of kpis(); track trackKpi($index, kpi)) {
+        <article
+          class="kpi-card app-surface"
+          [class.menu-open]="isKpiMenuOpen(kpi.id)"
+          [class.tone-open]="kpi.tone === 'open'"
+          [class.tone-accepted]="kpi.tone === 'accepted'"
+          [class.tone-declined]="kpi.tone === 'declined'"
+          [class.tone-expired]="kpi.tone === 'expired'">
+          <div class="kpi-head">
+            <div class="kpi-label">{{ kpi.label }}</div>
+            <div class="kpi-menu-wrap" (click)="$event.stopPropagation()">
+              <button type="button" class="kpi-menu-trigger" (click)="toggleKpiMenu(kpi.id, $event)" aria-label="Change KPI timeframe">
+                ⋯
               </button>
+              @if (isKpiMenuOpen(kpi.id)) {
+                <div class="kpi-menu">
+                  @for (option of kpiRangeOptions; track option) {
+                    <button
+                      type="button"
+                      class="kpi-menu-item"
+                      [class.active]="kpi.range === option.id"
+                      (click)="setKpiRangeForCard(kpi.id, option.id)">
+                      {{ option.label }}
+                    </button>
+                  }
+                </div>
+              }
             </div>
           </div>
-        </div>
-        <div class="kpi-value-row" *ngIf="kpi.kind === 'count'">
-          <div class="kpi-value">{{ kpi.value }}</div>
-          <span class="kpi-range-text">{{ kpi.rangeLabel }}</span>
-        </div>
-        <div class="kpi-value-row" *ngIf="kpi.kind === 'currency'">
-          <div class="kpi-value">{{ kpi.value | currency:'USD':'symbol':'1.2-2' }}</div>
-          <span class="kpi-range-text">{{ kpi.rangeLabel }}</span>
-        </div>
-      </article>
+          @if (kpi.kind === 'count') {
+            <div class="kpi-value-row">
+              <div class="kpi-value">{{ kpi.value }}</div>
+              <span class="kpi-range-text">{{ kpi.rangeLabel }}</span>
+            </div>
+          }
+          @if (kpi.kind === 'currency') {
+            <div class="kpi-value-row">
+              <div class="kpi-value">{{ kpi.value | currency:'USD':'symbol':'1.2-2' }}</div>
+              <span class="kpi-range-text">{{ kpi.rangeLabel }}</span>
+            </div>
+          }
+        </article>
+      }
     </section>
 
-    <section class="tabbed-panel glass-surface">
+    <section class="tabbed-panel app-surface">
       <header class="tabbed-panel-head">
-        <ion-segment
+        <ui-tabs
           class="invoices-segment"
           [value]="activeTab()"
-          (ionChange)="onTabChanged($any($event.detail).value)">
-          <ion-segment-button value="quotes">
+          (controlChange)="onTabChanged($any($event.detail).value)">
+          <button class="ui-tab" uiTab type="button" value="quotes">
             <span>Quotes</span>
-          </ion-segment-button>
-          <ion-segment-button value="invoices">
+          </button>
+          <button class="ui-tab" uiTab type="button" value="invoices">
             <span>Invoices</span>
-          </ion-segment-button>
-        </ion-segment>
+          </button>
+        </ui-tabs>
       </header>
 
       <section class="invoices-search tabbed-search">
@@ -71,118 +82,136 @@
           Search {{ activeTab() === 'quotes' ? 'quotes' : 'invoices' }}
         </label>
         <div class="search-field">
-          <input
+          <input class="form-control"
             id="invoice-search"
             type="text"
             placeholder="Customer, doc #, vehicle, template, amount"
             [value]="searchQuery()"
             (input)="setSearchQuery($any($event.target).value)" />
-          <button type="button" class="search-clear" *ngIf="searchQuery()" (click)="clearSearch()">Clear</button>
+          @if (searchQuery()) {
+            <button type="button" class="search-clear" (click)="clearSearch()">Clear</button>
+          }
         </div>
       </section>
 
       <div class="invoice-board-wrap" (click)="closeOpenMenu()">
         <div class="invoice-board">
-        <article
-          class="invoice-lane glass-surface"
-          *ngFor="let lane of lanes(); trackBy: trackLane"
-          [style.--lane-color]="lane.color">
-          <header class="lane-head">
-            <div class="lane-head-meta">
-              <div class="lane-title">{{ lane.title }}</div>
-              <div class="lane-count">{{ laneCardsFor(lane).length }}</div>
-            </div>
-            <ion-button
-              size="small"
-              fill="outline"
-              *ngIf="lane.id === 'draft'"
-              (click)="openTemplatePicker()">
-              + New
-            </ion-button>
-          </header>
-
-          <div class="lane-cards">
-            <a
-              class="invoice-card invoice-card-button"
-              *ngFor="let invoice of laneCardsFor(lane); trackBy: trackInvoice"
-              [routerLink]="documentRoute(invoice)"
-              (click)="openDocument(invoice, $event)"
-              [attr.aria-label]="'Open invoice ' + invoice.invoiceNumber + ' for ' + invoice.customerName">
-              <div class="invoice-card-top">
-                <div class="invoice-card-headline">
-                  <div class="invoice-customer">{{ invoice.customerName }}</div>
-                  <div
-                    class="invoice-card-menu-wrap"
-                    *ngIf="lane.id === 'draft' || (activeTab() === 'quotes' && lane.id === 'sent')"
-                    (click)="$event.preventDefault(); $event.stopPropagation()">
-                    <button
-                      type="button"
-                      class="invoice-card-menu-trigger"
-                      aria-label="Open document actions"
-                      (click)="toggleCardMenu(invoice, $event)">
-                      ⋯
-                    </button>
-                    <div class="invoice-card-menu" *ngIf="openMenuId() === invoice.id">
-                      <button
-                        type="button"
-                        class="invoice-card-menu-item"
-                        *ngIf="lane.id === 'draft'"
-                        (click)="sendNow(invoice, $event)">
-                        Send Now
-                      </button>
-                      <button
-                        type="button"
-                        class="invoice-card-menu-item danger"
-                        *ngIf="lane.id === 'draft'"
-                        (click)="requestDeleteDraft(invoice, $event)">
-                        Delete Draft {{ invoice.documentType === 'invoice' ? 'Invoice' : 'Quote' }}
-                      </button>
-                      <button
-                        type="button"
-                        class="invoice-card-menu-item warning"
-                        *ngIf="lane.id === 'sent'"
-                        (click)="requestCancelQuote(invoice, $event)">
-                        Cancel Quote
-                      </button>
-                    </div>
-                  </div>
+          @for (lane of lanes(); track trackLane($index, lane)) {
+            <article
+              class="invoice-lane app-surface"
+              [style.--lane-color]="lane.color">
+              <header class="lane-head">
+                <div class="lane-head-meta">
+                  <div class="lane-title">{{ lane.title }}</div>
+                  <div class="lane-count">{{ laneCardsFor(lane).length }}</div>
                 </div>
-                <div class="invoice-number">{{ invoice.invoiceNumber }}</div>
+                @if (lane.id === 'draft') {
+                  <button class="btn ui-button btn-outline-primary btn-sm" type="button"
+                    (click)="openTemplatePicker()">
+                    + New
+                  </button>
+                }
+              </header>
+              <div class="lane-cards">
+                @for (invoice of laneCardsFor(lane); track trackInvoice($index, invoice)) {
+                  <a
+                    class="invoice-card invoice-card-button"
+                    [routerLink]="documentRoute(invoice)"
+                    (click)="openDocument(invoice, $event)"
+                    [attr.aria-label]="'Open invoice ' + invoice.invoiceNumber + ' for ' + invoice.customerName">
+                    <div class="invoice-card-top">
+                      <div class="invoice-card-headline">
+                        <div class="invoice-customer">{{ invoice.customerName }}</div>
+                        @if (lane.id === 'draft' || (activeTab() === 'quotes' && lane.id === 'sent')) {
+                          <div
+                            class="invoice-card-menu-wrap"
+                            (click)="$event.preventDefault(); $event.stopPropagation()">
+                            <button
+                              type="button"
+                              class="invoice-card-menu-trigger"
+                              aria-label="Open document actions"
+                              (click)="toggleCardMenu(invoice, $event)">
+                              ⋯
+                            </button>
+                            @if (openMenuId() === invoice.id) {
+                              <div class="invoice-card-menu">
+                                @if (lane.id === 'draft') {
+                                  <button
+                                    type="button"
+                                    class="invoice-card-menu-item"
+                                    (click)="sendNow(invoice, $event)">
+                                    Send Now
+                                  </button>
+                                }
+                                @if (lane.id === 'draft') {
+                                  <button
+                                    type="button"
+                                    class="invoice-card-menu-item danger"
+                                    (click)="requestDeleteDraft(invoice, $event)">
+                                    Delete Draft {{ invoice.documentType === 'invoice' ? 'Invoice' : 'Quote' }}
+                                  </button>
+                                }
+                                @if (lane.id === 'sent') {
+                                  <button
+                                    type="button"
+                                    class="invoice-card-menu-item warning"
+                                    (click)="requestCancelQuote(invoice, $event)">
+                                    Cancel Quote
+                                  </button>
+                                }
+                              </div>
+                            }
+                          </div>
+                        }
+                      </div>
+                      <div class="invoice-number">{{ invoice.invoiceNumber }}</div>
+                    </div>
+                    <div class="invoice-line muted">Updated: {{ invoice.invoicedAt }}</div>
+                    <div class="invoice-line">Vehicle: {{ invoice.vehicle }}</div>
+                    <div class="invoice-line total">Total: {{ invoice.total | currency:'USD':'symbol':'1.2-2' }}</div>
+                  </a>
+                }
+                @if (!laneCardsFor(lane).length) {
+                  <div class="lane-empty">
+                    No {{ activeTab() === 'quotes' ? 'quotes' : 'invoices' }} in this stage.
+                  </div>
+                }
               </div>
-              <div class="invoice-line muted">Updated: {{ invoice.invoicedAt }}</div>
-              <div class="invoice-line">Vehicle: {{ invoice.vehicle }}</div>
-              <div class="invoice-line total">Total: {{ invoice.total | currency:'USD':'symbol':'1.2-2' }}</div>
-            </a>
-
-            <div class="lane-empty" *ngIf="!laneCardsFor(lane).length">
-              No {{ activeTab() === 'quotes' ? 'quotes' : 'invoices' }} in this stage.
-            </div>
-          </div>
-        </article>
+            </article>
+          }
         </div>
       </div>
     </section>
   </div>
 
-  <div class="quote-delete-modal-backdrop" *ngIf="deleteDialogOpen()" (click)="cancelDeleteDraft()"></div>
-  <section class="quote-delete-modal glass-surface" *ngIf="deleteDialogOpen()" role="dialog" aria-modal="true">
-    <h3>Delete Draft {{ deleteDialogDocumentLabel() }}</h3>
-    <p>
-      Delete
-      <strong>{{ deleteCandidate()?.invoiceNumber || ('this draft ' + deleteDialogDocumentLabel().toLowerCase()) }}</strong>
-      for
-      <strong>{{ deleteCandidate()?.customerName || 'this customer' }}</strong>?
-    </p>
-    <p class="quote-delete-modal-error" *ngIf="deleteError()">{{ deleteError() }}</p>
-    <div class="quote-delete-modal-actions">
-      <ion-button fill="outline" size="small" (click)="cancelDeleteDraft()">Cancel</ion-button>
-      <ion-button color="danger" size="small" (click)="confirmDeleteDraft()">Delete</ion-button>
-    </div>
-  </section>
-</ion-content>
+  @if (deleteDialogOpen()) {
+    <div class="quote-delete-modal-backdrop" (click)="cancelDeleteDraft()"></div>
+  }
+  @if (deleteDialogOpen()) {
+    <section class="quote-delete-modal app-surface" role="dialog" aria-modal="true">
+      <h3>Delete Draft {{ deleteDialogDocumentLabel() }}</h3>
+      <p>
+        Delete
+        <strong>{{ deleteCandidate()?.invoiceNumber || ('this draft ' + deleteDialogDocumentLabel().toLowerCase()) }}</strong>
+        for
+        <strong>{{ deleteCandidate()?.customerName || 'this customer' }}</strong>?
+      </p>
+      @if (deleteError()) {
+        <p class="quote-delete-modal-error">{{ deleteError() }}</p>
+      }
+      <div class="quote-delete-modal-actions">
+        <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="cancelDeleteDraft()">Cancel</button>
+        <button class="btn ui-button btn-danger btn-sm" type="button" (click)="confirmDeleteDraft()">Delete</button>
+      </div>
+    </section>
+  }
+</div>
 
-  <div class="quote-delete-modal-backdrop" *ngIf="cancelDialogOpen()" (click)="cancelQuoteDialog()"></div>
-  <section class="quote-delete-modal glass-surface" *ngIf="cancelDialogOpen()" role="dialog" aria-modal="true">
+@if (cancelDialogOpen()) {
+  <div class="quote-delete-modal-backdrop" (click)="cancelQuoteDialog()"></div>
+}
+@if (cancelDialogOpen()) {
+  <section class="quote-delete-modal app-surface" role="dialog" aria-modal="true">
     <h3>Cancel Sent Quote</h3>
     <p>
       Cancel
@@ -191,9 +220,12 @@
       <strong>{{ cancelCandidate()?.customerName || 'this customer' }}</strong>?
     </p>
     <p>This moves the quote from <strong>Sent</strong> to <strong>Declined</strong> and emails the customer.</p>
-    <p class="quote-delete-modal-error" *ngIf="cancelError()">{{ cancelError() }}</p>
+    @if (cancelError()) {
+      <p class="quote-delete-modal-error">{{ cancelError() }}</p>
+    }
     <div class="quote-delete-modal-actions">
-      <ion-button fill="outline" size="small" (click)="cancelQuoteDialog()">Back</ion-button>
-      <ion-button color="warning" size="small" (click)="confirmCancelQuote()">Cancel Quote</ion-button>
+      <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="cancelQuoteDialog()">Back</button>
+      <button class="btn ui-button btn-warning btn-sm" type="button" (click)="confirmCancelQuote()">Cancel Quote</button>
     </div>
   </section>
+}

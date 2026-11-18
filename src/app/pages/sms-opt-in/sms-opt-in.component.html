@@ -1,10 +1,10 @@
-<ion-header class="public-header">
-  <ion-toolbar>
-    <ion-title>PathFlow SMS Opt-In</ion-title>
-  </ion-toolbar>
-</ion-header>
+<header class="ui-header public-header">
+  <div class="ui-toolbar">
+    <h1 class="ui-title">PathFlow SMS Opt-In</h1>
+  </div>
+</header>
 
-<ion-content class="optin-page">
+<div class="ui-content optin-page">
   <main class="optin-shell">
     <section class="intro-card">
       <p class="eyebrow">Public consent page</p>
@@ -32,40 +32,40 @@
       </div>
 
       <div class="form-grid">
-        <ion-item>
-          <ion-label position="stacked">Full name</ion-label>
-          <ion-input [(ngModel)]="name" placeholder="Jane Smith"></ion-input>
-        </ion-item>
+        <div class="ui-item">
+          <span class="ui-label">Full name</span>
+          <ui-input aria-label="Full name" [(ngModel)]="name" placeholder="Jane Smith"></ui-input>
+        </div>
 
-        <ion-item>
-          <ion-label position="stacked">Mobile phone for SMS</ion-label>
-          <ion-input [ngModel]="phone" (ngModelChange)="onPhoneInput($event)" placeholder="(555) 555-1212"></ion-input>
-        </ion-item>
+        <div class="ui-item">
+          <span class="ui-label">Mobile phone for SMS</span>
+          <ui-input aria-label="Mobile phone for SMS" [ngModel]="phone" (ngModelChange)="onPhoneInput($event)" placeholder="(555) 555-1212"></ui-input>
+        </div>
 
-        <ion-item>
-          <ion-label position="stacked">Email (optional)</ion-label>
-          <ion-input [(ngModel)]="email" type="email" placeholder="you@example.com"></ion-input>
-        </ion-item>
+        <div class="ui-item">
+          <span class="ui-label">Email (optional)</span>
+          <ui-input aria-label="Email (optional)" [(ngModel)]="email" type="email" placeholder="you@example.com"></ui-input>
+        </div>
 
-        <ion-item>
-          <ion-label position="stacked">VIN or reference (optional)</ion-label>
-          <ion-input [(ngModel)]="vin" maxlength="17" placeholder="Optional 17-character VIN"></ion-input>
-        </ion-item>
+        <div class="ui-item">
+          <span class="ui-label">VIN or reference (optional)</span>
+          <ui-input aria-label="VIN or reference (optional)" [(ngModel)]="vin" maxlength="17" placeholder="Optional 17-character VIN"></ui-input>
+        </div>
       </div>
 
-      <ion-item class="message-item">
-        <ion-label position="stacked">Reason for updates (optional)</ion-label>
-        <ion-textarea
+      <div class="ui-item message-item">
+        <span class="ui-label">Reason for updates (optional)</span>
+        <ui-textarea aria-label="Reason for updates (optional)"
           [(ngModel)]="message"
           rows="3"
           [autoGrow]="true"
           maxlength="1200"
           placeholder="Appointment reminders, service updates, invoices, or account alerts">
-        </ion-textarea>
-      </ion-item>
+        </ui-textarea>
+      </div>
 
       <label class="consent-box">
-        <ion-checkbox [(ngModel)]="smsOptIn"></ion-checkbox>
+        <ui-checkbox [(ngModel)]="smsOptIn"></ui-checkbox>
         <span>{{ consentText }}</span>
       </label>
 
@@ -76,18 +76,24 @@
       </p>
 
       <div class="action-row">
-        <ion-button (click)="submit()" [disabled]="!canSubmit()">
-          <ion-spinner name="crescent" *ngIf="submitting()" slot="start"></ion-spinner>
+        <button class="btn ui-button btn-primary" type="button" (click)="submit()" [disabled]="!canSubmit()">
+          @if (submitting()) {
+            <span class="spinner-border spinner-border-sm ui-spinner" role="status" aria-label="Loading" slot="start"></span>
+          }
           {{ submitting() ? 'Submitting...' : 'Submit SMS Opt-In' }}
-        </ion-button>
+        </button>
       </div>
 
-      <ion-text color="success" *ngIf="status()">
-        <p class="feedback">{{ status() }}</p>
-      </ion-text>
-      <ion-text color="danger" *ngIf="error()">
-        <p class="feedback">{{ error() }}</p>
-      </ion-text>
+      @if (status()) {
+        <span class="ui-text text-success">
+          <p class="feedback">{{ status() }}</p>
+        </span>
+      }
+      @if (error()) {
+        <span class="ui-text text-danger">
+          <p class="feedback">{{ error() }}</p>
+        </span>
+      }
     </section>
 
     <section class="review-card">
@@ -101,4 +107,4 @@
       </p>
     </section>
   </main>
-</ion-content>
+</div>

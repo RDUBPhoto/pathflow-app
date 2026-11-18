@@ -1,10 +1,5 @@
+import { UiInput } from '../../../ui/controls';
 import { Component, Input, Output, EventEmitter } from '@angular/core';
-import {
-  IonMenu, IonHeader, IonToolbar, IonTitle, IonContent,
-  IonList, IonItem, IonLabel, IonInput, IonButton,
-  IonSelect, IonSelectOption
-} from '@ionic/angular/standalone';
-import { addIcons } from 'ionicons';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
@@ -17,10 +12,8 @@ type Lane = { id: string; name: string };
   standalone: true,
   imports: [
     CommonModule, FormsModule,
-    IonMenu, IonHeader, IonToolbar, IonTitle, IonContent,
-    IonList, IonItem, IonLabel, IonInput, IonButton,
-    IonSelect, IonSelectOption
-  ],
+       UiInput,
+    ],
   templateUrl: './board-settings-menu.component.html',
   styleUrls: ['./board-settings-menu.component.scss']
 })

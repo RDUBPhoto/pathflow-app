@@ -1,193 +1,163 @@
-<ion-content class="corp-home">
-  <main>
-    <header class="site-header">
-      <div class="site-nav">
-        <a class="brand" routerLink="/" aria-label="PathFlow home">
-          <img src="/pathflow-logo.svg" alt="" />
-          <span class="brand-mark" aria-hidden="true">P</span>
-          <span>PathFlow</span>
-        </a>
-        <nav aria-label="Main navigation">
-          <a href="#platform">Platform</a>
-          <a href="#workflow">Workflow</a>
-          <a href="#operations">Operations</a>
-          <a href="#access">Access</a>
-        </nav>
-        <div class="nav-actions">
-          <ion-button fill="clear" routerLink="/signup">Request Access</ion-button>
-          <ion-button (click)="openLogin()">Login</ion-button>
-        </div>
+<div class="corp-site">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="site-header">
+    <div class="site-container site-nav">
+      <a class="brand" routerLink="/" aria-label="Pathflow home">
+        <span class="brand-mark"><img src="/pathflow-logo.svg" alt="" width="168" height="40" /></span>
+        <span>Pathflow</span>
+      </a>
+      <nav class="site-links" aria-label="Main navigation">
+        <a href="#workflow">Workflow</a>
+        <a href="#customer-portal">Customer portal</a>
+        <a href="#platform">Features</a>
+      </nav>
+      <div class="nav-actions">
+        @if (auth.isAuthenticated()) {
+          <button class="site-button button-primary" type="button" (click)="openLogin()">Open workspace</button>
+        } @else {
+          <button class="site-button button-plain" type="button" (click)="openLogin()">Sign in</button>
+          <a class="site-button button-primary" routerLink="/signup">Get started</a>
+        }
       </div>
-    </header>
+    </div>
+  </header>
 
-    <section class="hero-section">
-      <div class="hero-copy reveal visible">
-        <p class="eyebrow">Automotive workflow software</p>
-        <h1>One calm workspace for every job in motion.</h1>
-        <p class="hero-sub">
-          PathFlow helps automotive service teams manage leads, quotes, schedules, inventory, purchase orders,
-          invoices, and transactional customer updates without jumping between disconnected tools.
-        </p>
-        <div class="cta-row">
-          <ion-button size="large" routerLink="/signup">Request Access</ion-button>
-          <ion-button size="large" fill="outline" (click)="openLogin()">Login to App</ion-button>
-        </div>
-        <p class="sms-proof-line">Built for service teams that need the front desk, shop, parts, and billing in sync.</p>
-      </div>
-
-      <div class="product-visual reveal visible" aria-label="PathFlow product preview">
-        <div class="journey-panel">
-          <div class="journey-header">
-            <span>Live workflow</span>
-            <strong>7 jobs active today</strong>
-          </div>
-          <div class="journey-rail">
-            <article>
-              <small>New request</small>
-              <strong>Quote sent</strong>
-              <p>Customer approved lift kit package.</p>
-            </article>
-            <article class="active">
-              <small>Install prep</small>
-              <strong>Parts arriving</strong>
-              <p>3 of 4 received. Final box ETA Friday.</p>
-            </article>
-            <article>
-              <small>Ready to bill</small>
-              <strong>Invoice draft</strong>
-              <p>Labor, parts, and approvals stay connected.</p>
-            </article>
-          </div>
-          <div class="signal-row">
-            <span><b>SMS</b> consent recorded</span>
-            <span><b>PO</b> partially received</span>
-            <span><b>Invoice</b> ready</span>
+  <main id="main-content" tabindex="-1">
+    <section class="hero" aria-labelledby="home-heading">
+      <div class="site-container hero-layout">
+        <div class="hero-copy">
+          <p class="section-label">Automotive shop management software</p>
+          <h1 id="home-heading">Run your shop from first call to pickup.</h1>
+          <p class="hero-description">Manage customer requests, quotes, scheduling, parts, and payments in one workspace built for automotive service, fabrication, and installation teams.</p>
+          <div class="cta-row">
+            @if (auth.isAuthenticated()) {
+              <button class="site-button button-primary" type="button" (click)="openLogin()">Open workspace <ui-icon name="chevron-right"></ui-icon></button>
+            } @else {
+              <a class="site-button button-primary" routerLink="/signup">Get started <ui-icon name="chevron-right"></ui-icon></a>
+            }
+            <a class="site-button button-secondary" href="#workflow">See how it works <ui-icon name="chevron-down"></ui-icon></a>
           </div>
         </div>
+
+        <figure class="hero-visual">
+          <div class="product-frame">
+            <img src="/marketing/shop-dashboard.webp" width="1370" height="615" fetchpriority="high"
+              alt="Pathflow dashboard showing customer vehicles and work in the Leads, Quotes, Invoices, and Scheduled lanes." />
+          </div>
+          <figcaption>Pathflow dashboard with sample jobs</figcaption>
+        </figure>
       </div>
     </section>
 
-    <section class="trust-strip reveal">
-      <div>
-        <strong>One operating view</strong>
-        <span>Leads, jobs, schedules, parts, invoices, and messages stay connected.</span>
-      </div>
-      <div>
-        <strong>Built for the shop</strong>
-        <span>Designed around real service workflows, approvals, installs, and handoffs.</span>
-      </div>
-      <div>
-        <strong>Customer-ready</strong>
-        <span>Quotes, invoices, payments, and updates keep customers informed.</span>
-      </div>
-    </section>
-
-    <section id="platform" class="section-grid reveal">
-      <div class="section-copy">
-        <p class="eyebrow">Platform</p>
-        <h2>Built for the full service lifecycle.</h2>
-        <p>
-          PathFlow gives service businesses a single operating layer for customer intake, workflow lanes,
-          scheduling, quote approvals, invoices, payments, inventory visibility, and purchase order tracking.
-        </p>
-      </div>
-      <div class="feature-grid">
-        <article>
-          <span>01</span>
-          <h3>Lead to job workflow</h3>
-          <p>Move customers from request to quote to scheduled work with clear operational status.</p>
-        </article>
-        <article>
-          <span>02</span>
-          <h3>Quotes and invoices</h3>
-          <p>Send customer-facing quotes, convert approved work, and collect payments with context intact.</p>
-        </article>
-        <article>
-          <span>03</span>
-          <h3>Parts and purchasing</h3>
-          <p>Track job-linked parts, purchase orders, receiving status, and inventory stock visibility.</p>
-        </article>
-        <article>
-          <span>04</span>
-          <h3>Customer messaging</h3>
-          <p>Send transactional SMS and email updates only after consent is captured and recorded.</p>
-        </article>
+    <section class="workflow section-spacing" id="workflow" aria-labelledby="workflow-heading">
+      <div class="site-container">
+        <div class="section-heading">
+          <p class="section-label">Shop workflow</p>
+          <h2 id="workflow-heading">Keep every handoff in view.</h2>
+          <p>Give the front desk, service bays, and parts team a shared view of what’s waiting, what’s booked, and what’s ready for pickup.</p>
+        </div>
+        <ol class="workflow-grid">
+          @for (step of workflow; track step.title) {
+            <li>
+              <span class="feature-icon"><ui-icon [name]="step.icon"></ui-icon></span>
+              <h3>{{ step.title }}</h3>
+              <p>{{ step.description }}</p>
+            </li>
+          }
+        </ol>
       </div>
     </section>
 
-    <section id="workflow" class="sms-section reveal">
-      <div>
-        <p class="eyebrow">Workflow</p>
-        <h2>From first request to final invoice, every step has context.</h2>
-        <p>
-          PathFlow keeps the customer, vehicle, quote, schedule, parts, purchase orders, invoice, and payment
-          connected so the team can see what is waiting, what is moving, and what needs attention.
-        </p>
-        <a class="text-link" routerLink="/signup">Request platform access</a>
-      </div>
-      <div class="consent-card">
-        <h3>Built around handoffs</h3>
-        <p>
-          Intake can capture the request, sales can quote it, the shop can schedule it, inventory can track
-          parts, and billing can invoice without re-entering the same details.
-        </p>
-      </div>
-    </section>
-
-    <section id="operations" class="section-grid reveal">
-      <div class="section-copy">
-        <p class="eyebrow">Operations</p>
-        <h2>Less chasing. More clarity for the whole team.</h2>
-        <p>
-          Daily work moves through clear lanes with the customer record, job status, parts status, approvals,
-          and billing details available where the team needs them.
-        </p>
-      </div>
-      <div class="policy-list">
-        <div><strong>Front desk:</strong> capture leads, customer details, vehicles, and appointment context.</div>
-        <div><strong>Sales:</strong> build quotes, collect approvals, and keep estimate history connected.</div>
-        <div><strong>Inventory:</strong> see job-linked parts, order status, receiving, and readiness.</div>
-        <div><strong>Billing:</strong> convert approved work into invoices and track payment state.</div>
+    <section class="portal-section section-spacing" id="customer-portal" aria-labelledby="portal-heading">
+      <div class="site-container split-layout">
+        <div class="section-heading">
+          <p class="section-label">Customer portal</p>
+          <h2 id="portal-heading">One link for the whole visit.</h2>
+          <p>Send a private visit link by email or text. Customers can open it on their phone without creating an account.</p>
+          <ul class="benefit-list">
+            <li><ui-icon name="circle-check"></ui-icon><span>Review and approve the quote</span></li>
+            <li><ui-icon name="circle-check"></ui-icon><span>See their appointment and vehicle status</span></li>
+            <li><ui-icon name="circle-check"></ui-icon><span>Pay the invoice and download receipts</span></li>
+          </ul>
+        </div>
+        <figure class="portal-visual">
+          <div class="portal-desktop">
+            <img src="/marketing/customer-portal.webp" width="820" height="678" loading="lazy"
+              alt="A sample customer visit in Pathflow showing a scheduled appointment, approved quote, invoice, and remaining balance." />
+          </div>
+          <div class="portal-phone" aria-hidden="true">
+            <img src="/marketing/customer-portal-mobile.webp" width="390" height="760" loading="lazy" alt="" />
+          </div>
+        </figure>
       </div>
     </section>
 
-    <section id="access" class="access-band reveal">
-      <div>
-        <p class="eyebrow">Access</p>
-        <h2>Bring the shop into one workspace.</h2>
-        <p>PathFlow is available by request for service businesses ready to centralize their workflow.</p>
-      </div>
-      <ion-button size="large" routerLink="/signup">Request Access</ion-button>
-    </section>
-
-    <footer class="site-footer">
-      <div class="footer-inner">
-        <div class="footer-brand">
-          <a class="brand footer-logo" routerLink="/" aria-label="PathFlow home">
-            <span class="brand-mark" aria-hidden="true">P</span>
-            <span>PathFlow</span>
-          </a>
-          <p>Automotive workflow and transactional messaging software operated by VistaLumina.</p>
+    <section class="operations section-spacing" id="platform" aria-labelledby="features-heading">
+      <div class="site-container" id="operations">
+        <div class="section-heading">
+          <p class="section-label">Shop operations</p>
+          <h2 id="features-heading">The tools your team uses every day.</h2>
+        </div>
+        <div class="feature-grid">
+          @for (feature of features; track feature.title) {
+            <article class="feature">
+              <span class="feature-icon"><ui-icon [name]="feature.icon"></ui-icon></span>
+              <h3>{{ feature.title }}</h3>
+              <p>{{ feature.description }}</p>
+            </article>
+          }
         </div>
 
-        <div class="footer-column">
-          <strong>Company</strong>
-          <p>
-            3724 Forsyth Park<br />
-            Schertz, TX 78154
-          </p>
-          <a href="mailto:robert@pathflow-app.com">robert&#64;pathflow-app.com</a>
+        <div class="report-feature">
+          <div class="report-copy">
+            <p class="section-label">Reporting</p>
+            <h3>See what you billed, collected, and spent on labor.</h3>
+            <p>Review sales and collections by month, quarter, or year. Compare tracked job time with billed labor to see where estimates need adjusting.</p>
+          </div>
+          <figure class="report-visual">
+            <img src="/marketing/shop-reports.webp" width="876" height="399" loading="lazy"
+              alt="Pathflow’s Invoiced Sales and Collections report with sample monthly totals for invoices, collections, and refunds." />
+          </figure>
         </div>
-
-        <nav class="footer-column" aria-label="Footer navigation">
-          <strong>Resources</strong>
-          <a routerLink="/privacy-policy">Privacy Policy</a>
-          <a routerLink="/terms-and-conditions">Terms and SMS Terms</a>
-          <a routerLink="/sms-opt-in">SMS Opt-In</a>
-          <a routerLink="/sms-opt-in-other">Opt-In Methods</a>
-          <a routerLink="/login">Login</a>
-        </nav>
       </div>
-    </footer>
+    </section>
+
+    <section class="access" id="access" aria-labelledby="access-heading">
+      <div class="site-container access-layout">
+        <div>
+          <h2 id="access-heading">Set up your shop in Pathflow.</h2>
+          <p>Create a workspace for your business and bring your team into the same workflow.</p>
+        </div>
+        @if (auth.isAuthenticated()) {
+          <button class="site-button button-primary" type="button" (click)="openLogin()">Open workspace <ui-icon name="chevron-right"></ui-icon></button>
+        } @else {
+          <a class="site-button button-primary" routerLink="/signup">Get started <ui-icon name="chevron-right"></ui-icon></a>
+        }
+      </div>
+    </section>
   </main>
-</ion-content>
+
+  <footer class="site-footer">
+    <div class="site-container footer-layout">
+      <div class="footer-brand">
+        <a class="brand" routerLink="/" aria-label="Pathflow home">
+          <span class="brand-mark"><img src="/pathflow-logo.svg" alt="" width="168" height="40" /></span>
+          <span>Pathflow</span>
+        </a>
+        <p>Shop management software operated by VistaLumina.</p>
+      </div>
+      <div class="footer-column">
+        <h2>Contact</h2>
+        <p>3724 Forsyth Park<br />Schertz, TX 78154</p>
+        <a href="mailto:robert@pathflow-app.com">robert&#64;pathflow-app.com</a>
+      </div>
+      <nav class="footer-column footer-links" aria-label="Footer navigation">
+        <h2>Legal and SMS</h2>
+        <a routerLink="/privacy-policy">Privacy policy</a>
+        <a routerLink="/terms-and-conditions">Terms and SMS terms</a>
+        <a routerLink="/sms-opt-in">SMS opt-in</a>
+        <a routerLink="/sms-opt-in-other">Other opt-in methods</a>
+      </nav>
+    </div>
+  </footer>
+</div>

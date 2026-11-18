@@ -2,7 +2,7 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { AppSettingsApiService } from './app-settings-api.service';
 
-export type PaymentGatewayProviderKey = 'authorize-net' | 'stripe' | 'paypal' | 'quickbooks';
+export type PaymentGatewayProviderKey = 'authorize-net' | 'stripe' | 'paypal' | 'quickbooks' | 'paylynx';
 
 export type PaymentGatewayProvider = {
   key: PaymentGatewayProviderKey;
@@ -54,6 +54,14 @@ const DEFAULT_PROVIDERS: PaymentGatewayProvider[] = [
   {
     key: 'quickbooks',
     label: 'QuickBooks Payments',
+    connected: false,
+    accountLabel: '',
+    mode: 'test',
+    updatedAt: ''
+  },
+  {
+    key: 'paylynx',
+    label: 'PayLynx',
     connected: false,
     accountLabel: '',
     mode: 'test',
@@ -203,9 +211,9 @@ export class PaymentGatewaySettingsService {
     this.state.set(next);
     try {
       await firstValueFrom(this.settingsApi.setValue(PAYMENT_GATEWAY_SETTINGS_KEY, next));
-    } catch {
+    } catch (error: unknown) {
       this.state.set(rollback);
-      throw new Error('Could not save payment gateway settings.');
+      throw error;
     } finally {
       this.saving.set(false);
     }
@@ -268,6 +276,6 @@ export class PaymentGatewaySettingsService {
   }
 
   private isProviderKey(value: unknown): value is PaymentGatewayProviderKey {
-    return value === 'authorize-net' || value === 'stripe' || value === 'paypal' || value === 'quickbooks';
+    return DEFAULT_PROVIDERS.some(provider => provider.key === value);
   }
 }

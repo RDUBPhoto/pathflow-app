@@ -1,1593 +1,1678 @@
-<ion-header class="glass-header">
-  <ion-toolbar>
-    <ion-buttons slot="start">
+<header class="ui-header app-header">
+  <div class="ui-toolbar">
+    <div class="ui-buttons" slot="start">
       <app-page-back-button></app-page-back-button>
-    </ion-buttons>
-    <ion-title>Admin Settings</ion-title>
+    </div>
+    <h1 class="ui-title">Admin Settings</h1>
     <app-company-switcher></app-company-switcher>
     <div class="toolbar-actions" slot="end">
       <app-user-menu></app-user-menu>
     </div>
-  </ion-toolbar>
-</ion-header>
+  </div>
+</header>
 
-<ion-content class="glass-bg admin-content ion-padding">
+<div class="ui-content app-content admin-content app-padding">
   <div class="admin-layout">
-    <aside class="admin-sidebar glass-surface">
+    <aside class="admin-sidebar app-surface">
       <div class="admin-sidebar-title">Settings Categories</div>
       <div class="admin-sidebar-list">
-        <button
-          type="button"
-          class="admin-section-btn"
-          *ngFor="let section of sections"
-          [class.active]="activeSection() === section.key"
-          [class.needs-setup]="sectionHasPending(section.key)"
-          (click)="setActiveSection(section.key)">
-          <ion-icon [name]="section.icon"></ion-icon>
-          <span class="admin-section-copy">
-            <span class="label">{{ section.label }}</span>
-            <span class="description">{{ section.description }}</span>
-          </span>
-        </button>
+        @for (section of sections; track section) {
+          <button
+            type="button"
+            class="admin-section-btn"
+            [class.active]="activeSection() === section.key"
+            [class.needs-setup]="sectionHasPending(section.key)"
+            (click)="setActiveSection(section.key)">
+            <ui-icon [name]="section.icon"></ui-icon>
+            <span class="admin-section-copy">
+              <span class="label">{{ section.label }}</span>
+              <span class="description">{{ section.description }}</span>
+            </span>
+          </button>
+        }
       </div>
     </aside>
 
     <section class="admin-main">
-      <ion-card class="glass-surface" *ngIf="activeSection() === 'branding'">
-        <ion-card-header>
-          <ion-card-title>
-            <ion-icon name="image-outline"></ion-icon>
-            Business Branding
-          </ion-card-title>
-        </ion-card-header>
-        <ion-card-content>
-          <div class="branding-grid">
-            <div class="logo-preview-wrap" [class.setup-invalid]="showSectionSetupError('branding') && !hasCustomLogo()">
-              <img class="logo-preview" *ngIf="hasCustomLogo()" [src]="logoUrl()" alt="Business logo preview" />
-              <div class="logo-empty" *ngIf="!hasCustomLogo()">No logo uploaded</div>
-            </div>
-
-            <div class="branding-actions">
-              <input #logoFileInput type="file" accept="image/*" hidden (change)="onLogoFileSelected($event)" />
-
-              <ion-button size="small" (click)="logoFileInput.click()">
-                <ion-icon slot="start" name="cloud-upload-outline"></ion-icon>
-                Upload Logo
-              </ion-button>
-
-              <ion-button size="small" fill="outline" [disabled]="!hasCustomLogo()" (click)="resetBusinessLogo()">
-                <ion-icon slot="start" name="refresh-outline"></ion-icon>
-                Reset
-              </ion-button>
-
-              <div class="branding-help">
-                Recommended: PNG/SVG, transparent background, max 5MB.
-              </div>
-              <div class="branding-help success" *ngIf="brandingStatus">{{ brandingStatus }}</div>
-              <div class="branding-help error" *ngIf="brandingError">{{ brandingError }}</div>
-            </div>
+      @if (activeSection() === 'branding') {
+        <div class="card ui-card app-surface">
+          <div class="card-header ui-card-header">
+            <h2 class="card-title ui-card-title">
+              <ui-icon name="photo"></ui-icon>
+              Business Branding
+            </h2>
           </div>
-
-          <div class="settings-subsection">
-            <div class="email-section-title">Business Profile</div>
-            <div class="sms-help">
-              These values power email merge tags like <code>{{ '{{company_phone}}' }}</code> and
-              <code>{{ '{{company_location}}' }}</code>.
-            </div>
-            <div class="sms-form">
-              <ion-item [class.setup-invalid]="showSectionSetupError('branding') && !businessProfileName.trim()">
-                <ion-label position="stacked">Business Name</ion-label>
-                <ion-input [(ngModel)]="businessProfileName" placeholder="Your Company"></ion-input>
-              </ion-item>
-              <ion-item [class.setup-invalid]="showSectionSetupError('branding') && !businessProfileEmail.trim()">
-                <ion-label position="stacked">Business Email</ion-label>
-                <ion-input [(ngModel)]="businessProfileEmail" placeholder="service@yourcompany.com"></ion-input>
-              </ion-item>
-              <ion-item [class.setup-invalid]="showSectionSetupError('branding') && !businessProfilePhone.trim()">
-                <ion-label position="stacked">Business Phone</ion-label>
-                <ion-input [ngModel]="businessProfilePhone" (ngModelChange)="onBusinessProfilePhoneInput($event)" placeholder="(555) 555-0100"></ion-input>
-              </ion-item>
-              <ion-item [class.setup-invalid]="showSectionSetupError('branding') && !businessProfileAddress.trim()">
-                <ion-label position="stacked">Business Address / Location</ion-label>
-                <ion-input
-                  [(ngModel)]="businessProfileAddress"
-                  (ngModelChange)="onBusinessAddressChange($event)"
-                  (ionBlur)="onBusinessAddressBlur()"
-                  placeholder="123 Main St, Anytown, USA">
-                </ion-input>
-              </ion-item>
-              <div class="sms-feedback error" *ngIf="showSectionSetupError('branding') && (!businessProfileName.trim() || !businessProfileEmail.trim() || !businessProfilePhone.trim() || !businessProfileAddress.trim() || !hasCustomLogo())">
-                Complete all required branding fields and upload a logo.
+          <div class="card-body ui-card-content">
+            <div class="branding-grid">
+              <div class="logo-preview-wrap" [class.setup-invalid]="showSectionSetupError('branding') && !hasCustomLogo()">
+                @if (hasCustomLogo()) {
+                  <img class="logo-preview" [src]="logoUrl()" alt="Business logo preview" />
+                }
+                @if (!hasCustomLogo()) {
+                  <div class="logo-empty">No logo uploaded</div>
+                }
               </div>
-              <ion-item>
-                <ion-label position="stacked">Default Tax Rate (%)</ion-label>
-                <ion-input
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="0.01"
-                  [(ngModel)]="businessTaxRate"
-                  placeholder="8.25">
-                </ion-input>
-              </ion-item>
-              <div class="address-lookup-box" *ngIf="businessAddressSearching() || businessAddressSuggestions().length || businessAddressNoMatches()">
-                <div class="address-lookup-state" *ngIf="businessAddressSearching()">Searching addresses...</div>
-                <button
-                  type="button"
-                  class="address-lookup-option"
-                  *ngFor="let item of businessAddressSuggestions()"
-                  (mousedown)="$event.preventDefault()"
-                  (click)="selectBusinessAddressSuggestion(item)">
-                  {{ item.display }}
+              <div class="branding-actions">
+                <input #logoFileInput type="file" accept="image/*" hidden (change)="onLogoFileSelected($event)" />
+                <button class="btn ui-button btn-primary btn-sm" type="button" (click)="logoFileInput.click()">
+                  <ui-icon slot="start" name="cloud-upload"></ui-icon>
+                  Upload Logo
                 </button>
-                <div class="address-lookup-state" *ngIf="!businessAddressSearching() && businessAddressNoMatches()">
-                  No address matches found.
+                <button class="btn ui-button btn-outline-primary btn-sm" type="button" [disabled]="!hasCustomLogo()" (click)="resetBusinessLogo()">
+                  <ui-icon slot="start" name="refresh"></ui-icon>
+                  Reset
+                </button>
+                <div class="branding-help">
+                  Recommended: PNG/SVG, transparent background, max 5MB.
                 </div>
+                @if (brandingStatus) {
+                  <div class="branding-help success">{{ brandingStatus }}</div>
+                }
+                @if (brandingError) {
+                  <div class="branding-help error">{{ brandingError }}</div>
+                }
               </div>
             </div>
-          </div>
-
-          <div class="settings-subsection">
-            <div class="email-section-title">Labor Rates Catalog</div>
-            <div class="sms-help">
-              Add labor line presets used in Quotes/Invoices (examples: Alignment, Tire disposal fee, Mount &amp; Balance Tires).
-            </div>
-            <div class="labor-rates-list">
-              <div class="labor-rate-row" *ngFor="let rate of laborRates; let i = index">
-                <ion-item>
-                  <ion-label position="stacked">Labor Name</ion-label>
-                  <ion-input [(ngModel)]="rate.name" placeholder="Alignment"></ion-input>
-                </ion-item>
-                <ion-item>
-                  <ion-label position="stacked">Default Price</ion-label>
-                  <ion-input type="number" min="0" step="0.01" [(ngModel)]="rate.price" placeholder="150.00"></ion-input>
-                </ion-item>
-                <ion-item>
-                  <ion-label position="stacked">Default Cost</ion-label>
-                  <ion-input type="number" min="0" step="0.01" [(ngModel)]="rate.cost" placeholder="60.00"></ion-input>
-                </ion-item>
-                <ion-item lines="none" class="labor-taxable-item">
-                  <ion-checkbox slot="start" [(ngModel)]="rate.taxable"></ion-checkbox>
-                  <ion-label>Taxable</ion-label>
-                </ion-item>
-                <ion-button fill="clear" color="danger" (click)="removeLaborRate(rate.id)" [disabled]="laborRates.length <= 0">
-                  <ion-icon name="trash-outline"></ion-icon>
-                </ion-button>
-              </div>
-              <div class="sms-actions">
-                <ion-button size="small" fill="outline" (click)="addLaborRate()">
-                  <ion-icon slot="start" name="add-outline"></ion-icon>
-                  Add Labor Rate
-                </ion-button>
-              </div>
-            </div>
-          </div>
-
-          <div class="settings-subsection">
-            <div class="email-section-title">Quote/Invoice Template Management</div>
-            <div class="sms-help">
-              Build templates that can auto-prefill parts and labor lines in the Quote/Invoice wizard.
-            </div>
-
-            <div class="sms-actions">
-              <ion-button size="small" fill="outline" (click)="addDocumentTemplate()">
-                <ion-icon slot="start" name="add-outline"></ion-icon>
-                Add Template
-              </ion-button>
-            </div>
-
-            <div class="template-catalog" *ngIf="documentTemplates.length; else noDocumentTemplates">
-              <div class="template-catalog-item" *ngFor="let template of documentTemplates; trackBy: trackDocumentTemplate">
-                <div class="template-catalog-head">
-                  <div class="template-catalog-title">{{ template.name || 'New Template' }}</div>
-                  <ion-button fill="clear" color="danger" (click)="removeDocumentTemplate(template.id)">
-                    <ion-icon name="trash-outline"></ion-icon>
-                  </ion-button>
-                </div>
-
-                <div class="template-catalog-grid">
-                  <ion-item>
-                    <ion-label position="stacked">Template Name</ion-label>
-                    <ion-input [(ngModel)]="template.name" placeholder="Lift kit install quote"></ion-input>
-                  </ion-item>
-                  <ion-item>
-                    <ion-label position="stacked">Applies To</ion-label>
-                    <ion-select [(ngModel)]="template.documentType" interface="popover">
-                      <ion-select-option value="quote">Quotes</ion-select-option>
-                      <ion-select-option value="invoice">Invoices</ion-select-option>
-                      <ion-select-option value="both">Both</ion-select-option>
-                    </ion-select>
-                  </ion-item>
-                </div>
-
-                <ion-item>
-                  <ion-label position="stacked">Default Subject</ion-label>
-                  <ion-input [(ngModel)]="template.subject" [placeholder]="'Quote for {{customer_name}}'"></ion-input>
-                </ion-item>
-
-                <ion-item>
-                  <ion-label position="stacked">Default HTML Body</ion-label>
-                  <ion-textarea
-                    [(ngModel)]="template.body"
-                    auto-grow="true"
-                    rows="5"
-                    [placeholder]="'<p>Hi {{customer_name}},</p><p>Here is your quote for {{vehicle_summary}}.</p>'">
-                  </ion-textarea>
-                </ion-item>
-
-                <div class="template-catalog-preset-head">Prefill Parts</div>
-                <input
-                  class="template-catalog-search"
-                  type="text"
-                  placeholder="Search inventory by name, SKU, vendor"
-                  [value]="templateInventoryQuery"
-                  (input)="setTemplateInventoryQuery($any($event.target).value)" />
-                <div class="template-checkbox-list">
-                  <label class="template-checkbox-item" *ngFor="let item of filteredInventoryForTemplates(); trackBy: trackInventoryItem">
-                    <input
-                      type="checkbox"
-                      [checked]="isPartSelected(template, item.id)"
-                      (change)="toggleTemplatePart(template.id, item.id, $any($event.target).checked)" />
-                    <span>{{ item.name }} <small>({{ item.sku || 'No SKU' }})</small></span>
-                  </label>
-                </div>
-
-                <div class="template-catalog-preset-head">Prefill Labor Rates</div>
-                <div class="template-checkbox-list" *ngIf="laborRates.length; else noLaborRatesInTemplate">
-                  <label class="template-checkbox-item" *ngFor="let rate of laborRates; trackBy: trackLaborRate">
-                    <input
-                      type="checkbox"
-                      [checked]="isLaborSelected(template, rate.id)"
-                      (change)="toggleTemplateLabor(template.id, rate.id, $any($event.target).checked)" />
-                    <span>{{ rate.name }} <small>({{ rate.price | currency:'USD':'symbol':'1.2-2' }})</small></span>
-                  </label>
-                </div>
-                <ng-template #noLaborRatesInTemplate>
-                  <div class="inline-help">Add labor rates above to use labor prefill in templates.</div>
-                </ng-template>
-              </div>
-            </div>
-            <ng-template #noDocumentTemplates>
-              <div class="inline-help">No templates yet. Add one and save Business Profile to persist it.</div>
-            </ng-template>
-          </div>
-
-          <div class="sms-actions">
-            <ion-button size="small" fill="outline" (click)="saveBusinessProfile()">
-              <ion-icon slot="start" name="save-outline"></ion-icon>
-              Save Business Profile
-            </ion-button>
-          </div>
-          <div class="branding-help success" *ngIf="businessProfileStatus">{{ businessProfileStatus }}</div>
-          <div class="branding-help error" *ngIf="businessProfileError">{{ businessProfileError }}</div>
-        </ion-card-content>
-      </ion-card>
-
-      <ion-card class="glass-surface" *ngIf="activeSection() === 'subscription'">
-        <ion-card-header>
-          <ion-card-title>
-            <ion-icon name="card-outline"></ion-icon>
-            Subscription
-          </ion-card-title>
-        </ion-card-header>
-        <ion-card-content>
-          <div class="sms-help">
-            Current status:
-            <strong>{{ auth.billingStatus() || 'trial' }}</strong>
-            <span *ngIf="auth.trialEndsAt()"> · trial ends {{ auth.trialEndsAt() | date:'mediumDate' }}</span>
-          </div>
-
-          <div class="plan-toggle">
-            <button
-              type="button"
-              class="plan-btn"
-              [class.active]="subscriptionPlanCycle === 'monthly'"
-              [disabled]="subscriptionSaving()"
-              (click)="subscriptionPlanCycle = 'monthly'">
-              <span class="plan-btn-title">Monthly</span>
-              <span class="plan-btn-subtitle">$149/month</span>
-            </button>
-            <button
-              type="button"
-              class="plan-btn"
-              [class.active]="subscriptionPlanCycle === 'annual'"
-              [disabled]="subscriptionSaving()"
-              (click)="subscriptionPlanCycle = 'annual'">
-              <span class="plan-btn-title">Annual</span>
-              <span class="plan-btn-subtitle">$1490/year</span>
-            </button>
-          </div>
-
-          <div class="sms-form">
-            <ion-item>
-              <ion-label position="stacked">Cardholder name</ion-label>
-              <ion-input [(ngModel)]="subscriptionCardholderName" placeholder="Robert Warren"></ion-input>
-            </ion-item>
-
-            <ion-item>
-              <ion-label position="stacked">Card number</ion-label>
-              <ion-input
-                [(ngModel)]="subscriptionCardNumber"
-                inputmode="numeric"
-                placeholder="4111111111111111 or 9999999999999999">
-              </ion-input>
-            </ion-item>
-
-            <div class="billing-row">
-              <ion-item>
-                <ion-label position="stacked">Exp month</ion-label>
-                <ion-input [(ngModel)]="subscriptionExpiryMonth" inputmode="numeric" placeholder="MM"></ion-input>
-              </ion-item>
-              <ion-item>
-                <ion-label position="stacked">Exp year</ion-label>
-                <ion-input [(ngModel)]="subscriptionExpiryYear" inputmode="numeric" placeholder="YYYY"></ion-input>
-              </ion-item>
-            </div>
-
-            <div class="billing-row">
-              <ion-item>
-                <ion-label position="stacked">CVC</ion-label>
-                <ion-input [(ngModel)]="subscriptionCvc" inputmode="numeric" placeholder="123"></ion-input>
-              </ion-item>
-              <ion-item>
-                <ion-label position="stacked">Postal code</ion-label>
-                <ion-input [(ngModel)]="subscriptionPostalCode" inputmode="numeric" placeholder="78154"></ion-input>
-              </ion-item>
-            </div>
-          </div>
-
-          <div class="sms-actions">
-            <ion-button (click)="saveSubscription()" [disabled]="subscriptionSaving() || !isSubscriptionFormValid()">
-              <ion-icon slot="start" name="save-outline"></ion-icon>
-              {{ subscriptionSaving() ? 'Saving...' : 'Activate Subscription' }}
-            </ion-button>
-          </div>
-
-          <div class="sms-feedback success" *ngIf="subscriptionStatus">{{ subscriptionStatus }}</div>
-          <div class="sms-feedback error" *ngIf="subscriptionError">{{ subscriptionError }}</div>
-        </ion-card-content>
-      </ion-card>
-
-      <ion-card class="glass-surface" *ngIf="activeSection() === 'payments'">
-        <ion-card-header>
-          <ion-card-title>
-            <ion-icon name="card-outline"></ion-icon>
-            Payment Gateways
-          </ion-card-title>
-        </ion-card-header>
-        <ion-card-content>
-          <div class="sms-feedback error" *ngIf="showSectionSetupError('payments') && !paymentGatewaySettings.connectedProviders().length">
-            Connect at least one payment gateway to complete setup.
-          </div>
-          <div class="sms-help">
-            Connect at least one provider to enable invoice payment links. Start in <strong>test</strong> mode with your sandbox credentials.
-          </div>
-
-          <div class="payment-gateway-list">
-            <div class="payment-gateway-row" *ngFor="let provider of paymentGatewaySettings.providers()">
-              <div class="payment-gateway-head">
-                <div class="payment-gateway-name">{{ provider.label }}</div>
-                <div class="badges">
-                  <ion-badge [color]="provider.connected ? 'success' : 'medium'">
-                    {{ provider.connected ? 'connected' : 'disconnected' }}
-                  </ion-badge>
-                  <ion-badge color="primary" *ngIf="paymentGatewaySettings.defaultProvider()?.key === provider.key">
-                    default
-                  </ion-badge>
-                </div>
-              </div>
-
-              <div class="payment-gateway-grid">
-                <ion-item>
-                  <ion-label position="stacked">Account Label</ion-label>
-                  <ion-input
-                    [ngModel]="paymentGatewayDraftFor(provider.key).accountLabel"
-                    (ngModelChange)="updatePaymentGatewayDraftAccount(provider.key, $event)"
-                    placeholder="Sandbox account / merchant id">
-                  </ion-input>
-                </ion-item>
-                <ion-item>
-                  <ion-label position="stacked">Mode</ion-label>
-                  <ion-select
-                    interface="popover"
-                    [ngModel]="paymentGatewayDraftFor(provider.key).mode"
-                    (ngModelChange)="updatePaymentGatewayDraftMode(provider.key, $event)">
-                    <ion-select-option value="test">Test (Sandbox)</ion-select-option>
-                    <ion-select-option value="live">Live (Production)</ion-select-option>
-                  </ion-select>
-                </ion-item>
-              </div>
-
-              <div class="payment-gateway-grid" *ngIf="provider.key === 'authorize-net'">
-                <ion-item>
-                  <ion-label position="stacked">API Login ID</ion-label>
-                  <ion-input
-                    type="text"
-                    [(ngModel)]="authorizeNetApiLoginId"
-                    placeholder="Authorize.net API Login ID">
-                  </ion-input>
-                </ion-item>
-                <ion-item>
-                  <ion-label position="stacked">Transaction Key</ion-label>
-                  <ion-input
-                    type="password"
-                    [(ngModel)]="authorizeNetTransactionKey"
-                    placeholder="Authorize.net Transaction Key">
-                  </ion-input>
-                </ion-item>
-              </div>
-
-              <div class="sms-actions">
-                <ion-button
-                  size="small"
-                  fill="outline"
-                  (click)="togglePaymentGatewayConnection(provider.key, !provider.connected)"
-                  [disabled]="paymentGatewaySettings.saving()">
-                  {{ provider.connected ? 'Disconnect' : 'Connect' }}
-                </ion-button>
-
-                <ion-button
-                  size="small"
-                  fill="outline"
-                  (click)="savePaymentGatewayProvider(provider.key)"
-                  [disabled]="paymentGatewaySettings.saving()">
-                  Save
-                </ion-button>
-
-                <ion-button
-                  size="small"
-                  fill="outline"
-                  *ngIf="provider.key === 'authorize-net'"
-                  (click)="saveAuthorizeNetCredentials()"
-                  [disabled]="paymentGatewaySettings.saving()">
-                  Save Credentials
-                </ion-button>
-
-                <ion-button
-                  size="small"
-                  fill="outline"
-                  (click)="setDefaultPaymentGateway(provider.key)"
-                  [disabled]="!provider.connected || paymentGatewaySettings.defaultProvider()?.key === provider.key || paymentGatewaySettings.saving()">
-                  Set Default
-                </ion-button>
-              </div>
-            </div>
-          </div>
-
-          <div class="sms-feedback success" *ngIf="paymentGatewayStatus">{{ paymentGatewayStatus }}</div>
-          <div class="sms-feedback error" *ngIf="paymentGatewayError">{{ paymentGatewayError }}</div>
-          <div class="sms-feedback error" *ngIf="paymentGatewaySettings.loadError()">{{ paymentGatewaySettings.loadError() }}</div>
-        </ion-card-content>
-      </ion-card>
-
-      <ion-card class="glass-surface" *ngIf="activeSection() === 'users'">
-        <ion-card-header>
-          <ion-card-title>
-            <ion-icon name="shield-checkmark-outline"></ion-icon>
-            User Access
-          </ion-card-title>
-        </ion-card-header>
-        <ion-card-content>
-          <div class="add-user-grid">
-            <ion-item>
-              <ion-label position="stacked">Name</ion-label>
-              <ion-input [(ngModel)]="newUserName" placeholder="New team member"></ion-input>
-            </ion-item>
-
-            <ion-item>
-              <ion-label position="stacked">Email</ion-label>
-              <ion-input [(ngModel)]="newUserEmail" placeholder="name@company.com"></ion-input>
-            </ion-item>
-
-            <ion-item>
-              <ion-label position="stacked">Role</ion-label>
-              <ion-select interface="popover" [(ngModel)]="newUserRole">
-                <ion-select-option value="user">User</ion-select-option>
-                <ion-select-option value="admin">Admin</ion-select-option>
-              </ion-select>
-            </ion-item>
-
-            <ion-button (click)="addUser()">
-              <ion-icon slot="start" name="add-outline"></ion-icon>
-              Add User
-            </ion-button>
-          </div>
-
-          <div class="summary-row">
-            <ion-badge color="primary">{{ userCount() }} users</ion-badge>
-            <span *ngIf="statusMessage">{{ statusMessage }}</span>
-          </div>
-          <div class="sms-feedback error" *ngIf="showSectionSetupError('users') && userCount() <= 0">
-            Add at least one team member to complete setup.
-          </div>
-          <div class="sms-feedback error" *ngIf="usersError">{{ usersError }}</div>
-
-          <div class="user-list">
-            <div class="user-row" *ngFor="let user of users()">
-              <div>
-                <div class="name">{{ user.name }}</div>
-                <div class="meta">{{ user.email }}</div>
-              </div>
-              <div class="badges">
-                <ion-badge [color]="user.role === 'admin' ? 'warning' : 'medium'">{{ user.role }}</ion-badge>
-                <ion-badge [color]="user.status === 'active' ? 'success' : (user.status === 'disabled' ? 'danger' : 'tertiary')">
-                  {{ user.status }}
-                </ion-badge>
-                <ion-button size="small" fill="clear" (click)="resetUserPassword(user)">
-                  Reset password
-                </ion-button>
-                <ion-button size="small" fill="clear" color="danger" (click)="removeUser(user)">
-                  <ion-icon name="remove-circle-outline"></ion-icon>
-                </ion-button>
-                <ion-button size="small" fill="clear" color="danger" (click)="deleteUser(user)">
-                  <ion-icon name="trash-outline"></ion-icon>
-                </ion-button>
-              </div>
-            </div>
-          </div>
-
-          <div class="sms-help" *ngIf="usersLoading()">Loading users...</div>
-
-          <div class="password-change-card">
-            <div class="customer-import-section-title">Change Your Password</div>
-            <div class="sms-help">
-              Pathflow uses Azure sign-in. We will email you a secure password reset link.
-            </div>
-            <div class="add-user-grid">
-              <ion-item>
-                <ion-label position="stacked">Current password</ion-label>
-                <ion-input type="password" [(ngModel)]="passwordCurrent" placeholder="Current password"></ion-input>
-              </ion-item>
-              <ion-item>
-                <ion-label position="stacked">New password</ion-label>
-                <ion-input type="password" [(ngModel)]="passwordNext" placeholder="New password"></ion-input>
-              </ion-item>
-              <ion-item>
-                <ion-label position="stacked">Confirm new password</ion-label>
-                <ion-input type="password" [(ngModel)]="passwordConfirm" placeholder="Confirm password"></ion-input>
-              </ion-item>
-              <ion-button (click)="saveMyPasswordChange()" [disabled]="passwordSaving() || !canChangePassword()">
-                {{ passwordSaving() ? 'Sending...' : 'Send Password Reset Email' }}
-              </ion-button>
-            </div>
-            <div class="sms-feedback success" *ngIf="passwordStatus">{{ passwordStatus }}</div>
-            <div class="sms-feedback error" *ngIf="passwordError">{{ passwordError }}</div>
-          </div>
-        </ion-card-content>
-      </ion-card>
-
-      <ion-card class="glass-surface" *ngIf="activeSection() === 'customerImport'">
-        <ion-card-header>
-          <ion-card-title>
-            <ion-icon name="cloud-upload-outline"></ion-icon>
-            Data Imports
-          </ion-card-title>
-        </ion-card-header>
-        <ion-card-content>
-          <div class="import-type-toggle" role="tablist" aria-label="Import data type">
-            <button
-              type="button"
-              class="import-type-btn"
-              [class.active]="selectedImportType === 'customers'"
-              (click)="selectedImportType = 'customers'">
-              Customers
-            </button>
-            <button
-              type="button"
-              class="import-type-btn"
-              [class.active]="selectedImportType === 'inventory'"
-              (click)="selectedImportType = 'inventory'">
-              Inventory
-            </button>
-          </div>
-
-          <div *ngIf="selectedImportType === 'customers'">
-            <div class="customer-import-grid">
-              <div class="customer-import-column">
-                <div class="customer-import-section-title">Upload File</div>
-                <div class="sms-help">
-                  Upload a CSV, XLSX, or XLS export and map source headers to Pathflow customer fields.
-                </div>
-                <input
-                  #customerImportFileInput
-                  type="file"
-                  accept=".csv,.xlsx,.xls"
-                  hidden
-                  (change)="onCustomerImportFileSelected($event)" />
-                <div class="sms-actions">
-                  <ion-button (click)="customerImportFileInput.click()">
-                    <ion-icon slot="start" name="cloud-upload-outline"></ion-icon>
-                    Choose file
-                  </ion-button>
-                </div>
-
-                <div class="customer-import-summary" *ngIf="customerImportFileName">
-                  <div><strong>File:</strong> {{ customerImportFileName }}</div>
-                  <div><strong>Rows:</strong> {{ customerImportRows.length }}</div>
-                  <div><strong>Mapped columns:</strong> {{ mappedCustomerImportCount() }} / {{ customerImportHeaders.length }}</div>
-                </div>
-
-                <div class="sms-feedback success" *ngIf="customerImportStatus">{{ customerImportStatus }}</div>
-                <div class="sms-feedback error" *ngIf="customerImportError">{{ customerImportError }}</div>
-
-                <div class="customer-import-warning" *ngIf="missingExpectedImportHeaders().length">
-                  <div class="warning-title">Missing expected headers from this export:</div>
-                  <div class="warning-list">
-                    <span class="warning-pill" *ngFor="let header of missingExpectedImportHeaders()">{{ header }}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div class="customer-import-column" *ngIf="customerImportHeaders.length">
-                <div class="customer-import-section-title">Field Mapping</div>
-                <div class="sms-help">
-                  Map source columns to target customer fields. Keep at least one identity field mapped:
-                  email, phone/mobile, or name.
-                </div>
-                <div class="customer-import-mapping-list">
-                  <div class="customer-import-mapping-row" *ngFor="let mapping of customerImportMappings; let i = index">
-                    <div class="mapping-source">
-                      <span class="source-label">{{ mapping.source }}</span>
-                    </div>
-                    <ion-item lines="none">
-                      <ion-label position="stacked">Target field</ion-label>
-                      <ion-select
-                        interface="popover"
-                        [(ngModel)]="customerImportMappings[i].target">
-                        <ion-select-option value="">Skip</ion-select-option>
-                        <ion-select-option *ngFor="let field of customerImportTargetFields" [value]="field.key">
-                          {{ field.label }}
-                        </ion-select-option>
-                      </ion-select>
-                    </ion-item>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="customer-import-preview" *ngIf="customerImportRows.length">
-              <div class="customer-import-section-title">Preview</div>
-              <div class="customer-import-table-wrap">
-                <table class="customer-import-table">
-                  <thead>
-                    <tr>
-                      <th *ngFor="let header of customerImportHeaders">{{ header }}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr *ngFor="let row of customerImportPreviewRows()">
-                      <td *ngFor="let header of customerImportHeaders">{{ row[header] }}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-              <div class="table-pager" *ngIf="customerImportRows.length > customerImportPreviewPageSize">
-                <ion-button
-                  size="small"
-                  fill="outline"
-                  (click)="prevCustomerImportPreviewPage()"
-                  [disabled]="customerImportPreviewPage() <= 1">
-                  Previous
-                </ion-button>
-                <span>Page {{ customerImportPreviewPage() }} of {{ customerImportPreviewTotalPages() }}</span>
-                <ion-button
-                  size="small"
-                  fill="outline"
-                  (click)="nextCustomerImportPreviewPage()"
-                  [disabled]="customerImportPreviewPage() >= customerImportPreviewTotalPages()">
-                  Next
-                </ion-button>
-              </div>
-            </div>
-
-            <div class="sms-actions" *ngIf="customerImportRows.length">
-              <ion-button
-                (click)="importCustomersFromFile()"
-                [disabled]="!canRunCustomerImport()">
-                <ion-icon slot="start" name="save-outline"></ion-icon>
-                {{ customerImporting() ? 'Importing...' : 'Import Customers' }}
-              </ion-button>
-            </div>
-
-            <div class="customer-import-results" *ngIf="customerImportResult() as result">
-              <div class="customer-import-section-title">Last Import Result</div>
-              <div class="customer-import-result-badges">
-                <ion-badge color="success">Created {{ result.created }}</ion-badge>
-                <ion-badge color="primary">Updated {{ result.updated }}</ion-badge>
-                <ion-badge color="medium">Skipped {{ result.skipped }}</ion-badge>
-                <ion-badge color="danger" *ngIf="result.errors.length">Errors {{ result.errors.length }}</ion-badge>
-              </div>
-              <div class="customer-import-error-list" *ngIf="result.errors.length">
-                <div class="error-row" *ngFor="let err of result.errors.slice(0, 10)">
-                  Row {{ err.index }}: {{ err.error }}
-                </div>
-                <div class="sms-help" *ngIf="result.errors.length > 10">
-                  Showing first 10 of {{ result.errors.length }} errors.
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div *ngIf="selectedImportType === 'inventory'">
-            <div class="customer-import-grid">
-              <div class="customer-import-column">
-                <div class="customer-import-section-title">Upload File</div>
-                <div class="sms-help">
-                  Upload a CSV, XLSX, or XLS file and map source headers to Pathflow inventory fields.
-                </div>
-                <input
-                  #inventoryImportFileInput
-                  type="file"
-                  accept=".csv,.xlsx,.xls"
-                  hidden
-                  (change)="onInventoryImportFileSelected($event)" />
-                <div class="sms-actions">
-                  <ion-button (click)="inventoryImportFileInput.click()">
-                    <ion-icon slot="start" name="cloud-upload-outline"></ion-icon>
-                    Choose file
-                  </ion-button>
-                </div>
-
-                <div class="customer-import-summary" *ngIf="inventoryImportFileName">
-                  <div><strong>File:</strong> {{ inventoryImportFileName }}</div>
-                  <div><strong>Rows:</strong> {{ inventoryImportRows.length }}</div>
-                  <div><strong>Mapped columns:</strong> {{ mappedInventoryImportCount() }} / {{ inventoryImportHeaders.length }}</div>
-                </div>
-
-                <div class="sms-feedback success" *ngIf="inventoryImportStatus">{{ inventoryImportStatus }}</div>
-                <div class="sms-feedback error" *ngIf="inventoryImportError">{{ inventoryImportError }}</div>
-              </div>
-
-              <div class="customer-import-column" *ngIf="inventoryImportHeaders.length">
-                <div class="customer-import-section-title">Field Mapping</div>
-                <div class="sms-help">
-                  Map source columns to inventory fields. Keep at least one identity field mapped: Description or Part/Labor Code.
-                </div>
-                <div class="customer-import-mapping-list">
-                  <div class="customer-import-mapping-row" *ngFor="let mapping of inventoryImportMappings; let i = index">
-                    <div class="mapping-source">
-                      <span class="source-label">{{ mapping.source }}</span>
-                    </div>
-                    <ion-item lines="none">
-                      <ion-label position="stacked">Target field</ion-label>
-                      <ion-select
-                        interface="popover"
-                        [(ngModel)]="inventoryImportMappings[i].target">
-                        <ion-select-option value="">Skip</ion-select-option>
-                        <ion-select-option *ngFor="let field of inventoryImportTargetFields" [value]="field.key">
-                          {{ field.label }}
-                        </ion-select-option>
-                      </ion-select>
-                    </ion-item>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="customer-import-preview" *ngIf="inventoryImportRows.length">
-              <div class="customer-import-section-title">Preview</div>
-              <div class="customer-import-table-wrap">
-                <table class="customer-import-table">
-                  <thead>
-                    <tr>
-                      <th *ngFor="let header of inventoryImportHeaders">{{ header }}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr *ngFor="let row of inventoryImportPreviewRows()">
-                      <td *ngFor="let header of inventoryImportHeaders">{{ row[header] }}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-              <div class="table-pager" *ngIf="inventoryImportRows.length > inventoryImportPreviewPageSize">
-                <ion-button
-                  size="small"
-                  fill="outline"
-                  (click)="prevInventoryImportPreviewPage()"
-                  [disabled]="inventoryImportPreviewPage() <= 1">
-                  Previous
-                </ion-button>
-                <span>Page {{ inventoryImportPreviewPage() }} of {{ inventoryImportPreviewTotalPages() }}</span>
-                <ion-button
-                  size="small"
-                  fill="outline"
-                  (click)="nextInventoryImportPreviewPage()"
-                  [disabled]="inventoryImportPreviewPage() >= inventoryImportPreviewTotalPages()">
-                  Next
-                </ion-button>
-              </div>
-            </div>
-
-            <div class="sms-actions" *ngIf="inventoryImportRows.length">
-              <ion-button
-                (click)="importInventoryFromFile()"
-                [disabled]="!canRunInventoryImport()">
-                <ion-icon slot="start" name="save-outline"></ion-icon>
-                {{ inventoryImporting() ? 'Importing...' : 'Import Inventory' }}
-              </ion-button>
-            </div>
-
-            <div class="customer-import-results" *ngIf="inventoryImportResult() as result">
-              <div class="customer-import-section-title">Last Import Result</div>
-              <div class="customer-import-result-badges">
-                <ion-badge color="success">Created {{ result.created }}</ion-badge>
-                <ion-badge color="primary">Updated {{ result.updated }}</ion-badge>
-                <ion-badge color="medium">Skipped {{ result.skipped }}</ion-badge>
-                <ion-badge color="danger" *ngIf="result.errors.length">Errors {{ result.errors.length }}</ion-badge>
-              </div>
-              <div class="customer-import-error-list" *ngIf="result.errors.length">
-                <div class="error-row" *ngFor="let err of result.errors.slice(0, 10)">
-                  Row {{ err.index }}: {{ err.error }}
-                </div>
-                <div class="sms-help" *ngIf="result.errors.length > 10">
-                  Showing first 10 of {{ result.errors.length }} errors.
-                </div>
-              </div>
-            </div>
-          </div>
-        </ion-card-content>
-      </ion-card>
-
-      <ion-card class="glass-surface" *ngIf="activeSection() === 'schedule'">
-        <ion-card-header>
-          <ion-card-title>
-            <ion-icon name="settings-outline"></ion-icon>
-            Schedule Settings
-          </ion-card-title>
-        </ion-card-header>
-        <ion-card-content>
-          <div class="sms-help">
-            These settings drive calendar behavior across the app and are used for scheduling and time-based reporting.
-          </div>
-
-          <div class="schedule-settings-shell">
-            <div class="schedule-settings-grid">
-              <div class="schedule-field-card">
-                <ion-item lines="none" class="schedule-field-item" [class.setup-invalid]="showSectionSetupError('schedule') && !(scheduleCloseHour > scheduleOpenHour)">
-                  <ion-label position="stacked">Open time</ion-label>
-                  <ion-select
-                    interface="popover"
-                    [ngModel]="scheduleOpenHour"
-                    (ngModelChange)="scheduleOpenHour = +$event">
-                    <ion-select-option *ngFor="let option of openHourOptions" [value]="option.value">
-                      {{ option.label }}
-                    </ion-select-option>
-                  </ion-select>
-                </ion-item>
-              </div>
-
-              <div class="schedule-field-card">
-                <ion-item lines="none" class="schedule-field-item" [class.setup-invalid]="showSectionSetupError('schedule') && !(scheduleCloseHour > scheduleOpenHour)">
-                  <ion-label position="stacked">Close time</ion-label>
-                  <ion-select
-                    interface="popover"
-                    [ngModel]="scheduleCloseHour"
-                    (ngModelChange)="scheduleCloseHour = +$event">
-                    <ion-select-option *ngFor="let option of closeHourOptions" [value]="option.value">
-                      {{ option.label }}
-                    </ion-select-option>
-                  </ion-select>
-                </ion-item>
-              </div>
-            </div>
-
-            <div class="schedule-weekend-card">
-              <div class="schedule-weekend-copy">
-                <div class="label">Show weekends</div>
-                <div class="meta">Include Saturday/Sunday in scheduler views and reports.</div>
-              </div>
-              <ion-toggle
-                [ngModel]="scheduleShowWeekends"
-                (ngModelChange)="scheduleShowWeekends = !!$event">
-              </ion-toggle>
-            </div>
-
-            <div class="schedule-bays-header">
-              <div class="schedule-bays-title">Bays (Lifts/Categories)</div>
-              <ion-button size="small" fill="outline" (click)="addScheduleBay()">
-                <ion-icon slot="start" name="add-outline"></ion-icon>
-                Add Bay
-              </ion-button>
-            </div>
-
-            <div class="schedule-bays-list">
-              <div class="schedule-bay-row" *ngFor="let bay of scheduleBays; let i = index">
-                <ion-item lines="none" class="schedule-bay-item" [class.setup-invalid]="showSectionSetupError('schedule') && !bay.name.trim()">
-                  <ion-label position="stacked">Bay {{ i + 1 }}</ion-label>
-                  <ion-input [(ngModel)]="bay.name" placeholder="Bay name"></ion-input>
-                </ion-item>
-                <ion-button
-                  fill="clear"
-                  color="danger"
-                  class="schedule-delete-btn"
-                  [disabled]="scheduleBays.length <= 1"
-                  (click)="removeScheduleBay(bay.id)">
-                  <ion-icon name="trash-outline"></ion-icon>
-                </ion-button>
-              </div>
-            </div>
-            <div class="sms-feedback error" *ngIf="showSectionSetupError('schedule') && scheduleSetupInvalid()">
-              Fix schedule hours and ensure each bay has a name.
-            </div>
-          </div>
-
-          <div class="sms-actions">
-            <ion-button (click)="saveScheduleSettings()" [disabled]="!canSaveScheduleSettings()">
-              <ion-icon slot="start" name="save-outline"></ion-icon>
-              Save schedule settings
-            </ion-button>
-          </div>
-
-          <div class="sms-feedback success" *ngIf="scheduleStatus">{{ scheduleStatus }}</div>
-          <div class="sms-feedback error" *ngIf="scheduleError">{{ scheduleError }}</div>
-        </ion-card-content>
-      </ion-card>
-
-      <ion-card class="glass-surface" *ngIf="activeSection() === 'sms'">
-        <ion-card-header>
-          <ion-card-title>
-            <ion-icon name="chatbubble-ellipses-outline"></ion-icon>
-            SMS Messaging (Azure ACS)
-          </ion-card-title>
-        </ion-card-header>
-        <ion-card-content>
-          <div class="sms-form">
-            <ion-item>
-              <ion-label position="stacked">Tenant sender number (E.164)</ion-label>
-              <ion-input [(ngModel)]="smsSenderFrom" placeholder="+18338978049"></ion-input>
-            </ion-item>
-
-            <ion-item>
-              <ion-label position="stacked">Sender label (optional)</ion-label>
-              <ion-input [(ngModel)]="smsSenderLabel" placeholder="Pathflow Shop SMS"></ion-input>
-            </ion-item>
-
-            <ion-item>
-              <ion-label position="stacked">Verification status (optional)</ion-label>
-              <ion-input [(ngModel)]="smsSenderVerification" placeholder="pending / approved"></ion-input>
-            </ion-item>
-          </div>
-
-          <div class="sms-actions">
-            <ion-button
-              (click)="saveSmsSenderConfig()"
-              [disabled]="smsSenderSaving() || !canSaveSmsSender()">
-              {{ smsSenderSaving() ? 'Saving sender...' : 'Save tenant sender' }}
-            </ion-button>
-            <ion-button
-              fill="outline"
-              (click)="resetSmsSenderConfig()"
-              [disabled]="smsSenderSaving()">
-              Reset tenant sender
-            </ion-button>
-          </div>
-
-          <div class="sms-badges">
-            <ion-badge [color]="smsConfig()?.mode === 'azure' ? 'primary' : 'warning'">
-              {{ smsConfig()?.mode === 'azure' ? 'azure mode' : 'mock mode' }}
-            </ion-badge>
-            <ion-badge [color]="smsConfig()?.readyForLive ? 'success' : 'medium'">
-              {{ smsConfig()?.readyForLive ? 'live ready' : 'not live ready' }}
-            </ion-badge>
-            <ion-badge color="medium">
-              sender source: {{ smsConfig()?.sender?.source || 'none' }}
-            </ion-badge>
-          </div>
-
-          <div class="sms-help">
-            Mock mode is free and does not send carrier texts. Switch to Azure mode by setting
-            <code>SMS_MODE=azure</code> and <code>ACS_CONNECTION_STRING</code>. Sender routing uses tenant sender number when configured, otherwise <code>ACS_SMS_FROM</code>.
-          </div>
-          <div class="sms-help">
-            Public consent page preview:
-            <a href="/sms-opt-in" target="_blank" rel="noopener noreferrer">/sms-opt-in</a>
-          </div>
-
-          <div class="sms-form">
-            <ion-item>
-              <ion-label position="stacked">Test recipient (E.164)</ion-label>
-              <ion-input [(ngModel)]="smsTo" placeholder="+15551234567"></ion-input>
-            </ion-item>
-
-            <ion-item>
-              <ion-label position="stacked">Message</ion-label>
-              <ion-textarea
-                [(ngModel)]="smsMessage"
-                [autoGrow]="true"
-                [maxlength]="1000"
-                rows="4"
-                placeholder="Type a test update for your customer">
-              </ion-textarea>
-            </ion-item>
-          </div>
-
-          <div class="sms-actions">
-            <ion-button (click)="sendTestSms()" [disabled]="smsSending()">
-              <ion-icon slot="start" name="send-outline"></ion-icon>
-              {{ smsSending() ? 'Sending...' : 'Send test SMS' }}
-            </ion-button>
-
-            <ion-button fill="outline" (click)="loadSmsConfig()" [disabled]="smsLoading()">
-              <ion-icon slot="start" name="refresh-outline"></ion-icon>
-              {{ smsLoading() ? 'Refreshing...' : 'Refresh status' }}
-            </ion-button>
-          </div>
-
-          <div class="sms-feedback success" *ngIf="smsStatus">{{ smsStatus }}</div>
-          <div class="sms-feedback error" *ngIf="smsError">{{ smsError }}</div>
-        </ion-card-content>
-      </ion-card>
-
-      <ion-card class="glass-surface" *ngIf="activeSection() === 'widget'">
-        <ion-card-header>
-          <ion-card-title>
-            <ion-icon name="code-slash-outline"></ion-icon>
-            Website Widget Embed + Testing
-          </ion-card-title>
-        </ion-card-header>
-        <ion-card-content>
-          <div class="widget-grid">
-            <div class="widget-column">
-              <div class="widget-section-title">Embed Builder</div>
+            <div class="settings-subsection">
+              <div class="email-section-title">Business Profile</div>
               <div class="sms-help">
-                Generate a copy/paste snippet for your website contact widget. Use your deployed app API URL
-                (not localhost) so external sites can submit leads correctly.
-              </div>
-
-              <div class="sms-form">
-                <ion-item>
-                  <ion-label position="stacked">Widget API URL</ion-label>
-                  <ion-input [(ngModel)]="widgetApiUrl" placeholder="https://wonderful-glacier-0f45f5110.6.azurestaticapps.net/api/widget/lead"></ion-input>
-                </ion-item>
-
-                <ion-item>
-                  <ion-label position="stacked">Tenant ID (auto-included)</ion-label>
-                  <ion-input [value]="widgetTenantId()" readonly></ion-input>
-                </ion-item>
-
-                <ion-item>
-                  <ion-label position="stacked">Widget API key (optional)</ion-label>
-                  <ion-input [(ngModel)]="widgetApiKey" placeholder="Only if WIDGET_API_KEY is required"></ion-input>
-                </ion-item>
-
-                <ion-item>
-                  <ion-label position="stacked">Lead source label</ion-label>
-                  <ion-input [(ngModel)]="widgetSource" placeholder="website-widget"></ion-input>
-                </ion-item>
-
-                <ion-item>
-                  <ion-label position="stacked">Consent version</ion-label>
-                  <ion-input [(ngModel)]="widgetConsentVersion" placeholder="v1"></ion-input>
-                </ion-item>
-
-                <ion-item>
-                  <ion-label position="stacked">Privacy policy URL</ion-label>
-                  <ion-input [(ngModel)]="widgetPrivacyPolicyUrl" placeholder="https://yourdomain.com/privacy"></ion-input>
-                </ion-item>
-
-                <ion-item>
-                  <ion-label position="stacked">Terms URL</ion-label>
-                  <ion-input [(ngModel)]="widgetTermsUrl" placeholder="https://yourdomain.com/terms"></ion-input>
-                </ion-item>
-
-                <ion-item>
-                  <ion-label position="stacked">Submit button label</ion-label>
-                  <ion-input [(ngModel)]="widgetSubmitButtonLabel" placeholder="Send Request"></ion-input>
-                </ion-item>
-
-                <ion-item>
-                  <ion-label position="stacked">Success message</ion-label>
-                  <ion-input [(ngModel)]="widgetSuccessMessage" placeholder="Thanks! Your request was sent."></ion-input>
-                </ion-item>
-
-                <ion-item>
-                  <ion-label position="stacked">SMS consent text</ion-label>
-                  <ion-textarea
-                    [(ngModel)]="widgetConsentText"
-                    [autoGrow]="true"
-                    rows="5"
-                    maxlength="1200"
-                    placeholder="By checking this box, you agree to receive recurring SMS updates...">
-                  </ion-textarea>
-                </ion-item>
-              </div>
-
-              <div class="sms-actions">
-                <ion-button fill="outline" (click)="copyWidgetApiUrl()">
-                  <ion-icon slot="start" name="copy-outline"></ion-icon>
-                  Copy API URL
-                </ion-button>
-                <ion-button (click)="copyWidgetEmbedCode()">
-                  <ion-icon slot="start" name="copy-outline"></ion-icon>
-                  Copy Embed Code
-                </ion-button>
-              </div>
-            </div>
-
-            <div class="widget-column">
-              <div class="widget-section-title">Embed Code</div>
-              <div class="sms-form widget-code-block">
-                <ion-item>
-                  <ion-label position="stacked">Website embed snippet</ion-label>
-                  <ion-textarea
-                    class="widget-code"
-                    [value]="widgetEmbedCode()"
-                    [readonly]="true"
-                    [autoGrow]="false"
-                    rows="20">
-                  </ion-textarea>
-                </ion-item>
-              </div>
-
-              <div class="widget-section-title">Test Submit (from Admin)</div>
-              <div class="sms-help">
-                Use this to verify lead intake, customer matching, and lead card creation without leaving the app.
+                These values power email merge tags like <code>{{ '{{company_phone}}' }}</code> and
+                <code>{{ '{{company_location}}' }}</code>.
               </div>
               <div class="sms-form">
-                <ion-item>
-                  <ion-label position="stacked">First Name</ion-label>
-                  <ion-input [(ngModel)]="widgetTestFirstName" placeholder="Jane"></ion-input>
-                </ion-item>
-
-                <ion-item>
-                  <ion-label position="stacked">Last Name</ion-label>
-                  <ion-input [(ngModel)]="widgetTestLastName" placeholder="Customer"></ion-input>
-                </ion-item>
-
-                <ion-item>
-                  <ion-label position="stacked">Email</ion-label>
-                  <ion-input [(ngModel)]="widgetTestEmail" placeholder="jane@example.com"></ion-input>
-                </ion-item>
-
-                <ion-item>
-                  <ion-label position="stacked">Phone</ion-label>
-                  <ion-input [(ngModel)]="widgetTestPhone" placeholder="+15551234567"></ion-input>
-                </ion-item>
-
-                <ion-item>
-                  <ion-label position="stacked">VIN (required)</ion-label>
-                  <ion-input
-                    [(ngModel)]="widgetTestVin"
-                    maxlength="17"
-                    placeholder="Enter 17-character VIN (no I, O, or Q)">
-                  </ion-input>
-                </ion-item>
-
-                <ion-item>
-                  <ion-label position="stacked">Message (provide all details about what work you are interested in)</ion-label>
-                  <ion-textarea
-                    [(ngModel)]="widgetTestMessage"
-                    [autoGrow]="true"
-                    rows="3"
-                    maxlength="1200"
-                    placeholder="Provide all details about what work you are interested in.">
-                  </ion-textarea>
-                </ion-item>
-
-                <ion-item lines="none" class="widget-checkbox-item">
-                  <ion-checkbox slot="start" [(ngModel)]="widgetTestSmsOptIn"></ion-checkbox>
-                  <ion-label>
-                    SMS opt-in provided for this lead (required when phone is submitted in this test flow)
-                  </ion-label>
-                </ion-item>
-              </div>
-
-              <div class="sms-actions">
-                <ion-button (click)="submitWidgetTest()" [disabled]="!canSubmitWidgetTest()">
-                  <ion-icon slot="start" name="send-outline"></ion-icon>
-                  {{ widgetSubmitting() ? 'Submitting...' : 'Submit Test Lead' }}
-                </ion-button>
-              </div>
-
-              <div class="sms-badges" *ngIf="widgetTestResult() as result">
-                <ion-badge [color]="result.customerCreated ? 'success' : 'medium'">
-                  {{ result.customerCreated ? 'customer created' : 'customer matched' }}
-                </ion-badge>
-                <ion-badge [color]="result.leadCreated ? 'success' : 'warning'">
-                  {{ result.leadCreated ? 'lead created' : 'lead updated' }}
-                </ion-badge>
-                <ion-badge color="primary" *ngIf="result.sms?.confirmationSent">opt-in SMS sent</ion-badge>
-              </div>
-            </div>
-          </div>
-
-          <div class="sms-feedback success" *ngIf="widgetStatus">{{ widgetStatus }}</div>
-          <div class="sms-feedback error" *ngIf="widgetError">{{ widgetError }}</div>
-        </ion-card-content>
-      </ion-card>
-
-      <ion-card class="glass-surface" *ngIf="activeSection() === 'email'">
-        <ion-card-header>
-          <ion-card-title>
-            <ion-icon name="mail-outline"></ion-icon>
-            Email Options
-          </ion-card-title>
-        </ion-card-header>
-        <ion-card-content>
-          <div class="sms-help">
-            Create reusable templates for customer email. These templates are available in Customer Profile and
-            Messages Hub when composing email.
-          </div>
-
-          <div class="email-section-title">Orders Inbox Routing</div>
-          <div class="sms-help">
-            Pathflow uses this mailbox to receive forwarded order/shipping emails and auto-map tracking updates into invoices.
-          </div>
-
-          <div class="settings-subsection orders-inbox-box">
-            <div class="email-section-title">System Orders Inbox</div>
-            <div class="orders-inbox-row">
-              <ion-item>
-                <ion-label position="stacked">Generated mailbox</ion-label>
-                <ion-input
-                  [value]="ordersInboxEmail"
-                  [readonly]="true">
-                </ion-input>
-              </ion-item>
-              <div class="orders-inbox-actions">
-                <ion-button fill="outline" (click)="copyOrdersInboxEmail()" [disabled]="!ordersInboxEmail || emailSaving()">
-                  <ion-icon slot="start" name="copy-outline"></ion-icon>
-                  Copy
-                </ion-button>
-                <ion-button fill="outline" (click)="regenerateOrdersInboxEmail()" [disabled]="emailSaving()">
-                  <ion-icon slot="start" name="refresh-outline"></ion-icon>
-                  Regenerate
-                </ion-button>
+                <div class="ui-item" [class.setup-invalid]="showSectionSetupError('branding') && !businessProfileName.trim()">
+                  <span class="ui-label">Business Name</span>
+                  <ui-input aria-label="Business Name" [(ngModel)]="businessProfileName" placeholder="Your Company"></ui-input>
+                </div>
+                <div class="ui-item" [class.setup-invalid]="showSectionSetupError('branding') && !businessProfileEmail.trim()">
+                  <span class="ui-label">Business Email</span>
+                  <ui-input aria-label="Business Email" [(ngModel)]="businessProfileEmail" placeholder="service@yourcompany.com"></ui-input>
+                </div>
+                <div class="ui-item" [class.setup-invalid]="showSectionSetupError('branding') && !businessProfilePhone.trim()">
+                  <span class="ui-label">Business Phone</span>
+                  <ui-input aria-label="Business Phone" [ngModel]="businessProfilePhone" (ngModelChange)="onBusinessProfilePhoneInput($event)" placeholder="(555) 555-0100"></ui-input>
+                </div>
+                <div class="ui-item" [class.setup-invalid]="showSectionSetupError('branding') && !businessProfileAddress.trim()">
+                  <span class="ui-label">Business Address / Location</span>
+                  <ui-input aria-label="Business Address / Location"
+                    [(ngModel)]="businessProfileAddress"
+                    (ngModelChange)="onBusinessAddressChange($event)"
+                    (controlBlur)="onBusinessAddressBlur()"
+                    placeholder="123 Main St, Anytown, USA">
+                  </ui-input>
+                </div>
+                @if (showSectionSetupError('branding') && (!businessProfileName.trim() || !businessProfileEmail.trim() || !businessProfilePhone.trim() || !businessProfileAddress.trim() || !hasCustomLogo())) {
+                  <div class="sms-feedback error">
+                    Complete all required branding fields and upload a logo.
+                  </div>
+                }
+                <div class="ui-item">
+                  <span class="ui-label">Default Tax Rate (%)</span>
+                  <ui-input aria-label="Default Tax Rate (%)"
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.01"
+                    [(ngModel)]="businessTaxRate"
+                    placeholder="8.25">
+                  </ui-input>
+                </div>
+                <div class="ui-item" [class.setup-invalid]="companyPartsEmail.trim() && !canSaveOrdersInboxEmail()">
+                  <span class="ui-label">Parts Ordering Email</span>
+                  <ui-input aria-label="Parts Ordering Email"
+                    [(ngModel)]="companyPartsEmail"
+                    placeholder="parts@yourcompany.com"
+                    autocomplete="email">
+                  </ui-input>
+                </div>
+                <div class="sms-help">
+                  This is the company inbox your team uses for vendor orders, confirmations, and tracking updates.
+                  PathFlow will use it for parts-order automation and routing.
+                </div>
+                @if (businessAddressSearching() || businessAddressSuggestions().length || businessAddressNoMatches()) {
+                  <div class="address-lookup-box">
+                    @if (businessAddressSearching()) {
+                      <div class="address-lookup-state">Searching addresses...</div>
+                    }
+                    @for (item of businessAddressSuggestions(); track item) {
+                      <button
+                        type="button"
+                        class="address-lookup-option"
+                        (mousedown)="$event.preventDefault()"
+                        (click)="selectBusinessAddressSuggestion(item)">
+                        {{ item.display }}
+                      </button>
+                    }
+                    @if (!businessAddressSearching() && businessAddressNoMatches()) {
+                      <div class="address-lookup-state">
+                        No address matches found.
+                      </div>
+                    }
+                  </div>
+                }
               </div>
             </div>
-            <div class="sms-help" *ngIf="ordersInboxDomain">
-              Domain in use: <code>{{ ordersInboxDomain }}</code>
-            </div>
-            <div class="sms-help" *ngIf="ordersInboxUpdatedAt">
-              Last generated: {{ ordersInboxUpdatedAt | date:'short' }}
-            </div>
-
-            <div class="orders-inbox-provider">
-              <ion-item>
-                <ion-label position="stacked">Purchasing Email Provider</ion-label>
-                <ion-select [(ngModel)]="ordersInboxProvider" interface="popover">
-                  <ion-select-option value="gmail">Gmail (Google Workspace)</ion-select-option>
-                  <ion-select-option value="microsoft365">Microsoft 365 / Outlook</ion-select-option>
-                  <ion-select-option value="other">Other provider</ion-select-option>
-                </ion-select>
-              </ion-item>
+            <div class="settings-subsection">
+              <div class="email-section-title">Labor Rates Catalog</div>
               <div class="sms-help">
-                Select your provider so setup instructions below match your mailbox UI.
+                Add labor line presets used in Quotes/Invoices (examples: Alignment, Tire disposal fee, Mount &amp; Balance Tires).
               </div>
-            </div>
-
-            <div class="orders-inbox-steps">
-              <div class="orders-inbox-steps-title">Setup Steps (Simple)</div>
-              <ol *ngIf="ordersInboxProvider === 'gmail'">
-                <li>Click <strong>Copy</strong> above.</li>
-                <li>In Gmail, go to <strong>Settings → See all settings → Filters and blocked addresses → Create new filter</strong>.</li>
-                <li>Use sender/subject keywords (UPS, FedEx, USPS, DHL, supplier names), then click <strong>Create filter</strong>.</li>
-                <li>Check <strong>Forward it to</strong> and choose this orders inbox email.</li>
-                <li>Keep original subject/body unchanged so Pathflow can match tracking details correctly.</li>
-                <li>In Pathflow invoices, set part status to <strong>Ordered</strong> for parts you want tracked.</li>
-              </ol>
-              <ol *ngIf="ordersInboxProvider === 'microsoft365'">
-                <li>Click <strong>Copy</strong> above.</li>
-                <li>In Outlook Web, open <strong>Settings → Mail → Rules → Add new rule</strong>.</li>
-                <li>Set conditions using sender/subject keywords (UPS, FedEx, USPS, DHL, supplier names).</li>
-                <li>Add action: <strong>Forward to</strong> this orders inbox email.</li>
-                <li>Keep original subject/body unchanged so Pathflow can match tracking details correctly.</li>
-                <li>In Pathflow invoices, set part status to <strong>Ordered</strong> for parts you want tracked.</li>
-              </ol>
-              <ol *ngIf="ordersInboxProvider === 'other'">
-                <li>Click <strong>Copy</strong> above.</li>
-                <li>In your provider’s mailbox settings, create a forwarding/filter rule for carrier + supplier emails.</li>
-                <li>Forward matching messages to this orders inbox email (do not rewrite subject/body).</li>
-                <li>In Pathflow invoices, set part status to <strong>Ordered</strong> for parts you want tracked.</li>
-                <li>When updates arrive, Pathflow matches tracking details to ordered part rows automatically.</li>
-              </ol>
-              <div class="orders-inbox-test">
-                <div class="orders-inbox-test-title">Quick Test</div>
-                <ol>
-                  <li>Pick one paid invoice and set at least one part to <strong>Ordered</strong>.</li>
-                  <li>Forward one real shipping/tracking email to this inbox address.</li>
-                  <li>Open the invoice again and verify tracking shows under the ordered parts section.</li>
-                </ol>
-              </div>
-            </div>
-          </div>
-
-          <div class="sms-form">
-            <ion-item>
-              <ion-label position="stacked">Override orders inbox email (optional)</ion-label>
-              <ion-input
-                [(ngModel)]="ordersInboxEmail"
-                placeholder="parts@yourcompany.com"
-                autocomplete="off">
-              </ion-input>
-            </ion-item>
-            <div class="sms-help">
-              Optional: replace the generated mailbox with your own shared inbox.
-            </div>
-          </div>
-          <div class="sms-actions">
-            <ion-button
-              fill="outline"
-              (click)="saveOrdersInboxEmail()"
-              [disabled]="emailSaving() || !canSaveOrdersInboxEmail()">
-              <ion-icon slot="start" name="save-outline"></ion-icon>
-              {{ emailSaving() ? 'Saving...' : 'Save routing settings' }}
-            </ion-button>
-          </div>
-
-          <div class="email-grid">
-            <div class="email-column">
-              <div class="email-section-title">Template Editor</div>
-              <div class="sms-help">
-                Write template body in HTML. This content is used as the email HTML when sending from Customer Profile
-                or Messages Hub.
-              </div>
-              <div class="merge-tag-tools">
-                <div class="merge-tag-title">Insert Variables</div>
-                <div class="merge-tag-list">
-                  <button
-                    type="button"
-                    class="merge-tag-chip"
-                    *ngFor="let tag of emailMergeTagOptions"
-                    (click)="insertEmailMergeTag(tag.token, 'body')">
-                    {{ tag.label }}
+              <div class="labor-rates-list">
+                @for (rate of laborRates; track rate; let i = $index) {
+                  <div class="labor-rate-row">
+                    <div class="ui-item">
+                      <span class="ui-label">Labor Name</span>
+                      <ui-input aria-label="Labor Name" [(ngModel)]="rate.name" placeholder="Alignment"></ui-input>
+                    </div>
+                    <div class="ui-item">
+                      <span class="ui-label">Default Price</span>
+                      <ui-input aria-label="Default Price" type="number" min="0" step="0.01" [(ngModel)]="rate.price" placeholder="150.00"></ui-input>
+                    </div>
+                    <div class="ui-item">
+                      <span class="ui-label">Default Cost</span>
+                      <ui-input aria-label="Default Cost" type="number" min="0" step="0.01" [(ngModel)]="rate.cost" placeholder="60.00"></ui-input>
+                    </div>
+                    <div class="ui-item labor-taxable-item">
+                      <ui-checkbox slot="start" [(ngModel)]="rate.taxable"></ui-checkbox>
+                      <span class="ui-label">Taxable</span>
+                    </div>
+                    <button class="btn ui-button btn-ghost-danger" type="button" (click)="removeLaborRate(rate.id)" [disabled]="laborRates.length <= 0">
+                      <ui-icon name="trash"></ui-icon>
+                    </button>
+                  </div>
+                }
+                <div class="sms-actions">
+                  <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="addLaborRate()">
+                    <ui-icon slot="start" name="plus"></ui-icon>
+                    Add Labor Rate
                   </button>
                 </div>
               </div>
-              <div class="sms-form">
-                <ion-item [class.setup-invalid]="showSectionSetupError('email') && !emailTemplateName.trim()">
-                  <ion-label position="stacked">Template name</ion-label>
-                  <ion-input [(ngModel)]="emailTemplateName" placeholder="Appointment follow-up"></ion-input>
-                </ion-item>
-
-                <ion-item [class.setup-invalid]="showSectionSetupError('email') && !emailTemplateSubject.trim()">
-                  <ion-label position="stacked">Subject</ion-label>
-                  <ion-input [(ngModel)]="emailTemplateSubject" placeholder="Your service update"></ion-input>
-                </ion-item>
-                <div class="sms-actions">
-                  <ion-button size="small" fill="outline" (click)="insertEmailMergeTag('{{customer_name}}', 'subject')">
-                    Insert Customer Name In Subject
-                  </ion-button>
-                </div>
-
-                <ion-item [class.setup-invalid]="showSectionSetupError('email') && !emailTemplateBody.trim()">
-                  <ion-label position="stacked">HTML body</ion-label>
-                  <ion-textarea
-                    class="email-template-code"
-                    [(ngModel)]="emailTemplateBody"
-                    [autoGrow]="true"
-                    rows="12"
-                    maxlength="30000"
-                    placeholder="<div><img src=&quot;...&quot; alt=&quot;Logo&quot; /><p>Hello customer,</p></div>">
-                  </ion-textarea>
-                </ion-item>
-                <div class="sms-feedback error" *ngIf="showSectionSetupError('email') && (!emailTemplateName.trim() || !emailTemplateSubject.trim() || !emailTemplateBody.trim())">
-                  Create at least one complete email template to finish setup.
-                </div>
-              </div>
-
-              <div class="sms-actions">
-                <ion-button fill="outline" (click)="insertSavedLogoIntoTemplate()" [disabled]="emailSaving() || !canInsertTemplateLogo()">
-                  <ion-icon slot="start" name="image-outline"></ion-icon>
-                  Insert saved logo
-                </ion-button>
-                <ion-button (click)="saveEmailTemplate()" [disabled]="emailSaving() || !canSaveEmailTemplate()">
-                  <ion-icon slot="start" name="save-outline"></ion-icon>
-                  {{ emailSaving() ? 'Saving...' : (emailTemplateId ? 'Update template' : 'Create template') }}
-                </ion-button>
-                <ion-button fill="outline" (click)="clearEmailTemplateForm()" [disabled]="emailSaving()">
-                  New template
-                </ion-button>
-              </div>
-
-              <div class="email-section-title">Default Company Signature</div>
+            </div>
+            <div class="settings-subsection">
+              <div class="email-section-title">Quote/Invoice Template Management</div>
               <div class="sms-help">
-                This signature is appended automatically when composing customer email from Customer Profile or Messages Hub.
-              </div>
-              <div class="sms-form">
-                <ion-item>
-                  <ion-label position="stacked">Signature (text or HTML)</ion-label>
-                  <ion-textarea
-                    class="email-template-code"
-                    [(ngModel)]="emailSignatureDraft"
-                    [autoGrow]="true"
-                    rows="8"
-                    maxlength="12000"
-                    placeholder="Thanks,<br/>Your Company Team<br/>service@yourcompany.com">
-                  </ion-textarea>
-                </ion-item>
+                Build templates that can auto-prefill parts and labor lines in the Quote/Invoice wizard.
               </div>
               <div class="sms-actions">
-                <ion-button fill="outline" (click)="saveEmailSignature()" [disabled]="emailSaving()">
-                  <ion-icon slot="start" name="save-outline"></ion-icon>
-                  Save signature
-                </ion-button>
+                <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="addDocumentTemplate()">
+                  <ui-icon slot="start" name="plus"></ui-icon>
+                  Add Template
+                </button>
               </div>
+              @if (documentTemplates.length) {
+                <div class="template-catalog">
+                  @for (template of documentTemplates; track trackDocumentTemplate($index, template)) {
+                    <div class="template-catalog-item">
+                      <div class="template-catalog-head">
+                        <div class="template-catalog-title">{{ template.name || 'New Template' }}</div>
+                        <button class="btn ui-button btn-ghost-danger" type="button" (click)="removeDocumentTemplate(template.id)">
+                          <ui-icon name="trash"></ui-icon>
+                        </button>
+                      </div>
+                      <div class="template-catalog-grid">
+                        <div class="ui-item">
+                          <span class="ui-label">Template Name</span>
+                          <ui-input aria-label="Template Name" [(ngModel)]="template.name" placeholder="Lift kit install quote"></ui-input>
+                        </div>
+                        <div class="ui-item">
+                          <span class="ui-label">Applies To</span>
+                          <select class="form-select" aria-label="Applies To" [(ngModel)]="template.documentType">
+                            <option value="quote">Quotes</option>
+                            <option value="invoice">Invoices</option>
+                            <option value="both">Both</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div class="ui-item">
+                        <span class="ui-label">Default Subject</span>
+                        <ui-input aria-label="Default Subject" [(ngModel)]="template.subject" [placeholder]="'Quote for {{customer_name}}'"></ui-input>
+                      </div>
+                      <div class="ui-item">
+                        <span class="ui-label">Default HTML Body</span>
+                        <ui-textarea aria-label="Default HTML Body"
+                          [(ngModel)]="template.body"
+                          autoGrow="true"
+                          rows="5"
+                          [placeholder]="'<p>Hi {{customer_name}},</p><p>Here is your quote for {{vehicle_summary}}.</p>'">
+                        </ui-textarea>
+                      </div>
+                      <div class="template-catalog-preset-head">Prefill Parts</div>
+                      <input
+                        class="form-control template-catalog-search"
+                        type="text"
+                        placeholder="Search inventory by name, SKU, vendor"
+                        [value]="templateInventoryQuery"
+                        (input)="setTemplateInventoryQuery($any($event.target).value)" />
+                      <div class="template-checkbox-list">
+                        @for (item of filteredInventoryForTemplates(); track trackInventoryItem($index, item)) {
+                          <label class="template-checkbox-item">
+                            <input class="form-check-input"
+                              type="checkbox"
+                              [checked]="isPartSelected(template, item.id)"
+                              (change)="toggleTemplatePart(template.id, item.id, $any($event.target).checked)" />
+                            <span>{{ item.name }} <small>({{ item.sku || 'No SKU' }})</small></span>
+                          </label>
+                        }
+                      </div>
+                      <div class="template-catalog-preset-head">Prefill Labor Rates</div>
+                      @if (laborRates.length) {
+                        <div class="template-checkbox-list">
+                          @for (rate of laborRates; track trackLaborRate($index, rate)) {
+                            <label class="template-checkbox-item">
+                              <input class="form-check-input"
+                                type="checkbox"
+                                [checked]="isLaborSelected(template, rate.id)"
+                                (change)="toggleTemplateLabor(template.id, rate.id, $any($event.target).checked)" />
+                              <span>{{ rate.name }} <small>({{ rate.price | currency:'USD':'symbol':'1.2-2' }})</small></span>
+                            </label>
+                          }
+                        </div>
+                      } @else {
+                        <div class="inline-help">Add labor rates above to use labor prefill in templates.</div>
+                      }
+                    </div>
+                  }
+                </div>
+              } @else {
+                <div class="inline-help">No templates yet. Add one and save Business Profile to persist it.</div>
+              }
+            </div>
+            <div class="sms-actions">
+              <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="saveBusinessProfile()">
+                <ui-icon slot="start" name="device-floppy"></ui-icon>
+                Save Business Profile
+              </button>
+            </div>
+            @if (businessProfileStatus) {
+              <div class="branding-help success">{{ businessProfileStatus }}</div>
+            }
+            @if (businessProfileError) {
+              <div class="branding-help error">{{ businessProfileError }}</div>
+            }
+          </div>
+        </div>
+      }
 
-              <div class="email-section-title">Default Email Footer Terms (Always Included)</div>
-              <div class="sms-help">
-                This footer is automatically appended to every outbound customer email from Pathflow.
+      @if (activeSection() === 'subscription') {
+        <div class="card ui-card app-surface">
+          <div class="card-header ui-card-header">
+            <h2 class="card-title ui-card-title">
+              <ui-icon name="credit-card"></ui-icon>
+              Subscription
+            </h2>
+          </div>
+          <div class="card-body ui-card-content">
+            @if (!auth.subscriptionBillingEnabled()) {
+              <p role="status">Complimentary access is enabled. Your workspace is available without a subscription charge.</p>
+            } @else {
+            <div class="sms-help">
+              Current status:
+              <strong>{{ auth.billingStatus() || 'trial' }}</strong>
+              @if (auth.trialEndsAt()) {
+                <span> · trial ends {{ auth.trialEndsAt() | date:'mediumDate' }}</span>
+              }
+            </div>
+            <div class="plan-toggle">
+              <button
+                type="button"
+                class="plan-btn"
+                [class.active]="subscriptionPlanCycle === 'monthly'"
+                [disabled]="subscriptionSaving()"
+                (click)="subscriptionPlanCycle = 'monthly'">
+                <span class="plan-btn-title">Monthly</span>
+                <span class="plan-btn-subtitle">$149/month</span>
+              </button>
+              <button
+                type="button"
+                class="plan-btn"
+                [class.active]="subscriptionPlanCycle === 'annual'"
+                [disabled]="subscriptionSaving()"
+                (click)="subscriptionPlanCycle = 'annual'">
+                <span class="plan-btn-title">Annual</span>
+                <span class="plan-btn-subtitle">$1490/year</span>
+              </button>
+            </div>
+            <div class="sms-form">
+              <div class="ui-item">
+                <span class="ui-label">Cardholder name</span>
+                <ui-input aria-label="Cardholder name" [(ngModel)]="subscriptionCardholderName" placeholder="Robert Warren"></ui-input>
               </div>
-              <div class="sms-form">
-                <ion-item>
-                    <ion-label position="stacked">Footer terms (text or HTML)</ion-label>
-                  <ion-textarea
-                    class="email-template-code"
-                    [(ngModel)]="quoteTermsDraft"
-                    [autoGrow]="true"
-                    rows="10"
-                    maxlength="20000"
-                    placeholder="Terms, warranty, labor charges, and other quote conditions...">
-                  </ion-textarea>
-                </ion-item>
+              <div class="ui-item">
+                <span class="ui-label">Card number</span>
+                <ui-input aria-label="Card number"
+                  [(ngModel)]="subscriptionCardNumber"
+                  inputmode="numeric"
+                  placeholder="4111111111111111 or 9999999999999999">
+                </ui-input>
               </div>
-              <div class="sms-actions">
-                <ion-button fill="outline" (click)="saveQuoteTerms()" [disabled]="emailSaving()">
-                  <ion-icon slot="start" name="save-outline"></ion-icon>
-                  Save footer terms
-                </ion-button>
+              <div class="billing-row">
+                <div class="ui-item">
+                  <span class="ui-label">Exp month</span>
+                  <ui-input aria-label="Exp month" [(ngModel)]="subscriptionExpiryMonth" inputmode="numeric" placeholder="MM"></ui-input>
+                </div>
+                <div class="ui-item">
+                  <span class="ui-label">Exp year</span>
+                  <ui-input aria-label="Exp year" [(ngModel)]="subscriptionExpiryYear" inputmode="numeric" placeholder="YYYY"></ui-input>
+                </div>
+              </div>
+              <div class="billing-row">
+                <div class="ui-item">
+                  <span class="ui-label">CVC</span>
+                  <ui-input aria-label="CVC" [(ngModel)]="subscriptionCvc" inputmode="numeric" placeholder="123"></ui-input>
+                </div>
+                <div class="ui-item">
+                  <span class="ui-label">Postal code</span>
+                  <ui-input aria-label="Postal code" [(ngModel)]="subscriptionPostalCode" inputmode="numeric" placeholder="78154"></ui-input>
+                </div>
               </div>
             </div>
+            <div class="sms-actions">
+              <button class="btn ui-button btn-primary" type="button" (click)="saveSubscription()" [disabled]="subscriptionSaving() || !isSubscriptionFormValid()">
+                <ui-icon slot="start" name="device-floppy"></ui-icon>
+                {{ subscriptionSaving() ? 'Saving...' : 'Activate Subscription' }}
+              </button>
+            </div>
+            @if (subscriptionStatus) {
+              <div class="sms-feedback success">{{ subscriptionStatus }}</div>
+            }
+            @if (subscriptionError) {
+              <div class="sms-feedback error">{{ subscriptionError }}</div>
+            }
+            }
+          </div>
+        </div>
+      }
 
-            <div class="email-column">
-              <div class="email-section-title">Saved Templates</div>
-              <div class="email-template-list">
-                <button
-                  type="button"
-                  class="email-template-item"
-                  *ngFor="let template of emailTemplates()"
-                  (click)="editEmailTemplate(template)">
-                  <div class="email-template-head">
-                    <span>{{ template.name }}</span>
-                    <ion-button
-                      size="small"
-                      fill="clear"
-                      color="danger"
-                      (click)="$event.stopPropagation(); deleteEmailTemplate(template)"
-                      [disabled]="emailSaving()">
-                      <ion-icon name="trash-outline"></ion-icon>
-                    </ion-button>
+      @if (activeSection() === 'payments') {
+        <div class="card ui-card app-surface">
+          <div class="card-header ui-card-header">
+            <h2 class="card-title ui-card-title">
+              <ui-icon name="credit-card"></ui-icon>
+              Payment Gateways
+            </h2>
+          </div>
+          <div class="card-body ui-card-content">
+            @if (showSectionSetupError('payments') && !paymentGatewaySettings.connectedProviders().length) {
+              <div class="sms-feedback error">
+                Connect at least one payment gateway to complete setup.
+              </div>
+            }
+            <div class="sms-help">
+              Connect at least one provider to enable invoice payment links. Start in <strong>test</strong> mode with your sandbox credentials.
+            </div>
+            <div class="payment-gateway-list">
+              @for (provider of paymentGatewaySettings.providers(); track provider) {
+                <div class="payment-gateway-row">
+                  <div class="payment-gateway-head">
+                    <div class="payment-gateway-name">{{ provider.label }}</div>
+                    <div class="badges">
+                      <span class="ui-badge" uiBadge [color]="provider.connected ? 'success' : 'medium'">
+                        {{ provider.connected ? 'connected' : 'disconnected' }}
+                      </span>
+                      @if (paymentGatewaySettings.defaultProvider()?.key === provider.key) {
+                        <span class="ui-badge" uiBadge color="primary">
+                          default
+                        </span>
+                      }
+                    </div>
                   </div>
-                  <div class="email-template-meta">{{ template.subject }}</div>
+                  <div class="payment-gateway-grid">
+                    <div class="ui-item">
+                      <span class="ui-label">Account Label</span>
+                      <ui-input aria-label="Account Label"
+                        [ngModel]="paymentGatewayDraftFor(provider.key).accountLabel"
+                        (ngModelChange)="updatePaymentGatewayDraftAccount(provider.key, $event)"
+                        placeholder="Sandbox account / merchant id">
+                      </ui-input>
+                    </div>
+                    <div class="ui-item">
+                      <span class="ui-label">Mode</span>
+                      <select class="form-select" aria-label="Mode"
+                        [ngModel]="paymentGatewayDraftFor(provider.key).mode"
+                        (ngModelChange)="updatePaymentGatewayDraftMode(provider.key, $event)">
+                        <option value="test">Test (Sandbox)</option>
+                        <option value="live">Live (Production)</option>
+                      </select>
+                    </div>
+                  </div>
+                  @if (provider.key === 'paylynx') {
+                    <div class="sms-help">
+                      PayLynx uses the credentials configured securely on the server for this location and mode. Test mode uses sandbox cards. Live mode accepts real payments.
+                    </div>
+                  }
+                  @if (provider.key === 'authorize-net') {
+                    <div class="payment-gateway-grid">
+                      <div class="ui-item">
+                        <span class="ui-label">API Login ID</span>
+                        <ui-input aria-label="API Login ID"
+                          type="text"
+                          [(ngModel)]="authorizeNetApiLoginId"
+                          placeholder="Authorize.net API Login ID">
+                        </ui-input>
+                      </div>
+                      <div class="ui-item">
+                        <span class="ui-label">Transaction Key</span>
+                        <ui-input aria-label="Transaction Key"
+                          type="password"
+                          [(ngModel)]="authorizeNetTransactionKey"
+                          placeholder="Authorize.net Transaction Key">
+                        </ui-input>
+                      </div>
+                    </div>
+                  }
+                  <div class="sms-actions">
+                    <button class="btn ui-button btn-outline-primary btn-sm" type="button"
+                      (click)="togglePaymentGatewayConnection(provider.key, !provider.connected)"
+                      [disabled]="paymentGatewaySettings.saving()">
+                      {{ provider.connected ? 'Disconnect' : 'Connect' }}
+                    </button>
+                    <button class="btn ui-button btn-outline-primary btn-sm" type="button"
+                      (click)="savePaymentGatewayProvider(provider.key)"
+                      [disabled]="paymentGatewaySettings.saving()">
+                      Save
+                    </button>
+                    @if (provider.key === 'authorize-net') {
+                      <button class="btn ui-button btn-outline-primary btn-sm" type="button"
+                        (click)="saveAuthorizeNetCredentials()"
+                        [disabled]="paymentGatewaySettings.saving()">
+                        Save Credentials
+                      </button>
+                    }
+                    <button class="btn ui-button btn-outline-primary btn-sm" type="button"
+                      (click)="setDefaultPaymentGateway(provider.key)"
+                      [disabled]="!provider.connected || paymentGatewaySettings.defaultProvider()?.key === provider.key || paymentGatewaySettings.saving()">
+                      Set Default
+                    </button>
+                  </div>
+                </div>
+              }
+            </div>
+            @if (paymentGatewayStatus) {
+              <div class="sms-feedback success">{{ paymentGatewayStatus }}</div>
+            }
+            @if (paymentGatewayError) {
+              <div class="sms-feedback error">{{ paymentGatewayError }}</div>
+            }
+            @if (paymentGatewaySettings.loadError()) {
+              <div class="sms-feedback error">{{ paymentGatewaySettings.loadError() }}</div>
+            }
+          </div>
+        </div>
+      }
+
+      @if (activeSection() === 'users') {
+        <div class="card ui-card app-surface">
+          <div class="card-header ui-card-header">
+            <h2 class="card-title ui-card-title">
+              <ui-icon name="shield-check"></ui-icon>
+              User Access
+            </h2>
+          </div>
+          <div class="card-body ui-card-content">
+            <div class="add-user-grid">
+              <div class="ui-item">
+                <span class="ui-label">Name</span>
+                <ui-input aria-label="Name" [(ngModel)]="newUserName" placeholder="New team member"></ui-input>
+              </div>
+              <div class="ui-item">
+                <span class="ui-label">Email</span>
+                <ui-input aria-label="Email" [(ngModel)]="newUserEmail" placeholder="name@company.com"></ui-input>
+              </div>
+              <div class="ui-item">
+                <span class="ui-label">Role</span>
+                <select class="form-select" aria-label="Role" [(ngModel)]="newUserRole">
+                  <option value="user">User</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+              <button class="btn ui-button btn-primary" type="button" (click)="addUser()">
+                <ui-icon slot="start" name="plus"></ui-icon>
+                Add User
+              </button>
+            </div>
+            <div class="summary-row">
+              <span class="ui-badge" uiBadge color="primary">{{ userCount() }} users</span>
+              @if (statusMessage) {
+                <span>{{ statusMessage }}</span>
+              }
+            </div>
+            @if (showSectionSetupError('users') && userCount() <= 0) {
+              <div class="sms-feedback error">
+                Add at least one team member to complete setup.
+              </div>
+            }
+            @if (usersError) {
+              <div class="sms-feedback error">{{ usersError }}</div>
+            }
+            <div class="user-list">
+              @for (user of users(); track user) {
+                <div class="user-row">
+                  <div class="user-main">
+                    <div>
+                      <div class="name">{{ user.name }}</div>
+                      <div class="meta">{{ user.email }}</div>
+                    </div>
+                    @if (user.role !== 'admin') {
+                      <div class="area-access-grid">
+                        @for (area of appAreaAccessOptions; track area) {
+                          <label class="area-access-option">
+                            <ui-checkbox
+                              [checked]="userHasArea(user, area.key)"
+                              [disabled]="isUserAccessSaving(user)"
+                              (controlChange)="setUserAreaAccess(user, area.key, $event.detail.checked)">
+                            </ui-checkbox>
+                            <span>{{ area.label }}</span>
+                          </label>
+                        }
+                      </div>
+                    } @else {
+                      <div class="area-access-admin-note">Admin users can access every app area.</div>
+                    }
+                  </div>
+                  <div class="badges">
+                    <span class="ui-badge" uiBadge [color]="user.role === 'admin' ? 'warning' : 'medium'">{{ user.role }}</span>
+                    <span class="ui-badge" uiBadge [color]="user.status === 'active' ? 'success' : (user.status === 'disabled' ? 'danger' : 'tertiary')">
+                      {{ user.status }}
+                    </span>
+                    <button class="btn ui-button btn-ghost-primary btn-sm" type="button" (click)="resetUserPassword(user)">
+                      Reset password
+                    </button>
+                    <button class="btn ui-button btn-ghost-danger btn-sm" type="button" (click)="removeUser(user)">
+                      <ui-icon name="circle-minus"></ui-icon>
+                    </button>
+                    <button class="btn ui-button btn-ghost-danger btn-sm" type="button" (click)="deleteUser(user)">
+                      <ui-icon name="trash"></ui-icon>
+                    </button>
+                  </div>
+                </div>
+              }
+            </div>
+            @if (usersLoading()) {
+              <div class="sms-help">Loading users...</div>
+            }
+            <div class="password-change-card">
+              <div class="customer-import-section-title">Change Your Password</div>
+              <div class="sms-help">
+                Pathflow uses Azure sign-in. We will email you a secure password reset link.
+              </div>
+              <div class="add-user-grid">
+                <div class="ui-item">
+                  <span class="ui-label">Current password</span>
+                  <ui-input aria-label="Current password" type="password" [(ngModel)]="passwordCurrent" placeholder="Current password"></ui-input>
+                </div>
+                <div class="ui-item">
+                  <span class="ui-label">New password</span>
+                  <ui-input aria-label="New password" type="password" [(ngModel)]="passwordNext" placeholder="New password"></ui-input>
+                </div>
+                <div class="ui-item">
+                  <span class="ui-label">Confirm new password</span>
+                  <ui-input aria-label="Confirm new password" type="password" [(ngModel)]="passwordConfirm" placeholder="Confirm password"></ui-input>
+                </div>
+                <button class="btn ui-button btn-primary" type="button" (click)="saveMyPasswordChange()" [disabled]="passwordSaving() || !canChangePassword()">
+                  {{ passwordSaving() ? 'Sending...' : 'Send Password Reset Email' }}
                 </button>
-                <div class="sms-help" *ngIf="!emailTemplates().length">No templates yet.</div>
               </div>
-
-              <div class="email-section-title">HTML Preview</div>
-              <div class="email-template-preview" *ngIf="emailTemplatePreviewHtml(); else emptyTemplatePreview">
-                <div class="email-template-preview-inner" [innerHTML]="emailTemplatePreviewHtml()"></div>
-              </div>
-              <ng-template #emptyTemplatePreview>
-                <div class="sms-help">Enter HTML in the template body to preview it here.</div>
-              </ng-template>
-
-              <div class="email-section-title">Signature Preview</div>
-              <div class="email-template-preview" *ngIf="emailSignaturePreviewHtml(); else emptySignaturePreview">
-                <div class="email-template-preview-inner" [innerHTML]="emailSignaturePreviewHtml()"></div>
-              </div>
-              <ng-template #emptySignaturePreview>
-                <div class="sms-help">No default signature saved yet.</div>
-              </ng-template>
-
-              <div class="email-section-title">Footer Terms Preview</div>
-              <div class="email-template-preview" *ngIf="quoteTermsPreviewHtml(); else emptyQuoteTermsPreview">
-                <div class="email-template-preview-inner" [innerHTML]="quoteTermsPreviewHtml()"></div>
-              </div>
-              <ng-template #emptyQuoteTermsPreview>
-                <div class="sms-help">No default email footer terms saved yet.</div>
-              </ng-template>
+              @if (passwordStatus) {
+                <div class="sms-feedback success">{{ passwordStatus }}</div>
+              }
+              @if (passwordError) {
+                <div class="sms-feedback error">{{ passwordError }}</div>
+              }
             </div>
           </div>
+        </div>
+      }
 
-          <div class="sms-feedback success" *ngIf="emailStatus">{{ emailStatus }}</div>
-          <div class="sms-feedback error" *ngIf="emailError">{{ emailError }}</div>
-        </ion-card-content>
-      </ion-card>
-
-      <ion-card class="glass-surface" *ngIf="activeSection() === 'integrations'">
-        <ion-card-header>
-          <ion-card-title>
-            <ion-icon name="settings-outline"></ion-icon>
-            Connected Apps
-          </ion-card-title>
-        </ion-card-header>
-        <ion-card-content>
-          <div class="integration-section-title">Core Integrations</div>
-          <div class="integration-row" *ngFor="let integration of integrations()">
-            <div>
-              <div class="name">{{ integration.name }}</div>
-              <div class="meta">{{ integration.summary }}</div>
+      @if (activeSection() === 'customerImport') {
+        <div class="card ui-card app-surface">
+          <div class="card-header ui-card-header">
+            <h2 class="card-title ui-card-title">
+              <ui-icon name="cloud-upload"></ui-icon>
+              Data Imports
+            </h2>
+          </div>
+          <div class="card-body ui-card-content">
+            <div class="import-type-toggle" role="tablist" aria-label="Import data type">
+              <button
+                type="button"
+                class="import-type-btn"
+                [class.active]="selectedImportType === 'customers'"
+                (click)="selectedImportType = 'customers'">
+                Customers
+              </button>
+              <button
+                type="button"
+                class="import-type-btn"
+                [class.active]="selectedImportType === 'inventory'"
+                (click)="selectedImportType = 'inventory'">
+                Inventory
+              </button>
             </div>
-            <div class="badges">
-              <ion-badge [color]="integration.connected ? 'success' : 'medium'">
-                {{ integration.connected ? 'connected' : 'disconnected' }}
-              </ion-badge>
-              <ion-button size="small" fill="outline" (click)="toggleIntegration(integration.key)">
-                {{
-                  integration.key === 'acs-sms' || integration.key === 'sendgrid-email'
+            @if (selectedImportType === 'customers') {
+              <div>
+                <div class="customer-import-grid">
+                  <div class="customer-import-column">
+                    <div class="customer-import-section-title">Upload File</div>
+                    <div class="sms-help">
+                      Upload a CSV, XLSX, or XLS export and map source headers to Pathflow customer fields.
+                    </div>
+                    <input
+                      #customerImportFileInput
+                      type="file"
+                      accept=".csv,.xlsx,.xls"
+                      hidden
+                      (change)="onCustomerImportFileSelected($event)" />
+                    <div class="sms-actions">
+                      <button class="btn ui-button btn-primary" type="button" (click)="customerImportFileInput.click()">
+                        <ui-icon slot="start" name="cloud-upload"></ui-icon>
+                        Choose file
+                      </button>
+                    </div>
+                    @if (customerImportFileName) {
+                      <div class="customer-import-summary">
+                        <div><strong>File:</strong> {{ customerImportFileName }}</div>
+                        <div><strong>Rows:</strong> {{ customerImportRows.length }}</div>
+                        <div><strong>Mapped columns:</strong> {{ mappedCustomerImportCount() }} / {{ customerImportHeaders.length }}</div>
+                      </div>
+                    }
+                    @if (customerImportStatus) {
+                      <div class="sms-feedback success">{{ customerImportStatus }}</div>
+                    }
+                    @if (customerImportError) {
+                      <div class="sms-feedback error">{{ customerImportError }}</div>
+                    }
+                    @if (missingExpectedImportHeaders().length) {
+                      <div class="customer-import-warning">
+                        <div class="warning-title">Missing expected headers from this export:</div>
+                        <div class="warning-list">
+                          @for (header of missingExpectedImportHeaders(); track header) {
+                            <span class="warning-pill">{{ header }}</span>
+                          }
+                        </div>
+                      </div>
+                    }
+                  </div>
+                  @if (customerImportHeaders.length) {
+                    <div class="customer-import-column">
+                      <div class="customer-import-section-title">Field Mapping</div>
+                      <div class="sms-help">
+                        Map source columns to target customer fields. Keep at least one identity field mapped:
+                        email, phone/mobile, or name.
+                      </div>
+                      <div class="customer-import-mapping-list">
+                        @for (mapping of customerImportMappings; track mapping; let i = $index) {
+                          <div class="customer-import-mapping-row">
+                            <div class="mapping-source">
+                              <span class="source-label">{{ mapping.source }}</span>
+                            </div>
+                            <div class="ui-item">
+                              <span class="ui-label">Target field</span>
+                              <select class="form-select" aria-label="Target field"
+                                [(ngModel)]="customerImportMappings[i].target">
+                                <option value="">Skip</option>
+                                @for (field of customerImportTargetFields; track field) {
+                                  <option [ngValue]="field.key">
+                                    {{ field.label }}
+                                  </option>
+                                }
+                              </select>
+                            </div>
+                          </div>
+                        }
+                      </div>
+                    </div>
+                  }
+                </div>
+                @if (customerImportRows.length) {
+                  <div class="customer-import-preview">
+                    <div class="customer-import-section-title">Preview</div>
+                    <div class="customer-import-table-wrap">
+                      <table class="customer-import-table">
+                        <thead>
+                          <tr>
+                            @for (header of customerImportHeaders; track header) {
+                              <th>{{ header }}</th>
+                            }
+                          </tr>
+                        </thead>
+                        <tbody>
+                          @for (row of customerImportPreviewRows(); track row) {
+                            <tr>
+                              @for (header of customerImportHeaders; track header) {
+                                <td>{{ row[header] }}</td>
+                              }
+                            </tr>
+                          }
+                        </tbody>
+                      </table>
+                    </div>
+                    @if (customerImportRows.length > customerImportPreviewPageSize) {
+                      <div class="table-pager">
+                        <button class="btn ui-button btn-outline-primary btn-sm" type="button"
+                          (click)="prevCustomerImportPreviewPage()"
+                          [disabled]="customerImportPreviewPage() <= 1">
+                          Previous
+                        </button>
+                        <span>Page {{ customerImportPreviewPage() }} of {{ customerImportPreviewTotalPages() }}</span>
+                        <button class="btn ui-button btn-outline-primary btn-sm" type="button"
+                          (click)="nextCustomerImportPreviewPage()"
+                          [disabled]="customerImportPreviewPage() >= customerImportPreviewTotalPages()">
+                          Next
+                        </button>
+                      </div>
+                    }
+                  </div>
+                }
+                @if (customerImportRows.length) {
+                  <div class="sms-actions">
+                    <button class="btn ui-button btn-primary" type="button"
+                      (click)="importCustomersFromFile()"
+                      [disabled]="!canRunCustomerImport()">
+                      <ui-icon slot="start" name="device-floppy"></ui-icon>
+                      {{ customerImporting() ? 'Importing...' : 'Import Customers' }}
+                    </button>
+                  </div>
+                }
+                @if (customerImportResult(); as result) {
+                  <div class="customer-import-results">
+                    <div class="customer-import-section-title">Last Import Result</div>
+                    <div class="customer-import-result-badges">
+                      <span class="ui-badge" uiBadge color="success">Created {{ result.created }}</span>
+                      <span class="ui-badge" uiBadge color="primary">Updated {{ result.updated }}</span>
+                      <span class="ui-badge" uiBadge color="medium">Skipped {{ result.skipped }}</span>
+                      @if (result.errors.length) {
+                        <span class="ui-badge" uiBadge color="danger">Errors {{ result.errors.length }}</span>
+                      }
+                    </div>
+                    @if (result.errors.length) {
+                      <div class="customer-import-error-list">
+                        @for (err of result.errors.slice(0, 10); track err) {
+                          <div class="error-row">
+                            Row {{ err.index }}: {{ err.error }}
+                          </div>
+                        }
+                        @if (result.errors.length > 10) {
+                          <div class="sms-help">
+                            Showing first 10 of {{ result.errors.length }} errors.
+                          </div>
+                        }
+                      </div>
+                    }
+                  </div>
+                }
+              </div>
+            }
+            @if (selectedImportType === 'inventory') {
+              <div>
+                <div class="customer-import-grid">
+                  <div class="customer-import-column">
+                    <div class="customer-import-section-title">Upload File</div>
+                    <div class="sms-help">
+                      Upload a CSV, XLSX, or XLS file and map source headers to Pathflow inventory fields.
+                    </div>
+                    <input
+                      #inventoryImportFileInput
+                      type="file"
+                      accept=".csv,.xlsx,.xls"
+                      hidden
+                      (change)="onInventoryImportFileSelected($event)" />
+                    <div class="sms-actions">
+                      <button class="btn ui-button btn-primary" type="button" (click)="inventoryImportFileInput.click()">
+                        <ui-icon slot="start" name="cloud-upload"></ui-icon>
+                        Choose file
+                      </button>
+                    </div>
+                    @if (inventoryImportFileName) {
+                      <div class="customer-import-summary">
+                        <div><strong>File:</strong> {{ inventoryImportFileName }}</div>
+                        <div><strong>Rows:</strong> {{ inventoryImportRows.length }}</div>
+                        <div><strong>Mapped columns:</strong> {{ mappedInventoryImportCount() }} / {{ inventoryImportHeaders.length }}</div>
+                      </div>
+                    }
+                    @if (inventoryImportStatus) {
+                      <div class="sms-feedback success">{{ inventoryImportStatus }}</div>
+                    }
+                    @if (inventoryImportError) {
+                      <div class="sms-feedback error">{{ inventoryImportError }}</div>
+                    }
+                  </div>
+                  @if (inventoryImportHeaders.length) {
+                    <div class="customer-import-column">
+                      <div class="customer-import-section-title">Field Mapping</div>
+                      <div class="sms-help">
+                        Map source columns to inventory fields. Keep at least one identity field mapped: Description or Part/Labor Code.
+                      </div>
+                      <div class="customer-import-mapping-list">
+                        @for (mapping of inventoryImportMappings; track mapping; let i = $index) {
+                          <div class="customer-import-mapping-row">
+                            <div class="mapping-source">
+                              <span class="source-label">{{ mapping.source }}</span>
+                            </div>
+                            <div class="ui-item">
+                              <span class="ui-label">Target field</span>
+                              <select class="form-select" aria-label="Target field"
+                                [(ngModel)]="inventoryImportMappings[i].target">
+                                <option value="">Skip</option>
+                                @for (field of inventoryImportTargetFields; track field) {
+                                  <option [ngValue]="field.key">
+                                    {{ field.label }}
+                                  </option>
+                                }
+                              </select>
+                            </div>
+                          </div>
+                        }
+                      </div>
+                    </div>
+                  }
+                </div>
+                @if (inventoryImportRows.length) {
+                  <div class="customer-import-preview">
+                    <div class="customer-import-section-title">Preview</div>
+                    <div class="customer-import-table-wrap">
+                      <table class="customer-import-table">
+                        <thead>
+                          <tr>
+                            @for (header of inventoryImportHeaders; track header) {
+                              <th>{{ header }}</th>
+                            }
+                          </tr>
+                        </thead>
+                        <tbody>
+                          @for (row of inventoryImportPreviewRows(); track row) {
+                            <tr>
+                              @for (header of inventoryImportHeaders; track header) {
+                                <td>{{ row[header] }}</td>
+                              }
+                            </tr>
+                          }
+                        </tbody>
+                      </table>
+                    </div>
+                    @if (inventoryImportRows.length > inventoryImportPreviewPageSize) {
+                      <div class="table-pager">
+                        <button class="btn ui-button btn-outline-primary btn-sm" type="button"
+                          (click)="prevInventoryImportPreviewPage()"
+                          [disabled]="inventoryImportPreviewPage() <= 1">
+                          Previous
+                        </button>
+                        <span>Page {{ inventoryImportPreviewPage() }} of {{ inventoryImportPreviewTotalPages() }}</span>
+                        <button class="btn ui-button btn-outline-primary btn-sm" type="button"
+                          (click)="nextInventoryImportPreviewPage()"
+                          [disabled]="inventoryImportPreviewPage() >= inventoryImportPreviewTotalPages()">
+                          Next
+                        </button>
+                      </div>
+                    }
+                  </div>
+                }
+                @if (inventoryImportRows.length) {
+                  <div class="sms-actions">
+                    <button class="btn ui-button btn-primary" type="button"
+                      (click)="importInventoryFromFile()"
+                      [disabled]="!canRunInventoryImport()">
+                      <ui-icon slot="start" name="device-floppy"></ui-icon>
+                      {{ inventoryImporting() ? 'Importing...' : 'Import Inventory' }}
+                    </button>
+                  </div>
+                }
+                @if (inventoryImportResult(); as result) {
+                  <div class="customer-import-results">
+                    <div class="customer-import-section-title">Last Import Result</div>
+                    <div class="customer-import-result-badges">
+                      <span class="ui-badge" uiBadge color="success">Created {{ result.created }}</span>
+                      <span class="ui-badge" uiBadge color="primary">Updated {{ result.updated }}</span>
+                      <span class="ui-badge" uiBadge color="medium">Skipped {{ result.skipped }}</span>
+                      @if (result.errors.length) {
+                        <span class="ui-badge" uiBadge color="danger">Errors {{ result.errors.length }}</span>
+                      }
+                    </div>
+                    @if (result.errors.length) {
+                      <div class="customer-import-error-list">
+                        @for (err of result.errors.slice(0, 10); track err) {
+                          <div class="error-row">
+                            Row {{ err.index }}: {{ err.error }}
+                          </div>
+                        }
+                        @if (result.errors.length > 10) {
+                          <div class="sms-help">
+                            Showing first 10 of {{ result.errors.length }} errors.
+                          </div>
+                        }
+                      </div>
+                    }
+                  </div>
+                }
+              </div>
+            }
+          </div>
+        </div>
+      }
+
+      @if (activeSection() === 'schedule') {
+        <div class="card ui-card app-surface">
+          <div class="card-header ui-card-header">
+            <h2 class="card-title ui-card-title">
+              <ui-icon name="settings"></ui-icon>
+              Schedule Settings
+            </h2>
+          </div>
+          <div class="card-body ui-card-content">
+            <div class="sms-help">
+              These settings drive calendar behavior across the app and are used for scheduling and time-based reporting.
+            </div>
+            <div class="schedule-settings-shell">
+              <div class="schedule-settings-grid">
+                <div class="schedule-field-card">
+                  <div class="ui-item schedule-field-item" [class.setup-invalid]="showSectionSetupError('schedule') && !(scheduleCloseHour > scheduleOpenHour)">
+                    <span class="ui-label">Open time</span>
+                    <select class="form-select" aria-label="Open time"
+                      [ngModel]="scheduleOpenHour"
+                      (ngModelChange)="scheduleOpenHour = +$event">
+                      @for (option of openHourOptions; track option) {
+                        <option [ngValue]="option.value">
+                          {{ option.label }}
+                        </option>
+                      }
+                    </select>
+                  </div>
+                </div>
+                <div class="schedule-field-card">
+                  <div class="ui-item schedule-field-item" [class.setup-invalid]="showSectionSetupError('schedule') && !(scheduleCloseHour > scheduleOpenHour)">
+                    <span class="ui-label">Close time</span>
+                    <select class="form-select" aria-label="Close time"
+                      [ngModel]="scheduleCloseHour"
+                      (ngModelChange)="scheduleCloseHour = +$event">
+                      @for (option of closeHourOptions; track option) {
+                        <option [ngValue]="option.value">
+                          {{ option.label }}
+                        </option>
+                      }
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <div class="schedule-weekend-card">
+                <div class="schedule-weekend-copy">
+                  <div class="label">Work weekends</div>
+                  <div class="meta">Include Saturday and Sunday in scheduling and tracked shop hours.</div>
+                </div>
+                <ui-switch
+                  [ngModel]="scheduleShowWeekends"
+                  (ngModelChange)="scheduleShowWeekends = !!$event">
+                </ui-switch>
+              </div>
+              <div class="ui-item schedule-field-item">
+                <label class="ui-label" for="shop-time-zone">Shop time zone</label>
+                <select class="form-select" id="shop-time-zone" [(ngModel)]="scheduleTimeZone">
+                  @if (!scheduleTimeZones.includes(scheduleTimeZone)) {
+                    <option [value]="scheduleTimeZone">{{ scheduleTimeZone }}</option>
+                  }
+                  @for (zone of scheduleTimeZones; track zone) {
+                    <option [value]="zone">{{ zone.replaceAll('_', ' ') }}</option>
+                  }
+                </select>
+              </div>
+              <div class="schedule-bays-header">
+                <div class="schedule-bays-title">Bays (Lifts/Categories)</div>
+                <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="addScheduleBay()">
+                  <ui-icon slot="start" name="plus"></ui-icon>
+                  Add Bay
+                </button>
+              </div>
+              <div class="schedule-bays-list">
+                @for (bay of scheduleBays; track bay; let i = $index) {
+                  <div class="schedule-bay-row">
+                    <div class="ui-item schedule-bay-item" [class.setup-invalid]="showSectionSetupError('schedule') && !bay.name.trim()">
+                      <span class="ui-label">Bay {{ i + 1 }}</span>
+                      <ui-input [(ngModel)]="bay.name" placeholder="Bay name"></ui-input>
+                    </div>
+                    <button type="button"
+                      class="btn ui-button btn-ghost-danger schedule-delete-btn"
+                      [disabled]="scheduleBays.length <= 1"
+                      (click)="removeScheduleBay(bay.id)">
+                      <ui-icon name="trash"></ui-icon>
+                    </button>
+                  </div>
+                }
+              </div>
+              @if (showSectionSetupError('schedule') && scheduleSetupInvalid()) {
+                <div class="sms-feedback error">
+                  Fix schedule hours and ensure each bay has a name.
+                </div>
+              }
+            </div>
+            <div class="sms-actions">
+              <button class="btn ui-button btn-primary" type="button" (click)="saveScheduleSettings()" [disabled]="!canSaveScheduleSettings()">
+                <ui-icon slot="start" name="device-floppy"></ui-icon>
+                Save schedule settings
+              </button>
+            </div>
+            @if (scheduleStatus) {
+              <div class="sms-feedback success">{{ scheduleStatus }}</div>
+            }
+            @if (scheduleError) {
+              <div class="sms-feedback error">{{ scheduleError }}</div>
+            }
+          </div>
+        </div>
+      }
+
+      @if (activeSection() === 'sms') {
+        <div class="card ui-card app-surface">
+          <div class="card-header ui-card-header">
+            <h2 class="card-title ui-card-title">
+              <ui-icon name="message-dots"></ui-icon>
+              SMS Messaging (Azure ACS)
+            </h2>
+          </div>
+          <div class="card-body ui-card-content">
+            <div class="sms-form">
+              <div class="ui-item">
+                <span class="ui-label">Tenant sender number (E.164)</span>
+                <ui-input aria-label="Tenant sender number (E.164)" [(ngModel)]="smsSenderFrom" placeholder="+18338978049"></ui-input>
+              </div>
+              <div class="ui-item">
+                <span class="ui-label">Sender label (optional)</span>
+                <ui-input aria-label="Sender label (optional)" [(ngModel)]="smsSenderLabel" placeholder="Pathflow Shop SMS"></ui-input>
+              </div>
+              <div class="ui-item">
+                <span class="ui-label">Verification status (optional)</span>
+                <ui-input aria-label="Verification status (optional)" [(ngModel)]="smsSenderVerification" placeholder="pending / approved"></ui-input>
+              </div>
+            </div>
+            <div class="sms-actions">
+              <button class="btn ui-button btn-primary" type="button"
+                (click)="saveSmsSenderConfig()"
+                [disabled]="smsSenderSaving() || !canSaveSmsSender()">
+                {{ smsSenderSaving() ? 'Saving sender...' : 'Save tenant sender' }}
+              </button>
+              <button class="btn ui-button btn-outline-primary" type="button"
+                (click)="resetSmsSenderConfig()"
+                [disabled]="smsSenderSaving()">
+                Reset tenant sender
+              </button>
+            </div>
+            <div class="sms-badges">
+              <span class="ui-badge" uiBadge [color]="smsConfig()?.mode === 'azure' ? 'primary' : 'warning'">
+                {{ smsConfig()?.mode === 'azure' ? 'azure mode' : 'mock mode' }}
+              </span>
+              <span class="ui-badge" uiBadge [color]="smsConfig()?.readyForLive ? 'success' : 'medium'">
+                {{ smsConfig()?.readyForLive ? 'live ready' : 'not live ready' }}
+              </span>
+              <span class="ui-badge" uiBadge color="medium">
+                sender source: {{ smsConfig()?.sender?.source || 'none' }}
+              </span>
+            </div>
+            <div class="sms-help">
+              Mock mode is free and does not send carrier texts. Switch to Azure mode by setting
+              <code>SMS_MODE=azure</code> and <code>ACS_CONNECTION_STRING</code>. Sender routing uses tenant sender number when configured, otherwise <code>ACS_SMS_FROM</code>.
+            </div>
+            <div class="sms-help">
+              Public consent page preview:
+              <a href="/sms-opt-in" target="_blank" rel="noopener noreferrer">/sms-opt-in</a>
+            </div>
+            <div class="sms-form">
+              <div class="ui-item">
+                <span class="ui-label">Test recipient (E.164)</span>
+                <ui-input aria-label="Test recipient (E.164)" [(ngModel)]="smsTo" placeholder="+15551234567"></ui-input>
+              </div>
+              <div class="ui-item">
+                <span class="ui-label">Message</span>
+                <ui-textarea aria-label="Message"
+                  [(ngModel)]="smsMessage"
+                  [autoGrow]="true"
+                  [maxlength]="1000"
+                  rows="4"
+                  placeholder="Type a test update for your customer">
+                </ui-textarea>
+              </div>
+            </div>
+            <div class="sms-actions">
+              <button class="btn ui-button btn-primary" type="button" (click)="sendTestSms()" [disabled]="smsSending()">
+                <ui-icon slot="start" name="send"></ui-icon>
+                {{ smsSending() ? 'Sending...' : 'Send test SMS' }}
+              </button>
+              <button class="btn ui-button btn-outline-primary" type="button" (click)="loadSmsConfig()" [disabled]="smsLoading()">
+                <ui-icon slot="start" name="refresh"></ui-icon>
+                {{ smsLoading() ? 'Refreshing...' : 'Refresh status' }}
+              </button>
+            </div>
+            @if (smsStatus) {
+              <div class="sms-feedback success">{{ smsStatus }}</div>
+            }
+            @if (smsError) {
+              <div class="sms-feedback error">{{ smsError }}</div>
+            }
+          </div>
+        </div>
+      }
+
+      @if (activeSection() === 'widget') {
+        <div class="card ui-card app-surface">
+          <div class="card-header ui-card-header">
+            <h2 class="card-title ui-card-title">
+              <ui-icon name="code"></ui-icon>
+              Website Widget Embed + Testing
+            </h2>
+          </div>
+          <div class="card-body ui-card-content">
+            <div class="widget-grid">
+              <div class="widget-column">
+                <div class="widget-section-title">Embed Builder</div>
+                <div class="sms-help">
+                  Generate a copy/paste snippet for your website contact widget. Use your deployed app API URL
+                  (not localhost) so external sites can submit leads correctly.
+                </div>
+                <div class="sms-form">
+                  <div class="ui-item">
+                    <span class="ui-label">Widget API URL</span>
+                    <ui-input aria-label="Widget API URL" [(ngModel)]="widgetApiUrl" placeholder="https://wonderful-glacier-0f45f5110.6.azurestaticapps.net/api/widget/lead"></ui-input>
+                  </div>
+                  <div class="ui-item">
+                    <span class="ui-label">Tenant ID (auto-included)</span>
+                    <ui-input aria-label="Tenant ID (auto-included)" [value]="widgetTenantId()" readonly></ui-input>
+                  </div>
+                  <div class="ui-item">
+                    <span class="ui-label">Widget API key (optional)</span>
+                    <ui-input aria-label="Widget API key (optional)" [(ngModel)]="widgetApiKey" placeholder="Only if WIDGET_API_KEY is required"></ui-input>
+                  </div>
+                  <div class="ui-item">
+                    <span class="ui-label">Lead source label</span>
+                    <ui-input aria-label="Lead source label" [(ngModel)]="widgetSource" placeholder="website-widget"></ui-input>
+                  </div>
+                  <div class="ui-item">
+                    <span class="ui-label">Consent version</span>
+                    <ui-input aria-label="Consent version" [(ngModel)]="widgetConsentVersion" placeholder="v1"></ui-input>
+                  </div>
+                  <div class="ui-item">
+                    <span class="ui-label">Privacy policy URL</span>
+                    <ui-input aria-label="Privacy policy URL" [(ngModel)]="widgetPrivacyPolicyUrl" placeholder="https://yourdomain.com/privacy"></ui-input>
+                  </div>
+                  <div class="ui-item">
+                    <span class="ui-label">Terms URL</span>
+                    <ui-input aria-label="Terms URL" [(ngModel)]="widgetTermsUrl" placeholder="https://yourdomain.com/terms"></ui-input>
+                  </div>
+                  <div class="ui-item">
+                    <span class="ui-label">Submit button label</span>
+                    <ui-input aria-label="Submit button label" [(ngModel)]="widgetSubmitButtonLabel" placeholder="Send Request"></ui-input>
+                  </div>
+                  <div class="ui-item">
+                    <span class="ui-label">Success message</span>
+                    <ui-input aria-label="Success message" [(ngModel)]="widgetSuccessMessage" placeholder="Thanks! Your request was sent."></ui-input>
+                  </div>
+                  <div class="ui-item">
+                    <span class="ui-label">SMS consent text</span>
+                    <ui-textarea aria-label="SMS consent text"
+                      [(ngModel)]="widgetConsentText"
+                      [autoGrow]="true"
+                      rows="5"
+                      maxlength="1200"
+                      placeholder="By checking this box, you agree to receive recurring SMS updates...">
+                    </ui-textarea>
+                  </div>
+                </div>
+                <div class="sms-actions">
+                  <button class="btn ui-button btn-outline-primary" type="button" (click)="copyWidgetApiUrl()">
+                    <ui-icon slot="start" name="copy"></ui-icon>
+                    Copy API URL
+                  </button>
+                  <button class="btn ui-button btn-primary" type="button" (click)="copyWidgetEmbedCode()">
+                    <ui-icon slot="start" name="copy"></ui-icon>
+                    Copy Embed Code
+                  </button>
+                </div>
+              </div>
+              <div class="widget-column">
+                <div class="widget-section-title">Embed Code</div>
+                <div class="sms-form widget-code-block">
+                  <div class="ui-item">
+                    <span class="ui-label">Website embed snippet</span>
+                    <ui-textarea aria-label="Website embed snippet"
+                      class="widget-code"
+                      [value]="widgetEmbedCode()"
+                      [readonly]="true"
+                      [autoGrow]="false"
+                      rows="20">
+                    </ui-textarea>
+                  </div>
+                </div>
+                <div class="widget-section-title">Test Submit (from Admin)</div>
+                <div class="sms-help">
+                  Use this to verify lead intake, customer matching, and lead card creation without leaving the app.
+                </div>
+                <div class="sms-form">
+                  <div class="ui-item">
+                    <span class="ui-label">First Name</span>
+                    <ui-input aria-label="First Name" [(ngModel)]="widgetTestFirstName" placeholder="Jane"></ui-input>
+                  </div>
+                  <div class="ui-item">
+                    <span class="ui-label">Last Name</span>
+                    <ui-input aria-label="Last Name" [(ngModel)]="widgetTestLastName" placeholder="Customer"></ui-input>
+                  </div>
+                  <div class="ui-item">
+                    <span class="ui-label">Email</span>
+                    <ui-input aria-label="Email" [(ngModel)]="widgetTestEmail" placeholder="jane@example.com"></ui-input>
+                  </div>
+                  <div class="ui-item">
+                    <span class="ui-label">Phone</span>
+                    <ui-input aria-label="Phone" [(ngModel)]="widgetTestPhone" placeholder="+15551234567"></ui-input>
+                  </div>
+                  <div class="ui-item">
+                    <span class="ui-label">VIN (optional)</span>
+                    <ui-input aria-label="VIN (optional)"
+                      [(ngModel)]="widgetTestVin"
+                      maxlength="17"
+                      placeholder="Enter 17-character VIN (no I, O, or Q)">
+                    </ui-input>
+                  </div>
+                  <div class="ui-item">
+                    <span class="ui-label">Message (provide all details about what work you are interested in)</span>
+                    <ui-textarea aria-label="Message (provide all details about what work you are interested in)"
+                      [(ngModel)]="widgetTestMessage"
+                      [autoGrow]="true"
+                      rows="3"
+                      maxlength="1200"
+                      placeholder="Provide all details about what work you are interested in.">
+                    </ui-textarea>
+                  </div>
+                  <div class="ui-item widget-checkbox-item">
+                    <ui-checkbox slot="start" [(ngModel)]="widgetTestSmsOptIn"></ui-checkbox>
+                    <span class="ui-label">
+                      Test SMS opt-in for the provided phone number
+                    </span>
+                  </div>
+                </div>
+                <div class="sms-actions">
+                  <button class="btn ui-button btn-primary" type="button" (click)="submitWidgetTest()" [disabled]="!canSubmitWidgetTest()">
+                    <ui-icon slot="start" name="send"></ui-icon>
+                    {{ widgetSubmitting() ? 'Submitting...' : 'Submit Test Lead' }}
+                  </button>
+                </div>
+                @if (widgetTestResult(); as result) {
+                  <div class="sms-badges">
+                    <span class="ui-badge" uiBadge [color]="result.customerCreated ? 'success' : 'medium'">
+                      {{ result.customerCreated ? 'customer created' : 'customer matched' }}
+                    </span>
+                    <span class="ui-badge" uiBadge [color]="result.leadCreated ? 'success' : 'warning'">
+                      {{ result.leadCreated ? 'lead created' : 'lead updated' }}
+                    </span>
+                    @if (result.sms?.confirmationSent) {
+                      <span class="ui-badge" uiBadge color="primary">opt-in SMS sent</span>
+                    }
+                  </div>
+                }
+              </div>
+            </div>
+            @if (widgetStatus) {
+              <div class="sms-feedback success">{{ widgetStatus }}</div>
+            }
+            @if (widgetError) {
+              <div class="sms-feedback error">{{ widgetError }}</div>
+            }
+          </div>
+        </div>
+      }
+
+      @if (activeSection() === 'email') {
+        <div class="card ui-card app-surface">
+          <div class="card-header ui-card-header">
+            <h2 class="card-title ui-card-title">
+              <ui-icon name="mail"></ui-icon>
+              Email Options
+            </h2>
+          </div>
+          <div class="card-body ui-card-content">
+            <div class="sms-help">
+              Create reusable templates for customer email. These templates are available in Customer Profile and
+              Messages Hub when composing email.
+            </div>
+            <div class="email-section-title">Parts Email Routing</div>
+            <div class="sms-help">
+              Add the parts email your business already uses. PathFlow will handle routing and matching from there.
+            </div>
+            <div class="settings-subsection orders-inbox-box">
+              <div class="email-section-title">Business Parts Inbox</div>
+              <div class="orders-inbox-row">
+                <div class="ui-item">
+                  <span class="ui-label">Parts ordering email</span>
+                  <ui-input aria-label="Parts ordering email"
+                    [(ngModel)]="companyPartsEmail"
+                    placeholder="parts@yourcompany.com"
+                    autocomplete="email">
+                  </ui-input>
+                </div>
+                <div class="orders-inbox-actions">
+                  <button class="btn ui-button btn-outline-primary" type="button"
+                    (click)="saveOrdersInboxEmail()"
+                    [disabled]="emailSaving() || !canSaveOrdersInboxEmail()">
+                    <ui-icon slot="start" name="device-floppy"></ui-icon>
+                    {{ emailSaving() ? 'Saving...' : 'Save' }}
+                  </button>
+                </div>
+              </div>
+              <div class="sms-help">
+                Use the email your vendors already know, such as <code>parts&#64;exodus4x4.com</code>.
+                Future vendor confirmations and shipping updates will be matched to POs, jobs, and tracking records.
+              </div>
+            </div>
+            <div class="settings-subsection orders-inbox-box">
+              <div class="email-section-title">Internal Routing Address</div>
+              <div class="orders-inbox-row">
+                <div class="ui-item">
+                  <span class="ui-label">PathFlow ingest mailbox</span>
+                  <ui-input aria-label="PathFlow ingest mailbox"
+                    [value]="ordersInboxEmail"
+                    [readonly]="true">
+                  </ui-input>
+                </div>
+                <div class="orders-inbox-actions">
+                  <button class="btn ui-button btn-outline-primary" type="button" (click)="copyOrdersInboxEmail()" [disabled]="!ordersInboxEmail || emailSaving()">
+                    <ui-icon slot="start" name="copy"></ui-icon>
+                    Copy
+                  </button>
+                  <button class="btn ui-button btn-outline-primary" type="button" (click)="regenerateOrdersInboxEmail()" [disabled]="emailSaving()">
+                    <ui-icon slot="start" name="refresh"></ui-icon>
+                    Regenerate
+                  </button>
+                </div>
+              </div>
+              @if (ordersInboxDomain) {
+                <div class="sms-help">
+                  Domain in use: <code>{{ ordersInboxDomain }}</code>
+                </div>
+              }
+              @if (ordersInboxUpdatedAt) {
+                <div class="sms-help">
+                  Last generated: {{ ordersInboxUpdatedAt | date:'short' }}
+                </div>
+              }
+              <div class="sms-help">
+                Internal support field. Shops do not need to configure this address themselves.
+              </div>
+            </div>
+            <div class="email-grid">
+              <div class="email-column">
+                <div class="email-section-title">Template Editor</div>
+                <div class="sms-help">
+                  Write template body in HTML. This content is used as the email HTML when sending from Customer Profile
+                  or Messages Hub.
+                </div>
+                <div class="merge-tag-tools">
+                  <div class="merge-tag-title">Insert Variables</div>
+                  <div class="merge-tag-list">
+                    @for (tag of emailMergeTagOptions; track tag) {
+                      <button
+                        type="button"
+                        class="merge-tag-chip"
+                        (click)="insertEmailMergeTag(tag.token, 'body')">
+                        {{ tag.label }}
+                      </button>
+                    }
+                  </div>
+                </div>
+                <div class="sms-form">
+                  <div class="ui-item" [class.setup-invalid]="showSectionSetupError('email') && !emailTemplateName.trim()">
+                    <span class="ui-label">Template name</span>
+                    <ui-input aria-label="Template name" [(ngModel)]="emailTemplateName" placeholder="Appointment follow-up"></ui-input>
+                  </div>
+                  <div class="ui-item" [class.setup-invalid]="showSectionSetupError('email') && !emailTemplateSubject.trim()">
+                    <span class="ui-label">Subject</span>
+                    <ui-input aria-label="Subject" [(ngModel)]="emailTemplateSubject" placeholder="Your service update"></ui-input>
+                  </div>
+                  <div class="sms-actions">
+                    <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="insertEmailMergeTag('{{customer_name}}', 'subject')">
+                      Insert Customer Name In Subject
+                    </button>
+                  </div>
+                  <div class="ui-item" [class.setup-invalid]="showSectionSetupError('email') && !emailTemplateBody.trim()">
+                    <span class="ui-label">HTML body</span>
+                    <ui-textarea aria-label="HTML body"
+                      class="email-template-code"
+                      [(ngModel)]="emailTemplateBody"
+                      [autoGrow]="true"
+                      rows="12"
+                      maxlength="30000"
+                      placeholder="<div><img src=&quot;...&quot; alt=&quot;Logo&quot; /><p>Hello customer,</p></div>">
+                    </ui-textarea>
+                  </div>
+                  @if (showSectionSetupError('email') && (!emailTemplateName.trim() || !emailTemplateSubject.trim() || !emailTemplateBody.trim())) {
+                    <div class="sms-feedback error">
+                      Create at least one complete email template to finish setup.
+                    </div>
+                  }
+                </div>
+                <div class="sms-actions">
+                  <button class="btn ui-button btn-outline-primary" type="button" (click)="insertSavedLogoIntoTemplate()" [disabled]="emailSaving() || !canInsertTemplateLogo()">
+                    <ui-icon slot="start" name="photo"></ui-icon>
+                    Insert saved logo
+                  </button>
+                  <button class="btn ui-button btn-primary" type="button" (click)="saveEmailTemplate()" [disabled]="emailSaving() || !canSaveEmailTemplate()">
+                    <ui-icon slot="start" name="device-floppy"></ui-icon>
+                    {{ emailSaving() ? 'Saving...' : (emailTemplateId ? 'Update template' : 'Create template') }}
+                  </button>
+                  <button class="btn ui-button btn-outline-primary" type="button" (click)="clearEmailTemplateForm()" [disabled]="emailSaving()">
+                    New template
+                  </button>
+                </div>
+                <div class="email-section-title">Default Company Signature</div>
+                <div class="sms-help">
+                  This signature is appended automatically when composing customer email from Customer Profile or Messages Hub.
+                </div>
+                <div class="sms-form">
+                  <div class="ui-item">
+                    <span class="ui-label">Signature (text or HTML)</span>
+                    <ui-textarea aria-label="Signature (text or HTML)"
+                      class="email-template-code"
+                      [(ngModel)]="emailSignatureDraft"
+                      [autoGrow]="true"
+                      rows="8"
+                      maxlength="12000"
+                      placeholder="Thanks,<br/>Your Company Team<br/>service@yourcompany.com">
+                    </ui-textarea>
+                  </div>
+                </div>
+                <div class="sms-actions">
+                  <button class="btn ui-button btn-outline-primary" type="button" (click)="saveEmailSignature()" [disabled]="emailSaving()">
+                    <ui-icon slot="start" name="device-floppy"></ui-icon>
+                    Save signature
+                  </button>
+                </div>
+                <div class="email-section-title">Default Email Footer Terms (Always Included)</div>
+                <div class="sms-help">
+                  This footer is automatically appended to every outbound customer email from Pathflow.
+                </div>
+                <div class="sms-form">
+                  <div class="ui-item">
+                    <span class="ui-label">Footer terms (text or HTML)</span>
+                    <ui-textarea aria-label="Footer terms (text or HTML)"
+                      class="email-template-code"
+                      [(ngModel)]="quoteTermsDraft"
+                      [autoGrow]="true"
+                      rows="10"
+                      maxlength="20000"
+                      placeholder="Terms, warranty, labor charges, and other quote conditions...">
+                    </ui-textarea>
+                  </div>
+                </div>
+                <div class="sms-actions">
+                  <button class="btn ui-button btn-outline-primary" type="button" (click)="saveQuoteTerms()" [disabled]="emailSaving()">
+                    <ui-icon slot="start" name="device-floppy"></ui-icon>
+                    Save footer terms
+                  </button>
+                </div>
+              </div>
+              <div class="email-column">
+                <div class="email-section-title">Saved Templates</div>
+                <div class="email-template-list">
+                  @for (template of emailTemplates(); track template) {
+                    <div class="email-template-item">
+                      <div class="email-template-head">
+                        <button class="btn btn-link p-0" type="button" (click)="editEmailTemplate(template)">
+                          {{ template.name }}
+                        </button>
+                        <button class="btn ui-button btn-ghost-danger btn-sm" type="button"
+                          [attr.aria-label]="'Delete ' + template.name"
+                          (click)="deleteEmailTemplate(template)"
+                          [disabled]="emailSaving()">
+                          <ui-icon name="trash"></ui-icon>
+                        </button>
+                      </div>
+                      <div class="email-template-meta">{{ template.subject }}</div>
+                    </div>
+                  }
+                  @if (!emailTemplates().length) {
+                    <div class="sms-help">No templates yet.</div>
+                  }
+                </div>
+                <div class="email-section-title">HTML Preview</div>
+                @if (emailTemplatePreviewHtml()) {
+                  <div class="email-template-preview">
+                    <div class="email-template-preview-inner" [innerHTML]="emailTemplatePreviewHtml()"></div>
+                  </div>
+                } @else {
+                  <div class="sms-help">Enter HTML in the template body to preview it here.</div>
+                }
+                <div class="email-section-title">Signature Preview</div>
+                @if (emailSignaturePreviewHtml()) {
+                  <div class="email-template-preview">
+                    <div class="email-template-preview-inner" [innerHTML]="emailSignaturePreviewHtml()"></div>
+                  </div>
+                } @else {
+                  <div class="sms-help">No default signature saved yet.</div>
+                }
+                <div class="email-section-title">Footer Terms Preview</div>
+                @if (quoteTermsPreviewHtml()) {
+                  <div class="email-template-preview">
+                    <div class="email-template-preview-inner" [innerHTML]="quoteTermsPreviewHtml()"></div>
+                  </div>
+                } @else {
+                  <div class="sms-help">No default email footer terms saved yet.</div>
+                }
+              </div>
+            </div>
+            @if (emailStatus) {
+              <div class="sms-feedback success">{{ emailStatus }}</div>
+            }
+            @if (emailError) {
+              <div class="sms-feedback error">{{ emailError }}</div>
+            }
+          </div>
+        </div>
+      }
+
+      @if (activeSection() === 'integrations') {
+        <div class="card ui-card app-surface">
+          <div class="card-header ui-card-header">
+            <h2 class="card-title ui-card-title">
+              <ui-icon name="settings"></ui-icon>
+              Connected Apps
+            </h2>
+          </div>
+          <div class="card-body ui-card-content">
+            <div class="integration-section-title">Core Integrations</div>
+            @for (integration of integrations(); track integration) {
+              <div class="integration-row">
+                <div>
+                  <div class="name">{{ integration.name }}</div>
+                  <div class="meta">{{ integration.summary }}</div>
+                </div>
+                <div class="badges">
+                  <span class="ui-badge" uiBadge [color]="integration.connected ? 'success' : 'medium'">
+                    {{ integration.connected ? 'connected' : 'disconnected' }}
+                  </span>
+                  <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="toggleIntegration(integration.key)">
+                    {{
+                    integration.key === 'acs-sms' || integration.key === 'sendgrid-email'
                     ? 'Refresh'
                     : (integration.connected ? 'Disconnect' : 'Connect')
-                }}
-              </ion-button>
+                    }}
+                  </button>
+                </div>
+              </div>
+            }
+            <div class="integration-section-header">
+              <div class="integration-section-title">
+                <ui-icon name="link"></ui-icon>
+                Supplier Connections
+              </div>
+              <button class="btn ui-button btn-outline-primary btn-sm" type="button"
+                (click)="loadSupplierConnections()"
+                [disabled]="supplierLoading() || supplierSaving()">
+                <ui-icon slot="start" name="refresh"></ui-icon>
+                {{ supplierLoading() ? 'Refreshing...' : 'Refresh' }}
+              </button>
             </div>
-          </div>
-
-          <div class="integration-section-header">
-            <div class="integration-section-title">
-              <ion-icon name="link-outline"></ion-icon>
-              Supplier Connections
+            <div class="sms-help">
+              Parts suppliers and OEM connectors are managed here with your other 3rd-party integrations.
             </div>
-            <ion-button
-              size="small"
-              fill="outline"
-              (click)="loadSupplierConnections()"
-              [disabled]="supplierLoading() || supplierSaving()">
-              <ion-icon slot="start" name="refresh-outline"></ion-icon>
-              {{ supplierLoading() ? 'Refreshing...' : 'Refresh' }}
-            </ion-button>
-          </div>
-
-          <div class="sms-help">
-            Parts suppliers and OEM connectors are managed here with your other 3rd-party integrations.
-          </div>
-
-          <div class="sms-feedback success" *ngIf="supplierStatus">{{ supplierStatus }}</div>
-          <div class="sms-feedback error" *ngIf="supplierError">{{ supplierError }}</div>
-          <div class="sms-help" *ngIf="supplierLoading() && !supplierConnectors().length">Loading supplier connections...</div>
-
-          <div class="integration-row" *ngFor="let connector of supplierConnectors(); trackBy: trackSupplierConnector">
-            <div>
-              <div class="name">{{ connector.provider }}</div>
-              <div class="meta">{{ connector.segment }} · {{ connector.note }}</div>
+            @if (supplierStatus) {
+              <div class="sms-feedback success">{{ supplierStatus }}</div>
+            }
+            @if (supplierError) {
+              <div class="sms-feedback error">{{ supplierError }}</div>
+            }
+            @if (supplierLoading() && !supplierConnectors().length) {
+              <div class="sms-help">Loading supplier connections...</div>
+            }
+            @for (connector of supplierConnectors(); track trackSupplierConnector($index, connector)) {
+              <div class="integration-row">
+                <div>
+                  <div class="name">{{ connector.provider }}</div>
+                  <div class="meta">{{ connector.segment }} · {{ connector.note }}</div>
+                </div>
+                <div class="badges">
+                  <span class="ui-badge" uiBadge [color]="connectorBadgeColor(connector)">
+                    {{ connectorBadgeLabel(connector) }}
+                  </span>
+                  <button class="btn ui-button btn-outline-primary btn-sm" type="button"
+                    [disabled]="supplierSaving() || connectorActionDisabled(connector)"
+                    (click)="connectSupplierConnector(connector)">
+                    {{ connectorActionLabel(connector) }}
+                  </button>
+                </div>
+              </div>
+            }
+            @if (!supplierLoading() && !supplierConnectors().length) {
+              <div class="sms-help">
+                No supplier connections configured.
+              </div>
+            }
+            <div class="integration-section-header" style="margin-top:16px;">
+              <div class="integration-section-title">
+                <ui-icon name="trash"></ui-icon>
+                QA Cleanup
+              </div>
+              <button class="btn ui-button btn-outline-danger btn-sm" type="button"
+                (click)="purgeQaTestData()"
+                [disabled]="qaCleanupRunning()">
+                {{ qaCleanupRunning() ? 'Cleaning...' : 'Purge QA Test Data' }}
+              </button>
             </div>
-            <div class="badges">
-              <ion-badge [color]="connectorBadgeColor(connector)">
-                {{ connectorBadgeLabel(connector) }}
-              </ion-badge>
-              <ion-button
-                size="small"
-                fill="outline"
-                [disabled]="supplierSaving() || connectorActionDisabled(connector)"
-                (click)="connectSupplierConnector(connector)">
-                {{ connectorActionLabel(connector) }}
-              </ion-button>
+            <div class="sms-help">
+              Removes obvious QA artifacts in this tenant: QA schedule events, QA dashboard cards, and QA customers.
             </div>
+            @if (qaCleanupStatus) {
+              <div class="sms-feedback success">{{ qaCleanupStatus }}</div>
+            }
+            @if (qaCleanupError) {
+              <div class="sms-feedback error">{{ qaCleanupError }}</div>
+            }
           </div>
-          <div class="sms-help" *ngIf="!supplierLoading() && !supplierConnectors().length">
-            No supplier connections configured.
-          </div>
-
-          <div class="integration-section-header" style="margin-top:16px;">
-            <div class="integration-section-title">
-              <ion-icon name="trash-outline"></ion-icon>
-              QA Cleanup
-            </div>
-            <ion-button
-              size="small"
-              color="danger"
-              fill="outline"
-              (click)="purgeQaTestData()"
-              [disabled]="qaCleanupRunning()">
-              {{ qaCleanupRunning() ? 'Cleaning...' : 'Purge QA Test Data' }}
-            </ion-button>
-          </div>
-          <div class="sms-help">
-            Removes obvious QA artifacts in this tenant: QA schedule events, QA dashboard cards, and QA customers.
-          </div>
-          <div class="sms-feedback success" *ngIf="qaCleanupStatus">{{ qaCleanupStatus }}</div>
-          <div class="sms-feedback error" *ngIf="qaCleanupError">{{ qaCleanupError }}</div>
-        </ion-card-content>
-      </ion-card>
+        </div>
+      }
     </section>
   </div>
 
-</ion-content>
-
-<div class="import-lock-overlay" *ngIf="importOverlayActive()" aria-live="polite" aria-busy="true">
-  <div class="import-lock-card">
-    <div class="import-lock-spinner" aria-hidden="true"></div>
-    <div class="import-lock-title">{{ importOverlayMessage() }}</div>
-    <div class="import-lock-subtitle">Please wait. Do not close or navigate away.</div>
-  </div>
 </div>
+
+@if (importOverlayActive()) {
+  <div class="import-lock-overlay" aria-live="polite" aria-busy="true">
+    <div class="import-lock-card">
+      <div class="import-lock-spinner" aria-hidden="true"></div>
+      <div class="import-lock-title">{{ importOverlayMessage() }}</div>
+      <div class="import-lock-subtitle">Please wait. Do not close or navigate away.</div>
+    </div>
+  </div>
+}

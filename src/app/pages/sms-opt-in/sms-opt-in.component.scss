@@ -2,13 +2,13 @@
   display: block;
 }
 
-.public-header ion-toolbar {
+.public-header .ui-toolbar {
   --background: #ffffff;
   --color: #0f172a;
   border-bottom: 1px solid #e2e8f0;
 }
 
-.public-header ion-title {
+.public-header .ui-title {
   color: #0f172a;
 }
 
@@ -112,7 +112,7 @@ p {
   gap: 10px;
 }
 
-ion-item {
+.ui-item {
   --background: #ffffff;
   --color: #0f172a;
   --border-color: #e2e8f0;
@@ -143,7 +143,7 @@ ion-item {
   margin-top: 16px;
 }
 
-.action-row ion-button {
+.action-row .ui-button {
   --border-radius: 999px;
   --background: #0b63f6;
   --background-hover: #0756d6;
@@ -156,7 +156,7 @@ ion-item {
   font-weight: 800;
 }
 
-.action-row ion-button::part(native) {
+.action-row .ui-button {
   border-radius: 999px;
   overflow: hidden;
 }

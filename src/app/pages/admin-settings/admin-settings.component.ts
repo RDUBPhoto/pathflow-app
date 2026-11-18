@@ -1,49 +1,10 @@
-import { Component, OnDestroy, OnInit, computed, effect, inject, signal } from '@angular/core';
+import { UiBadge, UiCheckbox, UiInput, UiTextarea } from '../../ui/controls';
+import { UiIcon } from '../../ui/icons';
+import { Component, OnDestroy, OnInit, computed, effect, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
-import {
-  IonBadge,
-  IonButton,
-  IonButtons,
-  IonCard,
-  IonCardContent,
-  IonCardHeader,
-  IonCardTitle,
-  IonCheckbox,
-  IonContent,
-  IonHeader,
-  IonIcon,
-  IonInput,
-  IonItem,
-  IonLabel,
-  IonSelect,
-  IonSelectOption,
-  IonToggle,
-  IonTextarea,
-  IonTitle,
-  IonToolbar
-} from '@ionic/angular/standalone';
 import { ActivatedRoute } from '@angular/router';
-import { addIcons } from 'ionicons';
-import {
-  cloudUploadOutline,
-  imageOutline,
-  addOutline,
-  linkOutline,
-  refreshOutline,
-  sendOutline,
-  removeCircleOutline,
-  settingsOutline,
-  shieldCheckmarkOutline,
-  chatbubbleEllipsesOutline,
-  mailOutline,
-  trashOutline,
-  saveOutline,
-  codeSlashOutline,
-  copyOutline,
-  cardOutline
-} from 'ionicons/icons';
 import { Observable, Subscription, catchError, finalize, firstValueFrom, forkJoin, of } from 'rxjs';
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
 import { PageBackButtonComponent } from '../../components/navigation/page-back-button/page-back-button.component';
@@ -87,7 +48,8 @@ import {
 } from '../../services/customers-api.service';
 import { ScheduleApi, ScheduleItem } from '../../services/schedule-api.service';
 import { WorkItem, WorkItemsApi } from '../../services/workitems-api.service';
-import { formatUsPhoneInput } from '../../utils/phone-format';
+import { formatUsPhoneInput, normalizePhoneToE164 } from '../../utils/phone-format';
+import { DEFAULT_SHOP_TIME_ZONE, normalizeShopTimeZone, SCHEDULE_SETTINGS_KEY, shopTimeZones, validShopTimeZone } from '../../utils/shop-time';
 import * as XLSX from 'xlsx';
 
 interface AppIntegration {
@@ -102,6 +64,7 @@ type ScheduleSettings = {
   bays: Bay[];
   openHour: number;
   closeHour: number;
+  timeZone: string;
   showWeekends: boolean;
   holidays: string[];
   federalYear: number;
@@ -127,11 +90,11 @@ type DocumentTemplate = {
 };
 
 const ADMIN_INTEGRATIONS_SETTING_KEY = 'admin.integrations';
-const SCHEDULE_SETTINGS_KEY = 'schedule.settings';
 const EMAIL_FOOTER_TERMS_SETTING_KEY = 'email.footer.terms.html';
 const LEGACY_QUOTE_TERMS_SETTING_KEY = 'quote.terms.html';
 const ORDERS_INBOX_EMAIL_SETTING_KEY = 'orders.inbox.email';
 const ORDERS_INBOX_PROVIDER_SETTING_KEY = 'orders.inbox.provider';
+const COMPANY_PARTS_EMAIL_SETTING_KEY = 'parts.company.email';
 const BUSINESS_TAX_RATE_SETTING_KEY = 'business.tax.rate';
 const BUSINESS_LABOR_RATES_SETTING_KEY = 'business.labor.rates';
 const BUSINESS_DOCUMENT_TEMPLATES_SETTING_KEY = 'business.document.templates';
@@ -158,6 +121,18 @@ const DEFAULT_ADMIN_USERS: WorkspaceUser[] = [
     role: 'user',
     status: 'invited'
   }
+];
+const APP_AREA_ACCESS_OPTIONS: Array<{ key: string; label: string }> = [
+  { key: 'dashboard', label: 'Dashboard' },
+  { key: 'inventory', label: 'Inventory' },
+  { key: 'jobs', label: 'Jobs / Calendar' },
+  { key: 'purchase-orders', label: 'Purchase Orders' },
+  { key: 'tasks', label: 'Tasks' },
+  { key: 'quotes', label: 'Quotes' },
+  { key: 'invoices', label: 'Invoices' },
+  { key: 'customers', label: 'Customers' },
+  { key: 'reports', label: 'Reports' },
+  { key: 'settings-admin', label: 'Settings / Admin' }
 ];
 const DEFAULT_INTEGRATIONS: AppIntegration[] = [
   {
@@ -426,31 +401,18 @@ const INVENTORY_IMPORT_HEADER_MAP: Record<string, keyof InventoryImportRow> = {
   imports: [
     CommonModule,
     FormsModule,
-    IonHeader,
-    IonToolbar,
-    IonTitle,
-    IonButtons,
-    IonContent,
-    IonCard,
-    IonCardHeader,
-    IonCardTitle,
-    IonCardContent,
-    IonCheckbox,
-    IonItem,
-    IonLabel,
-    IonInput,
-    IonButton,
-    IonIcon,
-    IonSelect,
-    IonSelectOption,
-    IonToggle,
-    IonTextarea,
-    IonBadge,
+    UiCheckbox,
+    UiInput,
+    UiIcon,
+    UiCheckbox,
+    UiTextarea,
+    UiBadge,
     UserMenuComponent,
     PageBackButtonComponent,
     CompanySwitcherComponent
   ],
   templateUrl: './admin-settings.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./admin-settings.component.scss']
 })
 export default class AdminSettingsComponent implements OnInit, OnDestroy {
@@ -484,61 +446,61 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
       key: 'branding',
       label: 'Business Profile',
       description: 'Business logo, address, phone, etc.',
-      icon: 'image-outline'
+      icon: 'photo'
     },
     {
       key: 'payments',
       label: 'Payment Gateways',
       description: 'Connect sandbox/live providers for invoice payments',
-      icon: 'card-outline'
+      icon: 'credit-card'
     },
     {
       key: 'subscription',
       label: 'Subscription',
       description: 'Billing, trial, and plan activation',
-      icon: 'card-outline'
+      icon: 'credit-card'
     },
     {
       key: 'users',
       label: 'User Access',
       description: 'Roles and team member management',
-      icon: 'shield-checkmark-outline'
+      icon: 'shield-check'
     },
     {
       key: 'customerImport',
       label: 'Data Imports',
       description: 'Import customers, inventory, and more',
-      icon: 'cloud-upload-outline'
+      icon: 'cloud-upload'
     },
     {
       key: 'schedule',
       label: 'Schedule',
       description: 'Business hours, weekends, and calendar bays',
-      icon: 'settings-outline'
+      icon: 'settings'
     },
     {
       key: 'sms',
       label: 'SMS Messaging',
       description: 'Azure ACS mode and test sending',
-      icon: 'chatbubble-ellipses-outline'
+      icon: 'message-dots'
     },
     {
       key: 'widget',
       label: 'Web Widget',
       description: 'Embed code + lead submit testing',
-      icon: 'code-slash-outline'
+      icon: 'code'
     },
     {
       key: 'email',
       label: 'Email Options',
       description: 'Sender settings, orders inbox routing, and templates',
-      icon: 'mail-outline'
+      icon: 'mail'
     },
     {
       key: 'integrations',
       label: 'Connected Apps',
       description: 'Core and supplier connector status',
-      icon: 'settings-outline'
+      icon: 'settings'
     }
   ];
 
@@ -580,6 +542,8 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
   statusMessage = '';
   usersError = '';
   readonly usersLoading = signal(false);
+  readonly userAccessSaving = signal<Record<string, boolean>>({});
+  readonly appAreaAccessOptions = APP_AREA_ACCESS_OPTIONS;
   passwordStatus = '';
   passwordError = '';
   passwordCurrent = '';
@@ -646,6 +610,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
   ordersInboxDomain = '';
   ordersInboxUpdatedAt = '';
   ordersInboxProvider: OrdersInboxProvider = 'gmail';
+  companyPartsEmail = '';
   inboundFrom = '';
   inboundFromName = '';
   inboundSubject = '';
@@ -669,7 +634,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
   widgetTestPhone = '';
   widgetTestVin = '';
   widgetTestMessage = 'Test lead submit from Admin widget panel.';
-  widgetTestSmsOptIn = true;
+  widgetTestSmsOptIn = false;
   supplierStatus = '';
   supplierError = '';
   qaCleanupStatus = '';
@@ -682,10 +647,14 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
   scheduleStatus = '';
   scheduleError = '';
   scheduleOpenHour = 7;
+  scheduleTimeZone = DEFAULT_SHOP_TIME_ZONE;
+  readonly scheduleTimeZones = shopTimeZones();
+  private loadedScheduleSettings: ScheduleSettings | null = null;
   scheduleCloseHour = 16;
   scheduleShowWeekends = false;
   scheduleBays: Bay[] = [];
   private scheduleSettingsLoaded = false;
+  private scheduleSettingsSaving = false;
   private adminSettingsLoaded = false;
   readonly customerImporting = signal(false);
   readonly customerImportPreviewPage = signal(1);
@@ -734,6 +703,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
     Record<PaymentGatewayProviderKey, { accountLabel: string; mode: 'test' | 'live' }>
   >({
     'authorize-net': { accountLabel: '', mode: 'test' },
+    paylynx: { accountLabel: '', mode: 'test' },
     stripe: { accountLabel: '', mode: 'test' },
     paypal: { accountLabel: '', mode: 'test' },
     quickbooks: { accountLabel: '', mode: 'test' }
@@ -750,6 +720,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
     const providers = this.paymentGatewaySettings.providers();
     const next: Record<PaymentGatewayProviderKey, { accountLabel: string; mode: 'test' | 'live' }> = {
       'authorize-net': { accountLabel: '', mode: 'test' },
+      paylynx: { accountLabel: '', mode: 'test' },
       stripe: { accountLabel: '', mode: 'test' },
       paypal: { accountLabel: '', mode: 'test' },
       quickbooks: { accountLabel: '', mode: 'test' }
@@ -764,24 +735,6 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
   });
 
   constructor() {
-    addIcons({
-      'shield-checkmark-outline': shieldCheckmarkOutline,
-      'settings-outline': settingsOutline,
-      'link-outline': linkOutline,
-      'add-outline': addOutline,
-      'remove-circle-outline': removeCircleOutline,
-      'image-outline': imageOutline,
-      'cloud-upload-outline': cloudUploadOutline,
-      'refresh-outline': refreshOutline,
-      'chatbubble-ellipses-outline': chatbubbleEllipsesOutline,
-      'send-outline': sendOutline,
-      'mail-outline': mailOutline,
-      'trash-outline': trashOutline,
-      'save-outline': saveOutline,
-      'code-slash-outline': codeSlashOutline,
-      'copy-outline': copyOutline,
-      'card-outline': cardOutline
-    });
 
     this.widgetApiUrl = this.resolveWidgetApiEndpoint(this.widgetApiUrl);
   }
@@ -918,6 +871,11 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
     this.businessProfileStatus = '';
     this.businessProfileError = '';
     const normalizedTaxRate = this.normalizeTaxRate(this.businessTaxRate);
+    const partsEmail = this.companyPartsEmail.trim().toLowerCase();
+    if (partsEmail && !this.isValidEmail(partsEmail)) {
+      this.businessProfileError = 'Parts ordering email must be a valid email address.';
+      return;
+    }
     forkJoin({
       profile: this.businessProfile.save({
         companyName: this.businessProfileName,
@@ -926,6 +884,10 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
         companyAddress: this.businessProfileAddress
       }),
       taxRate: this.settingsApi.setValue<number>(BUSINESS_TAX_RATE_SETTING_KEY, normalizedTaxRate),
+      partsEmail: partsEmail
+        ? this.settingsApi.setValue<string>(COMPANY_PARTS_EMAIL_SETTING_KEY, partsEmail)
+        : this.settingsApi.deleteValue(COMPANY_PARTS_EMAIL_SETTING_KEY),
+      routingInbox: this.settingsApi.ensureOrdersInboxEmail(false).pipe(catchError(() => of(null))),
       laborRates: this.settingsApi.setValue<LaborRate[]>(
         BUSINESS_LABOR_RATES_SETTING_KEY,
         this.laborRates
@@ -943,8 +905,14 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
         this.normalizeDocumentTemplates(this.documentTemplates)
       )
     }).subscribe({
-      next: () => {
+      next: ({ routingInbox }) => {
         this.businessTaxRate = normalizedTaxRate;
+        this.companyPartsEmail = partsEmail;
+        if (routingInbox?.value) {
+          this.ordersInboxEmail = String(routingInbox.value || '').trim().toLowerCase();
+          this.ordersInboxDomain = String(routingInbox.domain || '').trim();
+          this.ordersInboxUpdatedAt = String(routingInbox.updatedAt || '').trim();
+        }
         this.businessProfileStatus = 'Business profile saved.';
         this.businessProfileError = '';
         void this.setupProgress.refresh();
@@ -1207,6 +1175,54 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
       });
   }
 
+  userHasArea(user: WorkspaceUser, area: string): boolean {
+    if (user.role === 'admin') return true;
+    const access = user.areaAccess || {};
+    if (!Object.prototype.hasOwnProperty.call(access, area)) return true;
+    return access[area] !== false;
+  }
+
+  setUserAreaAccess(user: WorkspaceUser, area: string, checked: boolean): void {
+    if (user.role === 'admin') return;
+    const email = String(user.email || '').trim().toLowerCase();
+    if (!email) return;
+    const normalizedArea = String(area || '').trim().toLowerCase();
+    if (!normalizedArea) return;
+    const areaAccess = {
+      ...(user.areaAccess || {}),
+      [normalizedArea]: !!checked
+    };
+    this.userAccessSaving.set({
+      ...this.userAccessSaving(),
+      [email]: true
+    });
+    this.usersError = '';
+    this.accessAdminApi
+      .updateUserAccess({
+        email,
+        areaAccess,
+        tenantId: this.tenantContext.tenantId()
+      })
+      .pipe(finalize(() => {
+        const next = { ...this.userAccessSaving() };
+        delete next[email];
+        this.userAccessSaving.set(next);
+      }))
+      .subscribe({
+        next: res => {
+          this.users.set(Array.isArray(res.items) ? res.items : []);
+          this.statusMessage = `${email} area access updated.`;
+        },
+        error: err => {
+          this.usersError = this.extractApiError(err, 'Could not update user area access.');
+        }
+      });
+  }
+
+  isUserAccessSaving(user: WorkspaceUser): boolean {
+    return !!this.userAccessSaving()[String(user.email || '').trim().toLowerCase()];
+  }
+
   canChangePassword(): boolean {
     return this.passwordNext.trim().length >= 8 &&
       this.passwordConfirm.trim().length >= 8 &&
@@ -1293,8 +1309,8 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
         ? 'Payment gateway connected.'
         : 'Payment gateway disconnected.';
       void this.setupProgress.refresh();
-    } catch {
-      this.paymentGatewayError = 'Could not update payment gateway connection.';
+    } catch (error) {
+      this.paymentGatewayError = this.extractApiError(error, 'Could not update payment gateway connection.');
     }
   }
 
@@ -2203,9 +2219,9 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
     if (!firstName || !lastName) return false;
     if (!email && !phone) return false;
     if (phone && !phoneE164) return false;
-    if (!this.isValidVin(vin)) return false;
+    if (vin && !this.isValidVin(vin)) return false;
     if (!message) return false;
-    if (phone && !this.widgetTestSmsOptIn) return false;
+    if (this.widgetTestSmsOptIn && !phoneE164) return false;
     return true;
   }
 
@@ -2260,14 +2276,10 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
       return;
     }
     if (phoneRaw && !phone) {
-      this.widgetError = 'Phone must be valid E.164 format (example: +15551234567) or a 10-digit US number.';
+      this.widgetError = 'Enter a valid US phone number or E.164 number (example: +15551234567).';
       return;
     }
-    if (!vin) {
-      this.widgetError = 'VIN is required.';
-      return;
-    }
-    if (!this.isValidVin(vin)) {
+    if (vin && !this.isValidVin(vin)) {
       this.widgetError = 'VIN must be 17 characters and cannot include I, O, or Q.';
       return;
     }
@@ -2275,8 +2287,8 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
       this.widgetError = 'Message is required.';
       return;
     }
-    if (phone && !smsOptIn) {
-      this.widgetError = 'Enable SMS opt-in when sending a test with phone number.';
+    if (smsOptIn && !phone) {
+      this.widgetError = 'Enter a phone number to test SMS opt-in.';
       return;
     }
 
@@ -2342,11 +2354,12 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
       ordersInbox: this.settingsApi
         .getValue<string>(ORDERS_INBOX_EMAIL_SETTING_KEY)
         .pipe(catchError(() => of(null))),
-      ordersInboxProvider: this.settingsApi.getValue<string>(ORDERS_INBOX_PROVIDER_SETTING_KEY)
+      ordersInboxProvider: this.settingsApi.getValue<string>(ORDERS_INBOX_PROVIDER_SETTING_KEY),
+      companyPartsEmail: this.settingsApi.getValue<string>(COMPANY_PARTS_EMAIL_SETTING_KEY)
     })
       .pipe(finalize(() => this.emailLoading.set(false)))
       .subscribe({
-        next: ({ config, sender, templates, ordersInbox, ordersInboxProvider }) => {
+        next: ({ config, sender, templates, ordersInbox, ordersInboxProvider, companyPartsEmail }) => {
           this.emailConfig.set(config);
           this.emailSender.set(sender?.sender || null);
           this.emailSenderFrom = (sender?.sender?.fromEmail || config?.fromEmail || '').trim();
@@ -2356,6 +2369,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
           this.ordersInboxDomain = this.ordersInboxEmail.includes('@') ? this.ordersInboxEmail.split('@')[1] : '';
           this.ordersInboxUpdatedAt = '';
           this.ordersInboxProvider = this.normalizeOrdersInboxProvider(ordersInboxProvider);
+          this.companyPartsEmail = String(companyPartsEmail || '').trim();
           this.applyEmailConnectionToIntegration(config);
           this.applyEmailTemplatesResponse(templates, true);
           this.emailStatus = '';
@@ -2431,40 +2445,54 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
   }
 
   canSaveOrdersInboxEmail(): boolean {
-    const email = this.ordersInboxEmail.trim();
-    return !email || this.isValidEmail(email);
+    const systemEmail = this.ordersInboxEmail.trim();
+    const partsEmail = this.companyPartsEmail.trim();
+    return (!systemEmail || this.isValidEmail(systemEmail)) && (!partsEmail || this.isValidEmail(partsEmail));
   }
 
   saveOrdersInboxEmail(): void {
-    const email = this.ordersInboxEmail.trim().toLowerCase();
-    if (email && !this.isValidEmail(email)) {
-      this.emailError = 'Orders inbox email must be a valid email address.';
+    const systemEmail = this.ordersInboxEmail.trim().toLowerCase();
+    const partsEmail = this.companyPartsEmail.trim().toLowerCase();
+    if (systemEmail && !this.isValidEmail(systemEmail)) {
+      this.emailError = 'System routing email must be a valid email address.';
+      return;
+    }
+    if (partsEmail && !this.isValidEmail(partsEmail)) {
+      this.emailError = 'Parts ordering email must be a valid email address.';
       return;
     }
 
     this.emailSaving.set(true);
     this.emailError = '';
     this.emailStatus = '';
-    const inboxRequest$: Observable<unknown> = email
-      ? this.settingsApi.setValue<string>(ORDERS_INBOX_EMAIL_SETTING_KEY, email)
-      : this.settingsApi.deleteValue(ORDERS_INBOX_EMAIL_SETTING_KEY);
+    const inboxRequest$: Observable<unknown> = systemEmail
+      ? this.settingsApi.setValue<string>(ORDERS_INBOX_EMAIL_SETTING_KEY, systemEmail)
+      : this.settingsApi.ensureOrdersInboxEmail(false);
+    const partsEmailRequest$: Observable<unknown> = partsEmail
+      ? this.settingsApi.setValue<string>(COMPANY_PARTS_EMAIL_SETTING_KEY, partsEmail)
+      : this.settingsApi.deleteValue(COMPANY_PARTS_EMAIL_SETTING_KEY);
     const provider = this.normalizeOrdersInboxProvider(this.ordersInboxProvider);
 
     forkJoin({
       inbox: inboxRequest$,
+      partsEmail: partsEmailRequest$,
       provider: this.settingsApi.setValue<OrdersInboxProvider>(ORDERS_INBOX_PROVIDER_SETTING_KEY, provider)
     })
       .pipe(finalize(() => this.emailSaving.set(false)))
       .subscribe({
-        next: () => {
-          this.ordersInboxEmail = email;
+        next: ({ inbox }) => {
+          const generatedInbox = inbox && typeof inbox === 'object' && 'value' in inbox
+            ? String((inbox as { value?: unknown }).value || '').trim().toLowerCase()
+            : '';
+          this.ordersInboxEmail = systemEmail || generatedInbox;
+          this.companyPartsEmail = partsEmail;
           this.ordersInboxProvider = provider;
-          this.emailStatus = email
-            ? 'Orders inbox routing settings saved.'
-            : 'Orders inbox email cleared and provider saved.';
+          this.emailStatus = partsEmail
+            ? 'Parts email routing saved. PathFlow will use this as the shop parts inbox.'
+            : 'Parts email cleared. System routing settings saved.';
         },
         error: (err: unknown) => {
-          this.emailError = this.extractApiError(err, 'Could not save orders inbox routing settings.');
+          this.emailError = this.extractApiError(err, 'Could not save parts email routing settings.');
         }
       });
   }
@@ -2756,36 +2784,47 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
       `  const consentText = '${this.escapeJsString(consentText)}';`,
       `  const successMessage = '${this.escapeJsString(successMessage)}';`,
       "  root.innerHTML = [",
-      "    '<form id=\"pathflowLeadForm\" style=\"display:grid;gap:10px;max-width:460px;font-family:Arial,sans-serif\">',",
-      "    '  <input name=\"firstName\" type=\"text\" placeholder=\"First name\" required style=\"padding:10px;border:1px solid #cbd5e1;border-radius:8px;\">',",
-      "    '  <input name=\"lastName\" type=\"text\" placeholder=\"Last name\" required style=\"padding:10px;border:1px solid #cbd5e1;border-radius:8px;\">',",
-      "    '  <input name=\"email\" type=\"email\" placeholder=\"Email\" style=\"padding:10px;border:1px solid #cbd5e1;border-radius:8px;\">',",
-      "    '  <input name=\"phone\" type=\"tel\" placeholder=\"Phone\" style=\"padding:10px;border:1px solid #cbd5e1;border-radius:8px;\">',",
-      "    '  <input name=\"vin\" type=\"text\" required minlength=\"17\" maxlength=\"17\" pattern=\"[A-HJ-NPR-Z0-9]{17}\" placeholder=\"VIN (17 chars)\" style=\"padding:10px;border:1px solid #cbd5e1;border-radius:8px;\">',",
+      "    '<form id=\"pathflowLeadForm\" style=\"display:grid;gap:10px;max-width:460px;font:14px/1.5 system-ui,sans-serif;color:#182433\">',",
+      "    '  <input name=\"firstName\" type=\"text\" placeholder=\"First name\" required style=\"padding:8px 12px;border:1px solid #dadfe5;border-radius:4px;font:inherit;\">',",
+      "    '  <input name=\"lastName\" type=\"text\" placeholder=\"Last name\" required style=\"padding:8px 12px;border:1px solid #dadfe5;border-radius:4px;font:inherit;\">',",
+      "    '  <input name=\"email\" type=\"email\" placeholder=\"Email\" style=\"padding:8px 12px;border:1px solid #dadfe5;border-radius:4px;font:inherit;\">',",
+      "    '  <input name=\"phone\" type=\"tel\" placeholder=\"Phone\" style=\"padding:8px 12px;border:1px solid #dadfe5;border-radius:4px;font:inherit;\">',",
+      "    '  <input name=\"vin\" type=\"text\" minlength=\"17\" maxlength=\"17\" pattern=\"[A-HJ-NPR-Za-hj-npr-z0-9]{17}\" placeholder=\"VIN (optional)\" style=\"padding:8px 12px;border:1px solid #dadfe5;border-radius:4px;font:inherit;\">',",
       "    '  <label style=\"font-size:13px;color:#334155;font-weight:600;\">Message (provide all details about what work you are interested in)</label>',",
-      "    '  <textarea name=\"message\" rows=\"4\" required placeholder=\"Provide all details about what work you are interested in\" style=\"padding:10px;border:1px solid #cbd5e1;border-radius:8px;\"></textarea>',",
+      "    '  <textarea name=\"message\" rows=\"4\" required placeholder=\"Provide all details about what work you are interested in\" style=\"padding:8px 12px;border:1px solid #dadfe5;border-radius:4px;font:inherit;\"></textarea>',",
       "    '  <label style=\"font-size:13px;line-height:1.4;color:#334155;\">',",
       `    '    <input name="smsOptIn" type="checkbox" value="true" style="margin-right:6px;vertical-align:middle;">${escapedConsentHtml}',`,
       "    '  </label>',",
-      `    '  <button type="submit" style="padding:10px 14px;border:0;border-radius:8px;background:#2563eb;color:#fff;cursor:pointer;">${escapedSubmitHtml}</button>',`,
-      "    '  <div id=\"pathflowLeadStatus\" style=\"font-size:13px;min-height:18px;\"></div>',",
+      `    '  <button type="submit" style="padding:8px 14px;border:1px solid transparent;border-radius:4px;background:#066fd1;color:#fff;font:600 14px/1.5 system-ui,sans-serif;cursor:pointer;">${escapedSubmitHtml}</button>',`,
+      "    '  <div id=\"pathflowLeadStatus\" role=\"status\" style=\"font-size:13px;min-height:18px;\"></div>',",
       "    '</form>'",
       "  ].join('');",
       "  const form = document.getElementById('pathflowLeadForm');",
       "  const status = document.getElementById('pathflowLeadStatus');",
       '  if (!form || !status) return;',
+      "  const submit = form.querySelector('button[type=submit]');",
+      '  function normalizePhoneToE164(value) {',
+      "    const text = String(value || '').trim();",
+      "    const digits = text.replace(/\\D+/g, '');",
+      "    if (!digits) return '';",
+      "    if (text.charAt(0) === '+' && digits.length >= 8 && digits.length <= 15) return '+' + digits;",
+      "    if (digits.length === 10) return '+1' + digits;",
+      "    if (digits.length === 11 && digits.charAt(0) === '1') return '+' + digits;",
+      "    if (digits.length >= 8 && digits.length <= 15) return '+1' + digits;",
+      "    return '';",
+      '  }',
       "  form.addEventListener('submit', async function (event) {",
       '    event.preventDefault();',
-      "    status.textContent = 'Sending...';",
-      "    status.style.color = '#64748b';",
+      '    if (submit.disabled) return;',
       '    const formData = new FormData(form);',
+      "    const rawPhone = String(formData.get('phone') || '').trim();",
       '    const payload = {',
       '      source: source,',
       "      firstName: String(formData.get('firstName') || '').trim(),",
       "      lastName: String(formData.get('lastName') || '').trim(),",
       "      name: '',",
       "      email: String(formData.get('email') || '').trim(),",
-      "      phone: String(formData.get('phone') || '').trim(),",
+      "      phone: normalizePhoneToE164(rawPhone),",
       "      vin: String(formData.get('vin') || '').trim().toUpperCase().replace(/\\s+/g, ''),",
       "      message: String(formData.get('message') || '').trim(),",
       "      smsOptIn: !!formData.get('smsOptIn'),",
@@ -2801,17 +2840,12 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
       "      status.style.color = '#dc2626';",
       '      return;',
       '    }',
-      '    if (!payload.vin) {',
-      "      status.textContent = 'VIN is required.';",
-      "      status.style.color = '#dc2626';",
-      '      return;',
-      '    }',
       '    if (!payload.message) {',
       "      status.textContent = 'Message is required.';",
       "      status.style.color = '#dc2626';",
       '      return;',
       '    }',
-      "    if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(payload.vin)) {",
+      "    if (payload.vin && !/^[A-HJ-NPR-Z0-9]{17}$/.test(payload.vin)) {",
       "      status.textContent = 'VIN must be 17 characters and cannot include I, O, or Q.';",
       "      status.style.color = '#dc2626';",
       '      return;',
@@ -2821,19 +2855,24 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
       "      status.style.color = '#dc2626';",
       '      return;',
       '    }',
-      '    if (payload.phone && !payload.smsOptIn) {',
-      "      status.textContent = 'SMS opt-in is required when phone is provided.';",
+      '    if (rawPhone && !payload.phone) {',
+      "      status.textContent = 'Enter a valid US phone number.';",
       "      status.style.color = '#dc2626';",
       '      return;',
       '    }',
-      "    const headers = { 'Content-Type': 'application/json' };",
-      "    if (apiKey) headers['x-widget-key'] = apiKey;",
-      "    if (tenantId) headers['x-tenant-id'] = tenantId;",
+      '    if (payload.smsOptIn && !payload.phone) {',
+      "      status.textContent = 'Enter a phone number to receive SMS updates.';",
+      "      status.style.color = '#dc2626';",
+      '      return;',
+      '    }',
+      '    if (apiKey) payload.apiKey = apiKey;',
+      '    submit.disabled = true;',
+      "    status.textContent = 'Sending...';",
+      "    status.style.color = '#64748b';",
       '    try {',
       '      const response = await fetch(apiUrl, {',
       "        method: 'POST',",
-      '        headers: headers,',
-      '        body: JSON.stringify(payload)',
+      '        body: new URLSearchParams(payload)',
       '      });',
       '      const data = await response.json().catch(function () { return {}; });',
       "      if (!response.ok || !data.ok) throw new Error(data.error || 'Lead submit failed.');",
@@ -2843,6 +2882,8 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
       '    } catch (error) {',
       "      status.textContent = (error && error.message) ? error.message : 'Could not submit lead.';",
       "      status.style.color = '#dc2626';",
+      '    } finally {',
+      '      submit.disabled = false;',
       '    }',
       '  });',
       '})();',
@@ -2942,6 +2983,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
     return String(value || '')
       .replace(/\\/g, '\\\\')
       .replace(/'/g, "\\'")
+      .replace(/</g, '\\x3c')
       .replace(/\r/g, '')
       .replace(/\n/g, '\\n');
   }
@@ -2988,12 +3030,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
   }
 
   private normalizeWidgetPhone(value: string): string {
-    const digits = String(value || '').replace(/\D+/g, '');
-    if (!digits) return '';
-    if (digits.length === 10) return `+1${digits}`;
-    if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
-    if (digits.length >= 8 && digits.length <= 15) return `+${digits}`;
-    return '';
+    return normalizePhoneToE164(value);
   }
 
   addScheduleBay(): void {
@@ -3016,10 +3053,11 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
   }
 
   canSaveScheduleSettings(): boolean {
-    return !this.scheduleValidationError();
+    return this.scheduleSettingsLoaded && !this.scheduleSettingsSaving && !this.scheduleValidationError();
   }
 
   saveScheduleSettings(): void {
+    if (!this.scheduleSettingsLoaded || this.scheduleSettingsSaving) return;
     const validationError = this.scheduleValidationError();
     if (validationError) {
       this.scheduleError = validationError;
@@ -3033,11 +3071,12 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
       closeHour = Math.min(24, openHour + 1);
     }
 
-    const current = this.defaultScheduleSettings();
+    const current = this.loadedScheduleSettings || this.defaultScheduleSettings();
     const settings: ScheduleSettings = {
       ...current,
       openHour,
       closeHour,
+      timeZone: this.scheduleTimeZone.trim(),
       showWeekends: !!this.scheduleShowWeekends,
       bays: this.scheduleBays.map(bay => ({
         id: bay.id,
@@ -3045,14 +3084,21 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
       }))
     };
 
-    this.settingsApi.setValue(SCHEDULE_SETTINGS_KEY, settings).subscribe({
+    this.scheduleSettingsSaving = true;
+    this.scheduleStatus = '';
+    this.scheduleError = '';
+    this.settingsApi.setValue(SCHEDULE_SETTINGS_KEY, settings).pipe(
+      finalize(() => { this.scheduleSettingsSaving = false; })
+    ).subscribe({
       next: () => {
+        this.loadedScheduleSettings = settings;
         this.scheduleStatus = 'Schedule settings saved.';
         this.scheduleError = '';
         void this.setupProgress.refresh();
       },
-      error: () => {
-        this.scheduleError = 'Could not save schedule settings.';
+      error: (error: HttpErrorResponse) => {
+        this.scheduleError = error.status === 400 && typeof error.error?.error === 'string'
+          ? error.error.error : 'Could not save schedule settings.';
         this.scheduleStatus = '';
       }
     });
@@ -3089,6 +3135,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
       ],
       openHour: 7,
       closeHour: 16,
+      timeZone: DEFAULT_SHOP_TIME_ZONE,
       showWeekends: false,
       holidays: [],
       federalYear: new Date().getFullYear(),
@@ -3113,6 +3160,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
       bays: bays.length ? bays : base.bays,
       openHour: Number.isFinite(parsed.openHour) ? Number(parsed.openHour) : base.openHour,
       closeHour: Number.isFinite(parsed.closeHour) ? Number(parsed.closeHour) : base.closeHour,
+      timeZone: normalizeShopTimeZone(parsed.timeZone),
       showWeekends: typeof parsed.showWeekends === 'boolean' ? parsed.showWeekends : base.showWeekends,
       holidays: Array.isArray(parsed.holidays) ? parsed.holidays.map(v => String(v || '')) : base.holidays,
       federalYear: Number.isFinite(parsed.federalYear) ? Number(parsed.federalYear) : base.federalYear,
@@ -3122,13 +3170,16 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
   }
 
   private applyScheduleSettings(settings: ScheduleSettings): void {
+    this.loadedScheduleSettings = settings;
     this.scheduleOpenHour = settings.openHour;
     this.scheduleCloseHour = settings.closeHour;
+    this.scheduleTimeZone = settings.timeZone;
     this.scheduleShowWeekends = !!settings.showWeekends;
     this.scheduleBays = settings.bays.map(bay => ({ ...bay }));
   }
 
   private scheduleValidationError(): string {
+    if (!validShopTimeZone(this.scheduleTimeZone)) return 'Select a shop time zone.';
     const openHour = Math.min(23, Math.max(0, Number(this.scheduleOpenHour) || 0));
     const closeHour = Math.min(24, Math.max(1, Number(this.scheduleCloseHour) || 1));
     if (closeHour <= openHour) {

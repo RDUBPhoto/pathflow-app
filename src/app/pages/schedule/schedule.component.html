@@ -1,83 +1,102 @@
-<ion-header class="glass-header">
-  <ion-toolbar>
-    <ion-buttons slot="start">
+<header class="ui-header app-header">
+  <div class="ui-toolbar">
+    <div class="ui-buttons" slot="start">
       <app-page-back-button></app-page-back-button>
-    </ion-buttons>
-    <ion-title>Schedule</ion-title>
+    </div>
+    <h1 class="ui-title">Schedule</h1>
     <app-company-switcher></app-company-switcher>
-    <ion-buttons slot="end" class="ion-margin-end">
+    <div slot="end" class="ui-buttons me-2">
       <app-user-menu></app-user-menu>
-      <ion-spinner name="crescent" *ngIf="loading()"></ion-spinner>
-    </ion-buttons>
-  </ion-toolbar>
-</ion-header>
-
-<ion-content class="ion-padding glass-bg schedule-content">
-  <div class="feedback-overlay" *ngIf="status()">
-    <div
-      class="page-feedback"
-      [class.success]="statusTone() === 'success'"
-      [class.error]="statusTone() === 'error'">
-      {{ status() }}
+      @if (loading()) {
+        <span class="spinner-border spinner-border-sm ui-spinner" role="status" aria-label="Loading"></span>
+      }
     </div>
   </div>
+</header>
 
-  <div class="calendar-toolbar glass-surface">
-    <div class="calendar-view-switch">
-      <button
-        type="button"
-        class="toolbar-chip"
-        *ngFor="let view of calendarViews"
-        [class.active]="isCalendarView(view.id)"
-        (click)="setCalendarView(view.id)">
-        {{ view.label }}
-      </button>
+<div class="ui-content app-padding app-content schedule-content" #scheduleContent>
+  @if (status()) {
+    <div class="feedback-overlay">
+      <div
+        class="page-feedback"
+        [class.success]="statusTone() === 'success'"
+        [class.error]="statusTone() === 'error'">
+        {{ status() }}
+      </div>
     </div>
-    <div class="calendar-toolbar-center" *ngIf="isMonthView()">
-      {{ monthViewLabel() }}
+  }
+
+  <div class="schedule-controls" #scheduleControls>
+    <div class="calendar-toolbar app-surface">
+      <div class="calendar-view-switch">
+        @for (view of calendarViews; track view) {
+          <button
+            type="button"
+            class="toolbar-chip"
+            [class.active]="isCalendarView(view.id)"
+            (click)="setCalendarView(view.id)">
+            {{ view.label }}
+          </button>
+        }
+      </div>
+      @if (isMonthView()) {
+        <div class="calendar-toolbar-center">
+          {{ monthViewLabel() }}
+        </div>
+      }
+      <div class="calendar-nav-group">
+        <button type="button" class="toolbar-chip" (click)="previousCalendarRange()">Prev</button>
+        <button type="button" class="toolbar-chip active" (click)="jumpToToday()">Today</button>
+        <button type="button" class="toolbar-chip" (click)="nextCalendarRange()">Next</button>
+        <span class="calendar-range-label">{{ viewRangeLabel() }} · {{ shopTimeZone() }}</span>
+      </div>
     </div>
-    <div class="calendar-nav-group">
-      <button type="button" class="toolbar-chip" (click)="previousCalendarRange()">Prev</button>
-      <button type="button" class="toolbar-chip active" (click)="jumpToToday()">Today</button>
-      <button type="button" class="toolbar-chip" (click)="nextCalendarRange()">Next</button>
-      <span class="calendar-range-label">{{ viewRangeLabel() }}</span>
-    </div>
+
+    @if (planningCustomerId(); as planningId) {
+      <section class="planner-hints app-surface">
+        <div class="planner-hints-header">
+          <div>
+            <h4>Suggested Time-slots available</h4>
+            <h3>Scheduling {{ planningCustomerName() }}</h3>
+            <p>Select an open slot below, pick manually, or click directly on the calendar to choose another time.</p>
+          </div>
+          <div class="planner-actions">
+            <button type="button" class="toolbar-chip manual-slot" (click)="openManualPlanningEditor()">Pick manually</button>
+            <button type="button" class="toolbar-chip" (click)="clearPlanningCustomer()">Clear</button>
+          </div>
+        </div>
+        @if (suggestedSlots().length) {
+          <div class="planner-slot-list">
+            @for (slot of suggestedSlots(); track slot) {
+              <button
+                type="button"
+                class="planner-slot"
+                (click)="useSuggestedSlot(slot)">
+                {{ slot.label }}
+              </button>
+            }
+          </div>
+        } @else {
+          <div class="planner-empty">
+            No open 4-hour slots found soon. Try changing bays/business hours, or pick a custom range directly on the calendar.
+          </div>
+        }
+      </section>
+    }
   </div>
 
-  <section class="planner-hints glass-surface" *ngIf="planningCustomerId() as planningId">
-    <div class="planner-hints-header">
-      <div>
-        <h4>Suggested Time-slots available</h4>
-        <h3>Scheduling {{ planningCustomerName() }}</h3>
-        <p>Select an open slot below, or click directly on the calendar to choose another time.</p>
-      </div>
-      <button type="button" class="toolbar-chip" (click)="clearPlanningCustomer()">Clear</button>
-    </div>
-    <div class="planner-slot-list" *ngIf="suggestedSlots().length; else noSuggestedSlots">
-      <button
-        type="button"
-        class="planner-slot"
-        *ngFor="let slot of suggestedSlots()"
-        (click)="useSuggestedSlot(slot)">
-        {{ slot.label }}
-      </button>
-    </div>
-    <ng-template #noSuggestedSlots>
-      <div class="planner-empty">
-        No open 4-hour slots found soon. Try changing bays/business hours, or pick a custom range directly on the calendar.
-      </div>
-    </ng-template>
-  </section>
-
-  <div class="schedule-shell glass-surface" #scheduleShell>
-    <ng-container *ngIf="isMonthView(); else schedulerView">
-      <div class="month-legend" *ngIf="bayLegend().length">
-        <span class="month-legend-item" *ngFor="let bay of bayLegend()">
-          <span class="month-legend-dot" [style.background]="bay.color"></span>
-          {{ bay.name }}
-        </span>
-      </div>
-
+  <div class="schedule-shell app-surface" [class.month-view]="isMonthView()" #scheduleShell>
+    @if (isMonthView()) {
+      @if (bayLegend().length) {
+        <div class="month-legend">
+          @for (bay of bayLegend(); track bay) {
+            <span class="month-legend-item">
+              <span class="month-legend-dot" [style.background]="bay.color"></span>
+              {{ bay.name }}
+            </span>
+          }
+        </div>
+      }
       <div class="month-shell">
         <daypilot-month
           #month
@@ -85,144 +104,254 @@
           [events]="monthEvents()">
         </daypilot-month>
       </div>
-    </ng-container>
-
-    <ng-template #schedulerView>
+    } @else {
       <div class="scheduler-stage">
         <daypilot-scheduler
           #scheduler
           [config]="config"
           [events]="events()">
         </daypilot-scheduler>
-        <div
-          class="day-now-line"
-          *ngIf="showNowLine()"
-          [style.left.px]="nowLineLeft()"
-          [style.top.px]="nowLineTop()"
-          [style.height.px]="nowLineHeight()">
-          <span class="day-now-line-label">{{ nowLineLabel() }}</span>
-        </div>
+        @if (showNowLine()) {
+          <div
+            class="day-now-line"
+            [style.left.px]="nowLineLeft()"
+            [style.top.px]="nowLineTop()"
+            [style.height.px]="nowLineHeight()">
+            <span class="day-now-line-label">{{ nowLineLabel() }}</span>
+          </div>
+        }
       </div>
-    </ng-template>
+    }
+
   </div>
-</ion-content>
+</div>
 
-<ion-modal [isOpen]="editorOpen()" (didDismiss)="closeEditor()">
+<ui-modal class="appointment-editor-modal" [isOpen]="editorOpen()" (didDismiss)="closeEditor()" label="Appointment">
   <ng-template>
-    <ion-header>
-      <ion-toolbar>
-        <ion-title>Appointment</ion-title>
-        <ion-buttons slot="end">
-          <ion-button (click)="closeEditor()">Close</ion-button>
-        </ion-buttons>
-      </ion-toolbar>
-    </ion-header>
-    <ion-content class="ion-padding glass-bg modal-form-content">
-      <ion-item lines="full">
-        <ion-label>Block bay</ion-label>
-        <ion-checkbox slot="end" [checked]="editorBlocked()" (ionChange)="editorBlocked.set($event.detail.checked)"></ion-checkbox>
-      </ion-item>
-
-      <ion-item *ngIf="!editorBlocked()">
-        <ion-label position="stacked">Customer</ion-label>
-        <ion-select interface="popover" [value]="editorCustomerId()" (ionChange)="onEditorCustomerChange($event.detail.value)">
-          <ion-select-option [value]="null">Unassigned</ion-select-option>
-          <ion-select-option *ngFor="let c of customers()" [value]="c.id">
-            {{ c.name || 'Unnamed' }}
-          </ion-select-option>
-        </ion-select>
-      </ion-item>
-
-      <ion-item>
-        <ion-label position="stacked">Lift / Bay (Category)</ion-label>
-        <ion-select
-          interface="popover"
-          [value]="editorResource()"
-          (ionChange)="editorResource.set($event.detail.value || '')">
-          <ion-select-option *ngFor="let bay of resources()" [value]="bay.id">
-            {{ bay.name || bay.id }}
-          </ion-select-option>
-        </ion-select>
-      </ion-item>
-
-      <ion-item *ngIf="editorBlocked()">
-        <ion-label position="stacked">Block label</ion-label>
-        <ion-input [ngModel]="editorTitle()" (ngModelChange)="editorTitle.set($event)"></ion-input>
-      </ion-item>
-      <div class="validation-error" *ngIf="editorBlocked() && !editorTitle().trim()">
-        Block label is required when blocking a bay.
-      </div>
-
-      <ion-item>
-        <ion-label position="stacked">Notes</ion-label>
-        <ion-textarea autoGrow [ngModel]="editorNotes()" (ngModelChange)="editorNotes.set($event)"></ion-textarea>
-      </ion-item>
-
-      <ion-item *ngIf="!editorBlocked()">
-        <ion-label position="stacked">Parts for this job</ion-label>
-        <div class="parts-list" *ngIf="editorPartRequests().length; else noPartsForJob">
-          <ul>
-            <li *ngFor="let part of editorPartRequests()">
-              <span class="parts-qty">{{ part.qty }}x</span>
-              <span class="parts-name">{{ part.partName }}</span>
-              <span class="parts-meta" *ngIf="part.vendorHint || part.sku || part.note">
-                <ng-container *ngIf="part.vendorHint">{{ part.vendorHint }}</ng-container>
-                <ng-container *ngIf="part.sku"> | {{ part.sku }}</ng-container>
-                <ng-container *ngIf="part.note"> | {{ part.note }}</ng-container>
-              </span>
-            </li>
-          </ul>
+    <header class="ui-header">
+      <div class="ui-toolbar">
+        <h1 class="ui-title">Appointment</h1>
+        <div class="ui-buttons" slot="end">
+          <button class="btn ui-button btn-primary" type="button" (click)="closeEditor()">Close</button>
         </div>
-        <ng-template #noPartsForJob>
-          <div class="parts-empty">No parts listed for this job yet.</div>
-        </ng-template>
-      </ion-item>
-      <div class="hint-text" *ngIf="!editorBlocked() && editorPartsSourceHint()">
-        {{ editorPartsSourceHint() }}
+      </div>
+    </header>
+    <div class="ui-content app-padding app-content modal-form-content">
+      <div class="ui-item">
+        <span class="ui-label">Block bay</span>
+        <ui-checkbox aria-label="Block bay" slot="end" [checked]="editorBlocked()" (controlChange)="editorBlocked.set($event.detail.checked)"></ui-checkbox>
       </div>
 
-      <ion-item>
-        <ion-label position="stacked">Start</ion-label>
-        <ion-input
+      @if (!editorBlocked()) {
+        <div class="ui-item">
+          <span class="ui-label">Customer</span>
+          <select class="form-select" aria-label="Customer" [ngModel]="editorCustomerId()" (ngModelChange)="onEditorCustomerChange($event)">
+            <option [ngValue]="null">Unassigned</option>
+            @for (c of customers(); track c) {
+              <option [ngValue]="c.id">
+                {{ c.name || 'Unnamed' }}
+              </option>
+            }
+          </select>
+        </div>
+      }
+
+      <div class="ui-item">
+        <span class="ui-label">Lift / Bay (Category)</span>
+        <select class="form-select" aria-label="Lift / Bay (Category)"
+          [ngModel]="editorResource()"
+          (ngModelChange)="editorResource.set($event || '')">
+          @for (bay of resources(); track bay) {
+            <option [ngValue]="bay.id">
+              {{ bay.name || bay.id }}
+            </option>
+          }
+        </select>
+      </div>
+
+      @if (editorBlocked()) {
+        <div class="ui-item">
+          <span class="ui-label">Block label</span>
+          <ui-input aria-label="Block label" [ngModel]="editorTitle()" (ngModelChange)="editorTitle.set($event)"></ui-input>
+        </div>
+      }
+      @if (editorBlocked() && !editorTitle().trim()) {
+        <div class="validation-error">
+          Block label is required when blocking a bay.
+        </div>
+      }
+
+      <div class="ui-item">
+        <span class="ui-label">Notes</span>
+        <ui-textarea aria-label="Notes" autoGrow [ngModel]="editorNotes()" (ngModelChange)="editorNotes.set($event)"></ui-textarea>
+      </div>
+
+      @if (!editorBlocked()) {
+        <section class="editor-parts-panel">
+          <div class="editor-parts-heading">Parts for this job</div>
+          @if (editorPartRequests().length) {
+            <div class="parts-list">
+              <ul>
+                @for (part of editorPartRequests(); track part) {
+                  <li>
+                    <span class="parts-qty">{{ part.qty }}x</span>
+                    <span class="parts-name">{{ part.partName }}</span>
+                    @if (part.vendorHint || part.sku || part.note) {
+                      <span class="parts-meta">
+                        @if (part.vendorHint) {
+                          {{ part.vendorHint }}
+                        }
+                        @if (part.sku) {
+                          | {{ part.sku }}
+                        }
+                        @if (part.note) {
+                          | {{ part.note }}
+                        }
+                      </span>
+                    }
+                  </li>
+                }
+              </ul>
+            </div>
+          } @else {
+            <div class="parts-empty">No parts listed for this job yet.</div>
+          }
+        </section>
+      }
+      @if (!editorBlocked() && editorPartsSourceHint()) {
+        <div class="hint-text">
+          {{ editorPartsSourceHint() }}
+        </div>
+      }
+
+      <div class="ui-item">
+        <span class="ui-label">Start</span>
+        <ui-input aria-label="Start"
           type="datetime-local"
           [ngModel]="editorStart()"
           (ngModelChange)="editorStart.set($event || '')">
-        </ion-input>
-      </ion-item>
+        </ui-input>
+      </div>
 
-      <ion-item>
-        <ion-label position="stacked">End</ion-label>
-        <ion-input
+      <div class="ui-item">
+        <span class="ui-label">End</span>
+        <ui-input aria-label="End"
           type="datetime-local"
           [ngModel]="editorEnd()"
           (ngModelChange)="editorEnd.set($event || '')">
-        </ion-input>
-      </ion-item>
+        </ui-input>
+      </div>
 
-      <ion-item lines="full">
-        <ion-label position="stacked">Repeat every (days)</ion-label>
-        <ion-input type="number" min="0" [ngModel]="editorRepeatEvery()" (ngModelChange)="editorRepeatEvery.set($event)"></ion-input>
-      </ion-item>
+      <div class="ui-item">
+        <span class="ui-label">Repeat every (days)</span>
+        <ui-input aria-label="Repeat every (days)" type="number" min="0" [ngModel]="editorRepeatEvery()" (ngModelChange)="editorRepeatEvery.set($event)"></ui-input>
+      </div>
 
-      <ion-item>
-        <ion-label position="stacked">Occurrences</ion-label>
-        <ion-input type="number" min="1" [ngModel]="editorRepeatCount()" (ngModelChange)="editorRepeatCount.set($event)"></ion-input>
-      </ion-item>
+      <div class="ui-item">
+        <span class="ui-label">Occurrences</span>
+        <ui-input aria-label="Occurrences" type="number" min="1" [ngModel]="editorRepeatCount()" (ngModelChange)="editorRepeatCount.set($event)"></ui-input>
+      </div>
 
-    </ion-content>
-    <ion-footer class="modal-form-footer">
-      <ion-toolbar>
+    </div>
+    <footer class="ui-footer modal-form-footer">
+      <div class="ui-toolbar">
         <div class="modal-footer-row">
           <div class="modal-footer-left">
-            <ion-button fill="outline" color="danger" *ngIf="editorId()" (click)="deleteEditor()">Delete</ion-button>
+            @if (editorId()) {
+              <button class="btn ui-button btn-outline-danger" type="button" (click)="deleteEditor()">Delete</button>
+            }
           </div>
           <div class="modal-footer-right">
-            <ion-button fill="outline" (click)="closeEditor()">Cancel</ion-button>
-            <ion-button (click)="saveEditor()" [disabled]="!canSaveEditor()">Save</ion-button>
+            <button class="btn ui-button btn-outline-primary" type="button" (click)="closeEditor()">Cancel</button>
+            <button class="btn ui-button btn-primary" type="button" (click)="saveEditor()" [disabled]="!canSaveEditor()">Save</button>
           </div>
         </div>
-        <div class="validation-error footer-validation" *ngIf="editorValidationError()">{{ editorValidationError() }}</div>
-      </ion-toolbar>
-    </ion-footer>
+        @if (editorValidationError()) {
+          <div class="validation-error footer-validation">{{ editorValidationError() }}</div>
+        }
+      </div>
+    </footer>
   </ng-template>
-</ion-modal>
+</ui-modal>
+
+<ui-modal [isOpen]="appointmentInfoModalOpen()" (didDismiss)="closeAppointmentInfoModal()" label="Send Scheduled Info">
+  <ng-template>
+    <header class="ui-header">
+      <div class="ui-toolbar">
+        <h1 class="ui-title">Send Scheduled Info</h1>
+        <div class="ui-buttons" slot="end">
+          <button class="btn ui-button btn-primary" type="button" (click)="closeAppointmentInfoModal()">Close</button>
+        </div>
+      </div>
+    </header>
+    <div class="ui-content app-padding app-content appointment-info-modal">
+      <section class="appointment-summary">
+        <div>
+          <span class="summary-label">Customer</span>
+          <strong>{{ appointmentInfoCustomer()?.name || 'Customer' }}</strong>
+        </div>
+        <div>
+          <span class="summary-label">Appointment</span>
+          <strong>{{ appointmentInfoWhenLabel() }}</strong>
+        </div>
+      </section>
+
+      <section class="appointment-channel-panel">
+        <label class="channel-row" [class.disabled]="!appointmentInfoEmailAddress()">
+          <input class="form-check-input"
+            type="checkbox"
+            [ngModel]="appointmentInfoSendEmail()"
+            (ngModelChange)="appointmentInfoSendEmail.set($event)"
+            [disabled]="!appointmentInfoEmailAddress()" />
+          <span>
+            <strong>Email</strong>
+            <small>{{ appointmentInfoEmailAddress() || 'No customer email on file' }}</small>
+          </span>
+        </label>
+        <label class="channel-row" [class.disabled]="!appointmentInfoPhoneNumber()">
+          <input class="form-check-input"
+            type="checkbox"
+            [ngModel]="appointmentInfoSendSms()"
+            (ngModelChange)="appointmentInfoSendSms.set($event)"
+            [disabled]="!appointmentInfoPhoneNumber()" />
+          <span>
+            <strong>SMS</strong>
+            <small>{{ appointmentInfoPhoneNumber() || 'No customer phone on file' }}</small>
+          </span>
+        </label>
+      </section>
+
+      <section class="appointment-message-panel">
+        <label for="schedule-appointment-message">Message</label>
+        <textarea class="form-control"
+          id="schedule-appointment-message"
+          rows="5"
+          [ngModel]="appointmentInfoMessage()"
+          (ngModelChange)="appointmentInfoMessage.set($event)">
+        </textarea>
+      </section>
+
+      <section class="appointment-preview-grid">
+        <div class="appointment-preview">
+          <div class="preview-title">SMS Preview</div>
+          <p>{{ appointmentInfoSmsPreview() }}</p>
+        </div>
+        <div class="appointment-preview">
+          <div class="preview-title">Email Preview</div>
+          <p>{{ appointmentInfoEmailPreview() }}</p>
+        </div>
+      </section>
+
+      @if (appointmentInfoError()) {
+        <p class="appointment-error">{{ appointmentInfoError() }}</p>
+      }
+
+      <div class="appointment-actions">
+        <button class="btn ui-button btn-outline-primary" type="button" (click)="closeAppointmentInfoModal()">Skip for now</button>
+        <button class="btn ui-button btn-primary" type="button" [disabled]="!appointmentInfoCanSend()" (click)="sendAppointmentInfo()">
+          {{ appointmentInfoSending() ? 'Sending...' : 'Send Info' }}
+        </button>
+      </div>
+    </div>
+  </ng-template>
+</ui-modal>

@@ -4,10 +4,7 @@
 }
 
 .register-page {
-  --padding-top: 30px;
-  --padding-bottom: 30px;
-  --padding-start: 18px;
-  --padding-end: 18px;
+  padding: 1.5rem 1rem;
 }
 
 .register-shell {
@@ -21,7 +18,7 @@
 
 .marketing-panel {
   min-height: 320px;
-  border-radius: 18px;
+  border-radius: var(--tblr-border-radius);
   overflow: hidden;
   position: relative;
   border: 1px solid var(--app-border-subtle);
@@ -77,7 +74,7 @@
 }
 
 .register-panel {
-  border-radius: 18px;
+  border-radius: var(--tblr-border-radius);
   border: 1px solid var(--app-border-subtle);
   padding: 22px 20px;
 }
@@ -102,8 +99,8 @@
 
 .form-card {
   border: 1px solid var(--app-border-subtle);
-  border-radius: 14px;
-  background: rgba(35, 49, 72, 0.42);
+  border-radius: var(--tblr-border-radius);
+  background: var(--tblr-bg-surface-secondary);
   padding: 14px;
   margin-top: 12px;
 }
@@ -139,7 +136,7 @@
   align-items: center;
   gap: 7px;
   font-size: 13px;
-  color: #d7dfeb;
+  color: var(--tblr-body-color);
 }
 
 .location-mode-option input[type='radio'] {
@@ -164,7 +161,7 @@
   appearance: none;
   border: 0;
   background: none;
-  color: var(--ion-color-primary, #1d6bff);
+  color: var(--ui-color-primary, #1d6bff);
   font-weight: 600;
   font-size: 12px;
   letter-spacing: 0.02em;
@@ -179,7 +176,7 @@
 }
 
 .optional-billing-prompt {
-  background: rgba(20, 34, 54, 0.36);
+  background: var(--tblr-bg-surface-secondary);
 }
 
 .billing-toggle-btn {
@@ -197,9 +194,9 @@
 .plan-btn {
   appearance: none;
   border: 1px solid var(--app-border-subtle);
-  background: rgba(30, 43, 64, 0.58);
-  color: #cbd5e1;
-  border-radius: 10px;
+  background: var(--tblr-bg-surface-secondary);
+  color: var(--tblr-body-color);
+  border-radius: var(--tblr-border-radius);
   padding: 10px 12px;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -227,13 +224,13 @@
 .plan-btn:hover,
 .plan-btn:focus-visible {
   border-color: rgba(78, 142, 255, 0.72);
-  color: #e5efff;
+  color: var(--tblr-body-color);
 }
 
 .plan-btn.active {
   border-color: rgba(78, 142, 255, 0.9);
-  background: rgba(29, 107, 255, 0.2);
-  color: #dbe8ff;
+  background: var(--tblr-primary-lt);
+  color: var(--tblr-body-color);
 }
 
 .plan-btn:disabled {
@@ -241,18 +238,18 @@
   cursor: default;
 }
 
-.register-panel ion-item {
+.register-panel .ui-item {
   --background: rgba(55, 65, 81, 0.56);
   --border-color: transparent;
   --inner-border-width: 0;
   --padding-start: 12px;
   --inner-padding-end: 12px;
   border: 1px solid var(--app-border-subtle);
-  border-radius: 10px;
+  border-radius: var(--tblr-border-radius);
   margin-top: 10px;
 }
 
-.register-panel ion-item ion-label {
+.register-panel .ui-item .ui-label {
   margin-bottom: 4px;
   font-size: 12px;
   opacity: 0.9;
@@ -261,7 +258,7 @@
 .address-lookup-box {
   margin-top: 6px;
   border: 1px solid var(--app-border-subtle);
-  border-radius: 10px;
+  border-radius: var(--tblr-border-radius);
   background: var(--app-surface-bg);
   max-height: 220px;
   overflow-y: auto;
@@ -293,7 +290,7 @@
   color: var(--app-text-muted);
 }
 
-.register-panel ion-button {
+.register-panel .ui-button {
   margin-top: 12px;
   min-height: 44px;
 }
@@ -312,11 +309,11 @@
 }
 
 .auth-hint.error {
-  color: var(--ion-color-danger, #d14343);
+  color: var(--ui-color-danger, #d14343);
 }
 
 .auth-hint.warning {
-  color: var(--ion-color-warning, #d97706);
+  color: var(--ui-color-warning, #d97706);
 }
 
 @media (max-width: 560px) {

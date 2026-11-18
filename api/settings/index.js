@@ -1,6 +1,8 @@
 const { TableClient, isSqlBackendEnabled } = require("../_shared/table-client");
 const { resolveTenantId, sanitizeTenantId } = require("../_shared/tenant");
 const { requirePrincipal } = require("../_shared/auth");
+const { gatewayConfig, hasNoCardSurcharge } = require("../_shared/paylynx");
+const { validShopTimeZone } = require("../_shared/shop-hours");
 let AzureTableClient = null;
 try {
   AzureTableClient = require("@azure/data-tables").TableClient;
@@ -9,6 +11,7 @@ try {
 }
 
 const TABLE = "appsettings";
+const SCHEDULE_SETTINGS_KEY = "schedule.settings";
 const ORDERS_INBOX_EMAIL_KEY = "orders.inbox.email";
 const DEFAULT_ORDERS_INBOX_DOMAIN = "pathflow-app.com";
 
@@ -176,6 +179,10 @@ module.exports = async function (context, req) {
             } catch (_) {}
           }
         }
+        if (!setting && key === SCHEDULE_SETTINGS_KEY && tenantId === "primary-location") {
+          setting = await getSetting(client, "main", key) ||
+            (legacyClient ? await getSetting(legacyClient, "main", key) : null);
+        }
         if (!setting) {
           context.res = json(200, { ok: true, tenantId, key, value: null, updatedAt: "" });
           return;
@@ -262,11 +269,38 @@ module.exports = async function (context, req) {
       return;
     }
 
+    let value = body.value;
+    if (key === "billing.paymentProviders") {
+      if (!principal.userRoles?.includes("admin")) {
+        context.res = json(403, { error: "Admin access is required to configure payment gateways." });
+        return;
+      }
+      const paylynx = value?.providers?.find(provider => provider?.key === "paylynx" && provider.connected === true);
+      if (paylynx) {
+        const config = gatewayConfig(tenantId, paylynx.mode);
+        if (!config) {
+          context.res = json(400, { error: "Configure PayLynx server credentials for this location and selected mode before connecting." });
+          return;
+        }
+        if (!await hasNoCardSurcharge(config)) {
+          context.res = json(400, { error: "PayLynx could not verify this account and its card fees. Check the server keys and source permissions." });
+          return;
+        }
+      }
+    }
+    if (key === SCHEDULE_SETTINGS_KEY && value && Object.hasOwn(value, "timeZone")) {
+      const timeZone = validShopTimeZone(value.timeZone);
+      if (!timeZone) {
+        context.res = json(400, { error: "Select a supported shop time zone." });
+        return;
+      }
+      value = { ...value, timeZone };
+    }
     const now = new Date().toISOString();
-    await upsertSetting(client, tenantId, key, body.value, now);
+    await upsertSetting(client, tenantId, key, value, now);
     if (legacyClient) {
       try {
-        await upsertSetting(legacyClient, tenantId, key, body.value, now);
+        await upsertSetting(legacyClient, tenantId, key, value, now);
       } catch (_) {}
     }
 
@@ -274,7 +308,7 @@ module.exports = async function (context, req) {
       ok: true,
       tenantId,
       key,
-      value: body.value == null ? null : body.value,
+      value: value == null ? null : value,
       updatedAt: now
     });
   } catch (err) {

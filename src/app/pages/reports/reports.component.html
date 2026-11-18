@@ -1,23 +1,25 @@
-<ion-header class="glass-header">
-  <ion-toolbar>
-    <ion-buttons slot="start">
+<header class="ui-header app-header">
+  <div class="ui-toolbar">
+    <div class="ui-buttons" slot="start">
       <app-page-back-button></app-page-back-button>
-    </ion-buttons>
-    <ion-title>Reports</ion-title>
+    </div>
+    <h1 class="ui-title">Reports</h1>
     <app-company-switcher></app-company-switcher>
-    <ion-buttons slot="end" class="ion-margin-end">
+    <div slot="end" class="ui-buttons me-2">
       <app-user-menu></app-user-menu>
-    </ion-buttons>
-  </ion-toolbar>
-</ion-header>
+    </div>
+  </div>
+</header>
 
-<ion-content class="ion-padding glass-bg reports-content">
+<div class="ui-content app-padding app-content reports-content">
   <div class="reports-toolbar">
     <div class="reports-toolbar-line">
-      <div class="reports-meta" *ngIf="data() as report">Updated {{ formatDateTime(report.generatedAt) }}</div>
+      @if (data(); as report) {
+        <div class="reports-meta">Updated {{ formatDateTime(report.generatedAt) }}</div>
+      }
       <label class="reports-select-wrap">
         <span>Start</span>
-        <input
+        <input class="form-control"
           type="date"
           [value]="periodStart()"
           (change)="periodStart.set($any($event.target).value)"
@@ -25,21 +27,21 @@
       </label>
       <label class="reports-select-wrap">
         <span>End</span>
-        <input
+        <input class="form-control"
           type="date"
           [value]="periodEnd()"
           (change)="periodEnd.set($any($event.target).value)"
           aria-label="Report end date">
       </label>
-      <ion-button size="small" fill="outline" (click)="applyDateRange()" [disabled]="loading()">
+      <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="applyDateRange()" [disabled]="loading()">
         Apply Range
-      </ion-button>
-      <ion-button size="small" fill="outline" (click)="downloadCurrentReport()" [disabled]="!data() || loading()">
+      </button>
+      <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="downloadCurrentReport()" [disabled]="!data() || loading()">
         Download
-      </ion-button>
+      </button>
       <label class="reports-select-wrap horizon-select-end">
         <span>Forecast Horizon</span>
-        <select [value]="forecastMonths()" (change)="forecastMonths.set($any($event.target).value); refresh()">
+        <select class="form-select" [value]="forecastMonths()" (change)="forecastMonths.set($any($event.target).value); refresh()">
           <option value="3">3 months</option>
           <option value="6">6 months</option>
           <option value="9">9 months</option>
@@ -52,206 +54,246 @@
     </div>
   </div>
 
-  <div class="reports-feedback success" *ngIf="info()">{{ info() }}</div>
-  <div class="reports-feedback error" *ngIf="error()">{{ error() }}</div>
-  <div class="reports-feedback warning warning-with-action" *ngFor="let warning of visibleEconomicsWarnings()">
-    <div class="warning-body">
-      <span>{{ warning.message }}</span>
-      <ul class="warning-details" *ngIf="warning.details?.length">
-        <li *ngFor="let detail of warning.details">{{ detail }}</li>
-      </ul>
-      <div class="warning-more" *ngIf="(warning.moreCount || 0) > 0">
-        +{{ warning.moreCount }} more line item(s)
+  @if (info()) {
+    <div class="reports-feedback success">{{ info() }}</div>
+  }
+  @if (error()) {
+    <div class="reports-feedback error">{{ error() }}</div>
+  }
+  @if (data()?.tables?.salesPeriods) {
+    <section class="app-surface app-padding">
+      <h3>Invoiced Sales and Collections</h3>
+      <p>Collections reflect payments recorded in Pathflow's payment ledger. Reconcile older transactions before using these totals for a historical close.</p>
+      <label class="reports-select-wrap">
+        <span>Group by</span>
+        <select class="form-select" [value]="salesGrouping()" (change)="salesGrouping.set($any($event.target).value)">
+          <option value="month">Month</option>
+          <option value="quarter">Quarter</option>
+          <option value="year">Year</option>
+        </select>
+      </label>
+      @if (salesPeriods().length) {
+        <table>
+          <thead>
+            <tr><th>Period</th><th>Invoices</th><th>Invoiced</th><th>Tax included</th><th>Collected</th><th>Refunded</th></tr>
+          </thead>
+          <tbody>
+            @for (row of salesPeriods(); track row) {
+              <tr>
+                <td>{{ row.period }}</td><td>{{ row.invoices }}</td><td>{{ formatCurrency(row.invoiced) }}</td>
+                <td>{{ formatCurrency(row.taxes) }}</td><td>{{ formatCurrency(row.collected) }}</td><td>{{ formatCurrency(row.refunded) }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      } @else {
+        <p>No invoice or payment records in this range.</p>
+      }
+    </section>
+  }
+  @for (warning of visibleEconomicsWarnings(); track warning) {
+    <div class="reports-feedback warning warning-with-action">
+      <div class="warning-body">
+        <span>{{ warning.message }}</span>
+        @if (warning.details?.length) {
+          <ul class="warning-details">
+            @for (detail of warning.details; track detail) {
+              <li>{{ detail }}</li>
+            }
+          </ul>
+        }
+        @if ((warning.moreCount || 0) > 0) {
+          <div class="warning-more">
+            +{{ warning.moreCount }} more line item(s)
+          </div>
+        }
       </div>
+      @if (warning.link) {
+        <a
+          class="reports-warning-link"
+          [routerLink]="warning.link"
+          [queryParams]="warning.queryParams || null">
+          {{ warning.actionLabel || 'Fix now' }}
+        </a>
+      }
     </div>
-    <a
-      *ngIf="warning.link"
-      class="reports-warning-link"
-      [routerLink]="warning.link"
-      [queryParams]="warning.queryParams || null">
-      {{ warning.actionLabel || 'Fix now' }}
-    </a>
-  </div>
+  }
 
   <div class="reports-section-heading section-forecast">
     <h3>Forecast Outlook</h3>
     <p>Forward-looking projections driven by schedule load, labor accuracy, and forecast cash movement.</p>
   </div>
 
-  <section class="forecast-insights-grid section-forecast-cards" *ngIf="forecastCoverageCount() > 0">
-    <article class="kpi-card glass-surface">
-      <div class="kpi-head">
-        <ion-icon name="calendar-outline"></ion-icon>
-        <span>Forecast Window</span>
-        <button
-          type="button"
-          class="kpi-info"
-          aria-label="Forecast window info"
-          data-tooltip="Shows how many months forward are included in this forecast, plus total scheduled and pipeline jobs in that horizon.">
-          <ion-icon name="information-circle-outline"></ion-icon>
-        </button>
-      </div>
-      <div class="kpi-value">{{ forecastHorizonLabel() }}</div>
-      <div class="kpi-sub">
-        {{ forecastScheduledJobs() }} scheduled jobs / {{ forecastPipelineJobs() }} pipeline jobs
-      </div>
-    </article>
-
-    <article class="kpi-card glass-surface">
-      <div class="kpi-head">
-        <ion-icon name="trending-up-outline"></ion-icon>
-        <span>Projected Revenue</span>
-        <button
-          type="button"
-          class="kpi-info"
-          aria-label="Projected revenue info"
-          data-tooltip="Projected total revenue for the selected forecast horizon from scheduled and weighted pipeline production rows.">
-          <ion-icon name="information-circle-outline"></ion-icon>
-        </button>
-      </div>
-      <div class="kpi-value">{{ formatCurrency(projectedRevenueTotal()) }}</div>
-      <div class="kpi-sub">{{ formatCurrency(projectedRevenueMonthlyAvg()) }} avg per month</div>
-    </article>
-
-    <article class="kpi-card glass-surface">
-      <div class="kpi-head">
-        <ion-icon name="construct-outline"></ion-icon>
-        <span>Labor Capacity</span>
-        <button
-          type="button"
-          class="kpi-info"
-          aria-label="Labor capacity info"
-          data-tooltip="Schedule fill ratio and labor hours adjusted by your billed-vs-actual labor accuracy trend.">
-          <ion-icon name="information-circle-outline"></ion-icon>
-        </button>
-      </div>
-      <div class="kpi-value">{{ formatPercent(forecastScheduleFillPct()) }}</div>
-      <div class="kpi-sub">
-        {{ forecastLaborHoursAdjusted() }} hrs adjusted ({{ forecastLaborHoursVariance() > 0 ? '+' : '' }}{{ forecastLaborHoursVariance() }} vs plan)
-      </div>
-    </article>
-
-    <article class="kpi-card glass-surface">
-      <div class="kpi-head">
-        <ion-icon name="cash-outline"></ion-icon>
-        <span>Net Cash (Horizon)</span>
-        <button
-          type="button"
-          class="kpi-info"
-          aria-label="Net cash info"
-          data-tooltip="Projected cash in minus cash out across the selected forecast horizon.">
-          <ion-icon name="information-circle-outline"></ion-icon>
-        </button>
-      </div>
-      <div class="kpi-value" [class.negative]="projectedCashNet() < 0">{{ formatCurrency(projectedCashNet()) }}</div>
-      <div class="kpi-sub">
-        {{ formatCurrency(projectedInflowTotal()) }} in / {{ formatCurrency(projectedOutflowTotal()) }} out
-      </div>
-    </article>
-  </section>
+  @if (forecastCoverageCount() > 0) {
+    <section class="forecast-insights-grid section-forecast-cards">
+      <article class="kpi-card app-surface">
+        <div class="kpi-head">
+          <ui-icon name="calendar-event"></ui-icon>
+          <span>Forecast Window</span>
+          <button
+            type="button"
+            class="kpi-info"
+            aria-label="Forecast window info"
+            data-tooltip="Shows how many months forward are included in this forecast, plus total scheduled and pipeline jobs in that horizon.">
+            <ui-icon name="info-circle"></ui-icon>
+          </button>
+        </div>
+        <div class="kpi-value">{{ forecastHorizonLabel() }}</div>
+        <div class="kpi-sub">
+          {{ forecastScheduledJobs() }} scheduled jobs / {{ forecastPipelineJobs() }} pipeline jobs
+        </div>
+      </article>
+      <article class="kpi-card app-surface">
+        <div class="kpi-head">
+          <ui-icon name="trending-up"></ui-icon>
+          <span>Projected Revenue</span>
+          <button
+            type="button"
+            class="kpi-info"
+            aria-label="Projected revenue info"
+            data-tooltip="Projected total revenue for the selected forecast horizon from scheduled and weighted pipeline production rows.">
+            <ui-icon name="info-circle"></ui-icon>
+          </button>
+        </div>
+        <div class="kpi-value">{{ formatCurrency(projectedRevenueTotal()) }}</div>
+        <div class="kpi-sub">{{ formatCurrency(projectedRevenueMonthlyAvg()) }} avg per month</div>
+      </article>
+      <article class="kpi-card app-surface">
+        <div class="kpi-head">
+          <ui-icon name="tools"></ui-icon>
+          <span>Labor Capacity</span>
+          <button
+            type="button"
+            class="kpi-info"
+            aria-label="Labor capacity info"
+            data-tooltip="Schedule fill ratio and labor hours adjusted by your billed-vs-actual labor accuracy trend.">
+            <ui-icon name="info-circle"></ui-icon>
+          </button>
+        </div>
+        <div class="kpi-value">{{ formatPercent(forecastScheduleFillPct()) }}</div>
+        <div class="kpi-sub">
+          {{ forecastLaborHoursAdjusted() }} hrs adjusted ({{ forecastLaborHoursVariance() > 0 ? '+' : '' }}{{ forecastLaborHoursVariance() }} vs plan)
+        </div>
+      </article>
+      <article class="kpi-card app-surface">
+        <div class="kpi-head">
+          <ui-icon name="cash"></ui-icon>
+          <span>Net Cash (Horizon)</span>
+          <button
+            type="button"
+            class="kpi-info"
+            aria-label="Net cash info"
+            data-tooltip="Projected cash in minus cash out across the selected forecast horizon.">
+            <ui-icon name="info-circle"></ui-icon>
+          </button>
+        </div>
+        <div class="kpi-value" [class.negative]="projectedCashNet() < 0">{{ formatCurrency(projectedCashNet()) }}</div>
+        <div class="kpi-sub">
+          {{ formatCurrency(projectedInflowTotal()) }} in / {{ formatCurrency(projectedOutflowTotal()) }} out
+        </div>
+      </article>
+    </section>
+  }
 
   <div class="reports-section-heading section-sales">
     <h3>Sales Performance</h3>
     <p>Top-level conversion, sold revenue, and margin KPIs for the selected date range.</p>
   </div>
 
-  <section class="kpi-grid section-sales-cards" *ngIf="effectiveKpi() as kpi">
-    <article class="kpi-card glass-surface">
-      <div class="kpi-head">
-        <ion-icon name="bar-chart-outline"></ion-icon>
-        <span>Bid to Sold</span>
-        <button
-          type="button"
-          class="kpi-info"
-          aria-label="Bid to sold info"
-          data-tooltip="Quote-to-invoice conversion rate in the selected reporting date range.">
-          <ion-icon name="information-circle-outline"></ion-icon>
-        </button>
-      </div>
-      <div class="kpi-value">{{ formatPercent(kpi.quote_to_invoice_rate_pct) }}</div>
-      <div class="kpi-sub">Quote to invoice conversion</div>
-    </article>
-
-    <article class="kpi-card glass-surface">
-      <div class="kpi-head">
-        <ion-icon name="trending-up-outline"></ion-icon>
-        <span>Lead to Quote</span>
-        <button
-          type="button"
-          class="kpi-info"
-          aria-label="Lead to quote info"
-          data-tooltip="Percentage of leads that became quotes in the selected reporting date range.">
-          <ion-icon name="information-circle-outline"></ion-icon>
-        </button>
-      </div>
-      <div class="kpi-value">{{ formatPercent(kpi.lead_to_quote_rate_pct) }}</div>
-      <div class="kpi-sub">Lead intake conversion</div>
-    </article>
-
-    <article class="kpi-card glass-surface">
-      <div class="kpi-head">
-        <ion-icon name="cash-outline"></ion-icon>
-        <span>Sold Revenue</span>
-        <button
-          type="button"
-          class="kpi-info"
-          aria-label="Sold revenue info"
-          data-tooltip="Total sold invoice revenue (accepted/completed/paid invoices) in the selected reporting date range.">
-          <ion-icon name="information-circle-outline"></ion-icon>
-        </button>
-      </div>
-      <div class="kpi-value">{{ formatCurrency(unitEconomics().totalRevenue) }}</div>
-      <div class="kpi-sub">{{ unitEconomics().invoiceCount }} sold invoice(s) in period</div>
-    </article>
-
-    <article class="kpi-card glass-surface">
-      <div class="kpi-head">
-        <ion-icon name="stats-chart-outline"></ion-icon>
-        <span>Gross Margin</span>
-        <button
-          type="button"
-          class="kpi-info"
-          aria-label="Gross margin info"
-          data-tooltip="Gross profit percentage based on sold revenue minus estimated parts and labor costs in the selected date range.">
-          <ion-icon name="information-circle-outline"></ion-icon>
-        </button>
-      </div>
-      <div class="kpi-value">{{ formatPercent(unitEconomics().totalMarginPct) }}</div>
-      <div class="kpi-sub">{{ formatCurrency(unitEconomics().totalGrossProfit) }} gross profit</div>
-    </article>
-
-    <article class="kpi-card glass-surface">
-      <div class="kpi-head">
-        <ion-icon name="construct-outline"></ion-icon>
-        <span>Parts Margin</span>
-        <button
-          type="button"
-          class="kpi-info"
-          aria-label="Parts margin info"
-          data-tooltip="Parts-only margin: parts sold amount minus mapped part costs from inventory for sold invoices.">
-          <ion-icon name="information-circle-outline"></ion-icon>
-        </button>
-      </div>
-      <div class="kpi-value">{{ formatPercent(unitEconomics().partMarginPct) }}</div>
-      <div class="kpi-sub">{{ formatCurrency(unitEconomics().partRevenue) }} sold / {{ formatCurrency(unitEconomics().partCost) }} cost</div>
-    </article>
-
-    <article class="kpi-card glass-surface">
-      <div class="kpi-head">
-        <ion-icon name="pulse-outline"></ion-icon>
-        <span>Labor Margin</span>
-        <button
-          type="button"
-          class="kpi-info"
-          aria-label="Labor margin info"
-          data-tooltip="Labor-only margin: labor sold amount minus mapped labor costs and tracked-hours cost adjustments.">
-          <ion-icon name="information-circle-outline"></ion-icon>
-        </button>
-      </div>
-      <div class="kpi-value">{{ formatPercent(unitEconomics().laborMarginPct) }}</div>
-      <div class="kpi-sub">{{ formatCurrency(unitEconomics().laborRevenue) }} sold / {{ formatCurrency(unitEconomics().laborCost) }} cost</div>
-    </article>
-  </section>
+  @if (effectiveKpi(); as kpi) {
+    <section class="kpi-grid section-sales-cards">
+      <article class="kpi-card app-surface">
+        <div class="kpi-head">
+          <ui-icon name="chart-bar"></ui-icon>
+          <span>Bid to Sold</span>
+          <button
+            type="button"
+            class="kpi-info"
+            aria-label="Bid to sold info"
+            data-tooltip="Quote-to-invoice conversion rate in the selected reporting date range.">
+            <ui-icon name="info-circle"></ui-icon>
+          </button>
+        </div>
+        <div class="kpi-value">{{ formatPercent(kpi.quote_to_invoice_rate_pct) }}</div>
+        <div class="kpi-sub">Quote to invoice conversion</div>
+      </article>
+      <article class="kpi-card app-surface">
+        <div class="kpi-head">
+          <ui-icon name="trending-up"></ui-icon>
+          <span>Lead to Quote</span>
+          <button
+            type="button"
+            class="kpi-info"
+            aria-label="Lead to quote info"
+            data-tooltip="Percentage of leads that became quotes in the selected reporting date range.">
+            <ui-icon name="info-circle"></ui-icon>
+          </button>
+        </div>
+        <div class="kpi-value">{{ formatPercent(kpi.lead_to_quote_rate_pct) }}</div>
+        <div class="kpi-sub">Lead intake conversion</div>
+      </article>
+      <article class="kpi-card app-surface">
+        <div class="kpi-head">
+          <ui-icon name="cash"></ui-icon>
+          <span>Sold Revenue</span>
+          <button
+            type="button"
+            class="kpi-info"
+            aria-label="Sold revenue info"
+            data-tooltip="Total sold invoice revenue (accepted/completed/paid invoices) in the selected reporting date range.">
+            <ui-icon name="info-circle"></ui-icon>
+          </button>
+        </div>
+        <div class="kpi-value">{{ formatCurrency(reportSoldRevenue()) }}</div>
+        <div class="kpi-sub">{{ reportSoldInvoiceCount() }} sold invoice(s) in period</div>
+      </article>
+      <article class="kpi-card app-surface">
+        <div class="kpi-head">
+          <ui-icon name="chart-histogram"></ui-icon>
+          <span>Gross Margin</span>
+          <button
+            type="button"
+            class="kpi-info"
+            aria-label="Gross margin info"
+            data-tooltip="Gross profit percentage based on sold revenue minus estimated parts and labor costs in the selected date range.">
+            <ui-icon name="info-circle"></ui-icon>
+          </button>
+        </div>
+        <div class="kpi-value">{{ formatPercent(reportGrossMarginPct()) }}</div>
+        <div class="kpi-sub">{{ formatCurrency(reportGrossProfit()) }} gross profit</div>
+      </article>
+      <article class="kpi-card app-surface">
+        <div class="kpi-head">
+          <ui-icon name="tools"></ui-icon>
+          <span>Parts Margin</span>
+          <button
+            type="button"
+            class="kpi-info"
+            aria-label="Parts margin info"
+            data-tooltip="Parts-only margin: parts sold amount minus mapped part costs from inventory for sold invoices.">
+            <ui-icon name="info-circle"></ui-icon>
+          </button>
+        </div>
+        <div class="kpi-value">{{ formatPercent(unitEconomics().partMarginPct) }}</div>
+        <div class="kpi-sub">{{ formatCurrency(unitEconomics().partRevenue) }} sold / {{ formatCurrency(unitEconomics().partCost) }} cost</div>
+      </article>
+      <article class="kpi-card app-surface">
+        <div class="kpi-head">
+          <ui-icon name="activity"></ui-icon>
+          <span>Labor Margin</span>
+          <button
+            type="button"
+            class="kpi-info"
+            aria-label="Labor margin info"
+            data-tooltip="Labor-only margin: labor sold amount minus mapped labor costs and tracked-hours cost adjustments.">
+            <ui-icon name="info-circle"></ui-icon>
+          </button>
+        </div>
+        <div class="kpi-value">{{ formatPercent(unitEconomics().laborMarginPct) }}</div>
+        <div class="kpi-sub">{{ formatCurrency(unitEconomics().laborRevenue) }} sold / {{ formatCurrency(unitEconomics().laborCost) }} cost</div>
+      </article>
+    </section>
+  }
 
   <div class="reports-section-heading section-pipeline">
     <h3>Pipeline &amp; Cashflow</h3>
@@ -259,11 +301,11 @@
   </div>
 
   <section class="reports-grid section-pipeline-cards">
-    <ion-card class="glass-surface">
-      <ion-card-header>
-        <ion-card-title>Parts &amp; Labor Unit Economics</ion-card-title>
-      </ion-card-header>
-      <ion-card-content>
+    <div class="card ui-card app-surface">
+      <div class="card-header ui-card-header">
+        <h2 class="card-title ui-card-title">Parts &amp; Labor Unit Economics</h2>
+      </div>
+      <div class="card-body ui-card-content">
         <div class="trend-wrap">
           <table class="trend-table trend-table-tight economics-table">
             <thead>
@@ -300,72 +342,78 @@
             </tbody>
           </table>
         </div>
-      </ion-card-content>
-    </ion-card>
+      </div>
+    </div>
 
-    <ion-card class="glass-surface">
-      <ion-card-header>
-        <ion-card-title>Pipeline Value by Stage</ion-card-title>
-      </ion-card-header>
-      <ion-card-content>
-        <div class="funnel-list" *ngIf="funnel().length; else noFunnelData">
-          <div class="funnel-row" *ngFor="let row of funnel(); trackBy: trackFunnel">
-            <div class="funnel-left">
-              <div class="row-title">{{ row.stage_label }}</div>
-              <div class="row-sub">{{ row.item_count }} items</div>
-            </div>
-            <div class="funnel-middle">
-              <div class="stage-bar">
-                <span [style.width]="stageAmountWidth(row.amount)"></span>
+    <div class="card ui-card app-surface">
+      <div class="card-header ui-card-header">
+        <h2 class="card-title ui-card-title">Pipeline Value by Stage</h2>
+      </div>
+      <div class="card-body ui-card-content">
+        @if (funnel().length) {
+          <div class="funnel-list">
+            @for (row of funnel(); track trackFunnel($index, row)) {
+              <div class="funnel-row">
+                <div class="funnel-left">
+                  <div class="row-title">{{ row.stage_label }}</div>
+                  <div class="row-sub">{{ row.item_count }} items</div>
+                </div>
+                <div class="funnel-middle">
+                  <div class="stage-bar">
+                    <span [style.width]="stageAmountWidth(row.amount)"></span>
+                  </div>
+                </div>
+                <div class="row-right">
+                  <div class="row-title">{{ formatCurrency(row.amount) }}</div>
+                  <div class="row-sub">{{ formatPercent(row.conversion_from_previous_pct) }}</div>
+                </div>
               </div>
-            </div>
-            <div class="row-right">
-              <div class="row-title">{{ formatCurrency(row.amount) }}</div>
-              <div class="row-sub">{{ formatPercent(row.conversion_from_previous_pct) }}</div>
-            </div>
+            }
           </div>
-        </div>
-        <ng-template #noFunnelData>
+        } @else {
           <div class="reports-empty">No funnel data yet.</div>
-        </ng-template>
-      </ion-card-content>
-    </ion-card>
+        }
+      </div>
+    </div>
 
-    <ion-card class="glass-surface">
-      <ion-card-header>
-        <ion-card-title>Cashflow Forecast (In / Out)</ion-card-title>
-      </ion-card-header>
-      <ion-card-content>
-        <div class="trend-wrap" *ngIf="nextCashflowRows().length; else noCashflowData">
-          <table class="trend-table trend-table-tight">
-            <thead>
-              <tr>
-                <th>Month</th>
-                <th>Inflow</th>
-                <th>Outflow</th>
-                <th>Net</th>
-                <th>Ending Cash</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr *ngFor="let row of nextCashflowRows(); trackBy: trackCashflowForecast">
-                <td>{{ formatDate(row.period_start) }}</td>
-                <td>{{ formatCurrency(row.projected_inflow) }}</td>
-                <td>{{ formatCurrency(row.projected_outflow) }}</td>
-                <td [class.negative]="row.net_cashflow < 0">{{ formatCurrency(row.net_cashflow) }}</td>
-                <td>{{ formatCurrency(row.ending_cash) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <ng-template #noCashflowData>
+    <div class="card ui-card app-surface">
+      <div class="card-header ui-card-header">
+        <h2 class="card-title ui-card-title">Cashflow Forecast (In / Out)</h2>
+      </div>
+      <div class="card-body ui-card-content">
+        @if (nextCashflowRows().length) {
+          <div class="trend-wrap">
+            <table class="trend-table trend-table-tight">
+              <thead>
+                <tr>
+                  <th>Month</th>
+                  <th>Inflow</th>
+                  <th>Outflow</th>
+                  <th>Net</th>
+                  <th>Ending Cash</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (row of nextCashflowRows(); track trackCashflowForecast($index, row)) {
+                  <tr>
+                    <td>{{ formatDate(row.period_start) }}</td>
+                    <td>{{ formatCurrency(row.projected_inflow) }}</td>
+                    <td>{{ formatCurrency(row.projected_outflow) }}</td>
+                    <td [class.negative]="row.net_cashflow < 0">{{ formatCurrency(row.net_cashflow) }}</td>
+                    <td>{{ formatCurrency(row.ending_cash) }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        } @else {
           <div class="reports-empty">No cashflow forecast data yet.</div>
-        </ng-template>
+        }
         <div class="card-summary">
           Net horizon cashflow: <strong [class.negative]="projectedCashNet() < 0">{{ formatCurrency(projectedCashNet()) }}</strong>
         </div>
-      </ion-card-content>
-    </ion-card>
+      </div>
+    </div>
   </section>
 
   <div class="reports-section-heading section-profitability">
@@ -374,76 +422,84 @@
   </div>
 
   <section class="reports-grid section-profitability-cards">
-    <ion-card class="glass-surface">
-      <ion-card-header>
-        <ion-card-title>Profit Matrix (Per Job / Sold Invoice)</ion-card-title>
-      </ion-card-header>
-      <ion-card-content>
-        <div class="trend-wrap" *ngIf="topJobProfitRows().length; else noJobProfitRows">
-          <table class="trend-table">
-            <thead>
-              <tr>
-                <th>Invoice</th>
-                <th>Customer</th>
-                <th>Sold Date</th>
-                <th>Parts (Sold / Cost)</th>
-                <th>Labor (Sold / Cost)</th>
-                <th>Total Sold</th>
-                <th>Total Cost</th>
-                <th>Gross Profit</th>
-                <th>Margin</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr *ngFor="let row of topJobProfitRows(); trackBy: trackJobProfitRow">
-                <td>{{ row.invoiceNumber || row.invoiceId || '-' }}</td>
-                <td>{{ row.customerName }}</td>
-                <td>{{ row.soldDateLabel }}</td>
-                <td>{{ formatCurrency(row.partSold) }} / {{ formatCurrency(row.partCost) }}</td>
-                <td>{{ formatCurrency(row.laborSold) }} / {{ formatCurrency(row.laborCost) }}</td>
-                <td>{{ formatCurrency(row.totalSold) }}</td>
-                <td>{{ formatCurrency(row.totalCost) }}</td>
-                <td>{{ formatCurrency(row.grossProfit) }}</td>
-                <td>{{ formatPercent(row.marginPct) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <ng-template #noJobProfitRows>
+    <div class="card ui-card app-surface">
+      <div class="card-header ui-card-header">
+        <h2 class="card-title ui-card-title">Profit Matrix (Per Job / Sold Invoice)</h2>
+      </div>
+      <div class="card-body ui-card-content">
+        @if (topJobProfitRows().length) {
+          <div class="trend-wrap">
+            <table class="trend-table">
+              <thead>
+                <tr>
+                  <th>Invoice</th>
+                  <th>Customer</th>
+                  <th>Sold Date</th>
+                  <th>Parts (Sold / Cost)</th>
+                  <th>Labor (Sold / Cost)</th>
+                  <th>Total Sold</th>
+                  <th>Total Cost</th>
+                  <th>Gross Profit</th>
+                  <th>Margin</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (row of topJobProfitRows(); track trackJobProfitRow($index, row)) {
+                  <tr>
+                    <td>{{ row.invoiceNumber || row.invoiceId || '-' }}</td>
+                    <td>{{ row.customerName }}</td>
+                    <td>{{ row.soldDateLabel }}</td>
+                    <td>{{ formatCurrency(row.partSold) }} / {{ formatCurrency(row.partCost) }}</td>
+                    <td>{{ formatCurrency(row.laborSold) }} / {{ formatCurrency(row.laborCost) }}</td>
+                    <td>{{ formatCurrency(row.totalSold) }}</td>
+                    <td>{{ formatCurrency(row.totalCost) }}</td>
+                    <td>{{ formatCurrency(row.grossProfit) }}</td>
+                    <td>{{ formatPercent(row.marginPct) }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        } @else {
           <div class="reports-empty">
             No sold invoices in the current reporting period yet. Once invoices are accepted/completed or paid,
             job profitability rows will appear here.
           </div>
-        </ng-template>
-        <div class="card-summary" *ngIf="additionalJobProfitRows() > 0">
-          Showing top {{ topJobProfitRows().length }} jobs by recency/value.
-          <strong>{{ additionalJobProfitRows() }}</strong> additional row(s) available.
-        </div>
-      </ion-card-content>
-    </ion-card>
-
-    <ion-card class="glass-surface">
-      <ion-card-header>
-        <ion-card-title>Lift Timelines (Scheduled Work by Month)</ion-card-title>
-      </ion-card-header>
-      <ion-card-content>
-        <div class="funnel-list" *ngIf="nextProductionRows().length; else noTimelineData">
-          <div class="funnel-row" *ngFor="let row of nextProductionRows(); trackBy: trackProductionForecast">
-            <div class="funnel-left">
-              <div class="row-title">{{ formatDate(row.period_start) }}</div>
-              <div class="row-sub">{{ row.scheduled_jobs }} scheduled / {{ row.pipeline_items }} pipeline</div>
-            </div>
-            <div class="row-right">
-              <div class="row-title">{{ formatCurrency(row.projected_revenue) }}</div>
-              <div class="row-sub">Projected revenue</div>
-            </div>
+        }
+        @if (additionalJobProfitRows() > 0) {
+          <div class="card-summary">
+            Showing top {{ topJobProfitRows().length }} jobs by recency/value.
+            <strong>{{ additionalJobProfitRows() }}</strong> additional row(s) available.
           </div>
-        </div>
-        <ng-template #noTimelineData>
+        }
+      </div>
+    </div>
+
+    <div class="card ui-card app-surface">
+      <div class="card-header ui-card-header">
+        <h2 class="card-title ui-card-title">Lift Timelines (Scheduled Work by Month)</h2>
+      </div>
+      <div class="card-body ui-card-content">
+        @if (nextProductionRows().length) {
+          <div class="funnel-list">
+            @for (row of nextProductionRows(); track trackProductionForecast($index, row)) {
+              <div class="funnel-row">
+                <div class="funnel-left">
+                  <div class="row-title">{{ formatDate(row.period_start) }}</div>
+                  <div class="row-sub">{{ row.scheduled_jobs }} scheduled / {{ row.pipeline_items }} pipeline</div>
+                </div>
+                <div class="row-right">
+                  <div class="row-title">{{ formatCurrency(row.projected_revenue) }}</div>
+                  <div class="row-sub">Projected revenue</div>
+                </div>
+              </div>
+            }
+          </div>
+        } @else {
           <div class="reports-empty">No scheduling timeline data yet.</div>
-        </ng-template>
-      </ion-card-content>
-    </ion-card>
+        }
+      </div>
+    </div>
   </section>
 
   <div class="reports-section-heading section-labor">
@@ -451,14 +507,14 @@
     <p>Tracked hours versus billed hours to identify underages, overages, and labor-risk trends.</p>
   </div>
 
-  <ion-card class="glass-surface section-labor-card">
-    <ion-card-header>
-      <ion-card-title>
-        <ion-icon name="construct-outline"></ion-icon>
+  <div class="card ui-card app-surface section-labor-card">
+    <div class="card-header ui-card-header">
+      <h2 class="card-title ui-card-title">
+        <ui-icon name="tools"></ui-icon>
         Underages / Overages (Hours Worked vs Billed)
-      </ion-card-title>
-    </ion-card-header>
-    <ion-card-content>
+      </h2>
+    </div>
+    <div class="card-body ui-card-content">
       <div class="variance-summary-grid">
         <div class="variance-summary-item">
           <span class="label">Jobs With Billed Labor</span>
@@ -488,58 +544,61 @@
         </div>
       </div>
 
-      <div class="trend-wrap ion-margin-top" *ngIf="laborVarianceRows().length; else noVarianceRows">
-        <table class="trend-table trend-table-tight">
-          <thead>
-            <tr>
-              <th>Invoice</th>
-              <th>Customer</th>
-              <th>Billed Hours</th>
-              <th>Actual Hours</th>
-              <th>Variance</th>
-              <th>Status</th>
-              <th>Matched Work Item</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr *ngFor="let row of laborVarianceRows(); trackBy: trackJobProfitRow">
-              <td>{{ row.invoiceNumber || row.invoiceId || '-' }}</td>
-              <td>{{ row.customerName }}</td>
-              <td>{{ row.billedHours }}</td>
-              <td>{{ row.actualHours }}</td>
-              <td [class.negative]="row.hoursVariance > 0">
-                {{ row.hoursVariance > 0 ? '+' : '' }}{{ row.hoursVariance }}
-              </td>
-              <td>
-                <span
-                  class="variance-chip"
-                  [class.variance-chip-over]="row.varianceDirection === 'over'"
-                  [class.variance-chip-under]="row.varianceDirection === 'under'"
-                  [class.variance-chip-even]="row.varianceDirection === 'even'"
-                  [class.variance-chip-unknown]="row.varianceDirection === 'unknown'"
-                >
-                  {{
-                    row.varianceDirection === 'over' ? 'Over by hours'
-                    : row.varianceDirection === 'under' ? 'Under by hours'
-                    : row.varianceDirection === 'even' ? 'On target'
-                    : 'No tracked time'
-                  }}
-                </span>
-              </td>
-              <td>{{ row.matchedWorkItemTitle || row.matchedWorkItemId || '-' }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <ng-template #noVarianceRows>
+      @if (laborVarianceRows().length) {
+        <div class="trend-wrap mt-3">
+          <table class="trend-table trend-table-tight">
+            <thead>
+              <tr>
+                <th>Invoice</th>
+                <th>Customer</th>
+                <th>Billed Hours</th>
+                <th>Actual Hours</th>
+                <th>Variance</th>
+                <th>Status</th>
+                <th>Matched Work Item</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of laborVarianceRows(); track trackJobProfitRow($index, row)) {
+                <tr>
+                  <td>{{ row.invoiceNumber || row.invoiceId || '-' }}</td>
+                  <td>{{ row.customerName }}</td>
+                  <td>{{ row.billedHours }}</td>
+                  <td>{{ row.actualHours }}</td>
+                  <td [class.negative]="row.hoursVariance > 0">
+                    {{ row.hoursVariance > 0 ? '+' : '' }}{{ row.hoursVariance }}
+                  </td>
+                  <td>
+                    <span
+                      class="variance-chip"
+                      [class.variance-chip-over]="row.varianceDirection === 'over'"
+                      [class.variance-chip-under]="row.varianceDirection === 'under'"
+                      [class.variance-chip-even]="row.varianceDirection === 'even'"
+                      [class.variance-chip-unknown]="row.varianceDirection === 'unknown'"
+                      >
+                      {{
+                      row.varianceDirection === 'over' ? 'Over by hours'
+                      : row.varianceDirection === 'under' ? 'Under by hours'
+                      : row.varianceDirection === 'even' ? 'On target'
+                      : 'No tracked time'
+                      }}
+                    </span>
+                  </td>
+                  <td>{{ row.matchedWorkItemTitle || row.matchedWorkItemId || '-' }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      } @else {
         <div class="reports-empty">
           No billed labor lines in the current reporting period yet.
         </div>
-      </ng-template>
+      }
       <div class="card-summary">
         Positive variance means actual hours exceeded billed hours (underage risk). Negative variance means billed
         hours exceeded actual hours (overage).
       </div>
-    </ion-card-content>
-  </ion-card>
-</ion-content>
+    </div>
+  </div>
+</div>

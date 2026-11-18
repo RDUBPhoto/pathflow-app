@@ -1,34 +1,10 @@
-import { CommonModule } from '@angular/common';
-import { Component, OnInit, AfterViewInit, OnDestroy, ElementRef, ViewChild, computed, inject, signal } from '@angular/core';
+import { UiBadge } from '../../ui/controls';
+import { UiIcon } from '../../ui/icons';
+
+import { Component, OnInit, AfterViewInit, OnDestroy, ElementRef, ViewChild, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { Params, RouterLink } from '@angular/router';
-import {
-  IonBadge,
-  IonButton,
-  IonButtons,
-  IonCard,
-  IonCardContent,
-  IonCardHeader,
-  IonCardTitle,
-  IonContent,
-  IonHeader,
-  IonIcon,
-  IonTitle,
-  IonToolbar
-} from '@ionic/angular/standalone';
-import { addIcons } from 'ionicons';
-import {
-  barChartOutline,
-  calendarOutline,
-  cashOutline,
-  constructOutline,
-  informationCircleOutline,
-  pulseOutline,
-  refreshOutline,
-  statsChartOutline,
-  trendingUpOutline
-} from 'ionicons/icons';
 import { PageBackButtonComponent } from '../../components/navigation/page-back-button/page-back-button.component';
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
 import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
@@ -132,24 +108,14 @@ type MissingCostLine = {
   selector: 'app-reports',
   standalone: true,
   imports: [
-    CommonModule,
     RouterLink,
-    IonHeader,
-    IonToolbar,
-    IonTitle,
-    IonButtons,
-    IonContent,
-    IonCard,
-    IonCardHeader,
-    IonCardTitle,
-    IonCardContent,
-    IonIcon,
-    IonButton,
+    UiIcon,
     UserMenuComponent,
     PageBackButtonComponent,
     CompanySwitcherComponent
-  ],
+],
   templateUrl: './reports.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./reports.component.scss']
 })
 export default class ReportsComponent implements OnInit, AfterViewInit, OnDestroy {
@@ -184,6 +150,10 @@ export default class ReportsComponent implements OnInit, AfterViewInit, OnDestro
   >('all');
   readonly periodStart = signal('');
   readonly periodEnd = signal('');
+  readonly salesGrouping = signal<'month' | 'quarter' | 'year'>('month');
+  readonly salesPeriods = computed(() =>
+    (this.data()?.tables?.salesPeriods || []).filter(row => row.periodType === this.salesGrouping())
+  );
   readonly loading = signal(false);
   readonly error = signal('');
   readonly info = signal('');
@@ -213,6 +183,9 @@ export default class ReportsComponent implements OnInit, AfterViewInit, OnDestro
     this.invoicesData.invoiceDetails().filter(item => item.documentType === 'quote')
   );
   readonly soldInvoicesInPeriod = computed(() => {
+    if (this.reportSoldInvoiceCount() <= 0 && this.reportSoldRevenue() <= 0) {
+      return [];
+    }
     const filters = this.data()?.filters;
     const periodStart = this.parseAsDate(filters?.periodStart);
     const periodEnd = this.parseAsDate(filters?.periodEnd);
@@ -618,29 +591,20 @@ export default class ReportsComponent implements OnInit, AfterViewInit, OnDestro
       openAmountTotal
     };
   });
+  readonly reportSoldInvoiceCount = computed(() => Math.max(0, Number(this.kpi()?.invoices_created || 0)));
+  readonly reportSoldRevenue = computed(() => Math.max(0, Number(this.kpi()?.sales_current_amount || 0)));
+  readonly reportGrossProfit = computed(() =>
+    this.roundAmount(this.trend().reduce((sum, row) => sum + Number(row.gross_profit || 0), 0))
+  );
+  readonly reportGrossMarginPct = computed(() => {
+    const revenue = this.reportSoldRevenue();
+    if (revenue <= 0) return 0;
+    return this.roundAmount((this.reportGrossProfit() / revenue) * 100);
+  });
   readonly effectiveKpi = computed<ReportsKpiRow | null>(() => {
     const base = this.kpi();
     if (!base) return null;
-    const local = this.localInvoiceSummary();
     const next = { ...base };
-    if (next.invoice_amount <= 0 && local.invoiceAmountInPeriod > 0) {
-      next.invoice_amount = local.invoiceAmountInPeriod;
-    }
-    if (next.invoices_created <= 0 && local.invoiceCountInPeriod > 0) {
-      next.invoices_created = local.invoiceCountInPeriod;
-    }
-    if (next.quote_amount <= 0 && local.quoteAmountInPeriod > 0) {
-      next.quote_amount = local.quoteAmountInPeriod;
-    }
-    if (next.quotes_created <= 0 && local.quoteCountInPeriod > 0) {
-      next.quotes_created = local.quoteCountInPeriod;
-    }
-    if (next.sales_current_amount <= 0 && local.invoiceAmountInPeriod > 0) {
-      next.sales_current_amount = local.invoiceAmountInPeriod;
-    }
-    if (next.sales_past_amount <= 0 && local.salesPast > 0) {
-      next.sales_past_amount = local.salesPast;
-    }
     next.average_invoice_amount = next.invoices_created > 0
       ? Number((next.invoice_amount / next.invoices_created).toFixed(2))
       : 0;
@@ -728,15 +692,7 @@ export default class ReportsComponent implements OnInit, AfterViewInit, OnDestro
     this.roundAmount(this.forecastLaborHoursAdjusted() - this.forecastLaborHoursPlanned())
   );
   readonly usingLocalInvoiceFallback = computed(() => {
-    const base = this.kpi();
-    const local = this.localInvoiceSummary();
-    if (!base) return false;
-    return (
-      (base.invoice_amount <= 0 && local.invoiceAmountInPeriod > 0)
-      || (base.invoices_created <= 0 && local.invoiceCountInPeriod > 0)
-      || (base.quote_amount <= 0 && local.quoteAmountInPeriod > 0)
-      || (base.quotes_created <= 0 && local.quoteCountInPeriod > 0)
-    );
+    return false;
   });
   readonly trendTotalPages = computed(() => Math.max(1, Math.ceil(this.trend().length / this.pageSize)));
   readonly productionForecastTotalPages = computed(() =>
@@ -769,17 +725,6 @@ export default class ReportsComponent implements OnInit, AfterViewInit, OnDestro
   }
 
   constructor() {
-    addIcons({
-      'bar-chart-outline': barChartOutline,
-      'calendar-outline': calendarOutline,
-      'cash-outline': cashOutline,
-      'construct-outline': constructOutline,
-      'information-circle-outline': informationCircleOutline,
-      'stats-chart-outline': statsChartOutline,
-      'trending-up-outline': trendingUpOutline,
-      'pulse-outline': pulseOutline,
-      'refresh-outline': refreshOutline
-    });
   }
 
   ngOnInit(): void {
@@ -827,6 +772,7 @@ export default class ReportsComponent implements OnInit, AfterViewInit, OnDestro
         this.loading.set(false);
       },
       error: err => {
+        this.data.set(null);
         this.error.set(this.extractError(err, 'Could not load reporting data.'));
         this.loading.set(false);
       }
@@ -1198,6 +1144,7 @@ export default class ReportsComponent implements OnInit, AfterViewInit, OnDestro
 
   private computeActualWorkedHours(item: WorkItem | null): number {
     if (!item) return 0;
+    if (typeof item.activeWorkDurationMs === 'number') return item.activeWorkDurationMs / ReportsComponent.MS_PER_HOUR;
     const serverRow = this.jobTimingByWorkItemId().get(this.normalizeKey(item.id));
     const serverHours = Math.max(0, Number(serverRow?.tracked_hours_business || 0));
     if (serverHours > 0) return serverHours;

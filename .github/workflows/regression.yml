@@ -1,0 +1,89 @@
+name: Regression Gate
+
+on:
+  workflow_call:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: regression-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use repository Node version
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            api/package-lock.json
+
+      - name: Install web dependencies
+        run: npm ci
+
+      - name: Install API dependencies
+        run: npm ci --prefix api
+
+      - name: Check dependency security advisories
+        run: |
+          npm audit --audit-level=high
+          npm audit --prefix api --omit=dev --audit-level=high
+
+      - name: Run API regression tests
+        run: npm run test:api
+
+      - name: Run Angular unit tests
+        run: npm run test:unit:ci
+
+      - name: Build production deploy output
+        run: npm run build
+
+      - name: Verify deploy artifacts
+        run: npm run verify:deploy-output
+
+      - name: Install regression browser
+        run: npx --no-install playwright install --with-deps chromium
+
+      - name: Run auth startup regression
+        run: npm run test:e2e:regression
+
+      - name: Install isolated Functions and storage emulator
+        run: npm install --global azure-functions-core-tools@4 azurite@3.38.0
+
+      - name: Run production-build authentication with secure sessions
+        run: npm run test:auth:production
+
+      - name: Run isolated shop workflow
+        run: npm run test:shop:isolated
+
+      - name: Package tested Functions with clean production dependencies
+        run: |
+          stage_dir=$(mktemp -d "$RUNNER_TEMP/pathflow-api.XXXXXX")
+          cp api/package.json api/package-lock.json "$stage_dir/"
+          npm ci --prefix "$stage_dir" --omit=dev --ignore-scripts --no-audit --no-fund
+          node scripts/package-functions.mjs "$RUNNER_TEMP/pathflow-functions.zip" "$stage_dir"
+
+      - name: Preserve tested frontend release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pathflow-web-${{ github.sha }}
+          path: dist/web/browser/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Preserve tested API release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pathflow-functions-${{ github.sha }}
+          path: ${{ runner.temp }}/pathflow-functions.zip
+          if-no-files-found: error
+          retention-days: 14

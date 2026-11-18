@@ -9,12 +9,24 @@ export type QuoteResponseStage = 'accepted' | 'declined';
 
 export type QuoteResponsePayload = {
   quoteId: string;
+  publicToken: string;
   action: QuoteResponseAction;
   tenantId: string;
   quoteNumber?: string;
   customerName?: string;
   vehicle?: string;
   businessName?: string;
+};
+
+export type QuoteSnapshotPayload = {
+  quoteId: string;
+  publicToken: string;
+  tenantId: string;
+  quoteNumber?: string;
+  customerName?: string;
+  vehicle?: string;
+  businessName?: string;
+  quoteData: unknown;
 };
 
 export type QuoteResponseRecord = {
@@ -42,7 +54,26 @@ export class QuoteResponseApiService {
     return this.http.post<{ ok: boolean; stage: QuoteResponseStage }>(
       '/api/quote-response',
       payload,
-      { headers: new HttpHeaders({ 'x-skip-action-toast': '1' }) }
+      { headers: new HttpHeaders({ 'x-skip-action-toast': '1', 'x-tenant-id': payload.tenantId }) }
+    );
+  }
+
+  publishSnapshot(payload: QuoteSnapshotPayload): Observable<{ ok: boolean; quoteId: string; publicToken: string }> {
+    return this.http.post<{ ok: boolean; quoteId: string; publicToken: string }>(
+      '/api/quote-response',
+      { op: 'publish-snapshot', ...payload },
+      { headers: new HttpHeaders({ 'x-skip-action-toast': '1', 'x-tenant-id': payload.tenantId }) }
+    );
+  }
+
+  getSnapshot(quoteId: string, publicToken: string, tenantId: string): Observable<{ ok: boolean; tenantId: string; item: unknown | null }> {
+    const params = new URLSearchParams();
+    params.set('quoteId', quoteId);
+    params.set('publicToken', publicToken);
+    params.set('tenantId', tenantId);
+    return this.http.get<{ ok: boolean; tenantId: string; item: unknown | null }>(
+      `/api/quote-response?${params.toString()}`,
+      { headers: new HttpHeaders({ 'x-skip-action-toast': '1', 'x-tenant-id': tenantId }) }
     );
   }
 

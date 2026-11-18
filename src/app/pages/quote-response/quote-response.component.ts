@@ -1,7 +1,6 @@
 import { CommonModule } from '@angular/common';
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, HostListener, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
-import { IonContent } from '@ionic/angular/standalone';
 import { InvoicesDataService } from '../../services/invoices-data.service';
 import { TenantContextService } from '../../services/tenant-context.service';
 import { firstValueFrom } from 'rxjs';
@@ -46,7 +45,6 @@ type QuoteViewPayload = {
   dueDate: string;
   description: string;
   customerNote: string;
-  staffNote: string;
   subtotal: number;
   taxTotal: number;
   total: number;
@@ -56,8 +54,9 @@ type QuoteViewPayload = {
 @Component({
   selector: 'app-quote-response',
   standalone: true,
-  imports: [CommonModule, IonContent],
+  imports: [CommonModule, ],
   templateUrl: './quote-response.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./quote-response.component.scss']
 })
 export default class QuoteResponseComponent {
@@ -65,8 +64,14 @@ export default class QuoteResponseComponent {
   private readonly invoicesData = inject(InvoicesDataService);
   private readonly tenantContext = inject(TenantContextService);
   private readonly quoteResponseApi = inject(QuoteResponseApiService);
+  private readonly remoteQuotePayload = signal<QuoteViewPayload | null>(null);
+  private readonly selectedAction = signal<QuoteAction | null>(null);
+  readonly responseState = signal<'idle' | 'submitting' | 'success' | 'error'>('idle');
+  readonly responseSubmitting = computed(() => this.responseState() === 'submitting');
 
   readonly action = computed<QuoteAction>(() => {
+    const selected = this.selectedAction();
+    if (selected) return selected;
     const dataAction = String(this.route.snapshot.data['action'] || '').trim().toLowerCase();
     if (dataAction === 'accept') return 'accept';
     if (dataAction === 'decline') return 'decline';
@@ -76,7 +81,7 @@ export default class QuoteResponseComponent {
     return 'view';
   });
 
-  readonly quotePayload = computed<QuoteViewPayload | null>(() => this.decodeQuotePayload(this.route.snapshot.queryParamMap.get('quoteData')));
+  readonly quotePayload = computed<QuoteViewPayload | null>(() => this.decodeQuotePayload(this.route.snapshot.queryParamMap.get('quoteData')) || this.remoteQuotePayload());
   readonly quoteNumber = computed(() => this.quotePayload()?.quoteNumber || String(this.route.snapshot.queryParamMap.get('quoteNumber') || '').trim() || 'Quote');
   readonly customerName = computed(() => this.quotePayload()?.customerName || String(this.route.snapshot.queryParamMap.get('customerName') || '').trim() || 'Customer');
   readonly vehicle = computed(() => this.quotePayload()?.vehicle || String(this.route.snapshot.queryParamMap.get('vehicle') || '').trim() || 'Vehicle details pending');
@@ -93,7 +98,6 @@ export default class QuoteResponseComponent {
   readonly businessLogoUrl = computed(() => this.quotePayload()?.businessLogoUrl || '');
   readonly description = computed(() => this.quotePayload()?.description || '');
   readonly customerNote = computed(() => this.quotePayload()?.customerNote || '');
-  readonly staffNote = computed(() => this.quotePayload()?.staffNote || '');
 
   readonly lineItems = computed<QuoteViewLineItem[]>(() => this.quotePayload()?.lineItems || []);
   readonly subtotal = computed(() => this.quotePayload()?.subtotal || this.roundCurrency(this.lineItems().reduce((sum, item) => sum + item.lineSubtotal, 0)));
@@ -104,12 +108,16 @@ export default class QuoteResponseComponent {
   readonly declineUrl = computed(() => this.actionUrl('decline'));
 
   readonly title = computed(() => {
+    if (this.responseSubmitting()) return 'Recording your response';
+    if (this.responseState() === 'error') return 'Response not confirmed';
     if (this.action() === 'accept') return 'Quote Accepted';
     if (this.action() === 'decline') return 'Quote Declined';
     return 'Quote Ready';
   });
 
   readonly message = computed(() => {
+    if (this.responseSubmitting()) return 'Please stay on this page while we record your response.';
+    if (this.responseState() === 'error') return 'We could not confirm your response. Please try again.';
     if (this.action() === 'accept') {
       return `Thanks ${this.customerName()}, we received your approval. ${this.businessName()} will follow up with your invoice and scheduling details.`;
     }
@@ -119,10 +127,63 @@ export default class QuoteResponseComponent {
     return `Review your quote details below. When you are ready, accept or decline right from this page.`;
   });
 
-  readonly trackingMessage = signal('Recording your response...');
+  readonly trackingMessage = signal('');
 
   constructor() {
-    this.applyResponseTracking();
+    void this.initialize();
+  }
+
+  private async initialize(): Promise<void> {
+    if (this.action() !== 'view') {
+      this.responseState.set('submitting');
+      this.trackingMessage.set('Submitting your response...');
+    }
+    await this.loadRemoteQuoteSnapshot();
+    if (this.action() !== 'view') await this.applyResponseTracking();
+  }
+
+  submitResponse(action: 'accept' | 'decline'): void {
+    if (this.responseSubmitting() || this.responseState() === 'success') return;
+    this.selectedAction.set(action);
+    this.responseState.set('submitting');
+    this.trackingMessage.set('Submitting your response...');
+    void this.applyResponseTracking();
+  }
+
+  retryResponse(): void {
+    const action = this.action();
+    if (action === 'accept' || action === 'decline') this.submitResponse(action);
+  }
+
+  hasPendingAction(): boolean {
+    return this.responseSubmitting();
+  }
+
+  @HostListener('window:beforeunload', ['$event'])
+  onBeforeUnload(event: BeforeUnloadEvent): void {
+    if (!this.responseSubmitting()) return;
+    event.preventDefault();
+    event.returnValue = '';
+  }
+
+  private async loadRemoteQuoteSnapshot(): Promise<void> {
+    if (this.decodeQuotePayload(this.route.snapshot.queryParamMap.get('quoteData'))) return;
+    const quoteId = String(this.route.snapshot.queryParamMap.get('quoteId') || '').trim();
+    const publicToken = String(this.route.snapshot.queryParamMap.get('publicToken') || '').trim();
+    const tenantId = String(this.route.snapshot.queryParamMap.get('tenantId') || this.tenantContext.tenantId() || 'main').trim().toLowerCase() || 'main';
+    if (!quoteId || !publicToken) return;
+
+    try {
+      const response = await firstValueFrom(this.quoteResponseApi.getSnapshot(quoteId, publicToken, tenantId));
+      const raw = response?.item && typeof response.item === 'object' ? response.item as Record<string, unknown> : null;
+      const quoteData = raw && raw['quoteData'] && typeof raw['quoteData'] === 'object'
+        ? raw['quoteData'] as Record<string, unknown>
+        : null;
+      if (!quoteData) return;
+      this.remoteQuotePayload.set(this.normalizeQuotePayload(quoteData));
+    } catch {
+      this.remoteQuotePayload.set(null);
+    }
   }
 
   private async applyResponseTracking(): Promise<void> {
@@ -134,7 +195,8 @@ export default class QuoteResponseComponent {
 
     const quoteId = String(this.route.snapshot.queryParamMap.get('quoteId') || this.quotePayload()?.quoteId || '').trim();
     if (!quoteId) {
-      this.trackingMessage.set('Quote response captured.');
+      this.responseState.set('error');
+      this.trackingMessage.set('Quote ID is missing. Please contact the service team.');
       return;
     }
 
@@ -142,16 +204,10 @@ export default class QuoteResponseComponent {
     const activeTenant = String(this.tenantContext.tenantId() || '').trim().toLowerCase() || 'main';
     const targetTenant = requestedTenant || activeTenant;
     const stage = action === 'accept' ? 'accepted' : 'declined';
-    this.persistPendingResponse({
-      quoteId,
-      stage,
-      tenantId: targetTenant,
-      updatedAt: new Date().toISOString()
-    });
-
     try {
-      await firstValueFrom(this.quoteResponseApi.capture({
+      const response = await firstValueFrom(this.quoteResponseApi.capture({
         quoteId,
+        publicToken: String(this.route.snapshot.queryParamMap.get('publicToken') || '').trim(),
         action,
         tenantId: targetTenant,
         quoteNumber: this.quoteNumber(),
@@ -159,23 +215,32 @@ export default class QuoteResponseComponent {
         vehicle: this.vehicle(),
         businessName: this.businessName()
       }));
+      if (!response?.ok || response.stage !== stage) throw new Error('Quote response was not confirmed.');
 
-      if (targetTenant !== activeTenant) {
-        this.tenantContext.setTenantOverride(targetTenant);
-      }
-      this.invoicesData.setStage(
+      this.persistPendingResponse({
         quoteId,
         stage,
-        `Customer ${action}ed quote from public link.`,
-        'customer'
-      );
-      if (targetTenant !== activeTenant) {
-        this.tenantContext.setTenantOverride(activeTenant);
+        tenantId: targetTenant,
+        updatedAt: new Date().toISOString()
+      });
+      if (targetTenant === activeTenant) {
+        try {
+          this.invoicesData.setStage(
+            quoteId,
+            stage,
+            `Customer ${action}ed quote from public link.`,
+            'customer'
+          );
+        } catch {
+          // The server confirmed the response; a local cache failure must not invite a duplicate submission.
+        }
       }
 
+      this.responseState.set('success');
       this.trackingMessage.set(`Quote status updated to ${action === 'accept' ? 'Accepted' : 'Declined'}.`);
     } catch {
-      this.trackingMessage.set('We captured your response. If status has not updated yet, please refresh and try again.');
+      this.responseState.set('error');
+      this.trackingMessage.set('Your response was not confirmed. Please try again.');
     }
   }
 
@@ -207,33 +272,36 @@ export default class QuoteResponseComponent {
       const bytes = Uint8Array.from(binary, ch => ch.charCodeAt(0));
       const json = typeof TextDecoder !== 'undefined' ? new TextDecoder().decode(bytes) : binary;
       const parsed = JSON.parse(json) as Partial<QuoteViewPayload>;
-      if (!parsed || typeof parsed !== 'object') return null;
-      return {
-        quoteId: String(parsed.quoteId || '').trim(),
-        quoteNumber: String(parsed.quoteNumber || '').trim(),
-        customerName: String(parsed.customerName || '').trim(),
-        customerEmail: String(parsed.customerEmail || '').trim(),
-        customerPhone: String(parsed.customerPhone || '').trim(),
-        customerAddress: String(parsed.customerAddress || '').trim(),
-        vehicle: String(parsed.vehicle || '').trim(),
-        businessName: String(parsed.businessName || '').trim(),
-        businessEmail: String(parsed.businessEmail || '').trim(),
-        businessPhone: String(parsed.businessPhone || '').trim(),
-        businessAddress: String(parsed.businessAddress || '').trim(),
-        businessLogoUrl: String(parsed.businessLogoUrl || '').trim(),
-        issueDate: String(parsed.issueDate || '').trim(),
-        dueDate: String(parsed.dueDate || '').trim(),
-        description: String(parsed.description || '').trim(),
-        customerNote: String(parsed.customerNote || '').trim(),
-        staffNote: String(parsed.staffNote || '').trim(),
-        subtotal: this.asNumber(parsed.subtotal),
-        taxTotal: this.asNumber(parsed.taxTotal),
-        total: this.asNumber(parsed.total),
-        lineItems: Array.isArray(parsed.lineItems) ? parsed.lineItems.map(item => this.mapLineItem(item)).filter(item => !!item.description || !!item.code || item.quantity > 0 || item.lineTotal > 0) : []
-      };
+      return this.normalizeQuotePayload(parsed);
     } catch {
       return null;
     }
+  }
+
+  private normalizeQuotePayload(parsed: Partial<QuoteViewPayload> | Record<string, unknown> | null): QuoteViewPayload | null {
+    if (!parsed || typeof parsed !== 'object') return null;
+    return {
+      quoteId: String(parsed.quoteId || '').trim(),
+      quoteNumber: String(parsed.quoteNumber || '').trim(),
+      customerName: String(parsed.customerName || '').trim(),
+      customerEmail: String(parsed.customerEmail || '').trim(),
+      customerPhone: String(parsed.customerPhone || '').trim(),
+      customerAddress: String(parsed.customerAddress || '').trim(),
+      vehicle: String(parsed.vehicle || '').trim(),
+      businessName: String(parsed.businessName || '').trim(),
+      businessEmail: String(parsed.businessEmail || '').trim(),
+      businessPhone: String(parsed.businessPhone || '').trim(),
+      businessAddress: String(parsed.businessAddress || '').trim(),
+      businessLogoUrl: String(parsed.businessLogoUrl || '').trim(),
+      issueDate: String(parsed.issueDate || '').trim(),
+      dueDate: String(parsed.dueDate || '').trim(),
+      description: String(parsed.description || '').trim(),
+      customerNote: String(parsed.customerNote || '').trim(),
+      subtotal: this.asNumber(parsed.subtotal),
+      taxTotal: this.asNumber(parsed.taxTotal),
+      total: this.asNumber(parsed.total),
+      lineItems: Array.isArray(parsed.lineItems) ? parsed.lineItems.map(item => this.mapLineItem(item)).filter(item => !!item.description || !!item.code || item.quantity > 0 || item.lineTotal > 0) : []
+    };
   }
 
   private mapLineItem(value: unknown): QuoteViewLineItem {
@@ -265,10 +333,24 @@ export default class QuoteResponseComponent {
     const query = new URLSearchParams();
     for (const key of this.route.snapshot.queryParamMap.keys) {
       const value = this.route.snapshot.queryParamMap.get(key);
-      if (value != null && value !== '') query.set(key, value);
+      if (value == null || value === '') continue;
+      if (key === 'quoteData') {
+        const safePayload = this.quotePayload();
+        if (safePayload) query.set(key, this.encodeQuotePayload(safePayload));
+      } else {
+        query.set(key, value);
+      }
     }
     query.set('action', action);
     return this.publicRouteUrl(path, query);
+  }
+
+  private encodeQuotePayload(payload: QuoteViewPayload): string {
+    const json = JSON.stringify(payload);
+    const bytes = new TextEncoder().encode(json);
+    let binary = '';
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
   }
 
   private publicRouteUrl(path: string, query?: URLSearchParams): string {

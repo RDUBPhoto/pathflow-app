@@ -1,24 +1,11 @@
-import { Component, computed, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { UiCheckbox, UiInput, UiTextarea } from '../../ui/controls';
+import { Component, computed, signal, ChangeDetectionStrategy } from '@angular/core';
+
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { finalize } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { formatUsPhoneInput } from '../../utils/phone-format';
-import {
-  IonButton,
-  IonCheckbox,
-  IonContent,
-  IonHeader,
-  IonInput,
-  IonItem,
-  IonLabel,
-  IonSpinner,
-  IonText,
-  IonTextarea,
-  IonTitle,
-  IonToolbar
-} from '@ionic/angular/standalone';
 
 type WidgetLeadResponse = {
   ok: boolean;
@@ -45,22 +32,13 @@ type WidgetLeadResponse = {
   selector: 'app-sms-opt-in',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
-    IonHeader,
-    IonToolbar,
-    IonTitle,
-    IonContent,
-    IonItem,
-    IonLabel,
-    IonInput,
-    IonTextarea,
-    IonCheckbox,
-    IonButton,
-    IonText,
-    IonSpinner
-  ],
+    UiInput,
+    UiTextarea,
+    UiCheckbox
+],
   templateUrl: './sms-opt-in.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./sms-opt-in.component.scss']
 })
 export default class SmsOptInComponent {

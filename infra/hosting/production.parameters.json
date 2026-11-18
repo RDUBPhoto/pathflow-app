@@ -1,0 +1,18 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": { "value": "pathflow-prod" },
+    "location": { "value": "centralus" },
+    "vnetEnabled": { "value": false },
+    "candidateAllowedIp": { "value": "75.35.181.70" },
+    "deploymentPackageUrl": { "value": "https://stpfhost6c08277dcus.blob.core.windows.net/app-package-func-pathflow-api-prod-cus-2cvggs3/pathflow-prebuilt-20261009.zip" },
+    "resourceGroupName": { "value": "rg-pathflow-dev-us" },
+    "apiServiceName": { "value": "func-pathflow-api-prod-cus" },
+    "appServicePlanName": { "value": "asp-pathflow-prod-cus" },
+    "apiUserAssignedIdentityName": { "value": "id-pathflow-api-prod-cus" },
+    "storageAccountName": { "value": "stpfhost6c08277dcus" },
+    "applicationInsightsName": { "value": "appi-pathflow-prod-cus" },
+    "logAnalyticsName": { "value": "log-pathflow-prod-cus" }
+  }
+}

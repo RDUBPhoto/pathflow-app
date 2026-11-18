@@ -100,6 +100,7 @@ const RELATED_CUSTOMER_TABLES = [
   { table: "emailmessages", includeCustomerName: true },
   { table: "inventoryneeds", includeCustomerName: true }
 ];
+const SMS_CONSENTS_TABLE = "smsconsents";
 
 function toStr(v) { return v == null ? "" : String(v); }
 function pick(b, k) { return toStr(b[k]).trim(); }
@@ -231,6 +232,17 @@ function normalizePhone(value) {
   if (digits.length === 11 && digits.startsWith("1")) return digits.slice(1);
   if (digits.length > 10) return digits.slice(-10);
   return digits;
+}
+
+function normalizePhoneToE164(value) {
+  const raw = toStr(value).trim();
+  const digits = raw.replace(/\D+/g, "");
+  if (!digits) return "";
+  if (raw.startsWith("+") && digits.length >= 8 && digits.length <= 15) return `+${digits}`;
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+  if (digits.length >= 8 && digits.length <= 15) return `+1${digits}`;
+  return "";
 }
 
 function normalizeName(value) {
@@ -758,6 +770,53 @@ async function remapCustomerReferences(conn, sourceId, targetId, targetName, ten
   return stats;
 }
 
+async function deleteRowsByCustomerId(conn, tableName, customerId, tenantId) {
+  const client = TableClient.fromConnectionString(conn, tableName);
+  try { await client.createTable(); } catch (_) {}
+  const safeCustomerId = escapedFilterValue(customerId);
+  const iter = client.listEntities({
+    queryOptions: { filter: `PartitionKey eq '${tenantId}' and customerId eq '${safeCustomerId}'` }
+  });
+
+  let deleted = 0;
+  for await (const entity of iter) {
+    try {
+      await client.deleteEntity(entity.partitionKey, entity.rowKey);
+      deleted += 1;
+    } catch (_) {}
+  }
+  return deleted;
+}
+
+async function deleteCustomerOwnedRecords(conn, customerEntity, customerId, tenantId) {
+  const deleted = {};
+  for (const mapping of RELATED_CUSTOMER_TABLES) {
+    deleted[mapping.table] = await deleteRowsByCustomerId(conn, mapping.table, customerId, tenantId);
+  }
+
+  const consentsClient = TableClient.fromConnectionString(conn, SMS_CONSENTS_TABLE);
+  try { await consentsClient.createTable(); } catch (_) {}
+  deleted[SMS_CONSENTS_TABLE] = await deleteRowsByCustomerId(conn, SMS_CONSENTS_TABLE, customerId, tenantId);
+
+  const phoneE164 = normalizePhoneToE164(
+    toStr(customerEntity && (customerEntity.phone || customerEntity.mobile))
+  );
+  const digits = phoneE164.replace(/\D+/g, "");
+  if (digits) {
+    const rowKey = `phone-${digits}`.slice(0, 220);
+    try {
+      const consent = await consentsClient.getEntity(tenantId, rowKey);
+      const consentCustomerId = toStr(consent.customerId);
+      if (!consentCustomerId || consentCustomerId === customerId) {
+        await consentsClient.deleteEntity(tenantId, rowKey);
+        deleted[SMS_CONSENTS_TABLE] = (deleted[SMS_CONSENTS_TABLE] || 0) + 1;
+      }
+    } catch (_) {}
+  }
+
+  return deleted;
+}
+
 module.exports = async function (context, req) {
   const method = (req.method || "GET").toUpperCase();
   const tenantId = resolveTenantId(req, req && req.body ? req.body : {});
@@ -793,8 +852,12 @@ module.exports = async function (context, req) {
       const id = toStr(b.id);
 
       if (op === "delete" && id) {
+        const customerEntity = await getCustomerEntity(client, id, tenantId);
+        const deleted = customerEntity
+          ? await deleteCustomerOwnedRecords(conn, customerEntity, id, tenantId)
+          : {};
         await client.deleteEntity(tenantId, id);
-        context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true } };
+        context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true, deleted } };
         return;
       }
 
@@ -1092,7 +1155,8 @@ module.exports = async function (context, req) {
       }
 
       const name = pick(b, "name");
-      const phone = pick(b, "phone");
+      const phone = normalizePhoneToE164(pick(b, "phone"));
+      const mobile = normalizePhoneToE164(pick(b, "mobile"));
       const email = pick(b, "email");
       const secondaryEmail = pick(b, "secondaryEmail");
 
@@ -1121,7 +1185,7 @@ module.exports = async function (context, req) {
           firstName: pick(b, "firstName"),
           lastName: pick(b, "lastName"),
           phone,
-          mobile: pick(b, "mobile"),
+          mobile,
           email,
           secondaryEmail,
           address: pick(b, "address"),
@@ -1207,7 +1271,7 @@ module.exports = async function (context, req) {
         setIfPresent(patch, b, "firstName");
         setIfPresent(patch, b, "lastName");
         if (phone || Object.prototype.hasOwnProperty.call(b, "phone")) patch.phone = phone;
-        setIfPresent(patch, b, "mobile");
+        if (mobile || Object.prototype.hasOwnProperty.call(b, "mobile")) patch.mobile = mobile;
         if (email || Object.prototype.hasOwnProperty.call(b, "email")) patch.email = email;
         if (secondaryEmail || Object.prototype.hasOwnProperty.call(b, "secondaryEmail")) {
           patch.secondaryEmail = secondaryEmail;

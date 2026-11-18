@@ -1,6 +1,6 @@
 <label class="vendor-picker">
   <span class="vendor-picker-label">{{ label }}</span>
-  <input
+  <input class="form-control"
     type="text"
     [ngModel]="query() || vendorName"
     (focus)="focus()"
@@ -9,27 +9,148 @@
     autocomplete="off" />
 </label>
 
-<div class="vendor-menu" *ngIf="open()">
-  <button
-    type="button"
-    class="vendor-option"
-    *ngFor="let vendor of vendors()"
-    (click)="selectVendor(vendor)">
-    <strong>{{ vendor.name }}</strong>
-    <span>{{ vendor.phone || vendor.email || vendor.accountNumber || 'Supplier record' }}</span>
-  </button>
+@if (open()) {
+  <div class="vendor-menu">
+    @for (vendor of vendors(); track vendor) {
+      <button
+        type="button"
+        class="vendor-option"
+        (click)="selectVendor(vendor)">
+        <strong>{{ vendor.name }}</strong>
+        <span>{{ vendor.phone || vendor.email || vendor.accountNumber || 'Supplier record' }}</span>
+      </button>
+    }
+    @if (query().trim() && !hasExactMatch()) {
+      <button
+        type="button"
+        class="vendor-option add"
+        (click)="addVendor()"
+        [disabled]="loading()">
+        <strong>{{ vendors().length ? 'Add supplier' : 'No results. Add supplier.' }}</strong>
+        <span>{{ query().trim() }}</span>
+      </button>
+    }
+    @if (!loading() && !vendors().length && !query().trim()) {
+      <div class="vendor-empty">Type to search suppliers.</div>
+    }
+    @if (loading()) {
+      <div class="vendor-empty">Searching suppliers...</div>
+    }
+    @if (error()) {
+      <div class="vendor-error">{{ error() }}</div>
+    }
+  </div>
+}
 
-  <button
-    type="button"
-    class="vendor-option add"
-    *ngIf="query().trim() && !hasExactMatch()"
-    (click)="addVendor()"
-    [disabled]="loading()">
-    <strong>{{ vendors().length ? 'Add supplier' : 'No results. Add supplier.' }}</strong>
-    <span>{{ query().trim() }}</span>
-  </button>
-
-  <div class="vendor-empty" *ngIf="!loading() && !vendors().length && !query().trim()">Type to search suppliers.</div>
-  <div class="vendor-empty" *ngIf="loading()">Searching suppliers...</div>
-  <div class="vendor-error" *ngIf="error()">{{ error() }}</div>
-</div>
+@if (detailModalOpen()) {
+  <div class="vendor-modal-backdrop" (click)="closeDetailModal()">
+    <section class="vendor-modal" role="dialog" aria-modal="true" aria-label="Add supplier details" (click)="$event.stopPropagation()">
+      <div class="vendor-modal-head">
+        <div>
+          <span>New supplier</span>
+          <h3>Add supplier details</h3>
+        </div>
+        <button type="button" class="vendor-modal-close" (click)="closeDetailModal()" [disabled]="detailSaving()">×</button>
+      </div>
+      <div class="vendor-modal-grid">
+        <label class="vendor-field span-2">
+          <span>Name</span>
+          <input class="form-control"
+            type="text"
+            [ngModel]="vendorDraft().name"
+            (ngModelChange)="setDraftField('name', $event)"
+            autocomplete="organization" />
+        </label>
+        <label class="vendor-field">
+          <span>Contact</span>
+          <input class="form-control"
+            type="text"
+            [ngModel]="vendorDraft().contactName"
+            (ngModelChange)="setDraftField('contactName', $event)"
+            autocomplete="name" />
+        </label>
+        <label class="vendor-field">
+          <span>Phone</span>
+          <input class="form-control"
+            type="tel"
+            [ngModel]="vendorDraft().phone"
+            (ngModelChange)="setDraftField('phone', $event)"
+            autocomplete="tel" />
+        </label>
+        <label class="vendor-field">
+          <span>Email</span>
+          <input class="form-control"
+            type="email"
+            [ngModel]="vendorDraft().email"
+            (ngModelChange)="setDraftField('email', $event)"
+            autocomplete="email" />
+        </label>
+        <label class="vendor-field">
+          <span>Website</span>
+          <input class="form-control"
+            type="text"
+            [ngModel]="vendorDraft().website"
+            (ngModelChange)="setDraftField('website', $event)"
+            placeholder="supplier.com"
+            autocomplete="url" />
+        </label>
+        <label class="vendor-field">
+          <span>Account #</span>
+          <input class="form-control"
+            type="text"
+            [ngModel]="vendorDraft().accountNumber"
+            (ngModelChange)="setDraftField('accountNumber', $event)" />
+        </label>
+        <label class="vendor-field">
+          <span>Address</span>
+          <input class="form-control"
+            type="text"
+            [ngModel]="vendorDraft().address"
+            (ngModelChange)="setDraftField('address', $event)"
+            autocomplete="street-address" />
+        </label>
+        <label class="vendor-field">
+          <span>City</span>
+          <input class="form-control"
+            type="text"
+            [ngModel]="vendorDraft().city"
+            (ngModelChange)="setDraftField('city', $event)"
+            autocomplete="address-level2" />
+        </label>
+        <label class="vendor-field">
+          <span>State</span>
+          <input class="form-control"
+            type="text"
+            [ngModel]="vendorDraft().state"
+            (ngModelChange)="setDraftField('state', $event)"
+            autocomplete="address-level1" />
+        </label>
+        <label class="vendor-field">
+          <span>ZIP</span>
+          <input class="form-control"
+            type="text"
+            [ngModel]="vendorDraft().zip"
+            (ngModelChange)="setDraftField('zip', $event)"
+            autocomplete="postal-code" />
+        </label>
+        <label class="vendor-field span-2">
+          <span>Notes</span>
+          <textarea class="form-control"
+            rows="3"
+            [ngModel]="vendorDraft().notes"
+            (ngModelChange)="setDraftField('notes', $event)"
+          placeholder="Ordering notes, preferred contact, account instructions"></textarea>
+        </label>
+      </div>
+      @if (detailError()) {
+        <div class="vendor-error modal-error">{{ detailError() }}</div>
+      }
+      <div class="vendor-modal-actions">
+        <button type="button" class="vendor-secondary" (click)="closeDetailModal()" [disabled]="detailSaving()">Cancel</button>
+        <button type="button" class="vendor-primary" (click)="saveVendorDetails()" [disabled]="detailSaving()">
+          {{ detailSaving() ? 'Saving...' : 'Save Supplier' }}
+        </button>
+      </div>
+    </section>
+  </div>
+}

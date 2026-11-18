@@ -1,10 +1,18 @@
 const crypto = require("crypto");
-const { TableClient } = require("./table-client");
+const { TableClient, isSqlBackendEnabled } = require("./table-client");
+const { resolveTenantId } = require("./tenant");
 
 const SESSIONS_TABLE = "authsessions";
 const AUTH_SESSION_COOKIE = "pf_session";
 const SESSION_PARTITION = "v1";
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14; // 14 days
+
+class SessionStorageUnavailableError extends Error {
+  constructor(cause) {
+    super("Session storage is temporarily unavailable.", { cause });
+    this.name = "SessionStorageUnavailableError";
+  }
+}
 
 function asString(value) {
   return value == null ? "" : String(value).trim();
@@ -61,12 +69,12 @@ function parseJson(value, fallback) {
 function parseCookies(req) {
   const raw = readHeader(req && req.headers, "cookie");
   if (!raw) return {};
-  const out = {};
+  const out = Object.create(null);
   for (const chunk of raw.split(";")) {
     const [name, ...rest] = String(chunk || "").split("=");
     const key = asString(name);
     if (!key) continue;
-    out[key] = decodeURIComponent(rest.join("=") || "");
+    try { out[key] = decodeURIComponent(rest.join("=") || ""); } catch {}
   }
   return out;
 }
@@ -83,9 +91,16 @@ function extractSessionToken(req) {
 }
 
 function isLoopbackHost(rawHost) {
-  const host = asString(rawHost).split(",")[0].trim().toLowerCase();
-  const hostname = host.split(":")[0].toLowerCase();
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname.endsWith(".localhost");
+  return /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(asString(rawHost));
+}
+
+function isDevelopmentRuntime() {
+  return process.env.PATHFLOW_ENVIRONMENT === "development" && !process.env.WEBSITE_SITE_NAME &&
+    (!process.env.WEBSITE_HOSTNAME || isLoopbackHost(process.env.WEBSITE_HOSTNAME));
+}
+
+function isLocalDevelopmentRequest(req) {
+  return isDevelopmentRuntime() && isLoopbackHost(readHeader(req?.headers, "host"));
 }
 
 function parseSwaPrincipal(req) {
@@ -117,8 +132,7 @@ function parseSwaPrincipal(req) {
 }
 
 function parseDevPrincipal(req) {
-  const host = readHeader(req && req.headers, "x-forwarded-host") || readHeader(req && req.headers, "host");
-  if (!isLoopbackHost(host)) return null;
+  if (!isLocalDevelopmentRequest(req)) return null;
   const email = normalizeEmail(readHeader(req && req.headers, "x-dev-user-email"));
   if (!email) return null;
   const displayName = asString(readHeader(req && req.headers, "x-dev-user-name")) || email;
@@ -142,7 +156,7 @@ function parseDevPrincipal(req) {
 
 async function getTableClient(tableName) {
   const conn = asString(process.env.STORAGE_CONNECTION_STRING);
-  if (!conn) throw new Error("Missing STORAGE_CONNECTION_STRING");
+  if (!conn && !isSqlBackendEnabled()) throw new Error("Missing STORAGE_CONNECTION_STRING");
   const client = TableClient.fromConnectionString(conn, tableName);
   try {
     await client.createTable();
@@ -185,7 +199,7 @@ function verifyPassword(password, record) {
 }
 
 function createSessionCookie(token, maxAgeSeconds = Math.floor(SESSION_TTL_MS / 1000)) {
-  const secure = asString(process.env.NODE_ENV).toLowerCase() !== "development";
+  const secure = !isDevelopmentRuntime();
   const parts = [
     `${AUTH_SESSION_COOKIE}=${encodeURIComponent(asString(token))}`,
     "Path=/",
@@ -198,7 +212,7 @@ function createSessionCookie(token, maxAgeSeconds = Math.floor(SESSION_TTL_MS / 
 }
 
 function clearSessionCookie() {
-  const secure = asString(process.env.NODE_ENV).toLowerCase() !== "development";
+  const secure = !isDevelopmentRuntime();
   const parts = [
     `${AUTH_SESSION_COOKIE}=`,
     "Path=/",
@@ -245,38 +259,22 @@ async function persistSession(sessionClient, principal, options) {
   };
 }
 
-async function readSessionPrincipal(req, sessionClient) {
-  const rawToken = extractSessionToken(req);
+async function readSessionPrincipal(req, sessionClient, rawTokenInput) {
+  const rawToken = asString(rawTokenInput) || extractSessionToken(req);
   if (!rawToken) return null;
   const key = hashToken(rawToken);
   let entity;
   try {
     entity = await sessionClient.getEntity(SESSION_PARTITION, key);
-  } catch {
-    return null;
+  } catch (error) {
+    if (error?.statusCode === 404) return null;
+    throw error;
   }
   if (!entity || entity.revoked) return null;
   const expiresAtMs = Date.parse(asString(entity.expiresAt));
-  if (!Number.isFinite(expiresAtMs) || Date.now() > expiresAtMs) {
-    try {
-      await sessionClient.deleteEntity(SESSION_PARTITION, key);
-    } catch (_) {}
-    return null;
-  }
+  if (!Number.isFinite(expiresAtMs) || Date.now() >= expiresAtMs) return null;
 
   const roles = normalizeRoleList(parseJson(entity.rolesJson, []));
-  const nowIso = new Date().toISOString();
-  try {
-    await sessionClient.upsertEntity(
-      {
-        partitionKey: SESSION_PARTITION,
-        rowKey: key,
-        lastSeenAt: nowIso,
-        updatedAt: nowIso
-      },
-      "Merge"
-    );
-  } catch (_) {}
 
   return {
     source: "session",
@@ -292,12 +290,20 @@ async function readSessionPrincipal(req, sessionClient) {
 async function resolvePrincipal(req, options = {}) {
   const allowSwa = options.allowSwa !== false;
   const allowDev = options.allowDev !== false;
+  const rawSessionToken = extractSessionToken(req);
 
-  try {
-    const sessionClient = await getTableClient(SESSIONS_TABLE);
-    const sessionPrincipal = await readSessionPrincipal(req, sessionClient);
-    if (sessionPrincipal) return sessionPrincipal;
-  } catch (_) {}
+  if (rawSessionToken) {
+    try {
+      const sessionClientFactory = typeof options.sessionClientFactory === "function"
+        ? options.sessionClientFactory
+        : () => getTableClient(SESSIONS_TABLE);
+      const sessionClient = options.sessionClient || await sessionClientFactory();
+      const sessionPrincipal = await readSessionPrincipal(req, sessionClient, rawSessionToken);
+      if (sessionPrincipal) return sessionPrincipal;
+    } catch (error) {
+      throw new SessionStorageUnavailableError(error);
+    }
+  }
 
   if (allowSwa) {
     const swa = parseSwaPrincipal(req);
@@ -328,8 +334,48 @@ async function revokeSession(req) {
 }
 
 async function requirePrincipal(context, req, options = {}) {
-  const principal = await resolvePrincipal(req, options);
-  if (principal) return principal;
+  let principal;
+  try {
+    principal = await resolvePrincipal(req, options);
+  } catch (error) {
+    if (!(error instanceof SessionStorageUnavailableError)) throw error;
+    context.res = {
+      status: 503,
+      headers: { "content-type": "application/json", "cache-control": "no-store", "retry-after": "5" },
+      body: { ok: false, error: "Your session could not be checked. Please try again." }
+    };
+    return null;
+  }
+  if (principal) {
+    if (principal.source === "dev") return principal;
+    try {
+      const users = await getTableClient("useraccess");
+      let user;
+      try { user = await users.getEntity("v1", principal.email); }
+      catch (error) { if (error?.statusCode !== 404) throw error; }
+      const flag = value => value === true || ["true", "1"].includes(asString(value).toLowerCase());
+      const active = user && !flag(user.disabled) && !flag(user.accessRevoked) && !flag(user.revoked) &&
+        ["active", ""].includes(asString(user.status).toLowerCase());
+      const locations = parseJson(user?.locationIdsJson, []);
+      const tenant = resolveTenantId(req, req.body);
+      if (active && (flag(user.isSuperAdmin) || flag(user.allLocations) ||
+          Array.isArray(locations) && locations.some(id => asString(id).toLowerCase() === tenant))) {
+        return { ...principal, userRoles: normalizeRoleList(parseJson(user.rolesJson, [])) };
+      }
+      context.res = {
+        status: 403,
+        headers: { "content-type": "application/json", "cache-control": "no-store" },
+        body: { ok: false, error: "You do not have access to this location. Contact your workspace admin." }
+      };
+    } catch {
+      context.res = {
+        status: 503,
+        headers: { "content-type": "application/json", "cache-control": "no-store", "retry-after": "5" },
+        body: { ok: false, error: "Workspace access could not be checked. Please try again." }
+      };
+    }
+    return null;
+  }
   context.res = {
     status: 401,
     headers: { "content-type": "application/json" },
@@ -354,7 +400,14 @@ module.exports = {
   requirePrincipal,
   issueSession,
   revokeSession,
+  isDevelopmentRuntime,
+  isLocalDevelopmentRequest,
+  SessionStorageUnavailableError,
   createSessionCookie,
   clearSessionCookie,
-  escapedFilterValue
+  escapedFilterValue,
+  _internals: {
+    extractSessionToken,
+    readSessionPrincipal
+  }
 };

@@ -49,12 +49,12 @@ async function createCustomerInUi(page: Page, namePrefix = 'Lead'): Promise<Cust
   const phone = `(555) 01${phoneTail.slice(0, 2)}-${phoneTail.slice(2)}`;
 
   await page.goto('/customers/new');
-  await expect(page.locator('ion-title', { hasText: 'New Customer' })).toBeVisible();
+  await expect(page.locator('.ui-title', { hasText: 'New Customer' })).toBeVisible();
 
-  await page.locator('ion-item', { hasText: 'First Name *' }).locator('input').fill('QA');
-  await page.locator('ion-item', { hasText: 'Last Name *' }).locator('input').fill(name);
-  await page.locator('ion-item', { hasText: 'Phone *' }).locator('input').fill(phone);
-  await page.locator('ion-item', { hasText: 'Email *' }).locator('input').fill(email);
+  await page.locator('.ui-item', { hasText: 'First Name *' }).locator('input').fill('QA');
+  await page.locator('.ui-item', { hasText: 'Last Name *' }).locator('input').fill(name);
+  await page.locator('.ui-item', { hasText: 'Phone *' }).locator('input').fill(phone);
+  await page.locator('.ui-item', { hasText: 'Email *' }).locator('input').fill(email);
 
   await page.getByRole('button', { name: 'Save Customer' }).click();
   const saveAsSeparate = page.getByRole('button', { name: 'Save as Separate' });
@@ -73,8 +73,8 @@ async function createCustomerInUi(page: Page, namePrefix = 'Lead'): Promise<Cust
 
 async function assertCustomerNotVisibleInUi(page: Page, displayName: string): Promise<void> {
   await page.goto('/customers');
-  await expect(page.locator('ion-title', { hasText: 'Customers' })).toBeVisible();
-  await page.locator('ion-item.search-item ion-input input').fill(displayName);
+  await expect(page.locator('.ui-title', { hasText: 'Customers' })).toBeVisible();
+  await page.locator('.ui-item.search-item ui-input input').fill(displayName);
   await expect(page.locator('tr.data-row', { hasText: displayName })).toHaveCount(0);
 }
 
@@ -82,7 +82,7 @@ async function deleteCustomerInUi(page: Page, customerId: string): Promise<void>
   await page.goto(`/customers/${encodeURIComponent(customerId)}`);
   await expect(page.getByRole('button', { name: 'Delete Customer' })).toBeVisible();
   await page.getByRole('button', { name: 'Delete Customer' }).click();
-  const deleteModal = page.locator('ion-modal').filter({ has: page.locator('ion-title', { hasText: 'Delete Customer' }) }).last();
+  const deleteModal = page.locator('ui-modal').filter({ has: page.locator('.ui-title', { hasText: 'Delete Customer' }) }).last();
   await expect(deleteModal).toBeVisible();
   await deleteModal.getByRole('button', { name: 'Delete' }).click({ force: true });
   await expect(page).toHaveURL(/\/customers$/);
@@ -90,8 +90,8 @@ async function deleteCustomerInUi(page: Page, customerId: string): Promise<void>
 
 async function createScheduleAppointmentInUi(page: Page, customerId: string, noteText: string): Promise<void> {
   await page.goto(`/schedule?customerId=${encodeURIComponent(customerId)}`);
-  await expect(page.locator('ion-title', { hasText: 'Appointment' })).toBeVisible();
-  await page.locator('ion-item', { hasText: 'Notes' }).locator('textarea').fill(noteText);
+  await expect(page.locator('.ui-title', { hasText: 'Appointment' })).toBeVisible();
+  await page.locator('.ui-item', { hasText: 'Notes' }).locator('textarea').fill(noteText);
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.getByText('Appointment saved.')).toBeVisible();
 }
@@ -240,11 +240,11 @@ async function assertDocumentVisibleInBoard(
   options: { tab: 'quotes' | 'invoices'; documentNumber: string; customerName: string }
 ): Promise<void> {
   await page.goto('/quotes-invoices');
-  await expect(page.locator('ion-title', { hasText: 'Quotes & Invoices' })).toBeVisible();
+  await expect(page.locator('.ui-title', { hasText: 'Quotes & Invoices' })).toBeVisible();
   if (options.tab === 'invoices') {
-    await page.locator('ion-segment-button[value="invoices"]').click();
+    await page.locator('.ui-tab[value="invoices"]').click();
   } else {
-    await page.locator('ion-segment-button[value="quotes"]').click();
+    await page.locator('.ui-tab[value="quotes"]').click();
   }
 
   await page.locator('#invoice-search').fill(options.documentNumber);
@@ -269,7 +269,7 @@ test('login flow reaches dashboard', async ({ page }) => {
   await page.goto('/login');
   await page.getByRole('button', { name: 'Login as Super Admin' }).click();
   await expect(page).toHaveURL(/\/dashboard/);
-  await expect(page.locator('ion-title', { hasText: 'Dashboard' })).toBeVisible();
+  await expect(page.locator('.ui-title', { hasText: 'Dashboard' })).toBeVisible();
 });
 
 test('core routes load', async ({ page }) => {
@@ -289,7 +289,7 @@ test('core routes load', async ({ page }) => {
 
   for (const check of checks) {
     await page.goto(check.route);
-    await expect(page.locator('ion-title', { hasText: check.title })).toBeVisible();
+    await expect(page.locator('.ui-title', { hasText: check.title })).toBeVisible();
   }
 });
 
@@ -298,8 +298,8 @@ test('new customer can be created then deleted without remaining in the customer
   const customer = await createCustomerInUi(page, 'List Customer');
 
   await page.goto('/customers');
-  await expect(page.locator('ion-title', { hasText: 'Customers' })).toBeVisible();
-  await page.locator('ion-item.search-item ion-input input').fill(customer.displayName);
+  await expect(page.locator('.ui-title', { hasText: 'Customers' })).toBeVisible();
+  await page.locator('.ui-item.search-item ui-input input').fill(customer.displayName);
 
   const row = page.locator('tr.data-row', { hasText: customer.displayName }).first();
   await expect(row).toBeVisible();
@@ -474,8 +474,8 @@ test('schedule blocked bay requires block label', async ({ page }) => {
   const customer = await createCustomerInUi(page, 'Schedule Validation');
 
   await page.goto(`/schedule?customerId=${encodeURIComponent(customer.id)}`);
-  await expect(page.locator('ion-title', { hasText: 'Appointment' })).toBeVisible();
-  await page.locator('ion-item', { hasText: 'Block bay' }).locator('ion-checkbox').click();
+  await expect(page.locator('.ui-title', { hasText: 'Appointment' })).toBeVisible();
+  await page.locator('.ui-item', { hasText: 'Block bay' }).locator('ui-checkbox input').click();
   await expect(page.getByText('Block label is required when blocking a bay.').first()).toBeVisible();
   await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled();
 });
@@ -501,15 +501,15 @@ test('quote wizard blocks progress when no delivery channels are selected', asyn
 test('new customer save stays disabled until required contact fields are complete', async ({ page }) => {
   await seedAuthSession(page);
   await page.goto('/customers/new');
-  await expect(page.locator('ion-title', { hasText: 'New Customer' })).toBeVisible();
+  await expect(page.locator('.ui-title', { hasText: 'New Customer' })).toBeVisible();
 
   const saveButton = page.getByRole('button', { name: 'Save Customer' });
-  await page.locator('ion-item', { hasText: 'Phone *' }).locator('input').fill('(555) 555-1212');
-  await page.locator('ion-item', { hasText: 'Email *' }).locator('input').fill('qa@example.com');
+  await page.locator('.ui-item', { hasText: 'Phone *' }).locator('input').fill('(555) 555-1212');
+  await page.locator('.ui-item', { hasText: 'Email *' }).locator('input').fill('qa@example.com');
   await expect(saveButton).toBeDisabled();
 
-  await page.locator('ion-item', { hasText: 'First Name *' }).locator('input').fill('QA');
-  await page.locator('ion-item', { hasText: 'Last Name *' }).locator('input').fill(`Required-${Date.now()}`);
+  await page.locator('.ui-item', { hasText: 'First Name *' }).locator('input').fill('QA');
+  await page.locator('.ui-item', { hasText: 'Last Name *' }).locator('input').fill(`Required-${Date.now()}`);
   await expect(saveButton).toBeEnabled();
 });
 

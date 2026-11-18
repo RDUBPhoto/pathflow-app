@@ -9,6 +9,7 @@
 
 .invoice-detail-stack {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   position: relative;
   isolation: isolate;
@@ -94,6 +95,18 @@
   position: relative;
   z-index: 11;
   overflow: visible;
+}
+
+.invoice-head-actions .ui-button.secondary-header-action {
+  --color: var(--app-text-muted);
+  --color-hover: var(--app-text);
+  --background-hover: rgba(148, 163, 184, 0.12);
+  --border-radius: 9px;
+}
+
+.invoice-head-actions .ui-button.primary-header-action {
+  --box-shadow: 0 10px 22px rgba(37, 99, 235, 0.22);
+  font-weight: 800;
 }
 
 .invoice-actions-menu {
@@ -211,6 +224,23 @@
 .ordered-parts-head span {
   color: var(--app-text-muted);
   font-size: 12px;
+}
+
+.ordered-parts-table td strong {
+  display: block;
+}
+
+.ordered-parts-table td span {
+  display: block;
+  margin-top: 2px;
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
+.po-link-actions {
+  display: flex;
+  gap: 10px;
+  white-space: nowrap;
 }
 
 .ordered-parts-wrap {
@@ -505,6 +535,168 @@
   text-align: center;
 }
 
+.part-picker-modal-content {
+  --padding-bottom: calc(18px + env(safe-area-inset-bottom));
+  --padding-start: 14px;
+  --padding-end: 14px;
+  --overflow: hidden;
+}
+
+.part-picker-panel {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 12px;
+  height: 100%;
+  max-width: 920px;
+  margin: 0 auto;
+  overflow: hidden;
+}
+
+.part-picker-search-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.part-picker-search {
+  margin: 0;
+}
+
+.part-picker-count {
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
+.part-picker-table-wrap {
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 10px;
+  overflow: auto;
+  min-height: 0;
+  max-height: 100%;
+}
+
+.part-picker-table {
+  width: 100%;
+  min-width: 0;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.part-picker-table th,
+.part-picker-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--app-border-subtle);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.part-picker-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  color: var(--app-text-muted);
+  background: var(--app-surface-bg);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.part-picker-table td {
+  color: var(--app-text);
+  background: color-mix(in srgb, var(--app-control-bg) 62%, transparent);
+  font-size: 12px;
+}
+
+.part-picker-table th:nth-child(1),
+.part-picker-table td:nth-child(1) {
+  width: 54%;
+}
+
+.part-picker-table th:nth-child(2),
+.part-picker-table td:nth-child(2) {
+  width: 18%;
+}
+
+.part-picker-table th:nth-child(3),
+.part-picker-table td:nth-child(3) {
+  width: 14%;
+  white-space: nowrap;
+}
+
+.part-picker-action-col {
+  width: 14%;
+  min-width: 92px;
+  text-align: right !important;
+}
+
+.part-picker-table td strong,
+.part-picker-table td span {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.part-picker-table td strong {
+  white-space: normal;
+  line-height: 1.25;
+}
+
+.part-picker-table td span {
+  margin-top: 3px;
+  color: var(--app-text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.part-picker-add {
+  border: 1px solid rgba(59, 130, 246, 0.55);
+  border-radius: 8px;
+  background: rgba(37, 99, 235, 0.22);
+  color: var(--app-text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  min-height: 30px;
+  min-width: 68px;
+  padding: 6px 10px;
+}
+
+.part-picker-add:hover {
+  background: rgba(37, 99, 235, 0.34);
+}
+
+@media (max-width: 720px) {
+  .part-picker-search-row {
+    grid-template-columns: 1fr;
+  }
+
+  .part-picker-table th,
+  .part-picker-table td {
+    padding: 8px;
+  }
+
+  .part-picker-table th:nth-child(2),
+  .part-picker-table td:nth-child(2) {
+    display: none;
+  }
+
+  .part-picker-table th:nth-child(1),
+  .part-picker-table td:nth-child(1) {
+    width: 58%;
+  }
+
+  .part-picker-table th:nth-child(3),
+  .part-picker-table td:nth-child(3) {
+    width: 20%;
+  }
+
+  .part-picker-action-col {
+    width: 22%;
+  }
+}
+
 .table-pager {
   margin-top: 10px;
   display: flex;
@@ -789,7 +981,7 @@
     width: 100%;
   }
 
-  .invoice-head-actions ion-button {
+  .invoice-head-actions .ui-button {
     flex: 1 1 calc(50% - 4px);
     min-width: 140px;
   }

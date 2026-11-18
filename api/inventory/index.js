@@ -1,7 +1,7 @@
 const { TableClient } = require("../_shared/table-client");
 const { randomUUID } = require("crypto");
 const { resolveTenantId, sanitizeTenantId } = require("../_shared/tenant");
-const { requirePrincipal } = require("../_shared/auth");
+const { requirePrincipal, isLocalDevelopmentRequest } = require("../_shared/auth");
 
 const INVENTORY_TABLE = "inventoryitems";
 const NEEDS_TABLE = "inventoryneeds";
@@ -214,6 +214,7 @@ function tenantFromEmail(value) {
 
 function tenantReadCandidates(req, tenantId) {
   const primary = asString(tenantId);
+  if (!isLocalDevelopmentRequest(req)) return [primary];
   const defaultTenant = sanitizeTenantId(asString(process.env.DEFAULT_TENANT_ID));
   const aliases = LEGACY_TENANT_ALIASES[primary] || [];
   const devEmail = readHeaderValue(req && req.headers, "x-dev-user-email");

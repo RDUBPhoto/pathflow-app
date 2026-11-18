@@ -5,6 +5,10 @@ export const environment = {
     demoTools: false,
     powerBiReports: false
   },
+  telemetry: {
+    enabled: true,
+    endpoint: '/api/telemetry'
+  },
   auth: {
     primaryProvider: 'local',
     providers: ['local', 'aad', 'google'],

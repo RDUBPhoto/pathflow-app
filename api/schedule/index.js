@@ -6,92 +6,11 @@ const { requirePrincipal } = require("../_shared/auth");
 const TABLE = "schedule";
 const CUSTOMERS_TABLE = "customers";
 const INVENTORY_NEEDS_TABLE = "inventoryneeds";
-const WORKITEMS_TABLE = "workitems";
-const LANES_TABLE = "lanes";
 
 function pick(v, d = "") { return typeof v === "string" ? v : (v == null ? d : String(v)); }
 function bool(v) { return v === true || v === "true" || v === 1 || v === "1"; }
 function asString(v) { return v == null ? "" : String(v).trim(); }
 function asNumber(v, d = 0) { const n = Number(v); return Number.isFinite(n) ? n : d; }
-function toMillis(value) {
-  const parsed = Date.parse(asString(value));
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-function safeDuration(value) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-}
-function elapsedMs(fromValue, toValue) {
-  const from = toMillis(fromValue);
-  const to = toMillis(toValue);
-  if (!from || !to || to <= from) return 0;
-  return to - from;
-}
-function laneStageKey(lane) {
-  const explicit = asString(lane && lane.stageKey).toLowerCase();
-  if (explicit) return explicit;
-  const name = asString(lane && lane.name).toLowerCase();
-  if (!name) return "custom";
-  if (/lead/.test(name)) return "lead";
-  if (/quote/.test(name)) return "quote";
-  if (/sched|appointment|calendar/.test(name)) return "scheduled";
-  if (/progress|in[- ]?progress/.test(name)) return "inprogress";
-  if (/complete|completed|done|ready|pickup/.test(name)) return "completed";
-  if (/invoiced|invoice|paid/.test(name)) return "invoiced";
-  return "custom";
-}
-
-function isActiveScheduleRecord(record, nowMs) {
-  if (!record || bool(record.isBlocked)) return false;
-  const customerId = asString(record.customerId);
-  const resource = asString(record.resource);
-  if (!customerId || !resource) return false;
-  const startMs = toMillis(record.start);
-  const endMs = effectiveScheduleEndMs(record);
-  if (!startMs || !endMs || endMs <= startMs) return false;
-  return startMs <= nowMs && nowMs < endMs;
-}
-
-function effectiveScheduleEndMs(record) {
-  const plannedEndMs = toMillis(record && record.end);
-  const actualEndMs = toMillis(record && record.actualEnd);
-  const releasedMs = toMillis(record && record.bayReleasedAt);
-  let effective = plannedEndMs;
-  if (actualEndMs && (!effective || actualEndMs < effective)) effective = actualEndMs;
-  if (releasedMs && (!effective || releasedMs < effective)) effective = releasedMs;
-  return effective;
-}
-
-function compareSchedulePriority(a, b) {
-  const aUpdated = Math.max(toMillis(a.updatedAt), toMillis(a.createdAt));
-  const bUpdated = Math.max(toMillis(b.updatedAt), toMillis(b.createdAt));
-  if (aUpdated !== bUpdated) return aUpdated - bUpdated;
-  const aStart = toMillis(a.start);
-  const bStart = toMillis(b.start);
-  if (aStart !== bStart) return aStart - bStart;
-  return asString(a.id).localeCompare(asString(b.id));
-}
-
-function activeBayOccupants(records, nowMs) {
-  const byResource = new Map();
-  for (const record of records || []) {
-    if (!isActiveScheduleRecord(record, nowMs)) continue;
-    const resourceKey = asString(record.resource).toLowerCase();
-    if (!resourceKey) continue;
-    const current = byResource.get(resourceKey);
-    if (!current || compareSchedulePriority(current, record) < 0) {
-      byResource.set(resourceKey, record);
-    }
-  }
-
-  const customerIds = new Set();
-  for (const occupant of byResource.values()) {
-    const customerId = asString(occupant.customerId).toLowerCase();
-    if (customerId) customerIds.add(customerId);
-  }
-  return customerIds;
-}
-
 function normalizeNeedStatus(raw) {
   const value = asString(raw).toLowerCase();
   if (value === "ordered") return "ordered";
@@ -335,94 +254,6 @@ async function clearScheduleNeeds(conn, tenantId, scheduleId) {
   }
 }
 
-async function reconcileWorkTimers(conn, context, tenantId) {
-  const schedulesClient = await getTableClient(conn, TABLE);
-  const lanesClient = await getTableClient(conn, LANES_TABLE);
-  const itemsClient = await getTableClient(conn, WORKITEMS_TABLE);
-
-  const schedules = [];
-  const scheduleIter = schedulesClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${tenantId}'` } });
-  for await (const entity of scheduleIter) {
-    schedules.push({
-      id: entity.rowKey,
-      start: pick(entity.start),
-      end: pick(entity.end),
-      actualEnd: pick(entity.actualEnd),
-      bayReleasedAt: pick(entity.bayReleasedAt),
-      resource: pick(entity.resource),
-      customerId: pick(entity.customerId),
-      isBlocked: bool(entity.isBlocked),
-      createdAt: pick(entity.createdAt),
-      updatedAt: pick(entity.updatedAt)
-    });
-  }
-
-  const laneStageById = new Map();
-  const laneIter = lanesClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${tenantId}'` } });
-  for await (const lane of laneIter) {
-    laneStageById.set(asString(lane.rowKey), laneStageKey(lane));
-  }
-
-  const nowIso = new Date().toISOString();
-  const nowMs = toMillis(nowIso);
-  const activeCustomers = activeBayOccupants(schedules, nowMs);
-
-  let touched = 0;
-  const itemsIter = itemsClient.listEntities({ queryOptions: { filter: `PartitionKey eq '${tenantId}'` } });
-  for await (const item of itemsIter) {
-    const itemId = asString(item.rowKey);
-    if (!itemId) continue;
-    const customerId = asString(item.customerId).toLowerCase();
-    const checkedInAt = asString(item.checkedInAt);
-    const completedAt = asString(item.completedAt);
-    if (!customerId || !checkedInAt || completedAt) continue;
-
-    const stage = laneStageById.get(asString(item.laneId)) || "custom";
-    if (stage === "completed") continue;
-
-    const currentlyPaused = bool(item.isPaused) || !!asString(item.pausedAt);
-    const shouldBeActive = activeCustomers.has(customerId);
-
-    if (!shouldBeActive && !currentlyPaused) {
-      const resumedAt = asString(item.lastWorkResumedAt) || checkedInAt;
-      const workIncrement = elapsedMs(resumedAt, nowIso);
-      await itemsClient.upsertEntity(
-        {
-          partitionKey: tenantId,
-          rowKey: itemId,
-          isPaused: true,
-          pausedAt: nowIso,
-          lastWorkResumedAt: "",
-          workDurationMs: safeDuration(item.workDurationMs) + workIncrement,
-          updatedAt: nowIso
-        },
-        "Merge"
-      );
-      touched += 1;
-      continue;
-    }
-
-    if (shouldBeActive && currentlyPaused) {
-      const pauseIncrement = elapsedMs(item.pausedAt, nowIso);
-      await itemsClient.upsertEntity(
-        {
-          partitionKey: tenantId,
-          rowKey: itemId,
-          isPaused: false,
-          pausedAt: "",
-          lastWorkResumedAt: nowIso,
-          pauseDurationMs: safeDuration(item.pauseDurationMs) + pauseIncrement,
-          updatedAt: nowIso
-        },
-        "Merge"
-      );
-      touched += 1;
-    }
-  }
-
-  context.log(`schedule/work-timers reconciled: ${touched} item(s) updated`);
-}
-
 module.exports = async function (context, req) {
   const method = (req.method || "GET").toUpperCase();
   const id = context.bindingData && context.bindingData.id ? String(context.bindingData.id) : "";
@@ -453,10 +284,17 @@ module.exports = async function (context, req) {
           bayReleasedAt: pick(e.bayReleasedAt),
           resource: pick(e.resource),
           customerId: pick(e.customerId),
+          workItemId: pick(e.workItemId),
           isBlocked: bool(e.isBlocked),
           title: pick(e.title),
           notes: pick(e.notes),
           partRequests: parsePartRequests(e.partRequests),
+          appointmentInfoSentAt: pick(e.appointmentInfoSentAt),
+          appointmentInfoSentVia: pick(e.appointmentInfoSentVia),
+          appointmentInfoMessage: pick(e.appointmentInfoMessage),
+          appointmentInfoSentScheduleStart: pick(e.appointmentInfoSentScheduleStart),
+          appointmentInfoSentScheduleEnd: pick(e.appointmentInfoSentScheduleEnd),
+          appointmentInfoSentResource: pick(e.appointmentInfoSentResource),
           createdAt: pick(e.createdAt),
           updatedAt: pick(e.updatedAt)
         });
@@ -472,6 +310,7 @@ module.exports = async function (context, req) {
       const end = pick(b.end).trim();
       const resource = pick(b.resource).trim();
       const customerId = pick(b.customerId).trim();
+      const workItemId = pick(b.workItemId).trim();
       const title = pick(b.title).trim();
       const notes = pick(b.notes).trim();
       const actualEnd = Object.prototype.hasOwnProperty.call(b, "actualEnd") ? pick(b.actualEnd).trim() : null;
@@ -488,6 +327,19 @@ module.exports = async function (context, req) {
         context.res = { status: 400, headers: { "content-type": "application/json" }, body: { error: "start, end, resource required" } };
         return;
       }
+      if (workItemId) {
+        try {
+          const item = await (await getTableClient(conn, "workitems")).getEntity(resolvedTenantId, workItemId);
+          if (!item.jobId || item.customerId !== customerId || isBlocked) {
+            context.res = { status: 409, body: { error: "Select the paid job's customer to schedule this appointment." } };
+            return;
+          }
+        } catch (error) {
+          if (error.statusCode !== 404) throw error;
+          context.res = { status: 404, body: { error: "The paid job could not be found." } };
+          return;
+        }
+      }
 
       if (!rid) {
         const rowKey = randomUUID();
@@ -499,12 +351,19 @@ module.exports = async function (context, req) {
           end,
           resource,
           customerId,
+          workItemId,
           isBlocked,
           title,
           notes,
           actualEnd: "",
           bayReleasedAt: "",
           partRequests: JSON.stringify(requestedPartRequests || []),
+          appointmentInfoSentAt: "",
+          appointmentInfoSentVia: "",
+          appointmentInfoMessage: "",
+          appointmentInfoSentScheduleStart: "",
+          appointmentInfoSentScheduleEnd: "",
+          appointmentInfoSentResource: "",
           createdAt: now,
           updatedAt: now
         };
@@ -518,7 +377,6 @@ module.exports = async function (context, req) {
           isBlocked,
           partRequests: requestedPartRequests || []
         });
-        try { await reconcileWorkTimers(conn, context, tenantId); } catch (error) { context.log.warn(`work timer reconcile failed: ${String(error && error.message || error)}`); }
         context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true, id: rowKey } };
         return;
       } else {
@@ -531,6 +389,12 @@ module.exports = async function (context, req) {
           : parsePartRequests(current && current.partRequests);
 
         const patch = { partitionKey: tenantId, rowKey: rid, updatedAt: new Date().toISOString() };
+        if (workItemId) patch.workItemId = workItemId;
+        if (current?.workItemId && Object.prototype.hasOwnProperty.call(b, "customerId") &&
+            (customerId !== current.customerId || isBlocked)) {
+          context.res = { status: 409, body: { error: "Cancel the linked appointment before reassigning it." } };
+          return;
+        }
         if (start) patch.start = start;
         if (end) patch.end = end;
         if (resource) patch.resource = resource;
@@ -541,6 +405,12 @@ module.exports = async function (context, req) {
         if (actualEnd !== null) patch.actualEnd = actualEnd;
         if (bayReleasedAt !== null) patch.bayReleasedAt = bayReleasedAt;
         if (requestedPartRequests != null) patch.partRequests = JSON.stringify(requestedPartRequests);
+        if (Object.prototype.hasOwnProperty.call(b, "appointmentInfoSentAt")) patch.appointmentInfoSentAt = pick(b.appointmentInfoSentAt).trim();
+        if (Object.prototype.hasOwnProperty.call(b, "appointmentInfoSentVia")) patch.appointmentInfoSentVia = pick(b.appointmentInfoSentVia).trim();
+        if (Object.prototype.hasOwnProperty.call(b, "appointmentInfoMessage")) patch.appointmentInfoMessage = pick(b.appointmentInfoMessage).trim();
+        if (Object.prototype.hasOwnProperty.call(b, "appointmentInfoSentScheduleStart")) patch.appointmentInfoSentScheduleStart = pick(b.appointmentInfoSentScheduleStart).trim();
+        if (Object.prototype.hasOwnProperty.call(b, "appointmentInfoSentScheduleEnd")) patch.appointmentInfoSentScheduleEnd = pick(b.appointmentInfoSentScheduleEnd).trim();
+        if (Object.prototype.hasOwnProperty.call(b, "appointmentInfoSentResource")) patch.appointmentInfoSentResource = pick(b.appointmentInfoSentResource).trim();
         await client.upsertEntity(patch, "Merge");
 
         await syncScheduleNeeds(conn, tenantId, {
@@ -556,7 +426,6 @@ module.exports = async function (context, req) {
             : bool(current && current.isBlocked),
           partRequests: effectivePartRequests
         });
-        try { await reconcileWorkTimers(conn, context, tenantId); } catch (error) { context.log.warn(`work timer reconcile failed: ${String(error && error.message || error)}`); }
         context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true, id: rid } };
         return;
       }
@@ -565,7 +434,6 @@ module.exports = async function (context, req) {
     if (method === "DELETE" && id) {
       await client.deleteEntity(tenantId, id);
       await clearScheduleNeeds(conn, tenantId, id);
-      try { await reconcileWorkTimers(conn, context, tenantId); } catch (error) { context.log.warn(`work timer reconcile failed: ${String(error && error.message || error)}`); }
       context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true } };
       return;
     }

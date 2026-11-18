@@ -7,6 +7,7 @@ export interface WorkspaceUser {
   email: string;
   role: 'admin' | 'user';
   status: 'active' | 'invited' | 'disabled';
+  areaAccess?: Record<string, boolean>;
 }
 
 type UsersResponse = {
@@ -33,6 +34,13 @@ export class AccessAdminApiService {
   inviteUser(payload: { name: string; email: string; role: 'admin' | 'user'; tenantId?: string }) {
     return this.http.post<UsersResponse>('/api/access', {
       op: 'invite-user',
+      ...payload
+    });
+  }
+
+  updateUserAccess(payload: { email: string; areaAccess: Record<string, boolean>; tenantId?: string }) {
+    return this.http.post<UsersResponse>('/api/access', {
+      op: 'update-user-access',
       ...payload
     });
   }

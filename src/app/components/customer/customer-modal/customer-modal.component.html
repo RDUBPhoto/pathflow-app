@@ -1,201 +1,238 @@
-    <ion-header>
-      <ion-toolbar>
-        <ion-title>{{ customerId ? 'Edit Customer' : 'Add Customer' }}</ion-title>
-        <ion-buttons slot="end">
-          <ion-button (click)="close()">Close</ion-button>
-        </ion-buttons>
-      </ion-toolbar>
-    </ion-header>
+<header class="ui-header">
+  <div class="ui-toolbar">
+    <h1 class="ui-title">{{ mode() === 'lead' ? 'New Phone Lead' : (customerId ? 'Edit Customer' : 'Add Customer') }}</h1>
+    <div class="ui-buttons" slot="end">
+      <button class="btn ui-button btn-primary" type="button" [disabled]="loading()" (click)="close()">Close</button>
+    </div>
+  </div>
+</header>
 
-    <ion-content class="ion-padding modal-form-content">
-      <div *ngIf="loadingForm(); else formTpl" style="display:flex;justify-content:center;align-items:center;height:60vh;">
-        <ion-spinner name="crescent"></ion-spinner>
+<div class="ui-content app-padding modal-form-content">
+  @if (loadingForm()) {
+    <div style="display:flex;justify-content:center;align-items:center;height:60vh;">
+      <span class="spinner-border spinner-border-sm ui-spinner" role="status" aria-label="Loading"></span>
+    </div>
+  } @else {
+    <div style="font-weight:700; margin-top:4px;">Customer Details</div>
+    <div style="height:1px; background:rgba(0,0,0,0.08); margin:6px 0 12px;"></div>
+    <div style="display:grid; gap:12px; grid-template-columns: repeat(auto-fit,minmax(240px,1fr));">
+      <div class="ui-item">
+        <span class="ui-label">First Name *</span>
+        <ui-input aria-label="First Name *" [ngModel]="firstName()" (ngModelChange)="onFirstChange($event)"></ui-input>
+        @if (showErrors() && !firstName().trim()) {
+          <span class="text-secondary ui-note text-danger" slot="helper">Required</span>
+        }
       </div>
-
-      <ng-template #formTpl>
-        <div style="font-weight:700; margin-top:4px;">Customer Details</div>
-        <div style="height:1px; background:rgba(0,0,0,0.08); margin:6px 0 12px;"></div>
-
-        <div style="display:grid; gap:12px; grid-template-columns: repeat(auto-fit,minmax(240px,1fr));">
-          <ion-item>
-            <ion-label position="stacked">First Name *</ion-label>
-            <ion-input [ngModel]="firstName()" (ngModelChange)="onFirstChange($event)"></ion-input>
-            <ion-note slot="helper" color="danger" *ngIf="showErrors() && !firstName().trim()">Required</ion-note>
-          </ion-item>
-          <ion-item>
-            <ion-label position="stacked">Last Name *</ion-label>
-            <ion-input [ngModel]="lastName()" (ngModelChange)="onLastChange($event)"></ion-input>
-            <ion-note slot="helper" color="danger" *ngIf="showErrors() && !lastName().trim()">Required</ion-note>
-          </ion-item>
-          <ion-item>
-            <ion-label position="stacked">Phone *</ion-label>
-            <ion-input [ngModel]="phone()" (ngModelChange)="onPhoneInput($event)"></ion-input>
-            <ion-note slot="helper" color="danger" *ngIf="showErrors() && !phoneValid()">Enter a valid phone</ion-note>
-          </ion-item>
-          <ion-item>
-            <ion-label position="stacked">Email *</ion-label>
-            <ion-input [ngModel]="email()" (ngModelChange)="onEmailChange($event)"></ion-input>
-            <ion-note slot="helper" color="danger" *ngIf="showErrors() && !emailValid()">Enter a valid email</ion-note>
-          </ion-item>
-
-          <div class="full" *ngIf="dupMatches().length" style="grid-column: 1 / -1;">
-            <div style="font-weight:600; margin:6px 0 4px;">Possible duplicates</div>
-            <ion-list>
-              <ion-item button detail="false" *ngFor="let d of dupMatches()" (click)="selectDuplicate(d)">
-                <ion-label>
-                  <div style="font-weight:600;">{{ d.name }}</div>
+      <div class="ui-item">
+        <span class="ui-label">Last Name{{ mode() === 'lead' ? ' (optional)' : ' *' }}</span>
+        <ui-input [aria-label]="mode() === 'lead' ? 'Last Name' : 'Last Name *'" [ngModel]="lastName()" (ngModelChange)="onLastChange($event)"></ui-input>
+        @if (showErrors() && mode() !== 'lead' && !lastName().trim()) {
+          <span class="text-secondary ui-note text-danger" slot="helper">Required</span>
+        }
+      </div>
+      <div class="ui-item">
+        <span class="ui-label">Phone *</span>
+        <ui-input aria-label="Phone *" [ngModel]="phone()" (ngModelChange)="onPhoneInput($event)"></ui-input>
+        @if (showErrors() && !phoneValid()) {
+          <span class="text-secondary ui-note text-danger" slot="helper">Enter a valid phone</span>
+        }
+      </div>
+      <div class="ui-item">
+        <span class="ui-label">Email{{ mode() === 'lead' ? ' (optional)' : ' *' }}</span>
+        <ui-input [aria-label]="mode() === 'lead' ? 'Email' : 'Email *'" [ngModel]="email()" (ngModelChange)="onEmailChange($event)"></ui-input>
+        @if ((showErrors() || (mode() === 'lead' && email().trim())) && !emailValid()) {
+          <span class="text-secondary ui-note text-danger" slot="helper">Enter a valid email</span>
+        }
+      </div>
+      @if (dupMatches().length) {
+        <div class="full" style="grid-column: 1 / -1;">
+          <div style="font-weight:600; margin:6px 0 4px;">Possible duplicates</div>
+          <div class="ui-list">
+            @for (d of dupMatches(); track d) {
+              <button class="ui-item dropdown-item" type="button" [disabled]="loading()"
+                [attr.aria-label]="mode() === 'lead' ? 'Use existing customer ' + d.name : null" (click)="selectDuplicate(d)">
+                <span class="ui-label">
+                  <div style="font-weight:600;">{{ mode() === 'lead' ? 'Use existing customer ' + d.name : d.name }}</div>
                   <div style="font-size:12px; opacity:0.8;">
-                    <span *ngIf="d.phone">{{ d.phone }}</span>
-                    <span *ngIf="d.phone && d.email"> • </span>
-                    <span *ngIf="d.email">{{ d.email }}</span>
+                    @if (d.phone) {
+                      <span>{{ d.phone }}</span>
+                    }
+                    @if (d.phone && d.email) {
+                      <span> • </span>
+                    }
+                    @if (d.email) {
+                      <span>{{ d.email }}</span>
+                    }
                   </div>
-                </ion-label>
-              </ion-item>
-            </ion-list>
+                </span>
+              </button>
+            }
           </div>
-
-          <ion-item class="full" style="grid-column: 1 / -1;">
-            <ion-label position="stacked">Address *</ion-label>
-            <ion-textarea
-              autoGrow="true"
-              [ngModel]="address()"
-              (ngModelChange)="onAddressChange($event)"
-              (ionBlur)="onAddressBlur()">
-            </ion-textarea>
-            <ion-note slot="helper" color="danger" *ngIf="showErrors() && !addressValid()">Enter an address</ion-note>
-          </ion-item>
-          <div class="full address-lookup-box" *ngIf="addressSearching() || addressSuggestions().length || addressNoMatches()">
-            <div class="address-lookup-state" *ngIf="addressSearching()">Searching addresses...</div>
+        </div>
+      }
+      <div class="ui-item full" style="grid-column: 1 / -1;">
+        <span class="ui-label">Address{{ mode() === 'lead' ? ' (optional)' : ' *' }}</span>
+        <ui-textarea [aria-label]="mode() === 'lead' ? 'Address' : 'Address *'"
+          autoGrow="true"
+          [ngModel]="address()"
+          (ngModelChange)="onAddressChange($event)"
+          (controlBlur)="onAddressBlur()">
+        </ui-textarea>
+        @if ((showErrors() || (mode() === 'lead' && address().trim())) && !addressValid()) {
+          <span class="text-secondary ui-note text-danger" slot="helper">Enter an address</span>
+        }
+      </div>
+      @if (addressSearching() || addressSuggestions().length || addressNoMatches()) {
+        <div class="full address-lookup-box">
+          @if (addressSearching()) {
+            <div class="address-lookup-state">Searching addresses...</div>
+          }
+          @for (item of addressSuggestions(); track item) {
             <button
               type="button"
               class="address-lookup-option"
-              *ngFor="let item of addressSuggestions()"
               (mousedown)="$event.preventDefault()"
               (click)="selectAddressSuggestion(item)">
               {{ item.display }}
             </button>
-            <div class="address-lookup-state" *ngIf="!addressSearching() && addressNoMatches()">
+          }
+          @if (!addressSearching() && addressNoMatches()) {
+            <div class="address-lookup-state">
               No address matches found.
             </div>
-          </div>
+          }
         </div>
-
-        <div style="font-weight:700; margin-top:18px;">Vehicle Details</div>
-        <div style="height:1px; background:rgba(0,0,0,0.08); margin:6px 0 12px;"></div>
-
-        <ion-item class="full" style="grid-column: 1 / -1;">
-          <ion-label position="stacked">VIN (optional)</ion-label>
-          <div style="display:flex; gap:8px; width:100%; align-items:center;">
-            <ion-input style="flex:1" maxlength="17" [ngModel]="vin()" (ngModelChange)="onVinChange($event)"></ion-input>
-            <ion-button size="small" (click)="lookupVIN()">Decode VIN</ion-button>
-            <ion-button size="small" fill="outline" (click)="openVinPhotoPicker()" [disabled]="vinOcrLoading()">
-              {{ vinOcrLoading() ? 'Scanning...' : 'Scan VIN Photo' }}
-            </ion-button>
-          </div>
-          <input
-            #vinPhotoInput
-            type="file"
-            accept="image/*"
-            capture="environment"
-            style="display:none"
-            (change)="onVinPhotoSelected($event)" />
-          <ion-note slot="helper" color="danger" *ngIf="showErrors() && !vinValid()">VIN must be 17 characters and cannot contain I, O, or Q</ion-note>
-          <ion-note slot="helper" *ngIf="vinValid() && vinStatus()">{{ vinStatus() }}</ion-note>
-        </ion-item>
-
-        <div *ngIf="hasVinDetails()" style="margin:8px 0 12px;">
-          <div style="font-weight:600; margin-bottom:6px;">Decoded from VIN</div>
-          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:8px; border:1px solid rgba(0,0,0,0.06); border-radius:8px; padding:8px;">
-            <div *ngFor="let kv of (vinDecoded() | keyvalue)">
+      }
+    </div>
+    <div style="font-weight:700; margin-top:18px;">Vehicle Details{{ mode() === 'lead' ? ' (optional)' : '' }}</div>
+    <div style="height:1px; background:rgba(0,0,0,0.08); margin:6px 0 12px;"></div>
+    <div class="ui-item full" style="grid-column: 1 / -1;">
+      <span class="ui-label">VIN (optional)</span>
+      <div style="display:flex; gap:8px; width:100%; align-items:center;">
+        <ui-input style="flex:1" maxlength="17" [ngModel]="vin()" (ngModelChange)="onVinChange($event)"></ui-input>
+        <button class="btn ui-button btn-primary btn-sm" type="button" (click)="lookupVIN()">Decode VIN</button>
+        <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="openVinPhotoPicker()" [disabled]="vinOcrLoading()">
+          {{ vinOcrLoading() ? 'Scanning...' : 'Scan VIN Photo' }}
+        </button>
+      </div>
+      <input
+        #vinPhotoInput
+        type="file"
+        accept="image/*"
+        capture="environment"
+        style="display:none"
+        (change)="onVinPhotoSelected($event)" />
+      @if (showErrors() && !vinValid()) {
+        <span class="text-secondary ui-note text-danger" slot="helper">VIN must be 17 characters and cannot contain I, O, or Q</span>
+      }
+      @if (vinValid() && vinStatus()) {
+        <span class="text-secondary ui-note" slot="helper">{{ vinStatus() }}</span>
+      }
+    </div>
+    @if (hasVinDetails()) {
+      <div style="margin:8px 0 12px;">
+        <div style="font-weight:600; margin-bottom:6px;">Decoded from VIN</div>
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:8px; border:1px solid rgba(0,0,0,0.06); border-radius:8px; padding:8px;">
+          @for (kv of (vinDecoded() | keyvalue); track kv) {
+            <div>
               <div style="font-size:12px; opacity:0.7;">{{ kv.key }}</div>
               <div style="font-size:14px;">{{ kv.value || '—' }}</div>
             </div>
-          </div>
+          }
         </div>
-
-        <div style="display:grid; gap:12px; grid-template-columns: repeat(auto-fit,minmax(240px,1fr));">
-          <ion-item>
-            <ion-label position="stacked">Make *</ion-label>
-            <ion-input [ngModel]="vehicleMake()" (ngModelChange)="vehicleMake.set($event)"></ion-input>
-            <ion-note slot="helper" color="danger" *ngIf="showErrors() && !vehicleMakeValid()">Required</ion-note>
-          </ion-item>
-          <ion-item>
-            <ion-label position="stacked">Model *</ion-label>
-            <ion-input [ngModel]="vehicleModel()" (ngModelChange)="vehicleModel.set($event)"></ion-input>
-            <ion-note slot="helper" color="danger" *ngIf="showErrors() && !vehicleModelValid()">Required</ion-note>
-          </ion-item>
-          <ion-item>
-            <ion-label position="stacked">Year *</ion-label>
-            <ion-input [ngModel]="vehicleYear()" (ngModelChange)="vehicleYear.set($event)"></ion-input>
-            <ion-note slot="helper" color="danger" *ngIf="showErrors() && !vehicleYearValid()">Enter a 4-digit year</ion-note>
-          </ion-item>
-          <ion-item>
-            <ion-label position="stacked">Trim</ion-label>
-            <ion-input [ngModel]="vehicleTrim()" (ngModelChange)="vehicleTrim.set($event)"></ion-input>
-          </ion-item>
-          <ion-item>
-            <ion-label position="stacked">Doors</ion-label>
-            <ion-input [ngModel]="vehicleDoors()" (ngModelChange)="vehicleDoors.set($event)"></ion-input>
-          </ion-item>
-          <ion-item>
-            <ion-label position="stacked">Bed Length</ion-label>
-            <ion-input [ngModel]="bedLength()" (ngModelChange)="bedLength.set($event)"></ion-input>
-          </ion-item>
-          <ion-item>
-            <ion-label position="stacked">Cab Type</ion-label>
-            <ion-input [ngModel]="cabType()" (ngModelChange)="cabType.set($event)"></ion-input>
-          </ion-item>
-          <ion-item>
-            <ion-label position="stacked">Engine Model</ion-label>
-            <ion-input [ngModel]="engineModel()" (ngModelChange)="engineModel.set($event)"></ion-input>
-          </ion-item>
-          <ion-item>
-            <ion-label position="stacked">Engine Cylinders</ion-label>
-            <ion-input [ngModel]="engineCylinders()" (ngModelChange)="engineCylinders.set($event)"></ion-input>
-          </ion-item>
-          <ion-item>
-            <ion-label position="stacked">Transmission Style</ion-label>
-            <ion-input [ngModel]="transmissionStyle()" (ngModelChange)="transmissionStyle.set($event)"></ion-input>
-          </ion-item>
-
-          <ion-item class="full" style="grid-column: 1 / -1;" lines="none">
-            <ion-label position="stacked">Vehicle Color</ion-label>
-
-            <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:6px;">
-              <button type="button"
-                      *ngFor="let opt of palette"
-                      (click)="vehicleColor.set(opt.hex)"
-                      [attr.aria-pressed]="vehicleColor()===opt.hex"
-                      style="display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; border:2px solid; background: var(--ion-item-background); cursor:pointer;"
-                      [style.border-color]="vehicleColor()===opt.hex ? 'var(--ion-color-primary)' : 'rgba(0,0,0,0.15)'"
-                      [style.box-shadow]="vehicleColor()===opt.hex ? '0 0 0 3px rgba(var(--ion-color-primary-rgb,56,128,255),.25)' : 'none'">
-                <span style="display:inline-block; width:14px; height:14px; border-radius:50%; border:1px solid rgba(0,0,0,0.2);" [style.background]="opt.hex"></span>
-                <span>{{ opt.label }}</span>
-              </button>
-            </div>
-          </ion-item>
+      </div>
+    }
+    <div style="display:grid; gap:12px; grid-template-columns: repeat(auto-fit,minmax(240px,1fr));">
+      <div class="ui-item">
+        <span class="ui-label">Make{{ mode() === 'lead' ? '' : ' *' }}</span>
+        <ui-input [aria-label]="mode() === 'lead' ? 'Make' : 'Make *'" [ngModel]="vehicleMake()" (ngModelChange)="vehicleMake.set($event)"></ui-input>
+        @if (showErrors() && mode() !== 'lead' && !vehicleMakeValid()) {
+          <span class="text-secondary ui-note text-danger" slot="helper">Required</span>
+        }
+      </div>
+      <div class="ui-item">
+        <span class="ui-label">Model{{ mode() === 'lead' ? '' : ' *' }}</span>
+        <ui-input [aria-label]="mode() === 'lead' ? 'Model' : 'Model *'" [ngModel]="vehicleModel()" (ngModelChange)="vehicleModel.set($event)"></ui-input>
+        @if (showErrors() && mode() !== 'lead' && !vehicleModelValid()) {
+          <span class="text-secondary ui-note text-danger" slot="helper">Required</span>
+        }
+      </div>
+      <div class="ui-item">
+        <span class="ui-label">Year{{ mode() === 'lead' ? '' : ' *' }}</span>
+        <ui-input [aria-label]="mode() === 'lead' ? 'Year' : 'Year *'" [ngModel]="vehicleYear()" (ngModelChange)="vehicleYear.set($event)"></ui-input>
+        @if ((showErrors() || (mode() === 'lead' && vehicleYear().trim())) && !vehicleYearValid()) {
+          <span class="text-secondary ui-note text-danger" slot="helper">Enter a 4-digit year</span>
+        }
+      </div>
+      <div class="ui-item">
+        <span class="ui-label">Trim</span>
+        <ui-input aria-label="Trim" [ngModel]="vehicleTrim()" (ngModelChange)="vehicleTrim.set($event)"></ui-input>
+      </div>
+      <div class="ui-item">
+        <span class="ui-label">Doors</span>
+        <ui-input aria-label="Doors" [ngModel]="vehicleDoors()" (ngModelChange)="vehicleDoors.set($event)"></ui-input>
+      </div>
+      <div class="ui-item">
+        <span class="ui-label">Bed Length</span>
+        <ui-input aria-label="Bed Length" [ngModel]="bedLength()" (ngModelChange)="bedLength.set($event)"></ui-input>
+      </div>
+      <div class="ui-item">
+        <span class="ui-label">Cab Type</span>
+        <ui-input aria-label="Cab Type" [ngModel]="cabType()" (ngModelChange)="cabType.set($event)"></ui-input>
+      </div>
+      <div class="ui-item">
+        <span class="ui-label">Engine Model</span>
+        <ui-input aria-label="Engine Model" [ngModel]="engineModel()" (ngModelChange)="engineModel.set($event)"></ui-input>
+      </div>
+      <div class="ui-item">
+        <span class="ui-label">Engine Cylinders</span>
+        <ui-input aria-label="Engine Cylinders" [ngModel]="engineCylinders()" (ngModelChange)="engineCylinders.set($event)"></ui-input>
+      </div>
+      <div class="ui-item">
+        <span class="ui-label">Transmission Style</span>
+        <ui-input aria-label="Transmission Style" [ngModel]="transmissionStyle()" (ngModelChange)="transmissionStyle.set($event)"></ui-input>
+      </div>
+      <div class="ui-item full" style="grid-column: 1 / -1;">
+        <span class="ui-label">Vehicle Color</span>
+        <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:6px;">
+          @for (opt of palette; track opt) {
+            <button type="button"
+              (click)="vehicleColor.set(opt.hex)"
+              [attr.aria-pressed]="vehicleColor()===opt.hex"
+              style="display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; border:2px solid; background: var(--tblr-bg-surface); cursor:pointer;"
+              [style.border-color]="vehicleColor()===opt.hex ? 'var(--tblr-primary)' : 'rgba(0,0,0,0.15)'"
+              [style.box-shadow]="vehicleColor()===opt.hex ? '0 0 0 3px rgba(var(--tblr-primary-rgb),.25)' : 'none'">
+              <span style="display:inline-block; width:14px; height:14px; border-radius:50%; border:1px solid rgba(0,0,0,0.2);" [style.background]="opt.hex"></span>
+              <span>{{ opt.label }}</span>
+            </button>
+          }
         </div>
+      </div>
+    </div>
+    <div style="font-weight:700; margin-top:18px;">Customer Notes</div>
+    <div style="height:1px; background:rgba(0,0,0,0.08); margin:6px 0 12px;"></div>
+    <div class="ui-item full" style="grid-column: 1 / -1;">
+      <span class="ui-label">Notes</span>
+      <ui-textarea aria-label="Notes" autoGrow="true" [ngModel]="notes()" (ngModelChange)="notes.set($event)"></ui-textarea>
+    </div>
+  }
 
-        <div style="font-weight:700; margin-top:18px;">Customer Notes</div>
-        <div style="height:1px; background:rgba(0,0,0,0.08); margin:6px 0 12px;"></div>
-
-        <ion-item class="full" style="grid-column: 1 / -1;">
-          <ion-label position="stacked">Notes</ion-label>
-          <ion-textarea autoGrow="true" [ngModel]="notes()" (ngModelChange)="notes.set($event)"></ion-textarea>
-        </ion-item>
-
-      </ng-template>
-    </ion-content>
-    <ion-footer class="modal-form-footer">
-      <ion-toolbar>
-        <div class="modal-footer-row">
-          <div class="modal-footer-right">
-            <ion-button fill="clear" (click)="close()">Cancel</ion-button>
-            <ion-button [disabled]="!canSave() || loading() || loadingForm()" (click)="save()">
-              <ion-spinner *ngIf="loading()" name="crescent" style="margin-right:8px;"></ion-spinner>
-              Save
-            </ion-button>
-          </div>
-        </div>
-      </ion-toolbar>
-    </ion-footer>
+</div>
+<footer class="ui-footer modal-form-footer">
+  <div class="ui-toolbar">
+    <div class="modal-footer-row">
+      <div class="modal-footer-right">
+        <button class="btn ui-button btn-ghost-primary" type="button" [disabled]="loading()" (click)="close()">Cancel</button>
+        <button class="btn ui-button btn-primary" type="button" [disabled]="!canSave() || loading() || loadingForm()" (click)="save()">
+          @if (loading()) {
+            <span class="spinner-border spinner-border-sm ui-spinner" role="status" aria-label="Loading" style="margin-right:8px;"></span>
+          }
+          {{ mode() === 'lead' ? 'Save Lead' : 'Save' }}
+        </button>
+      </div>
+    </div>
+    @if (status() === 'Save error') {
+      <p class="text-danger mb-0" role="alert">Could not save the customer. Try again.</p>
+    }
+  </div>
+</footer>

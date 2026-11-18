@@ -1,16 +1,16 @@
-<div class="internal-shell glass-bg" [class.collapsed]="collapsed()">
-  <aside class="sidenav glass-surface">
+<div class="internal-shell app-content" [class.collapsed]="collapsed()">
+  <aside class="sidenav app-surface">
     <div class="sidenav-main">
       <div class="brand-row">
-        <ion-button
-          class="collapse-btn"
-          fill="clear"
-          *ngIf="!isMobile()"
-          (click)="toggleCollapsed()"
-          aria-label="Toggle navigation">
-          <ion-icon [name]="collapsed() ? 'chevron-forward-outline' : 'chevron-back-outline'"></ion-icon>
-        </ion-button>
-        <ng-container *ngIf="branding.hasCustomLogo(); else uploadLogoSlot">
+        @if (!isMobile()) {
+          <button type="button"
+            class="btn ui-button btn-ghost-primary collapse-btn"
+            (click)="toggleCollapsed()"
+            aria-label="Toggle navigation">
+            <ui-icon [name]="collapsed() ? 'chevron-right' : 'chevron-left'"></ui-icon>
+          </button>
+        }
+        @if (branding.hasCustomLogo()) {
           <a
             class="brand-home"
             routerLink="/dashboard"
@@ -20,173 +20,203 @@
               <img class="brand-logo" [src]="branding.logoUrl()" alt="Business logo" />
             </div>
           </a>
-        </ng-container>
-        <ng-template #uploadLogoSlot>
-          <button
-            type="button"
-            class="brand-upload-link"
-            *ngIf="showUploadLogoCta() && !collapsed()"
-            (click)="openBrandingSettings()">
-            Upload your logo
-          </button>
-        </ng-template>
+        } @else {
+          @if (showUploadLogoCta() && !collapsed()) {
+            <button
+              type="button"
+              class="brand-upload-link"
+              (click)="openBrandingSettings()">
+              Upload your logo
+            </button>
+          }
+        }
       </div>
 
       <div class="section-label">Workspace</div>
       <nav id="workspace-nav-guide-target" class="nav-links">
-        <a
-          class="nav-link"
-          routerLink="/dashboard"
-          routerLinkActive="active"
-          [routerLinkActiveOptions]="{ exact: true }"
-          title="Dashboard">
-          <span class="icon-wrap">
-            <ion-icon name="grid-outline"></ion-icon>
-          </span>
-          <span class="nav-label">Dashboard</span>
-        </a>
+        @if (canAccess('dashboard')) {
+          <a
+            class="nav-link"
+            routerLink="/dashboard"
+            routerLinkActive="active"
+            [routerLinkActiveOptions]="{ exact: true }"
+            title="Dashboard">
+            <span class="icon-wrap">
+              <ui-icon name="layout-grid"></ui-icon>
+            </span>
+            <span class="nav-label">Dashboard</span>
+          </a>
+        }
 
-        <a
-        class="nav-link"
-        routerLink="/quotes-invoices"
-        routerLinkActive="active"
-        title="Invoices and Quotes">
-        <span class="icon-wrap">
-          <ion-icon name="receipt-outline"></ion-icon>
-        </span>
-        <span class="nav-label">Quotes & Invoices</span>
-      </a>
+        @if (canAccessQuotesInvoices()) {
+          <a
+            class="nav-link"
+            routerLink="/quotes-invoices"
+            routerLinkActive="active"
+            title="Invoices and Quotes">
+            <span class="icon-wrap">
+              <ui-icon name="receipt"></ui-icon>
+            </span>
+            <span class="nav-label">Quotes & Invoices</span>
+          </a>
+        }
 
-        <a
-          class="nav-link"
-          routerLink="/schedule"
-          routerLinkActive="active"
-          title="Calendar">
-          <span class="icon-wrap">
-            <ion-icon name="calendar-clear-outline"></ion-icon>
-          </span>
-          <span class="nav-label">Calendar</span>
-        </a>
+        @if (canAccess('jobs')) {
+          <a
+            class="nav-link"
+            routerLink="/schedule"
+            routerLinkActive="active"
+            title="Calendar">
+            <span class="icon-wrap">
+              <ui-icon name="calendar"></ui-icon>
+            </span>
+            <span class="nav-label">Calendar</span>
+          </a>
+        }
 
-        <a
-          class="nav-link"
-          routerLink="/inventory"
-          routerLinkActive="active"
-          title="Inventory">
-          <span class="icon-wrap">
-            <ion-icon name="cube-outline"></ion-icon>
-          </span>
-          <span class="nav-label">Inventory</span>
-        </a>
+        @if (canAccess('tasks')) {
+          <a
+            class="nav-link"
+            [class.has-nav-alert]="jobsAttentionCount() > 0"
+            routerLink="/tasks"
+            routerLinkActive="active"
+            title="Jobs">
+            <span class="icon-wrap">
+              <ui-icon name="checks"></ui-icon>
+            </span>
+            <span class="nav-label">
+              Jobs
+              @if (jobsAttentionCount() > 0) {
+                <span class="nav-alert-count">({{ jobsAttentionCount() }})</span>
+              }
+            </span>
+          </a>
+        }
 
-        <a
-          class="nav-link"
-          routerLink="/tasks"
-          routerLinkActive="active"
-          title="Tasks">
-          <span class="icon-wrap">
-            <ion-icon name="checkmark-done-outline"></ion-icon>
-          </span>
-          <span class="nav-label">Tasks</span>
-        </a>
+        @if (canAccess('inventory')) {
+          <a
+            class="nav-link"
+            routerLink="/inventory"
+            routerLinkActive="active"
+            title="Parts Catalog">
+            <span class="icon-wrap">
+              <ui-icon name="package"></ui-icon>
+            </span>
+            <span class="nav-label">Parts Catalog</span>
+          </a>
+        }
 
-        <a
-          class="nav-link"
-          routerLink="/customers"
-          routerLinkActive="active"
-          title="Customers">
-          <span class="icon-wrap">
-            <ion-icon name="people-outline"></ion-icon>
-          </span>
-          <span class="nav-label">Customers</span>
-        </a>
+        @if (canAccess('customers')) {
+          <a
+            class="nav-link"
+            routerLink="/customers"
+            routerLinkActive="active"
+            title="Customers">
+            <span class="icon-wrap">
+              <ui-icon name="users"></ui-icon>
+            </span>
+            <span class="nav-label">Customers</span>
+          </a>
+        }
       </nav>
     </div>
 
     <nav class="nav-links utility-nav">
-      <a
-        class="nav-link"
-        routerLink="/reports"
-        routerLinkActive="active"
-        title="Reports">
-        <span class="icon-wrap">
-          <ion-icon name="bar-chart-outline"></ion-icon>
-        </span>
-        <span class="nav-label">Reports</span>
-      </a>
+      @if (canAccess('reports')) {
+        <a
+          class="nav-link"
+          routerLink="/reports"
+          routerLinkActive="active"
+          title="Reports">
+          <span class="icon-wrap">
+            <ui-icon name="chart-bar"></ui-icon>
+          </span>
+          <span class="nav-label">Reports</span>
+        </a>
+      }
     </nav>
 
-    <section
-      class="messages-panel"
-      *ngIf="!collapsed()"
-      [class.has-unread]="unreadMessages().length > 0"
-      [class.mobile-open]="isMobile()"
-      (click)="handleMessagesPanelClick($event)">
-      <ng-container *ngIf="isMobile(); else desktopMessagesHub">
-        <div class="mobile-sms-summary" aria-label="Open Messages Hub">
-          <ion-icon name="chatbubble-ellipses-outline"></ion-icon>
-          <span class="mobile-sms-label">Messages</span>
-          <span class="mobile-sms-count" [class.active]="unreadMessages().length > 0">
-            {{ unreadMessages().length > 99 ? '99+' : unreadMessages().length }}
-          </span>
-        </div>
-      </ng-container>
-
-      <ng-template #desktopMessagesHub>
-        <div class="messages-head">
-          <div class="messages-title">
-            <ion-icon name="chatbubble-ellipses-outline"></ion-icon>
-            <span>Messages Hub</span>
-            <span class="messages-alert-slot" *ngIf="unreadMessages().length > 0" aria-hidden="true">
-              <span class="messages-alert-dot"></span>
+    @if (!collapsed() && canAccess('customers')) {
+      <section
+        class="messages-panel"
+        [class.has-unread]="unreadMessages().length > 0"
+        [class.mobile-open]="isMobile()"
+        (click)="handleMessagesPanelClick($event)">
+        @if (isMobile()) {
+          <div class="mobile-sms-summary" aria-label="Open Messages Hub">
+            <ui-icon name="message-dots"></ui-icon>
+            <span class="mobile-sms-label">Messages</span>
+            <span class="mobile-sms-count" [class.active]="unreadMessages().length > 0">
+              {{ unreadMessages().length > 99 ? '99+' : unreadMessages().length }}
             </span>
           </div>
-          <button
-            type="button"
-            class="messages-see-all"
-            *ngIf="!isMobile()"
-            (click)="openMessagesScreen()">
-            View All
-          </button>
-        </div>
-
-        <div class="messages-empty" *ngIf="inboxLoading() && !messageThreads().length">Loading messages...</div>
-        <div class="messages-empty" *ngIf="!inboxLoading() && inboxError() && !messageThreads().length">{{ inboxError() }}</div>
-        <div class="messages-empty" *ngIf="!inboxLoading() && !inboxError() && !messageThreads().length">
-          No new messages.
-        </div>
-
-        <div class="messages-list" *ngIf="messageThreads().length">
-          <button
-            type="button"
-            class="message-row message-row-btn"
-            *ngFor="let thread of visibleMessageThreads(); trackBy: trackThread"
-            (click)="openThread(thread)">
-            <div class="message-avatar" [style.--avatar-color]="thread.color">{{ thread.initials }}</div>
-            <div class="message-meta">
-              <div class="message-name" [attr.title]="thread.name">{{ thread.name }}</div>
-              <div class="message-preview" [attr.title]="thread.preview">{{ thread.preview }}</div>
+        } @else {
+          <div class="messages-head">
+            <div class="messages-title">
+              <ui-icon name="message-dots"></ui-icon>
+              <span>Messages Hub</span>
             </div>
-            <div class="message-trailing">
-              <div class="message-time">{{ relativeTimeLabel(thread.latestAt) }}</div>
-              <span class="message-count" *ngIf="thread.unread > 0">{{ thread.unread }}</span>
+            @if (!isMobile()) {
+              <button
+                type="button"
+                class="messages-see-all"
+                (click)="openMessagesScreen()">
+                View All
+              </button>
+            }
+          </div>
+          @if (inboxLoading() && !messageThreads().length) {
+            <div class="messages-empty">Loading messages...</div>
+          }
+          @if (!inboxLoading() && inboxError() && !messageThreads().length) {
+            <div class="messages-empty">{{ inboxError() }}</div>
+          }
+          @if (!inboxLoading() && !inboxError() && !messageThreads().length) {
+            <div class="messages-empty">
+              No new messages.
             </div>
-          </button>
-        </div>
-      </ng-template>
-    </section>
+          }
+          @if (messageThreads().length) {
+            <div class="messages-list">
+              @for (thread of visibleMessageThreads(); track trackThread($index, thread)) {
+                <button
+                  type="button"
+                  class="message-row message-row-btn"
+                  (click)="openThread(thread)">
+                  <div class="message-avatar" [style.--avatar-color]="thread.color">{{ thread.initials }}</div>
+                  <div class="message-meta">
+                    <div class="message-line">
+                      <div class="message-name" [attr.title]="thread.name">{{ thread.name }}</div>
+                      <div class="message-status">
+                        <span class="message-time">{{ relativeTimeLabel(thread.latestAt) }}</span>
+                        @if (thread.unread > 0) {
+                          <span class="message-count">{{ thread.unread }}</span>
+                        }
+                      </div>
+                    </div>
+                    <div class="message-preview" [attr.title]="thread.preview">{{ thread.preview }}</div>
+                  </div>
+                </button>
+              }
+            </div>
+          }
+        }
+      </section>
+    }
   </aside>
 
   <main class="main-pane">
-    <header class="trial-banner" *ngIf="showTrialBanner()">
-      <div class="trial-banner-copy">
-        <span class="trial-banner-label">Trial Mode</span>
-        <span class="trial-banner-text">{{ trialCountdownLabel() }}</span>
-      </div>
-      <button type="button" class="trial-pay-link" (click)="openBilling()">
-        Activate Now
-      </button>
-    </header>
+    @if (showTrialBanner()) {
+      <header class="trial-banner">
+        <div class="trial-banner-copy">
+          <span class="trial-banner-label">Trial Mode</span>
+          <span class="trial-banner-text">{{ trialCountdownLabel() }}</span>
+        </div>
+        <button type="button" class="trial-pay-link" (click)="openBilling()">
+          Activate Now
+        </button>
+      </header>
+    }
 
     <section class="page-pane">
       <router-outlet></router-outlet>
@@ -204,141 +234,157 @@
   Feedback
 </button>
 
-<section
-  id="feedback-panel"
-  class="feedback-panel glass-surface"
-  *ngIf="feedbackOpen()"
-  aria-label="Send feedback">
-  <header class="feedback-head">
-    <h3>Send Feedback</h3>
-    <button type="button" class="feedback-close" (click)="closeFeedback()" aria-label="Close feedback panel">Close</button>
-  </header>
-
-  <label class="feedback-label" for="feedback-name">Name</label>
-  <input
-    id="feedback-name"
-    class="feedback-input"
-    type="text"
-    [value]="feedbackName()"
-    (input)="feedbackName.set($any($event.target).value)" />
-
-  <label class="feedback-label" for="feedback-email">Email</label>
-  <input
-    id="feedback-email"
-    class="feedback-input"
-    type="email"
-    [value]="feedbackEmail()"
-    (input)="feedbackEmail.set($any($event.target).value)" />
-
-  <label class="feedback-label" for="feedback-issue">Issue</label>
-  <textarea
-    id="feedback-issue"
-    class="feedback-textarea"
-    rows="6"
-    [value]="feedbackIssue()"
-    (input)="feedbackIssue.set($any($event.target).value)"
+@if (feedbackOpen()) {
+  <section
+    id="feedback-panel"
+    class="feedback-panel app-surface"
+    aria-label="Send feedback">
+    <header class="feedback-head">
+      <h3>Send Feedback</h3>
+      <button type="button" class="feedback-close" (click)="closeFeedback()" aria-label="Close feedback panel">Close</button>
+    </header>
+    <label class="feedback-label" for="feedback-name">Name</label>
+    <input
+      id="feedback-name"
+      class="form-control feedback-input"
+      type="text"
+      [value]="feedbackName()"
+      (input)="feedbackName.set($any($event.target).value)" />
+    <label class="feedback-label" for="feedback-email">Email</label>
+    <input
+      id="feedback-email"
+      class="form-control feedback-input"
+      type="email"
+      [value]="feedbackEmail()"
+      (input)="feedbackEmail.set($any($event.target).value)" />
+    <label class="feedback-label" for="feedback-issue">Issue</label>
+    <textarea
+      id="feedback-issue"
+      class="form-control feedback-textarea"
+      rows="6"
+      [value]="feedbackIssue()"
+      (input)="feedbackIssue.set($any($event.target).value)"
     placeholder="Tell us what happened, what you expected, and any steps to reproduce."></textarea>
+    <div class="feedback-row">
+      <button type="button" class="feedback-submit" (click)="submitFeedback()" [disabled]="feedbackSending()">
+        {{ feedbackSending() ? 'Sending...' : 'Send' }}
+      </button>
+    </div>
+    @if (feedbackStatus()) {
+      <p class="feedback-msg success">{{ feedbackStatus() }}</p>
+    }
+    @if (feedbackError()) {
+      <p class="feedback-msg error">{{ feedbackError() }}</p>
+    }
+    <p class="feedback-hint">This sends through your configured Pathflow email provider and includes the current screen link.</p>
+  </section>
+}
 
-  <div class="feedback-row">
-    <button type="button" class="feedback-submit" (click)="submitFeedback()" [disabled]="feedbackSending()">
-      {{ feedbackSending() ? 'Sending...' : 'Send' }}
-    </button>
+@if (showSetupPrompt()) {
+  <div class="setup-welcome-overlay">
+    <section class="setup-welcome-card app-surface" aria-label="Setup your account">
+      <h3>Finish account setup</h3>
+      <p>You can go step-by-step through Admin and finish the remaining setup items for your business.</p>
+      <div class="setup-welcome-actions">
+        <button type="button" class="setup-primary-btn" (click)="startSetupWizard()">Start Setup</button>
+        <button type="button" class="setup-secondary-btn" (click)="skipSetupPrompt()">Skip for now</button>
+      </div>
+    </section>
   </div>
+}
 
-  <p class="feedback-msg success" *ngIf="feedbackStatus()">{{ feedbackStatus() }}</p>
-  <p class="feedback-msg error" *ngIf="feedbackError()">{{ feedbackError() }}</p>
-  <p class="feedback-hint">This sends through your configured Pathflow email provider and includes the current screen link.</p>
-</section>
-
-<div class="setup-welcome-overlay" *ngIf="showSetupPrompt()">
-  <section class="setup-welcome-card glass-surface" aria-label="Setup your account">
-    <h3>Finish account setup</h3>
-    <p>You can go step-by-step through Admin and finish the remaining setup items for your business.</p>
-    <div class="setup-welcome-actions">
-      <button type="button" class="setup-primary-btn" (click)="startSetupWizard()">Start Setup</button>
-      <button type="button" class="setup-secondary-btn" (click)="skipSetupPrompt()">Skip for now</button>
-    </div>
-  </section>
-</div>
-
-<div class="quick-setup-overlay" *ngIf="quickSetupOpen()">
-  <section class="quick-setup-card glass-surface">
-    <div class="quick-setup-head">
-      <h3>Quick Setup</h3>
-      <button type="button" class="quick-close" (click)="closeQuickSetup()">Close</button>
-    </div>
-    <div class="quick-step-meta" *ngIf="quickSetupCurrent() as step">
-      Step {{ quickSetupIndex() + 1 }} of {{ quickSetupItems().length }} · {{ step.label }}
-    </div>
-
-    <div class="quick-form" *ngIf="quickSetupCurrent()?.id === 'business-profile'">
-      <label>Business Name <input [value]="quickBusinessName" (input)="quickBusinessName=$any($event.target).value" /></label>
-      <label>Business Email <input [value]="quickBusinessEmail" (input)="quickBusinessEmail=$any($event.target).value" /></label>
-      <label>Business Phone <input [value]="quickBusinessPhone" (input)="quickBusinessPhone=$any($event.target).value" /></label>
-      <label>Business Address <input [value]="quickBusinessAddress" (input)="quickBusinessAddress=$any($event.target).value" /></label>
-    </div>
-
-    <div class="quick-form" *ngIf="quickSetupCurrent()?.id === 'logo'">
-      <label>Upload Logo <input type="file" accept="image/*" (change)="quickUploadLogo($event)" /></label>
-    </div>
-
-    <div class="quick-form" *ngIf="quickSetupCurrent()?.id === 'business-hours'">
-      <label>Open Hour (0-23) <input type="number" min="0" max="23" [value]="quickOpenHour" (input)="quickOpenHour=+$any($event.target).value || 7" /></label>
-      <label>Close Hour (1-24) <input type="number" min="1" max="24" [value]="quickCloseHour" (input)="quickCloseHour=+$any($event.target).value || 16" /></label>
-    </div>
-
-    <div class="quick-form" *ngIf="quickSetupCurrent()?.id === 'payment-gateway'">
-      <label>Provider
-        <select [value]="quickPaymentProvider" (change)="quickPaymentProvider=$any($event.target).value">
-          <option value="authorize-net">Authorize.net</option>
-          <option value="stripe">Stripe</option>
-          <option value="paypal">PayPal</option>
-          <option value="quickbooks">QuickBooks</option>
-        </select>
-      </label>
-      <label>Account Label <input [value]="quickPaymentAccountLabel" (input)="quickPaymentAccountLabel=$any($event.target).value" /></label>
-      <label>Mode
-        <select [value]="quickPaymentMode" (change)="quickPaymentMode=$any($event.target).value">
-          <option value="test">Test</option>
-          <option value="live">Live</option>
-        </select>
-      </label>
-    </div>
-
-    <div class="quick-form" *ngIf="quickSetupCurrent()?.id === 'email-sender'">
-      <label>From Email <input [value]="quickSenderEmail" (input)="quickSenderEmail=$any($event.target).value" /></label>
-      <label>From Name <input [value]="quickSenderName" (input)="quickSenderName=$any($event.target).value" /></label>
-      <label>Reply-To <input [value]="quickSenderReplyTo" (input)="quickSenderReplyTo=$any($event.target).value" /></label>
-    </div>
-
-    <div class="quick-form" *ngIf="quickSetupCurrent()?.id === 'email-templates'">
-      <label>Template Name <input [value]="quickTemplateName" (input)="quickTemplateName=$any($event.target).value" /></label>
-      <label>Subject <input [value]="quickTemplateSubject" (input)="quickTemplateSubject=$any($event.target).value" /></label>
-      <label>Body <textarea rows="5" [value]="quickTemplateBody" (input)="quickTemplateBody=$any($event.target).value"></textarea></label>
-    </div>
-
-    <div class="quick-form" *ngIf="quickSetupCurrent()?.id === 'user-access'">
-      <label>Name <input [value]="quickUserName" (input)="quickUserName=$any($event.target).value" /></label>
-      <label>Email <input [value]="quickUserEmail" (input)="quickUserEmail=$any($event.target).value" /></label>
-      <label>Role
-        <select [value]="quickUserRole" (change)="quickUserRole=$any($event.target).value">
-          <option value="user">User</option>
-          <option value="admin">Admin</option>
-        </select>
-      </label>
-    </div>
-
-    <div class="quick-form" *ngIf="quickSetupCurrent()?.id === 'subscription' || quickSetupCurrent()?.id === 'data-import'">
-      <p>This step still needs the full Admin screen. You can skip this step here or finish in Admin later.</p>
-    </div>
-
-    <p class="quick-msg success" *ngIf="quickSetupStatus()">{{ quickSetupStatus() }}</p>
-    <p class="quick-msg error" *ngIf="quickSetupError()">{{ quickSetupError() }}</p>
-
-    <div class="quick-actions">
-      <button type="button" (click)="quickSetupBack()" [disabled]="quickSetupIndex()===0 || quickSetupBusy()">Back</button>
-      <button type="button" (click)="quickSetupNext()" [disabled]="quickSetupIndex()+1>=quickSetupItems().length || quickSetupBusy()">Next</button>
-      <button type="button" (click)="quickSetupSaveCurrent()" [disabled]="quickSetupBusy()">Save Step</button>
-    </div>
-  </section>
-</div>
+@if (quickSetupOpen()) {
+  <div class="quick-setup-overlay">
+    <section class="quick-setup-card app-surface">
+      <div class="quick-setup-head">
+        <h3>Quick Setup</h3>
+        <button type="button" class="quick-close" (click)="closeQuickSetup()">Close</button>
+      </div>
+      @if (quickSetupCurrent(); as step) {
+        <div class="quick-step-meta">
+          Step {{ quickSetupIndex() + 1 }} of {{ quickSetupItems().length }} · {{ step.label }}
+        </div>
+      }
+      @if (quickSetupCurrent()?.id === 'business-profile') {
+        <div class="quick-form">
+          <label>Business Name <input class="form-control" [value]="quickBusinessName" (input)="quickBusinessName=$any($event.target).value" /></label>
+          <label>Business Email <input class="form-control" [value]="quickBusinessEmail" (input)="quickBusinessEmail=$any($event.target).value" /></label>
+          <label>Business Phone <input class="form-control" [value]="quickBusinessPhone" (input)="quickBusinessPhone=$any($event.target).value" /></label>
+          <label>Business Address <input class="form-control" [value]="quickBusinessAddress" (input)="quickBusinessAddress=$any($event.target).value" /></label>
+        </div>
+      }
+      @if (quickSetupCurrent()?.id === 'logo') {
+        <div class="quick-form">
+          <label>Upload Logo <input type="file" accept="image/*" (change)="quickUploadLogo($event)" /></label>
+        </div>
+      }
+      @if (quickSetupCurrent()?.id === 'business-hours') {
+        <div class="quick-form">
+          <label>Open Hour (0-23) <input class="form-control" type="number" min="0" max="23" [value]="quickOpenHour" (input)="quickOpenHour=+$any($event.target).value || 7" /></label>
+          <label>Close Hour (1-24) <input class="form-control" type="number" min="1" max="24" [value]="quickCloseHour" (input)="quickCloseHour=+$any($event.target).value || 16" /></label>
+        </div>
+      }
+      @if (quickSetupCurrent()?.id === 'payment-gateway') {
+        <div class="quick-form">
+          <label>Provider
+            <select class="form-select" [value]="quickPaymentProvider" (change)="quickPaymentProvider=$any($event.target).value">
+              <option value="authorize-net">Authorize.net</option>
+              <option value="stripe">Stripe</option>
+              <option value="paypal">PayPal</option>
+              <option value="quickbooks">QuickBooks</option>
+            </select>
+          </label>
+          <label>Account Label <input class="form-control" [value]="quickPaymentAccountLabel" (input)="quickPaymentAccountLabel=$any($event.target).value" /></label>
+          <label>Mode
+            <select class="form-select" [value]="quickPaymentMode" (change)="quickPaymentMode=$any($event.target).value">
+              <option value="test">Test</option>
+              <option value="live">Live</option>
+            </select>
+          </label>
+        </div>
+      }
+      @if (quickSetupCurrent()?.id === 'email-sender') {
+        <div class="quick-form">
+          <label>From Email <input class="form-control" [value]="quickSenderEmail" (input)="quickSenderEmail=$any($event.target).value" /></label>
+          <label>From Name <input class="form-control" [value]="quickSenderName" (input)="quickSenderName=$any($event.target).value" /></label>
+          <label>Reply-To <input class="form-control" [value]="quickSenderReplyTo" (input)="quickSenderReplyTo=$any($event.target).value" /></label>
+        </div>
+      }
+      @if (quickSetupCurrent()?.id === 'email-templates') {
+        <div class="quick-form">
+          <label>Template Name <input class="form-control" [value]="quickTemplateName" (input)="quickTemplateName=$any($event.target).value" /></label>
+          <label>Subject <input class="form-control" [value]="quickTemplateSubject" (input)="quickTemplateSubject=$any($event.target).value" /></label>
+          <label>Body <textarea class="form-control" rows="5" [value]="quickTemplateBody" (input)="quickTemplateBody=$any($event.target).value"></textarea></label>
+        </div>
+      }
+      @if (quickSetupCurrent()?.id === 'user-access') {
+        <div class="quick-form">
+          <label>Name <input class="form-control" [value]="quickUserName" (input)="quickUserName=$any($event.target).value" /></label>
+          <label>Email <input class="form-control" [value]="quickUserEmail" (input)="quickUserEmail=$any($event.target).value" /></label>
+          <label>Role
+            <select class="form-select" [value]="quickUserRole" (change)="quickUserRole=$any($event.target).value">
+              <option value="user">User</option>
+              <option value="admin">Admin</option>
+            </select>
+          </label>
+        </div>
+      }
+      @if (quickSetupCurrent()?.id === 'subscription' || quickSetupCurrent()?.id === 'data-import') {
+        <div class="quick-form">
+          <p>This step still needs the full Admin screen. You can skip this step here or finish in Admin later.</p>
+        </div>
+      }
+      @if (quickSetupStatus()) {
+        <p class="quick-msg success">{{ quickSetupStatus() }}</p>
+      }
+      @if (quickSetupError()) {
+        <p class="quick-msg error">{{ quickSetupError() }}</p>
+      }
+      <div class="quick-actions">
+        <button type="button" (click)="quickSetupBack()" [disabled]="quickSetupIndex()===0 || quickSetupBusy()">Back</button>
+        <button type="button" (click)="quickSetupNext()" [disabled]="quickSetupIndex()+1>=quickSetupItems().length || quickSetupBusy()">Next</button>
+        <button type="button" (click)="quickSetupSaveCurrent()" [disabled]="quickSetupBusy()">Save Step</button>
+      </div>
+    </section>
+  </div>
+}

@@ -1,18 +1,9 @@
+import { UiTab, UiTabs } from '../../ui/controls';
+import { ToastController } from '../../ui/overlays';
 import { CommonModule, CurrencyPipe } from '@angular/common';
-import { Component, OnDestroy, computed, inject, signal } from '@angular/core';
-import {
-  IonButton,
-  IonButtons,
-  IonContent,
-  IonHeader,
-  IonSegment,
-  IonSegmentButton,
-  IonTitle,
-  IonToolbar
-} from '@ionic/angular/standalone';
-import { ToastController } from '@ionic/angular';
+import { Component, OnDestroy, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, forkJoin } from 'rxjs';
 import { AuthService } from '../../auth/auth.service';
 import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
 import { PageBackButtonComponent } from '../../components/navigation/page-back-button/page-back-button.component';
@@ -32,7 +23,7 @@ import { InvoiceResponseApiService } from '../../services/invoice-response-api.s
 import { EmailApiService } from '../../services/email-api.service';
 import { TenantContextService } from '../../services/tenant-context.service';
 import { ScheduleApi } from '../../services/schedule-api.service';
-import { NotificationsApiService } from '../../services/notifications-api.service';
+import { shopTimeMillis } from '../../utils/shop-time';
 
 type InvoiceKpi = {
   id: string;
@@ -48,16 +39,9 @@ type KpiRange = 'today' | 'wtd' | 'mtd' | 'ytd' | 'all';
 const INVOICES_TAB_STORAGE_KEY = 'pathflow.quotesInvoices.activeTab';
 const INVOICES_KPI_RANGE_STORAGE_KEY = 'pathflow.quotesInvoices.kpiRanges';
 const LOCAL_PENDING_QUOTE_RESPONSES_KEY = 'pathflow.quoteResponses.pending.v1';
-const LOCAL_PENDING_INVOICE_RESPONSES_KEY = 'pathflow.invoiceResponses.pending.v1';
 type PendingQuoteResponse = {
   quoteId: string;
   stage: 'accepted' | 'declined';
-  tenantId: string;
-  updatedAt: string;
-};
-type PendingInvoiceResponse = {
-  invoiceId: string;
-  stage: 'accepted';
   tenantId: string;
   updatedAt: string;
 };
@@ -68,32 +52,27 @@ type PendingInvoiceResponse = {
   imports: [
     CommonModule,
     CurrencyPipe,
-    IonHeader,
-    IonToolbar,
-    IonTitle,
-    IonButtons,
-    IonButton,
-    IonContent,
-    IonSegment,
-    IonSegmentButton,
+    UiTabs,
+    UiTab,
     RouterLink,
     PageBackButtonComponent,
     CompanySwitcherComponent,
     UserMenuComponent
   ],
   templateUrl: './invoices.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./invoices.component.scss']
 })
 export default class InvoicesComponent implements OnDestroy {
   private readonly route = inject(ActivatedRoute);
   private readonly invoicesData = inject(InvoicesDataService);
+  readonly documentSyncError = this.invoicesData.documentSyncError;
   private readonly quoteResponseApi = inject(QuoteResponseApiService);
   private readonly invoiceResponseApi = inject(InvoiceResponseApiService);
   private readonly emailApi = inject(EmailApiService);
   private readonly auth = inject(AuthService);
   private readonly tenantContext = inject(TenantContextService);
   private readonly scheduleApi = inject(ScheduleApi);
-  private readonly notificationsApi = inject(NotificationsApiService);
   private readonly toastController = inject(ToastController);
   private readonly laneDisplayOrder: InvoiceBoardStage[] = ['draft', 'sent', 'accepted', 'declined', 'completed'];
   private readonly quoteLanes: InvoiceLane[] = [...INVOICE_LANES].sort(
@@ -649,13 +628,16 @@ export default class InvoicesComponent implements OnDestroy {
 
   private async refreshScheduledCustomers(): Promise<void> {
     try {
-      const rows = await firstValueFrom(this.scheduleApi.list());
+      const { rows, timeZone } = await firstValueFrom(forkJoin({
+        rows: this.scheduleApi.list(),
+        timeZone: this.scheduleApi.getShopTimeZone()
+      }));
       const now = Date.now();
       const next = new Set<string>();
       for (const row of Array.isArray(rows) ? rows : []) {
         const customerId = String(row?.customerId || '').trim();
         if (!customerId) continue;
-        const endMillis = Date.parse(String(row?.end || ''));
+        const endMillis = shopTimeMillis(row.end, timeZone);
         if (Number.isFinite(endMillis) && endMillis < now) continue;
         next.add(customerId);
       }
@@ -719,7 +701,6 @@ export default class InvoicesComponent implements OnDestroy {
         `Customer ${item.stage === 'accepted' ? 'accepted' : 'declined'} quote from public link.`,
         'customer'
       );
-      await this.createQuoteStatusNotification(existing.id, existing.invoiceNumber, existing.customerName, item.stage);
       appliedIds.push(item.quoteId);
     }
 
@@ -729,114 +710,33 @@ export default class InvoicesComponent implements OnDestroy {
   }
 
   private async syncInvoiceResponses(): Promise<void> {
-    const collected: Array<{
-      invoiceId: string;
-      invoiceNumber: string;
-      stage: 'accepted';
-      updatedAt: string;
-      paymentAmount?: number;
-      paymentProvider?: string;
-      paymentTransactionId?: string;
-      paymentAccountNumber?: string;
-    }> = [];
     try {
       const response = await firstValueFrom(this.invoiceResponseApi.listRecent(250));
-      const items = Array.isArray(response?.items) ? response.items : [];
-      for (const item of items) {
-        const invoiceId = String(item?.invoiceId || '').trim();
-        const stage = String(item?.stage || '').trim().toLowerCase();
-        const invoiceNumber = String(item?.invoiceNumber || '').trim();
-        const updatedAt = String(item?.updatedAt || '').trim() || new Date().toISOString();
-        if (!invoiceId) continue;
-        if (stage !== 'accepted') continue;
-        collected.push({
-          invoiceId,
-          invoiceNumber,
-          stage: 'accepted',
-          updatedAt,
-          paymentAmount: Number((item as any)?.paymentAmount || 0),
-          paymentProvider: String((item as any)?.paymentProvider || '').trim(),
-          paymentTransactionId: String((item as any)?.paymentTransactionId || '').trim(),
-          paymentAccountNumber: String((item as any)?.paymentAccountNumber || '').trim()
-        });
+      for (const item of response.items || []) {
+        if (item.stage !== 'accepted' || !(Number(item.paidAmount) > 0)) continue;
+        const existing = this.invoicesData.getInvoiceById(item.invoiceId);
+        if (!existing || existing.documentType !== 'invoice') continue;
+        const total = Number(existing.total || 0);
+        const paid = Number(existing.paidAmount || 0);
+        const settledAmount = this.roundCurrency(Number(item.paidAmount));
+        if (settledAmount < paid || (settledAmount === paid && existing.stage !== 'sent')) continue;
+        const provider = this.normalizeRefundProviderKey(String(item.paymentProvider || ''));
+        const transactionId = String(item.paymentTransactionId || '').trim();
+        const amount = this.roundCurrency(Number(item.paymentAmount || 0));
+        if (['authorize-net', 'paylynx'].includes(provider) && transactionId && amount > 0) {
+          this.invoicesData.recordPaymentTransaction(existing.id, {
+            provider, amount, transactionId,
+            accountNumber: this.maskedAccountForRefund(String(item.paymentAccountNumber || '')),
+            createdAt: item.updatedAt
+          });
+        }
+        this.invoicesData.setPaidAmount(existing.id, settledAmount, 'Payment recorded on invoice.', 'customer');
+        if (settledAmount >= total && item.paymentKind !== 'final') {
+          this.invoicesData.setStage(existing.id, 'accepted', 'Initial invoice paid.', 'customer');
+        }
       }
     } catch {
-      // Keep local fallback sync running even when API is unavailable.
-    }
-
-    const pendingLocal = this.readPendingInvoiceResponses();
-    if (pendingLocal.length) {
-      const activeTenant = String(this.tenantContext.tenantId() || '').trim().toLowerCase() || 'main';
-      for (const item of pendingLocal) {
-        const tenantId = String(item?.tenantId || '').trim().toLowerCase();
-        if (tenantId && tenantId !== activeTenant) continue;
-        const invoiceId = String(item?.invoiceId || '').trim();
-        const stage = String(item?.stage || '').trim().toLowerCase();
-        const updatedAt = String(item?.updatedAt || '').trim() || new Date().toISOString();
-        if (!invoiceId) continue;
-        if (stage !== 'accepted') continue;
-        collected.push({ invoiceId, invoiceNumber: '', stage: 'accepted', updatedAt });
-      }
-    }
-
-    const deduped = new Map<string, {
-      invoiceId: string;
-      invoiceNumber: string;
-      stage: 'accepted';
-      updatedAt: string;
-      paymentAmount?: number;
-      paymentProvider?: string;
-      paymentTransactionId?: string;
-      paymentAccountNumber?: string;
-    }>();
-    for (const row of collected) {
-      const key = String(row.invoiceId || '').trim().toLowerCase();
-      if (!key) continue;
-      const previous = deduped.get(key);
-      if (!previous || Date.parse(row.updatedAt) >= Date.parse(previous.updatedAt)) {
-        deduped.set(key, row);
-      }
-    }
-
-    const appliedIds: string[] = [];
-    for (const item of deduped.values()) {
-      const existing = this.invoicesData.getInvoiceById(item.invoiceId)
-        || (item.invoiceNumber ? this.invoicesData.getInvoiceById(item.invoiceNumber) : null);
-      if (!existing || existing.documentType !== 'invoice') continue;
-      const responseUpdatedMs = Date.parse(String(item.updatedAt || '').trim() || new Date().toISOString());
-      const invoiceUpdatedMs = Date.parse(String(existing.updatedAt || existing.createdAt || '').trim());
-      if (Number.isFinite(responseUpdatedMs) && Number.isFinite(invoiceUpdatedMs) && responseUpdatedMs < invoiceUpdatedMs) continue;
-      if (existing.stage === 'accepted' && Number(existing.paidAmount || 0) >= Number(existing.total || 0)) continue;
-      const paidBefore = Math.max(0, Number(existing.paidAmount || 0));
-      const wasFinalInvoicePayment = paidBefore > 0 && paidBefore < Math.max(0, Number(existing.total || 0));
-      const provider = this.normalizeRefundProviderKey(String(item?.paymentProvider || existing.paymentProviderKey || '').trim().toLowerCase());
-      const transactionId = String(item?.paymentTransactionId || '').trim();
-      const accountNumber = this.maskedAccountForRefund(String(item?.paymentAccountNumber || '').trim());
-      const paymentAmount = this.roundCurrency(Math.max(0, Number(item?.paymentAmount || existing.total || 0)));
-      if (provider === 'authorize-net' && transactionId && paymentAmount > 0) {
-        this.invoicesData.recordPaymentTransaction(existing.id, {
-          provider,
-          amount: paymentAmount,
-          transactionId,
-          accountNumber,
-          createdAt: item.updatedAt || new Date().toISOString()
-        });
-      }
-      this.invoicesData.setPaidAmount(
-        existing.id,
-        Number(existing.total || 0),
-        'Customer paid invoice from public payment link.',
-        'customer'
-      );
-      if (wasFinalInvoicePayment) {
-        this.invoicesData.setStage(existing.id, 'completed', 'Final invoice paid by customer. Marked as Completed.', 'customer');
-      }
-      await this.createInvoicePaidNotification(existing.id, existing.invoiceNumber, existing.customerName, wasFinalInvoicePayment);
-      appliedIds.push(item.invoiceId);
-    }
-
-    if (appliedIds.length) {
-      this.removePendingInvoiceResponses(appliedIds);
+      // Retain the last known state until the server is available.
     }
   }
 
@@ -876,116 +776,6 @@ export default class InvoicesComponent implements OnDestroy {
     }
   }
 
-  private readPendingInvoiceResponses(): PendingInvoiceResponse[] {
-    try {
-      const raw = localStorage.getItem(LOCAL_PENDING_INVOICE_RESPONSES_KEY);
-      if (!raw) return [];
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  }
-
-  private removePendingInvoiceResponses(invoiceIds: string[]): void {
-    try {
-      const removeSet = new Set(invoiceIds.map(value => String(value || '').trim().toLowerCase()).filter(Boolean));
-      if (!removeSet.size) return;
-      const current = this.readPendingInvoiceResponses();
-      const filtered = current.filter(item => !removeSet.has(String(item?.invoiceId || '').trim().toLowerCase()));
-      localStorage.setItem(LOCAL_PENDING_INVOICE_RESPONSES_KEY, JSON.stringify(filtered));
-    } catch {
-      // Ignore localStorage failures.
-    }
-  }
-
-  private async createQuoteStatusNotification(
-    quoteId: string,
-    quoteNumber: string,
-    customerName: string,
-    stage: 'accepted' | 'declined'
-  ): Promise<void> {
-    const user = this.auth.user();
-    if (!user) return;
-
-    const targetUserId = String(user.id || '').trim();
-    const targetEmail = String(user.email || '').trim();
-    if (!targetUserId && !targetEmail) return;
-
-    const number = String(quoteNumber || quoteId || '').trim() || 'Quote';
-    const customer = String(customerName || '').trim() || 'Customer';
-    const accepted = stage === 'accepted';
-
-    try {
-      await firstValueFrom(
-        this.notificationsApi.createMention({
-          targetUserId: targetUserId || undefined,
-          targetEmail: targetEmail || undefined,
-          targetDisplayName: String(user.displayName || '').trim() || undefined,
-          title: `Quote ${number} ${accepted ? 'accepted' : 'declined'}`,
-          message: `${customer} ${accepted ? 'accepted' : 'declined'} quote ${number}.`,
-          route: `/quotes/${encodeURIComponent(quoteId || number)}`,
-          entityType: 'quote',
-          entityId: quoteId || number,
-          metadata: {
-            quoteId: quoteId || '',
-            quoteNumber: number,
-            customerName: customer,
-            stage,
-            source: 'response-sync'
-          }
-        })
-      );
-    } catch {
-      // Notification failures must not block status sync.
-    }
-  }
-
-  private async createInvoicePaidNotification(
-    invoiceId: string,
-    invoiceNumber: string,
-    customerName: string,
-    isFinalInvoice: boolean
-  ): Promise<void> {
-    const user = this.auth.user();
-    if (!user) return;
-
-    const targetUserId = String(user.id || '').trim();
-    const targetEmail = String(user.email || '').trim();
-    if (!targetUserId && !targetEmail) return;
-
-    const number = String(invoiceNumber || invoiceId || '').trim() || 'Invoice';
-    const customer = String(customerName || '').trim() || 'Customer';
-    const titlePrefix = isFinalInvoice ? 'Final invoice' : 'Invoice';
-    const messageBody = isFinalInvoice
-      ? `${customer} paid final invoice ${number}.`
-      : `${customer} paid invoice ${number}.`;
-
-    try {
-      await firstValueFrom(
-        this.notificationsApi.createMention({
-          targetUserId: targetUserId || undefined,
-          targetEmail: targetEmail || undefined,
-          targetDisplayName: String(user.displayName || '').trim() || undefined,
-          title: `${titlePrefix} ${number} paid`,
-          message: messageBody,
-          route: `/invoices/${encodeURIComponent(invoiceId || number)}`,
-          entityType: 'invoice',
-          entityId: invoiceId || number,
-          metadata: {
-            invoiceId: invoiceId || '',
-            invoiceNumber: number,
-            customerName: customer,
-            stage: 'accepted',
-            paymentKind: isFinalInvoice ? 'final' : 'initial',
-            source: 'response-sync'
-          }
-        })
-      );
-    } catch {
-      // Notification failures must not block status sync.
-    }
-  }
 
   private roundCurrency(value: number): number {
     return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;

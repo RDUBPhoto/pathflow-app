@@ -1,175 +1,205 @@
 <div class="menu-actions">
-  <button
-    type="button"
-    class="setup-reminder-trigger"
-    *ngIf="auth.isAdmin() && setupProgress.pendingCount() > 0 && !setupProgress.setupDone()"
-    (click)="openSetupWizard($event)"
-    [disabled]="setupNavigating()"
-    [attr.aria-label]="'Open setup wizard (' + (setupProgress.totalCount() - setupProgress.pendingCount()) + ' of ' + setupProgress.totalCount() + ' completed)'">
-    {{ setupNavigating() ? 'Opening...' : ('Setup ' + (setupProgress.totalCount() - setupProgress.pendingCount()) + '/' + setupProgress.totalCount()) }}
-  </button>
+  @if (auth.isAdmin() && setupProgress.pendingCount() > 0 && !setupProgress.setupDone()) {
+    <button
+      type="button"
+      class="setup-reminder-trigger"
+      (click)="openSetupWizard($event)"
+      [disabled]="setupNavigating()"
+      [attr.aria-label]="'Open setup wizard (' + (setupProgress.totalCount() - setupProgress.pendingCount()) + ' of ' + setupProgress.totalCount() + ' completed)'">
+      {{ setupNavigating() ? 'Opening...' : ('Setup ' + (setupProgress.totalCount() - setupProgress.pendingCount()) + '/' + setupProgress.totalCount()) }}
+    </button>
+  }
 
   <button
     id="notifications-trigger"
     type="button"
-    class="notification-trigger"
+    class="btn btn-ghost-secondary btn-icon notification-trigger"
     [class.counter-mode]="showUnreadCounter()"
     [attr.aria-label]="notificationAriaLabel()"
+    [attr.aria-expanded]="notificationsOpen()"
     (click)="toggleNotifications($event)">
-    <span class="notification-count-circle" *ngIf="showUnreadCounter(); else bellIcon">
-      {{ unreadBadgeText() }}
-    </span>
-    <ng-template #bellIcon>
-      <ion-icon name="notifications-outline"></ion-icon>
-    </ng-template>
+    @if (showUnreadCounter()) {
+      <span class="notification-count-circle">
+        {{ unreadBadgeText() }}
+      </span>
+    } @else {
+      <ui-icon name="bell"></ui-icon>
+    }
   </button>
 
-  <ion-button class="user-trigger" fill="clear" (click)="openMenu($event)">
-    <ion-avatar class="avatar" [style.--avatar-bg]="avatarColor()">
-      <img *ngIf="showAvatarImage()" [src]="avatarUrl()" alt="Profile avatar" (error)="onAvatarError()" />
-      <span *ngIf="!showAvatarImage()">{{ initials() }}</span>
-    </ion-avatar>
+  <button type="button" class="btn ui-button btn-ghost-primary user-trigger" (click)="openMenu($event)"
+    aria-label="User menu" [attr.aria-expanded]="menuOpen()">
+    <span class="avatar ui-avatar" [style.--avatar-bg]="avatarColor()">
+      @if (showAvatarImage()) {
+        <img [src]="avatarUrl()" alt="Profile avatar" (error)="onAvatarError()" />
+      }
+      @if (!showAvatarImage()) {
+        <span>{{ initials() }}</span>
+      }
+    </span>
 
     <span class="user-name">{{ firstName() }}</span>
-    <ion-icon name="chevron-down-outline"></ion-icon>
-  </ion-button>
+    <ui-icon name="chevron-down"></ui-icon>
+  </button>
 </div>
 
-<ion-popover class="user-menu-popover" [isOpen]="menuOpen()" [event]="menuEvent()" (didDismiss)="closeMenu()">
+<ui-popover class="user-menu-popover" [isOpen]="menuOpen()" [event]="menuEvent()" alignment="end" (didDismiss)="closeMenu()">
   <ng-template>
-    <ion-content>
+    <div>
       <div class="menu-profile">
-        <ion-avatar class="avatar menu-avatar" [style.--avatar-bg]="avatarColor()">
-          <img *ngIf="showAvatarImage()" [src]="avatarUrl()" alt="Profile avatar" (error)="onAvatarError()" />
-          <span *ngIf="!showAvatarImage()">{{ initials() }}</span>
-        </ion-avatar>
+        <span class="avatar ui-avatar menu-avatar" [style.--avatar-bg]="avatarColor()">
+          @if (showAvatarImage()) {
+            <img [src]="avatarUrl()" alt="Profile avatar" (error)="onAvatarError()" />
+          }
+          @if (!showAvatarImage()) {
+            <span>{{ initials() }}</span>
+          }
+        </span>
         <div>
           <div class="menu-name">{{ userDisplayName() }}</div>
           <div class="menu-email">{{ userEmail() }}</div>
         </div>
       </div>
 
-      <ion-list lines="full">
-        <ion-item button detail="false" routerLink="/user-settings" (click)="closeMenu()">
-          <ion-icon slot="start" name="person-circle-outline"></ion-icon>
-          <ion-label>User Settings</ion-label>
-        </ion-item>
+      <div class="ui-list">
+        <button class="dropdown-item" type="button" routerLink="/user-settings" (click)="closeMenu()">
+          <ui-icon name="user-circle"></ui-icon>
+          <span>User Settings</span>
+        </button>
 
-        <ion-item button detail="false" *ngIf="auth.isAdmin()" routerLink="/admin-settings" (click)="closeMenu()">
-          <ion-icon slot="start" name="shield-checkmark-outline"></ion-icon>
-          <ion-label>Admin</ion-label>
-        </ion-item>
+        @if (auth.isAdmin()) {
+          <button class="dropdown-item" type="button" routerLink="/admin-settings" (click)="closeMenu()">
+            <ui-icon name="shield-check"></ui-icon>
+            <span>Admin</span>
+          </button>
+        }
 
-        <ion-item lines="full" class="theme-menu-item">
-          <ion-label>Theme</ion-label>
-          <div slot="end" class="theme-direction-toggle">
+        <div class="dropdown-item-text theme-menu-item">
+          <ui-icon name="moon"></ui-icon>
+          <span>Theme</span>
+          <div class="theme-direction-toggle">
             <span class="theme-side" [class.active]="!isDarkTheme()">Light</span>
-            <ion-toggle
-              mode="ios"
+            <ui-switch
               [checked]="isDarkTheme()"
               aria-label="Theme toggle"
-              (ionChange)="onThemeToggle($event.detail.checked)">
-            </ion-toggle>
+              (controlChange)="onThemeToggle($event.detail.checked)">
+            </ui-switch>
             <span class="theme-side" [class.active]="isDarkTheme()">Dark</span>
           </div>
-        </ion-item>
+        </div>
 
-        <ion-item button detail="false" (click)="signOut()">
-          <ion-icon slot="start" name="log-out-outline"></ion-icon>
-          <ion-label>Logout</ion-label>
-        </ion-item>
-      </ion-list>
-    </ion-content>
+        <button class="dropdown-item" type="button" (click)="signOut()">
+          <ui-icon name="logout"></ui-icon>
+          <span>Logout</span>
+        </button>
+      </div>
+    </div>
   </ng-template>
-</ion-popover>
+</ui-popover>
 
-<ion-popover
+<ui-popover
   #notificationsPopover
   class="notifications-popover"
   [isOpen]="notificationsOpen()"
   trigger="notifications-trigger"
-  reference="trigger"
-  side="bottom"
   alignment="end"
   (didDismiss)="onNotificationsPopoverDismiss()">
   <ng-template>
-    <aside class="notifications-panel glass-surface">
+    <aside class="notifications-panel app-surface">
       <header class="notifications-header">
         <div class="notifications-title">{{ showAllNotifications() ? 'All Notifications' : 'Notifications' }}</div>
         <div class="notifications-header-actions">
-          <button
-            type="button"
-            class="header-link"
-            *ngIf="showAllNotifications()"
-            (click)="showRecentNotifications($event)">
-            Show recent
-          </button>
-          <button
-            type="button"
-            class="header-link"
-            *ngIf="!showAllNotifications() && hasMoreNotifications()"
-            (click)="viewAllNotifications($event)">
-            View all
-          </button>
+          @if (showAllNotifications()) {
+            <button
+              type="button"
+              class="header-link"
+              (click)="showRecentNotifications($event)">
+              Show recent
+            </button>
+          }
+          @if (!showAllNotifications() && hasMoreNotifications()) {
+            <button
+              type="button"
+              class="header-link"
+              (click)="viewAllNotifications($event)">
+              View all
+            </button>
+          }
         </div>
         <button
           type="button"
           class="notifications-close"
           aria-label="Close notifications"
           (click)="closeNotifications($event)">
-          <ion-icon name="close-outline"></ion-icon>
+          <ui-icon name="x"></ui-icon>
         </button>
       </header>
-      <div class="notifications-top-actions" *ngIf="unreadNotifications() > 0">
-        <button
-          type="button"
-          class="header-link"
-          (click)="markAllNotificationsRead($event)">
-          <ion-icon name="checkmark-done-outline"></ion-icon>
-          Mark all read
-        </button>
-      </div>
-
-      <div class="notifications-loading" *ngIf="notificationsLoading()">Loading notifications...</div>
-      <section class="notifications-body">
-        <div class="notifications-error" *ngIf="!notificationsLoading() && notificationsError()">{{ notificationsError() }}</div>
-
-        <div class="notifications-empty" *ngIf="!notificationsLoading() && !notificationsError() && !visibleNotifications().length">
-          <div class="notifications-empty-title">No notifications yet</div>
-          <div class="notifications-empty-text">
-            Notifications will appear here as activity happens.
-          </div>
-        </div>
-
-        <div class="notifications-list" *ngIf="!notificationsLoading() && visibleNotifications().length">
-          <button
-            type="button"
-            class="notification-item"
-            *ngFor="let notification of visibleNotifications()"
-            [class.unread]="isNotificationUnread(notification)"
-            (click)="openNotification(notification, $event)">
-            <div class="notification-item-head">
-              <div class="notification-item-title">{{ notification.title }}</div>
-              <div class="notification-item-time">{{ notificationTimeLabel(notification.createdAt) }}</div>
-            </div>
-            <div class="notification-item-message">{{ notification.message }}</div>
-            <div class="notification-item-route">
-              <ion-icon name="open-outline"></ion-icon>
-              <span>Open</span>
-            </div>
-          </button>
-        </div>
-        <div class="notifications-more" *ngIf="!notificationsLoading() && showAllNotifications()">
+      @if (unreadNotifications() > 0) {
+        <div class="notifications-top-actions">
           <button
             type="button"
             class="header-link"
-            *ngIf="hasMoreAllNotifications() && !loadingMoreNotifications()"
-            (click)="loadMoreNotifications($event)">
-            Load more
+            (click)="markAllNotificationsRead($event)">
+            <ui-icon name="checks"></ui-icon>
+            Mark all read
           </button>
-          <div class="notifications-loading-more" *ngIf="loadingMoreNotifications()">Loading more…</div>
         </div>
+      }
+
+      @if (notificationsLoading()) {
+        <div class="notifications-loading">Loading notifications...</div>
+      }
+      <section class="notifications-body">
+        @if (!notificationsLoading() && notificationsError()) {
+          <div class="notifications-error">{{ notificationsError() }}</div>
+        }
+
+        @if (!notificationsLoading() && !notificationsError() && !visibleNotifications().length) {
+          <div class="notifications-empty">
+            <div class="notifications-empty-title">No notifications yet</div>
+            <div class="notifications-empty-text">
+              Notifications will appear here as activity happens.
+            </div>
+          </div>
+        }
+
+        @if (!notificationsLoading() && visibleNotifications().length) {
+          <div class="notifications-list">
+            @for (notification of visibleNotifications(); track notification) {
+              <button
+                type="button"
+                class="notification-item"
+                [class.unread]="isNotificationUnread(notification)"
+                (click)="openNotification(notification, $event)">
+                <div class="notification-item-head">
+                  <div class="notification-item-title">{{ notification.title }}</div>
+                  <div class="notification-item-time">{{ notificationTimeLabel(notification.createdAt) }}</div>
+                </div>
+                <div class="notification-item-message">{{ notification.message }}</div>
+                <div class="notification-item-route">
+                  <ui-icon name="external-link"></ui-icon>
+                  <span>Open</span>
+                </div>
+              </button>
+            }
+          </div>
+        }
+        @if (!notificationsLoading() && showAllNotifications()) {
+          <div class="notifications-more">
+            @if (hasMoreAllNotifications() && !loadingMoreNotifications()) {
+              <button
+                type="button"
+                class="header-link"
+                (click)="loadMoreNotifications($event)">
+                Load more
+              </button>
+            }
+            @if (loadingMoreNotifications()) {
+              <div class="notifications-loading-more">Loading more…</div>
+            }
+          </div>
+        }
       </section>
     </aside>
   </ng-template>
-</ion-popover>
+</ui-popover>

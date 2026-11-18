@@ -1,26 +1,8 @@
-import { Component, effect, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { UiBadge, UiInput } from '../../ui/controls';
+import { UiIcon } from '../../ui/icons';
+import { Component, effect, inject, ChangeDetectionStrategy } from '@angular/core';
+
 import { FormsModule } from '@angular/forms';
-import {
-  IonAvatar,
-  IonBadge,
-  IonButton,
-  IonButtons,
-  IonCard,
-  IonCardContent,
-  IonCardHeader,
-  IonCardTitle,
-  IonContent,
-  IonHeader,
-  IonIcon,
-  IonInput,
-  IonItem,
-  IonLabel,
-  IonTitle,
-  IonToolbar
-} from '@ionic/angular/standalone';
-import { addIcons } from 'ionicons';
-import { checkmarkCircleOutline, keyOutline, personCircleOutline } from 'ionicons/icons';
 import { AuthService } from '../../auth/auth.service';
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
 import { PageBackButtonComponent } from '../../components/navigation/page-back-button/page-back-button.component';
@@ -30,29 +12,16 @@ import { CompanySwitcherComponent } from '../../components/header/company-switch
   selector: 'app-user-settings',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
-    IonHeader,
-    IonToolbar,
-    IonTitle,
-    IonButtons,
-    IonContent,
-    IonCard,
-    IonCardHeader,
-    IonCardTitle,
-    IonCardContent,
-    IonItem,
-    IonLabel,
-    IonInput,
-    IonButton,
-    IonIcon,
-    IonBadge,
-    IonAvatar,
+    UiInput,
+    UiIcon,
+    UiBadge,
     UserMenuComponent,
     PageBackButtonComponent,
     CompanySwitcherComponent
-  ],
+],
   templateUrl: './user-settings.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./user-settings.component.scss']
 })
 export default class UserSettingsComponent {
@@ -73,11 +42,6 @@ export default class UserSettingsComponent {
   passkeyBusy = false;
 
   constructor() {
-    addIcons({
-      'person-circle-outline': personCircleOutline,
-      'key-outline': keyOutline,
-      'checkmark-circle-outline': checkmarkCircleOutline
-    });
 
     effect(() => {
       const user = this.auth.user();

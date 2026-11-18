@@ -157,7 +157,7 @@
 
 .duplicate-banner {
   border: 1px solid var(--app-border-subtle);
-  border-left: 4px solid var(--ion-color-warning, #f5a623);
+  border-left: 4px solid var(--ui-color-warning, #f5a623);
   border-radius: 12px;
   padding: 10px 12px;
   display: flex;
@@ -168,7 +168,7 @@
 
 .duplicate-decision-banner {
   border: 1px solid var(--app-border-subtle);
-  border-left: 4px solid var(--ion-color-danger, #e45f2b);
+  border-left: 4px solid var(--ui-color-danger, #e45f2b);
   border-radius: 12px;
   padding: 10px 12px;
   display: grid;
@@ -196,7 +196,7 @@
   width: 100%;
 }
 
-.mobile-header-select ion-item {
+.mobile-header-select .ui-item {
   --background: transparent;
   --inner-padding-start: 0;
   --inner-padding-end: 0;
@@ -211,11 +211,11 @@
 }
 
 .save-feedback.success {
-  color: var(--ion-color-success, #22c55e);
+  color: var(--ui-color-success, #22c55e);
 }
 
 .save-feedback.error {
-  color: var(--ion-color-danger, #ef4444);
+  color: var(--ui-color-danger, #ef4444);
 }
 
 .mobile-sticky-save {
@@ -411,7 +411,7 @@
   grid-column: 1 / -1;
   margin-top: -4px;
   font-size: 12px;
-  color: var(--ion-color-danger, #ef4444);
+  color: var(--ui-color-danger, #ef4444);
 }
 
 .span-2 {
@@ -519,16 +519,16 @@
   position: sticky;
   top: 8px;
   align-self: start;
-  height: max(420px, calc(100dvh - 300px));
-  max-height: max(420px, calc(100dvh - 300px));
+  height: max(640px, calc(100dvh - 190px));
+  max-height: max(640px, calc(100dvh - 190px));
 }
 
 .right-column.email-active {
   position: sticky;
   top: 8px;
   align-self: start;
-  height: max(420px, calc(100dvh - 300px));
-  max-height: max(420px, calc(100dvh - 300px));
+  height: max(640px, calc(100dvh - 190px));
+  max-height: max(640px, calc(100dvh - 190px));
 }
 
 .tab-rail {
@@ -556,7 +556,7 @@
   min-height: 42px;
 }
 
-.tab-rail-btn ion-icon {
+.tab-rail-btn ui-icon {
   font-size: 20px;
 }
 
@@ -648,6 +648,7 @@
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  height: 100%;
 }
 
 .sms-thread {
@@ -659,12 +660,13 @@
   border-top: 1px solid var(--app-border-subtle);
   border-bottom: 1px solid var(--app-border-subtle);
   flex: 1;
-  min-height: 0;
+  min-height: 380px;
   overflow-y: auto;
 }
 
 .sms-entry {
   display: flex;
+  align-items: flex-end;
 }
 
 .sms-entry.outbound {
@@ -675,8 +677,22 @@
   justify-content: flex-start;
 }
 
-.sms-bubble {
+.sms-stack {
+  display: grid;
+  gap: 4px;
   max-width: min(640px, 86%);
+}
+
+.sms-entry.outbound .sms-stack {
+  justify-items: end;
+}
+
+.sms-entry.inbound .sms-stack {
+  justify-items: start;
+}
+
+.sms-bubble {
+  max-width: 100%;
   border-radius: 12px;
   border: 1px solid var(--app-border-subtle);
   background: var(--app-control-bg);
@@ -687,6 +703,10 @@
   background: var(--app-nav-active-bg);
   border-color: var(--app-nav-active-border);
   color: var(--app-nav-active-text);
+}
+
+.sms-entry.failed.outbound {
+  gap: 8px;
 }
 
 .sms-meta-line {
@@ -700,30 +720,27 @@
   margin-bottom: 4px;
 }
 
-.sms-delivery-badge {
+.sms-failed-icon {
+  width: 22px;
+  height: 22px;
+  margin-bottom: 7px;
   border-radius: 999px;
-  padding: 2px 7px;
-  border: 1px solid transparent;
-  line-height: 1;
-  font-weight: 700;
-}
-
-.sms-delivery-badge.queued {
-  color: #f59e0b;
-  border-color: color-mix(in srgb, #f59e0b 55%, transparent);
-  background: color-mix(in srgb, #f59e0b 16%, transparent);
-}
-
-.sms-delivery-badge.delivered {
-  color: #22c55e;
-  border-color: color-mix(in srgb, #22c55e 55%, transparent);
-  background: color-mix(in srgb, #22c55e 16%, transparent);
-}
-
-.sms-delivery-badge.failed {
+  border: 2px solid #ef4444;
   color: #ef4444;
-  border-color: color-mix(in srgb, #ef4444 55%, transparent);
-  background: color-mix(in srgb, #ef4444 16%, transparent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.sms-failure-reason {
+  color: #ef4444;
+  font-size: 12px;
+  font-weight: 700;
+  padding-right: 4px;
+  text-align: right;
 }
 
 .sms-message {
@@ -763,11 +780,11 @@
 }
 
 .sms-feedback.success {
-  color: var(--ion-color-success, #22c55e);
+  color: var(--ui-color-success, #22c55e);
 }
 
 .sms-feedback.error {
-  color: var(--ion-color-danger, #ef4444);
+  color: var(--ui-color-danger, #ef4444);
 }
 
 .invoice-grid {
@@ -1009,7 +1026,7 @@
   width: 100%;
 }
 
-.email-message-input::part(native) {
+.email-message-input {
   max-height: 300px;
   overflow-y: auto;
 }
@@ -1086,7 +1103,7 @@
 }
 
 @media (max-width: 800px) {
-  .mobile-header-select ion-item {
+  .mobile-header-select .ui-item {
     --min-height: 48px;
   }
 
@@ -1103,7 +1120,7 @@
     justify-items: stretch;
   }
 
-  .hero-actions ion-button {
+  .hero-actions .ui-button {
     flex: 1 1 auto;
   }
 
@@ -1124,15 +1141,15 @@
     max-width: 92%;
   }
 
-  .sms-compose-actions ion-button {
+  .sms-compose-actions .ui-button {
     flex: 1 1 auto;
   }
 
-  .email-compose-actions ion-button {
+  .email-compose-actions .ui-button {
     flex: 1 1 auto;
   }
 
-  .schedule-actions ion-button {
+  .schedule-actions .ui-button {
     flex: 1 1 auto;
   }
 

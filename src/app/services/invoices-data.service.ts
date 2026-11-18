@@ -1,4 +1,6 @@
-import { Injectable, computed, effect, inject, signal } from '@angular/core';
+import { DestroyRef, Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { firstValueFrom, timeout } from 'rxjs';
 import { TenantContextService } from './tenant-context.service';
 import { AuthService } from '../auth/auth.service';
 
@@ -77,11 +79,15 @@ export type InvoiceRefundTransaction = {
   transactionId: string;
   originalTransactionId: string;
   reason?: string;
+  operation?: 'void' | 'refund';
+  creditInvoice?: boolean;
+  retainedFee?: number;
   createdAt: string;
 };
 
 export type InvoiceDetail = {
   id: string;
+  sourceQuoteId?: string;
   documentType: InvoiceDocumentType;
   invoiceNumber: string;
   jobNumber?: string;
@@ -122,6 +128,7 @@ export type InvoiceDetail = {
   taxTotal: number;
   total: number;
   paidAmount?: number;
+  returnCreditAmount?: number;
   paymentTransactions?: InvoicePaymentTransaction[];
   refundTransactions?: InvoiceRefundTransaction[];
 
@@ -138,6 +145,7 @@ type InvoiceCustomerLookup = {
 
 export type InvoiceDraftPayload = {
   documentType?: InvoiceDocumentType | null;
+  sourceQuoteId?: string;
   jobNumber?: string | null;
   customerId?: string | null;
   customerName?: string | null;
@@ -552,29 +560,46 @@ const MOCK_INVOICES: InvoiceDetail[] = [
 ];
 
 const INVOICES_STORAGE_KEY_PREFIX = 'pathflow.invoices.v1';
-const LOCAL_PENDING_QUOTE_RESPONSES_KEY = 'pathflow.quoteResponses.pending.v1';
-const LOCAL_PENDING_INVOICE_RESPONSES_KEY = 'pathflow.invoiceResponses.pending.v1';
-const LOCALHOST_ONE_TIME_PURGE_MARKER_KEY = 'pathflow.local.invoiceQuotePurge.v5';
+type SharedDocument = { id: string; revision: string; document: InvoiceDetail | null };
+type PendingDocument = { document: InvoiceDetail | null; revision: string | null; conflict?: boolean };
+type DocumentSync = {
+  revisions: Record<string, string>;
+  pending: Record<string, PendingDocument>;
+  migrated: boolean;
+};
 
 @Injectable({ providedIn: 'root' })
 export class InvoicesDataService {
   private readonly tenantContext = inject(TenantContextService);
   private readonly auth = inject(AuthService);
+  private readonly http = inject(HttpClient, { optional: true });
+  private readonly destroyRef = inject(DestroyRef);
   private readonly state = signal<InvoiceDetail[]>([]);
+  private readonly syncing = new Set<string>();
+  private readonly syncState = new Map<string, DocumentSync>();
+  readonly documentSyncError = signal('');
 
   readonly invoiceDetails = computed(() => this.state().map(item => this.cloneInvoice(item)));
   readonly invoices = computed(() => this.state().map(item => this.toCard(item)));
 
   constructor() {
-    this.purgeLocalhostInvoiceQuoteDataOnce();
     effect(
       () => {
         const tenantId = this.storageTenantId();
         const loaded = this.loadFromStorage(tenantId);
         this.state.set(loaded);
+        this.documentSyncError.set('');
       },
       { allowSignalWrites: true }
     );
+    effect(onCleanup => {
+      const tenantId = this.storageTenantId();
+      if (!this.http || !this.auth.isAuthenticated?.()) return;
+      untracked(() => void this.syncDocuments(tenantId));
+      const timer = setInterval(() => void this.syncDocuments(tenantId), 15000);
+      onCleanup(() => clearInterval(timer));
+    });
+    this.destroyRef.onDestroy(() => this.syncState.clear());
   }
 
   previewNextInvoiceNumber(documentType: InvoiceDocumentType = 'invoice'): string {
@@ -599,8 +624,9 @@ export class InvoicesDataService {
     const jobNumber = this.safeText(payload.jobNumber) || this.previewNextJobNumber();
 
     const invoice = this.normalizeInvoice({
-      id: this.generateDocumentId(),
+      id: payload.sourceQuoteId ? `invoice-${payload.sourceQuoteId}` : this.generateDocumentId(),
       documentType,
+      sourceQuoteId: payload.sourceQuoteId,
       invoiceNumber: `${numberPrefix}-${sequence}`,
       jobNumber,
       stage: payload.stage || 'draft',
@@ -911,6 +937,12 @@ export class InvoicesDataService {
       originalTransactionId: string;
       reason?: string;
       createdAt?: string;
+      operation?: 'void' | 'refund';
+      id?: string;
+      paidAmount?: number;
+      returnCreditAmount?: number;
+      creditInvoice?: boolean;
+      retainedFee?: number;
     }
   ): InvoiceDetail | null {
     const key = String(id || '').trim();
@@ -930,20 +962,30 @@ export class InvoicesDataService {
       if (index === -1) return current;
 
       const existing = current[index];
+      const nextRefunds = [...(existing.refundTransactions || [])];
+      if (nextRefunds.some(item => item.provider === provider && item.transactionId === transactionId)) {
+        updated = this.cloneInvoice(existing);
+        return current;
+      }
       const previousStage = existing.stage;
       const currentPaid = this.roundCurrency(Math.max(0, Number(existing.paidAmount || 0)));
-      const nextPaid = this.roundCurrency(Math.max(0, currentPaid - amount));
-      const nextStage = this.resolveStageFromBalance(existing, nextPaid);
+      const nextPaid = this.roundCurrency(Math.max(0, refund.paidAmount ?? currentPaid - amount));
+      const returnCreditAmount = refund.returnCreditAmount ?? existing.returnCreditAmount ?? 0;
+      const nextTotal = existing.total + (existing.returnCreditAmount || 0) - returnCreditAmount;
+      const nextStage = this.resolveStageFromBalance({ ...existing, total: nextTotal }, nextPaid);
 
       const amountLabel = this.formatCurrency(amount);
       const reason = this.safeText(refund.reason);
       const timeline = [...existing.timeline];
+      const refundId = refund.id || `refund-${key}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      const action = refund.operation === 'void' ? 'Payment voided' : 'Refund issued';
+      const history = [`${action} for ${amountLabel}.`, refund.creditInvoice ? 'Invoice credited.' : '',
+        refund.retainedFee ? `Fee retained ${this.formatCurrency(refund.retainedFee)}.` : '', reason].filter(Boolean).join(' ');
       timeline.push(this.createTimelineEntry(
-        `timeline-${key}-${Date.now()}-refund-processor`,
+        refundId,
         createdAt,
-        reason
-          ? `Refund issued: ${amountLabel}. ${reason}`
-          : `Refund issued: ${amountLabel}.`
+        history,
+        'system'
       ));
       if (previousStage !== nextStage) {
         timeline.push(this.createTimelineEntry(
@@ -953,32 +995,24 @@ export class InvoicesDataService {
         ));
       }
 
-      const nextRefunds = [...(existing.refundTransactions || [])];
-      const refundDedup = `${provider}|${transactionId}`.toLowerCase();
-      const existingRefundIndex = nextRefunds.findIndex(item =>
-        `${this.safeText(item.provider).toLowerCase()}|${this.safeText(item.transactionId)}`.toLowerCase() === refundDedup
-      );
-      const refundEntry: InvoiceRefundTransaction = {
-        id: existingRefundIndex >= 0
-          ? nextRefunds[existingRefundIndex].id
-          : `refund-${key}-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      nextRefunds.push({
+        id: refundId,
         provider,
         amount,
         transactionId,
         originalTransactionId,
         reason,
+        operation: refund.operation,
+        creditInvoice: refund.creditInvoice,
+        retainedFee: refund.retainedFee,
         createdAt
-      };
-      if (existingRefundIndex >= 0) {
-        nextRefunds[existingRefundIndex] = refundEntry;
-      } else {
-        nextRefunds.push(refundEntry);
-      }
+      });
 
       const nextInvoice = this.normalizeInvoice({
         ...existing,
         stage: nextStage,
         paidAmount: nextPaid,
+        returnCreditAmount,
         paymentDate: nextStage === 'accepted' ? this.safeText(existing.paymentDate) || this.formatIsoDate(new Date()) : '',
         refundTransactions: nextRefunds,
         updatedAt: new Date().toISOString(),
@@ -989,7 +1023,7 @@ export class InvoicesDataService {
       next[index] = nextInvoice;
       updated = this.cloneInvoice(nextInvoice);
       return next;
-    });
+    }, provider !== 'paylynx');
 
     return updated;
   }
@@ -1118,8 +1152,11 @@ export class InvoicesDataService {
     const quote = this.getInvoiceById(quoteId);
     if (!quote || quote.documentType !== 'quote' || quote.stage !== 'accepted') return null;
 
-    const created = this.createDraftInvoice({
+    const existing = this.getInvoiceById(`invoice-${quote.id}`);
+    if (existing) return existing;
+    return this.createDraftInvoice({
       documentType: 'invoice',
+      sourceQuoteId: quote.id,
       jobNumber: quote.jobNumber,
       customerId: quote.customerId,
       customerName: quote.customerName,
@@ -1145,15 +1182,6 @@ export class InvoicesDataService {
       paidAmount: 0
     });
 
-    if (created) {
-      this.setStage(
-        quote.id,
-        'canceled',
-        `Converted to invoice ${created.invoiceNumber}.`
-      );
-    }
-
-    return created;
   }
 
   deleteDraftQuote(id: string): boolean {
@@ -1242,8 +1270,10 @@ export class InvoicesDataService {
     const lineItems = this.normalizeLineItems(invoice.lineItems || []);
     const subtotal = this.roundCurrency(lineItems.reduce((sum, line) => sum + line.lineSubtotal, 0));
     const taxTotal = this.roundCurrency(lineItems.reduce((sum, line) => sum + line.taxAmount, 0));
-    const total = this.roundCurrency(subtotal + taxTotal);
     const normalizedDocumentType: InvoiceDocumentType = invoice.documentType === 'quote' ? 'quote' : 'invoice';
+    const returnCreditAmount = normalizedDocumentType === 'invoice'
+      ? Math.max(0, this.safeNumber(invoice.returnCreditAmount, 0)) : 0;
+    const total = this.roundCurrency(Math.max(0, subtotal + taxTotal - returnCreditAmount));
     const requestedStage = this.normalizeStage(invoice.stage);
     const rawPaidAmount = Number((invoice as any).paidAmount);
     const hasExplicitPaidAmount = Number.isFinite(rawPaidAmount);
@@ -1296,6 +1326,7 @@ export class InvoicesDataService {
       subtotal,
       taxTotal,
       total,
+      returnCreditAmount,
       paidAmount,
       paymentTransactions,
       refundTransactions,
@@ -1426,6 +1457,9 @@ export class InvoicesDataService {
         transactionId,
         originalTransactionId,
         reason: this.safeText(row?.reason),
+        operation: row?.operation === 'void' || row?.operation === 'refund' ? row.operation : undefined,
+        creditInvoice: row?.creditInvoice === true,
+        retainedFee: this.roundCurrency(Math.max(0, this.safeNumber(row?.retainedFee, 0))),
         createdAt
       };
       dedupe.set(`${provider}|${transactionId}`.toLowerCase(), entry);
@@ -1520,9 +1554,114 @@ export class InvoicesDataService {
     };
   }
 
-  private updateState(mutator: (current: InvoiceDetail[]) => InvoiceDetail[]): void {
-    this.state.update(current => mutator(current));
+  private updateState(mutator: (current: InvoiceDetail[]) => InvoiceDetail[], syncChange = true): void {
+    const previous = this.state();
+    const next = mutator(previous);
+    this.state.set(next);
     this.persistToStorage();
+    if (!syncChange || !this.http || !this.auth.isAuthenticated?.()) return;
+    const tenant = this.storageTenantId();
+    const sync = this.syncFor(tenant);
+    const remaining = new Map(previous.map(item => [item.id, item]));
+    for (const item of next) {
+      const old = remaining.get(item.id);
+      remaining.delete(item.id);
+      if (item !== old && (!old || JSON.stringify(item) !== JSON.stringify(old))) this.queueDocument(sync, item.id, item);
+    }
+    for (const id of remaining.keys()) this.queueDocument(sync, id, null);
+    this.persistSync(tenant, sync);
+    void this.syncDocuments(tenant);
+  }
+
+  private queueDocument(sync: DocumentSync, id: string, document: InvoiceDetail | null): void {
+    const pending = sync.pending[id];
+    sync.pending[id] = { ...pending, document, revision: pending ? pending.revision : sync.revisions[id] ?? null };
+  }
+
+  private syncFor(tenant: string): DocumentSync {
+    const current = this.syncState.get(tenant);
+    if (current) return current;
+    let saved: DocumentSync | null = null;
+    try { saved = JSON.parse(localStorage.getItem(`${this.storageKey(tenant)}.sync`) || 'null'); } catch {}
+    const sync = saved || { revisions: {}, pending: {}, migrated: false };
+    this.syncState.set(tenant, sync);
+    return sync;
+  }
+
+  private persistSync(tenant: string, sync: DocumentSync): void {
+    try { localStorage.setItem(`${this.storageKey(tenant)}.sync`, JSON.stringify(sync)); } catch {}
+  }
+
+  async waitForSharedDocument(documentId: string): Promise<void> {
+    const tenant = this.storageTenantId();
+    const sync = this.syncFor(tenant);
+    const deadline = Date.now() + 20_000;
+    while (this.auth.isAuthenticated?.() && tenant === this.storageTenantId() && Date.now() < deadline) {
+      if (sync.pending[documentId]?.conflict) {
+        throw new Error('Resolve the document sync conflict before sharing the customer portal.');
+      }
+      if (sync.revisions[documentId] && !sync.pending[documentId]) return;
+      await this.syncDocuments(tenant);
+      await new Promise(resolve => setTimeout(resolve, 150));
+    }
+    throw new Error('Could not sync the document. Try sharing the portal again.');
+  }
+
+  private async syncDocuments(tenant: string): Promise<void> {
+    const http = this.http;
+    const isActive = () => this.auth.isAuthenticated?.() && tenant === this.storageTenantId();
+    if (!http || !isActive() || this.syncing.has(tenant)) return;
+    this.syncing.add(tenant);
+    const sync = this.syncFor(tenant);
+    const headers = { 'x-tenant-id': tenant, 'x-skip-action-toast': '1' };
+    try {
+      const { items } = await firstValueFrom(http.get<{ items: SharedDocument[] }>('/api/service-documents', { headers }).pipe(timeout(15000)));
+      if (!isActive()) return;
+      const local = new Map(this.state().map(item => [item.id, item]));
+      for (const row of items) {
+        sync.revisions[row.id] = row.revision;
+        if (sync.pending[row.id]) continue;
+        if (row.document) local.set(row.id, this.normalizeInvoice(row.document));
+        else local.delete(row.id);
+      }
+      if (!sync.migrated) {
+        for (const [id, item] of local) {
+          if (!sync.revisions[id] && !sync.pending[id]) this.queueDocument(sync, id, item);
+        }
+        sync.migrated = true;
+      }
+      this.state.set([...local.values()].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)));
+      this.persistToStorage();
+      this.persistSync(tenant, sync);
+
+      for (const [id, pending] of Object.entries(sync.pending)) {
+        if (!isActive()) return;
+        if (pending.conflict || sync.pending[id] !== pending) continue;
+        try {
+          const result = await firstValueFrom(http.post<{ revision: string }>('/api/service-documents', {
+            id, revision: pending.revision, document: pending.document
+          }, { headers }).pipe(timeout(15000)));
+          sync.revisions[id] = result.revision;
+          if (sync.pending[id] === pending) delete sync.pending[id];
+          else if (sync.pending[id]) sync.pending[id].revision = result.revision;
+        } catch (error) {
+          if (error instanceof HttpErrorResponse && error.status === 409) {
+            if (sync.pending[id]) sync.pending[id].conflict = true;
+          } else {
+            throw error;
+          }
+        } finally {
+          this.persistSync(tenant, sync);
+        }
+      }
+      if (isActive()) this.documentSyncError.set(Object.values(sync.pending).some(row => row.conflict)
+        ? 'Another session changed a quote or invoice. Your local edits are still on this device.'
+        : '');
+    } catch {
+      if (isActive()) this.documentSyncError.set('Shared documents are unavailable. Edits on this device are waiting to sync.');
+    } finally {
+      this.syncing.delete(tenant);
+    }
   }
 
   private storageTenantId(): string {
@@ -1535,10 +1674,8 @@ export class InvoicesDataService {
 
   private loadFromStorage(tenantId: string): InvoiceDetail[] {
     const key = this.storageKey(tenantId);
-    const fallbackKeys = [
-      key,
-      INVOICES_STORAGE_KEY_PREFIX
-    ];
+    const fallbackKeys = tenantId === 'main' || tenantId === 'primary-location'
+      ? [key, INVOICES_STORAGE_KEY_PREFIX] : [key];
     try {
       let raw = '';
       for (const candidate of fallbackKeys) {
@@ -1575,34 +1712,7 @@ export class InvoicesDataService {
   }
 
   private migrateLegacyCompletedInvoices(items: InvoiceDetail[]): InvoiceDetail[] {
-    let changed = false;
-    const migrated = (items || []).map(item => {
-      if (item.documentType !== 'invoice') return item;
-      if (item.stage !== 'accepted') return item;
-      const total = this.roundCurrency(Math.max(0, Number(item.total || 0)));
-      const paid = this.roundCurrency(Math.max(0, Number(item.paidAmount || 0)));
-      if (total <= 0 || this.roundCurrency(total - paid) > 0) return item;
-      if (!this.hasFinalInvoiceSentTimeline(item.timeline || [])) return item;
-
-      changed = true;
-      const nowIso = new Date().toISOString();
-      const timeline = [...(item.timeline || []), this.createTimelineEntry(
-        `timeline-${item.id}-${Date.now()}-legacy-completed`,
-        nowIso,
-        this.stageTransitionMessage('accepted', 'completed')
-      )];
-      return this.normalizeInvoice({
-        ...item,
-        stage: 'completed',
-        updatedAt: nowIso,
-        timeline
-      });
-    });
-
-    if (changed) {
-      setTimeout(() => this.persistToStorage());
-    }
-    return migrated;
+    return items || [];
   }
 
   private hasFinalInvoiceSentTimeline(timeline: InvoiceTimelineEntry[]): boolean {
@@ -1826,29 +1936,5 @@ export class InvoicesDataService {
         timeline
       });
     });
-  }
-
-  private purgeLocalhostInvoiceQuoteDataOnce(): void {
-    try {
-      const host = String(window?.location?.hostname || '').trim().toLowerCase();
-      if (host !== 'localhost' && host !== '127.0.0.1') return;
-      if (localStorage.getItem(LOCALHOST_ONE_TIME_PURGE_MARKER_KEY)) return;
-
-      const keysToRemove: string[] = [];
-      for (let index = 0; index < localStorage.length; index += 1) {
-        const key = String(localStorage.key(index) || '').trim();
-        if (!key) continue;
-        if (key === INVOICES_STORAGE_KEY_PREFIX || key.startsWith(`${INVOICES_STORAGE_KEY_PREFIX}.`)) {
-          keysToRemove.push(key);
-        }
-      }
-      keysToRemove.push(LOCAL_PENDING_QUOTE_RESPONSES_KEY, LOCAL_PENDING_INVOICE_RESPONSES_KEY);
-      for (const key of keysToRemove) {
-        try { localStorage.removeItem(key); } catch {}
-      }
-      localStorage.setItem(LOCALHOST_ONE_TIME_PURGE_MARKER_KEY, new Date().toISOString());
-    } catch {
-      // Ignore if localStorage/window is unavailable.
-    }
   }
 }

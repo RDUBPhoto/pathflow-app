@@ -1,7 +1,7 @@
 .schedule-shell {
   border-radius: 16px;
   padding: 12px;
-  box-shadow: var(--glass-shadow);
+  box-shadow: var(--surface-shadow);
   height: 520px;
   display: flex;
   flex-direction: column;
@@ -67,7 +67,7 @@ daypilot-scheduler {
 .validation-error {
   margin-top: 8px;
   font-size: 12px;
-  color: var(--ion-color-danger, #ef4444);
+  color: var(--ui-color-danger, #ef4444);
 }
 
 .schedule-shell ::ng-deep .holiday-cell {

@@ -3,12 +3,12 @@
   align-items: center;
 }
 
-:host ::ng-deep ion-popover.user-menu-popover {
+:host ::ng-deep ui-popover.user-menu-popover {
   --width: min(320px, calc(100vw - 20px));
   --max-width: calc(100vw - 20px);
 }
 
-:host ::ng-deep ion-popover.user-menu-popover::part(content) {
+:host ::ng-deep ui-popover.user-menu-popover .ui-popover-panel {
   width: var(--width);
   max-width: var(--max-width);
 }
@@ -47,7 +47,7 @@
   transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
-.notification-trigger ion-icon {
+.notification-trigger ui-icon {
   font-size: 18px;
 }
 
@@ -140,8 +140,9 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 12px;
+  padding: .75rem var(--tblr-dropdown-item-padding-x);
   border-bottom: 1px solid var(--app-border-subtle, rgba(15, 23, 42, 0.1));
+  overflow-wrap: anywhere;
 }
 
 .menu-avatar {
@@ -169,14 +170,9 @@
 }
 
 .theme-menu-item {
-  --min-height: 56px;
-  --inner-padding-end: 8px;
-}
-
-.theme-menu-item ion-label {
-  white-space: nowrap;
-  margin-right: 10px;
-  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--tblr-dropdown-item-gap);
 }
 
 .theme-direction-toggle {
@@ -203,18 +199,8 @@
   font-weight: 700;
 }
 
-.theme-direction-toggle ion-toggle {
-  --track-background: rgba(100, 116, 139, 0.34);
-  --track-background-checked: rgba(10, 132, 255, 0.54);
-  --handle-background: #ffffff;
-  --handle-background-checked: #ffffff;
-  --handle-width: 16px;
-  --handle-height: 16px;
-  --border-radius: 14px;
-}
-
 @media (max-width: 640px) {
-  :host ::ng-deep ion-popover.user-menu-popover {
+  :host ::ng-deep ui-popover.user-menu-popover {
     --width: min(304px, calc(100vw - 16px));
     --max-width: calc(100vw - 16px);
   }
@@ -233,13 +219,13 @@
   }
 }
 
-:host ::ng-deep ion-popover.notifications-popover {
+:host ::ng-deep ui-popover.notifications-popover {
   --offset-y: 6px;
   --width: min(420px, calc(100vw - 24px));
   --max-width: calc(100vw - 24px);
 }
 
-:host ::ng-deep ion-popover.notifications-popover::part(content) {
+:host ::ng-deep ui-popover.notifications-popover .ui-popover-panel {
   background: transparent;
   box-shadow: none;
   border: 0;
@@ -460,14 +446,14 @@
 }
 
 @media (max-width: 720px) {
-  :host ::ng-deep ion-popover.notifications-popover {
+  :host ::ng-deep ui-popover.notifications-popover {
     --offset-x: 0px;
     --offset-y: 4px;
     --width: calc(100vw - 12px);
     --max-width: calc(100vw - 12px);
   }
 
-  :host ::ng-deep ion-popover.notifications-popover::part(content) {
+  :host ::ng-deep ui-popover.notifications-popover .ui-popover-panel {
     width: calc(100vw - 12px);
     max-width: calc(100vw - 12px);
     max-height: calc(100dvh - 84px);

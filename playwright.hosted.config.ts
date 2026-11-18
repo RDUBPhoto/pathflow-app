@@ -1,6 +1,6 @@
 import { defineConfig } from '@playwright/test';
 
-const baseURL = process.env.PLAYWRIGHT_BASE_URL || 'https://wonderful-glacier-0f45f5110.6.azurestaticapps.net';
+const baseURL = process.env.PLAYWRIGHT_BASE_URL || 'https://www.pathflow-app.com';
 
 export default defineConfig({
   testDir: './e2e',

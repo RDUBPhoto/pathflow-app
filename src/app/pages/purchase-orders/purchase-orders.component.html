@@ -1,221 +1,308 @@
-<ion-header class="glass-header">
-  <ion-toolbar>
-    <ion-buttons slot="start">
+<header class="ui-header app-header">
+  <div class="ui-toolbar">
+    <div class="ui-buttons" slot="start">
       <app-page-back-button></app-page-back-button>
-    </ion-buttons>
-    <ion-title>Purchase Orders</ion-title>
+    </div>
+    <h1 class="ui-title">Purchase Orders</h1>
     <app-company-switcher></app-company-switcher>
-    <ion-buttons slot="end" class="ion-margin-end">
+    <div slot="end" class="ui-buttons me-2">
       <app-user-menu></app-user-menu>
-    </ion-buttons>
-  </ion-toolbar>
-</ion-header>
+    </div>
+  </div>
+</header>
 
-<ion-content class="ion-padding glass-bg purchase-orders-content">
+<div class="ui-content app-padding app-content purchase-orders-content">
   <div class="po-stack">
-    <section class="po-feedback" *ngIf="loading() || status() || error()">
-      <div class="feedback-row" *ngIf="loading()">Loading purchase orders...</div>
-      <div class="feedback-row success" *ngIf="!loading() && status()">{{ status() }}</div>
-      <div class="feedback-row error" *ngIf="!loading() && error()">{{ error() }}</div>
-    </section>
+    @if (loading() || status() || error()) {
+      <section class="po-feedback">
+        @if (loading()) {
+          <div class="feedback-row">Loading purchase orders...</div>
+        }
+        @if (!loading() && status()) {
+          <div class="feedback-row success">{{ status() }}</div>
+        }
+        @if (!loading() && error()) {
+          <div class="feedback-row error">{{ error() }}</div>
+        }
+      </section>
+    }
 
-    <section class="po-shell glass-surface">
+    <section class="po-shell app-surface">
       <aside class="po-list">
         <div class="panel-head">
           <div>
             <h2>Orders</h2>
             <div class="panel-meta">{{ orders().length }} purchase order(s)</div>
           </div>
-          <ion-button size="small" fill="outline" (click)="loadOrders()" [disabled]="loading()">Refresh</ion-button>
+          <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="loadOrders()" [disabled]="loading()">Refresh</button>
         </div>
 
-        <button
-          type="button"
-          class="po-list-row"
-          *ngFor="let order of orders(); trackBy: trackOrder"
-          [class.active]="selectedOrderId() === order.id"
-          (click)="selectOrder(order)">
-          <div class="po-list-title">{{ order.supplier || 'Unassigned Supplier' }}</div>
-          <div class="po-list-meta">{{ order.status }} · {{ order.lineCount }} line(s) · {{ formatCurrency(order.subtotal) }}</div>
-          <div class="po-list-meta">{{ formatDate(order.updatedAt) }}</div>
-        </button>
+        @for (order of orders(); track trackOrder($index, order)) {
+          <button
+            type="button"
+            class="po-list-row"
+            [class.active]="selectedOrderId() === order.id"
+            (click)="selectOrder(order)">
+            <div class="po-list-title">{{ order.supplier || 'Unassigned Supplier' }}</div>
+            <div class="po-list-meta">{{ orderStatusLabel(order) }} · {{ order.lineCount }} line(s)</div>
+          </button>
+        }
 
-        <div class="empty-state" *ngIf="!loading() && !orders().length">
-          No purchase orders yet. Create a draft from Inventory job parts.
-        </div>
+        @if (!loading() && !orders().length) {
+          <div class="empty-state">
+            No purchase orders yet. Create a draft from Inventory job parts.
+          </div>
+        }
       </aside>
 
-      <article class="po-detail" *ngIf="selectedOrder() as order; else noOrderSelected">
-        <div class="panel-head">
-          <div>
-            <h2>{{ order.supplier || 'Purchase Order' }}</h2>
-            <div class="panel-meta">
-              {{ order.status }} · {{ order.lineCount }} line(s) · {{ formatCurrency(order.subtotal) }}
-            </div>
-          </div>
-          <div class="po-actions">
-            <ion-button size="small" fill="outline" *ngIf="order.status === 'draft'" [disabled]="saving()" (click)="deleteDraft(order)">
-              Delete Draft
-            </ion-button>
-            <ion-button size="small" *ngIf="order.status === 'draft'" [disabled]="saving()" (click)="submitOrder(order)">
-              Submit PO
-            </ion-button>
-            <ion-button size="small" *ngIf="order.status === 'ordered'" [disabled]="saving()" (click)="receiveAll(order)">
-              Receive All
-            </ion-button>
-          </div>
-        </div>
-
-        <div class="po-meta-grid">
-          <div class="po-vendor-field" *ngIf="order.status === 'draft'; else lockedSupplier">
-            <app-vendor-picker
-              [vendorId]="order.vendorId || ''"
-              [vendorName]="order.supplier || ''"
-              (vendorChange)="updateOrderVendor(order, $event)">
-            </app-vendor-picker>
-          </div>
-          <ng-template #lockedSupplier>
+      @if (selectedOrder(); as order) {
+        <article class="po-detail">
+          <div class="panel-head">
             <div>
-              <span>Supplier</span>
-              <strong>{{ order.supplier || '-' }}</strong>
+              <h2>{{ order.supplier || 'Purchase Order' }}</h2>
+              <div class="panel-meta">
+                {{ orderStatusLabel(order) }} · {{ order.lineCount }} line(s)
+              </div>
             </div>
-          </ng-template>
-          <div>
-            <span>Created</span>
-            <strong>{{ formatDate(order.createdAt) || '-' }}</strong>
+            <div class="po-actions">
+              <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="printReceivingSummary(order)">
+                Print Receiving Summary
+              </button>
+              @if (order.status === 'draft') {
+                <button class="btn ui-button btn-outline-primary btn-sm" type="button" [disabled]="saving()" (click)="deleteDraft(order)">
+                  Delete Draft
+                </button>
+              }
+              @if (order.status === 'draft' || order.status === 'ordered') {
+                <button class="btn ui-button btn-outline-warning btn-sm" type="button" [disabled]="saving()" (click)="cancelOrder(order)">
+                  Cancel PO
+                </button>
+              }
+              @if (order.status === 'ordered') {
+                <button class="btn ui-button btn-outline-primary btn-sm" type="button" [disabled]="saving()" (click)="reopenDraft(order)">
+                  Reopen Draft
+                </button>
+              }
+              @if (order.status === 'draft') {
+                <button class="btn ui-button btn-primary btn-sm" type="button" [disabled]="saving()" (click)="submitOrder(order)">
+                  Submit PO
+                </button>
+              }
+              @if (order.status === 'ordered') {
+                <button class="btn ui-button btn-primary btn-sm" type="button" [disabled]="saving()" (click)="receiveAll(order)">
+                  Receive All
+                </button>
+              }
+            </div>
           </div>
-          <div>
-            <span>Submitted</span>
-            <strong>{{ formatDate(order.submittedAt) || '-' }}</strong>
-          </div>
-          <div>
-            <span>Received</span>
-            <strong>{{ formatDate(order.receivedAt) || '-' }}</strong>
-          </div>
-        </div>
-
-        <section class="po-attachments">
-          <div class="panel-head compact">
+          <div class="po-meta-grid">
+            @if (order.status === 'draft') {
+              <div class="po-vendor-field">
+                <app-vendor-picker
+                  [vendorId]="order.vendorId || ''"
+                  [vendorName]="order.supplier || ''"
+                  (vendorChange)="updateOrderVendor(order, $event)">
+                </app-vendor-picker>
+              </div>
+            } @else {
+              <div>
+                <span>Supplier</span>
+                <strong>{{ order.supplier || '-' }}</strong>
+              </div>
+            }
             <div>
-              <h3>Attachments</h3>
-              <div class="panel-meta">Vendor invoices, receipts, and PO documents</div>
+              <span>Created</span>
+              <strong>{{ formatDate(order.createdAt) || '-' }}</strong>
+            </div>
+            <div>
+              <span>Submitted</span>
+              <strong>{{ formatDate(order.submittedAt) || '-' }}</strong>
+            </div>
+            <div>
+              <span>Received</span>
+              <strong>{{ formatDate(order.receivedAt) || '-' }}</strong>
             </div>
           </div>
-          <div class="po-attachment-form">
-            <label class="native-field">
-              <span>Category</span>
-              <select
-                [ngModel]="poAttachmentDraft().category"
-                (ngModelChange)="setPoAttachmentField('category', $any($event))">
-                <option value="vendor_invoice">Vendor Invoice</option>
-                <option value="receipt">Receipt</option>
-                <option value="document">Document</option>
-                <option value="photo">Photo</option>
-                <option value="other">Other</option>
-              </select>
-            </label>
-            <ion-item class="attachment-notes" lines="none">
-              <ion-label position="stacked">Notes</ion-label>
-              <ion-input
-                [ngModel]="poAttachmentDraft().description"
-                (ngModelChange)="setPoAttachmentField('description', $event)"
-                placeholder="Vendor invoice number, receipt note">
-              </ion-input>
-            </ion-item>
-            <label class="file-picker">
-              <span>{{ poAttachmentFile()?.name || 'Choose file' }}</span>
-              <input
-                type="file"
-                accept=".pdf,.jpg,.jpeg,.png,.heic,.heif,.doc,.docx,application/pdf,image/jpeg,image/png,image/heic,image/heif,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                (change)="setPoAttachmentFile($any($event.target))" />
-            </label>
-            <ion-button size="small" [disabled]="saving() || !poAttachmentFile()" (click)="uploadPoAttachment(order)">
-              Upload
-            </ion-button>
-          </div>
-
-          <div class="po-attachment-list" *ngIf="poAttachments().length">
-            <a
-              class="po-attachment-row"
-              *ngFor="let attachment of poAttachments()"
-              [href]="attachment.url"
-              target="_blank"
-              rel="noopener">
-              <span>{{ attachment.originalFileName || attachment.fileName }}</span>
-              <small>{{ label(attachment.category) }} · {{ formatBytes(attachment.size) }}</small>
-            </a>
-          </div>
-        </section>
-
-        <div class="po-lines">
-          <article class="po-line" *ngFor="let line of order.lines; trackBy: trackLine">
-            <div class="po-line-main">
-              <div class="po-line-title">
-                <span>{{ line.partName || line.sku || 'Part' }}</span>
-                <span class="line-status" [ngClass]="lineStatusClass(line)">{{ lineStatusLabel(line) }}</span>
+          <section class="po-attachments">
+            <div class="panel-head compact">
+              <div>
+                <h3>Attachments</h3>
+                <div class="panel-meta">{{ poAttachments().length }} vendor invoice / receipt file(s)</div>
               </div>
-              <div class="po-line-meta">
-                {{ line.jobNumber || line.jobId || 'Job TBD' }} · SKU {{ line.sku || 'N/A' }} · {{ line.vendor || order.supplier || 'No supplier' }}
-              </div>
-              <div class="po-line-meta">
-                Ordered {{ line.qty }} · Received {{ line.qtyReceived || 0 }} · Remaining {{ remainingQty(line) }} · Unit {{ formatCurrency(line.unitCost || 0) }}
-              </div>
-              <div class="po-line-meta" *ngIf="line.needId || line.jobId || line.jobNumber">
-                <a [routerLink]="['/jobs/detail']" [queryParams]="jobDetailQueryParams(line)">Open Job</a>
-              </div>
+              <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="toggleAttachments()">
+                {{ showAttachments() ? 'Hide' : 'Show' }}
+              </button>
             </div>
-
-            <div class="receive-panel" *ngIf="order.status === 'ordered' && remainingQty(line) > 0">
-              <ion-item class="receive-field" lines="none">
-                <ion-label position="stacked">Receive Qty</ion-label>
-                <ion-input
-                  type="number"
-                  [ngModel]="receiptDraft(line).qtyReceived"
-                  (ngModelChange)="setReceiptField(line, 'qtyReceived', $event)">
-                </ion-input>
-              </ion-item>
-              <ion-item class="receive-field" lines="none">
-                <ion-label position="stacked">Order #</ion-label>
-                <ion-input
-                  [ngModel]="receiptDraft(line).orderNumber"
-                  (ngModelChange)="setReceiptField(line, 'orderNumber', $event)">
-                </ion-input>
-              </ion-item>
-              <ion-item class="receive-field" lines="none">
-                <ion-label position="stacked">Tracking #</ion-label>
-                <ion-input
-                  [ngModel]="receiptDraft(line).trackingNumber"
-                  (ngModelChange)="setReceiptField(line, 'trackingNumber', $event)">
-                </ion-input>
-              </ion-item>
-              <ion-item class="receive-field" lines="none">
-                <ion-label position="stacked">ETA</ion-label>
-                <ion-input
-                  type="date"
-                  [ngModel]="receiptDraft(line).etaDate"
-                  (ngModelChange)="setReceiptField(line, 'etaDate', $event)">
-                </ion-input>
-              </ion-item>
-              <ion-item class="receive-field" lines="none">
-                <ion-label position="stacked">Vendor Invoice #</ion-label>
-                <ion-input
-                  [ngModel]="receiptDraft(line).vendorInvoiceNumber"
-                  (ngModelChange)="setReceiptField(line, 'vendorInvoiceNumber', $event)">
-                </ion-input>
-              </ion-item>
-              <ion-button size="small" [disabled]="saving()" (click)="receiveLine(order, line)">
-                Receive Line
-              </ion-button>
-            </div>
-          </article>
-        </div>
-      </article>
+            @if (showAttachments()) {
+              <div class="po-attachment-form">
+                <label class="native-field">
+                  <span>Category</span>
+                  <select class="form-select"
+                    [ngModel]="poAttachmentDraft().category"
+                    (ngModelChange)="setPoAttachmentField('category', $any($event))">
+                    <option value="vendor_invoice">Vendor Invoice</option>
+                    <option value="receipt">Receipt</option>
+                    <option value="document">Document</option>
+                    <option value="photo">Photo</option>
+                    <option value="other">Other</option>
+                  </select>
+                </label>
+                <div class="ui-item attachment-notes">
+                  <span class="ui-label">Notes</span>
+                  <ui-input aria-label="Notes"
+                    [ngModel]="poAttachmentDraft().description"
+                    (ngModelChange)="setPoAttachmentField('description', $event)"
+                    placeholder="Vendor invoice number, receipt note">
+                  </ui-input>
+                </div>
+                <label class="file-picker">
+                  <span>{{ poAttachmentFile()?.name || 'Choose file' }}</span>
+                  <input
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png,.heic,.heif,.doc,.docx,application/pdf,image/jpeg,image/png,image/heic,image/heif,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    (change)="setPoAttachmentFile($any($event.target))" />
+                </label>
+                <button class="btn ui-button btn-primary btn-sm" type="button" [disabled]="saving() || !poAttachmentFile()" (click)="uploadPoAttachment(order)">
+                  Upload
+                </button>
+              </div>
+            }
+            @if (showAttachments() && poAttachments().length) {
+              <div class="po-attachment-list">
+                @for (attachment of poAttachments(); track attachment) {
+                  <a
+                    class="po-attachment-row"
+                    [href]="attachment.url"
+                    target="_blank"
+                    rel="noopener">
+                    <span>{{ attachment.originalFileName || attachment.fileName }}</span>
+                    <small>{{ label(attachment.category) }} · {{ formatBytes(attachment.size) }}</small>
+                  </a>
+                }
+              </div>
+            }
+          </section>
+          <div class="po-lines">
+            @for (line of order.lines; track trackLine($index, line)) {
+              <article class="po-line">
+                <div class="po-line-main">
+                  <div>
+                    <div class="po-line-title">
+                      <span>{{ line.partName || line.sku || 'Part' }}</span>
+                      <span class="line-status" [ngClass]="lineStatusClass(line, order)">{{ lineStatusLabel(line, order) }}</span>
+                    </div>
+                    <div class="po-line-meta">
+                      {{ line.jobNumber || line.jobId || 'Job TBD' }} · SKU {{ line.sku || 'N/A' }} · {{ line.vendor || order.supplier || 'No supplier' }}
+                    </div>
+                    @if (line.needId || line.jobId || line.jobNumber) {
+                      <div class="po-line-meta">
+                        <a [routerLink]="['/jobs/detail']" [queryParams]="jobDetailQueryParams(line)">Open Job</a>
+                      </div>
+                    }
+                  </div>
+                  <div class="po-line-stats">
+                    <span><small>{{ order.status === 'draft' ? 'Qty' : 'Ordered' }}</small>{{ line.qty }}</span>
+                    <span><small>Received</small>{{ line.qtyReceived || 0 }}</span>
+                    <span><small>Remaining</small>{{ remainingQty(line) }}</span>
+                    <span><small>Unit</small>{{ formatCurrency(line.unitCost || 0) }}</span>
+                  </div>
+                </div>
+                @if (order.status === 'draft' || order.status === 'ordered' || order.status === 'received') {
+                  <div class="tracking-panel">
+                    <div class="tracking-panel-head">
+                      <div>
+                        <strong>Order tracking</strong>
+                        <span>PO, carrier, tracking, ETA, and vendor invoice details.</span>
+                      </div>
+                      @if (receiptDraft(line).trackingNumber) {
+                        <a
+                          [href]="trackingUrl(receiptDraft(line).trackingNumber)"
+                          target="_blank"
+                          rel="noopener">
+                          Track package
+                        </a>
+                      }
+                    </div>
+                    <label class="tracking-field">
+                      <span>PO / Order #</span>
+                      <input class="form-control"
+                        [ngModel]="receiptDraft(line).orderNumber"
+                        (ngModelChange)="setReceiptField(line, 'orderNumber', $event)" />
+                    </label>
+                    <label class="tracking-field tracking-field-wide">
+                      <span>Tracking #</span>
+                      <input class="form-control"
+                        [ngModel]="receiptDraft(line).trackingNumber"
+                        (ngModelChange)="setReceiptField(line, 'trackingNumber', $event)" />
+                    </label>
+                    <label class="tracking-field">
+                      <span>Carrier</span>
+                      <input class="form-control"
+                        placeholder="Optional"
+                        [ngModel]="receiptDraft(line).carrier"
+                        (ngModelChange)="setReceiptField(line, 'carrier', $event)" />
+                    </label>
+                    <label class="tracking-field">
+                      <span>Package ETA</span>
+                      <input class="form-control"
+                        type="date"
+                        [ngModel]="receiptDraft(line).etaDate"
+                        (ngModelChange)="setReceiptField(line, 'etaDate', $event)" />
+                    </label>
+                    <label class="tracking-field">
+                      <span>Vendor Invoice #</span>
+                      <input class="form-control"
+                        [ngModel]="receiptDraft(line).vendorInvoiceNumber"
+                        (ngModelChange)="setReceiptField(line, 'vendorInvoiceNumber', $event)" />
+                    </label>
+                    <div class="tracking-actions">
+                      <button class="btn ui-button btn-outline-primary btn-sm" type="button" [disabled]="saving()" (click)="saveLineTracking(order, line)">
+                        Save
+                      </button>
+                      <button class="btn ui-button btn-outline-primary btn-sm" type="button" [disabled]="saving() || !receiptDraft(line).trackingNumber" (click)="refreshLineTracking(order, line)">
+                        Refresh
+                      </button>
+                    </div>
+                    @if (trackingSummary(line) || line.trackingLastError) {
+                      <div class="tracking-provider-status">
+                        @if (receiptDraft(line).etaDate) {
+                          <span>ETA {{ formatDateOnly(receiptDraft(line).etaDate) }}</span>
+                        }
+                        @if (trackingSummary(line)) {
+                          <span>{{ trackingSummary(line) }}</span>
+                        }
+                        @if (line.trackingLastError) {
+                          <span class="tracking-error">{{ line.trackingLastError }}</span>
+                        }
+                      </div>
+                    }
+                  </div>
+                }
+                @if (order.status === 'ordered' && remainingQty(line) > 0) {
+                  <div class="receive-panel">
+                    <div class="ui-item receive-field">
+                      <span class="ui-label">Receive Qty</span>
+                      <ui-input aria-label="Receive Qty"
+                        type="number"
+                        [ngModel]="receiptDraft(line).qtyReceived"
+                        (ngModelChange)="setReceiptField(line, 'qtyReceived', $event)">
+                      </ui-input>
+                    </div>
+                    <button class="btn ui-button btn-primary btn-sm" type="button" [disabled]="saving()" (click)="receiveLine(order, line)">
+                      Receive Line
+                    </button>
+                  </div>
+                }
+              </article>
+            }
+          </div>
+        </article>
+      } @else {
+        <article class="po-detail empty-state">
+          Select a purchase order.
+        </article>
+      }
     </section>
 
-    <ng-template #noOrderSelected>
-      <article class="po-detail empty-state">
-        Select a purchase order.
-      </article>
-    </ng-template>
   </div>
-</ion-content>
+</div>

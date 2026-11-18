@@ -1,18 +1,21 @@
+const { scopedTenantPartition } = require("../_shared/notification-partition");
 const { SmsClient } = require("@azure/communication-sms");
 const { TableClient } = require("../_shared/table-client");
 const { randomUUID } = require("crypto");
-const { resolveTenantId } = require("../_shared/tenant");
+const { resolveTenantId, sanitizeTenantId } = require("../_shared/tenant");
 
 const CUSTOMERS_TABLE = "customers";
 const LANES_TABLE = "lanes";
 const WORKITEMS_TABLE = "workitems";
 const SMS_TABLE = "smsmessages";
+const SMS_CONSENTS_TABLE = "smsconsents";
 const NOTIFICATIONS_TABLE = "notifications";
 const USERS_TABLE = "useraccess";
+const SETTINGS_TABLE = "appsettings";
+const BUSINESS_PROFILE_KEY = "business.profile";
 const USERS_PARTITION = "v1";
 const SENDER_TABLE = "smssenders";
 const SENDER_DEFAULT_ROW_KEY = "default";
-const TENANT_SCOPE_DELIMITER = "::";
 const AUTO_CREATED_CREATOR = "Auto-Created Lead";
 const DUPLICATE_REASON_WEIGHTS = Object.freeze({
   vin: 45,
@@ -63,6 +66,28 @@ function normalizeE164(value) {
   if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
   if (digits.length >= 8 && digits.length <= 15) return `+${digits}`;
   return "";
+}
+
+function phoneConsentRowKey(value) {
+  const digits = normalizeE164(value).replace(/\D+/g, "") || normalizePhone(value);
+  if (!digits) return "";
+  return `phone-${digits}`.slice(0, 220);
+}
+
+function isSmsConsentOptedIn(entity) {
+  const status = asString(entity && entity.status || entity && entity.smsConsentStatus).toLowerCase();
+  if (!status) return false;
+  if (asString(entity && (entity.revokedAt || entity.smsConsentRevokedAt))) return false;
+  return ["opted-in", "opted_in", "confirmed", "subscribed"].includes(status);
+}
+
+function isRecentPendingConsent(entity) {
+  const status = asString(entity && entity.status || entity && entity.smsConsentStatus).toLowerCase();
+  if (status !== "pending-confirmation") return false;
+  const sentAt = Date.parse(asString(entity && (entity.promptSentAt || entity.smsConsentPromptSentAt || entity.updatedAt)));
+  if (!Number.isFinite(sentAt)) return false;
+  const resendWindowMs = 24 * 60 * 60 * 1000;
+  return Date.now() - sentAt < resendWindowMs;
 }
 
 function isE164(value) {
@@ -164,6 +189,7 @@ function parseFormEncoded(text) {
 
 function parseRequestBody(req) {
   const raw = req && req.body;
+  if (Buffer.isBuffer(raw)) return parseRequestBody({ body: raw.toString("utf8") });
   if (raw && typeof raw === "object" && !Array.isArray(raw)) return raw;
   if (typeof raw === "string") {
     const text = raw.trim();
@@ -174,7 +200,6 @@ function parseRequestBody(req) {
     } catch (_) {}
     return parseFormEncoded(text);
   }
-  if (Buffer.isBuffer(raw)) return parseRequestBody({ body: raw.toString("utf8") });
   return {};
 }
 
@@ -432,32 +457,22 @@ function shouldForceReuseExistingCustomer(match) {
   return false;
 }
 
-function isLocalRuntime() {
-  const websiteHostname = asString(process.env.WEBSITE_HOSTNAME).toLowerCase();
-  if (!websiteHostname) return true;
-  return websiteHostname.includes("localhost") || websiteHostname.includes("127.0.0.1");
+function duplicateReviewFields(match) {
+  if (!match || !match.customer) return null;
+  return {
+    duplicateReviewStatus: "pending",
+    duplicateReviewCandidateId: asString(match.customer.id),
+    duplicateReviewCandidateName: asString(match.customer.name),
+    duplicateReviewConfidence: Number(match.confidence) || 0,
+    duplicateReviewScore: Number(match.score) || 0,
+    duplicateReviewReasons: Array.isArray(match.reasons) ? match.reasons.join(",") : "",
+    duplicateReviewUpdatedAt: new Date().toISOString()
+  };
 }
 
-function notificationsScope() {
-  const explicit = asString(process.env.NOTIFICATIONS_NAMESPACE || process.env.APP_ENV || process.env.NODE_ENV).toLowerCase();
-  if (explicit) return explicit.replace(/[^a-z0-9._:-]+/g, "-").replace(/^-+|-+$/g, "") || "prod";
-  return isLocalRuntime() ? "local" : "prod";
-}
 
-function scopedTenantPartition(tenantId) {
-  return `${asString(tenantId) || "tenant-unassigned"}${TENANT_SCOPE_DELIMITER}${notificationsScope()}`;
-}
-
-function submittedLeadNotificationSubject(leadId, customer) {
-  const email = normalizeEmail(customer && customer.email);
-  const phone = normalizePhone(customer && customer.phone);
-  const name = asString(customer && customer.name).toLowerCase();
-  const customerId = asString(customer && customer.id);
-  return email || phone || name || customerId || asString(leadId) || "unknown";
-}
-
-function rowKeyForLeadNotification(leadId, customer, recipientKey) {
-  return String(`lead-${submittedLeadNotificationSubject(leadId, customer)}-submitted-${asString(recipientKey)}`)
+function rowKeyForLeadNotification(leadId, recipientKey) {
+  return String(`lead-${leadId}-submitted-${asString(recipientKey)}`)
     .toLowerCase()
     .replace(/[^a-z0-9._:-]+/g, "-")
     .replace(/-+/g, "-")
@@ -510,7 +525,7 @@ async function createCustomer(customersClient, inbound, tenantId) {
     firstName: names.firstName,
     lastName: names.lastName,
     email: asString(inbound.email),
-    phone: asString(inbound.phone),
+    phone: asString(inbound.phoneE164 || inbound.phone),
     vin: asString(inbound.vin),
     vehicleYear: asString(inbound.vehicleYear),
     vehicleMake: asString(inbound.vehicleMake),
@@ -532,7 +547,7 @@ async function createCustomer(customersClient, inbound, tenantId) {
     firstName: names.firstName,
     lastName: names.lastName,
     email: asString(inbound.email),
-    phone: asString(inbound.phone),
+    phone: asString(inbound.phoneE164 || inbound.phone),
     vin: asString(inbound.vin),
     vehicleYear: asString(inbound.vehicleYear),
     vehicleMake: asString(inbound.vehicleMake),
@@ -556,7 +571,9 @@ async function updateCustomerFromInbound(customersClient, customer, inbound, ten
   if (!asString(customer.firstName) && names.firstName) patch.firstName = names.firstName;
   if (!asString(customer.lastName) && names.lastName) patch.lastName = names.lastName;
   if (!asString(customer.email) && asString(inbound.email)) patch.email = asString(inbound.email);
-  if (!asString(customer.phone) && asString(inbound.phone)) patch.phone = asString(inbound.phone);
+  if (!asString(customer.phone) && asString(inbound.phoneE164 || inbound.phone)) {
+    patch.phone = asString(inbound.phoneE164 || inbound.phone);
+  }
   if (!asString(customer.vin) && asString(inbound.vin)) patch.vin = asString(inbound.vin);
   if (!asString(customer.vehicleYear) && asString(inbound.vehicleYear)) patch.vehicleYear = asString(inbound.vehicleYear);
   if (!asString(customer.vehicleMake) && asString(inbound.vehicleMake)) patch.vehicleMake = asString(inbound.vehicleMake);
@@ -594,6 +611,46 @@ async function setCustomerConsentStatus(customersClient, tenantId, customerId, s
   );
 }
 
+async function getPhoneConsent(consentsClient, tenantId, phone) {
+  const rowKey = phoneConsentRowKey(phone);
+  if (!rowKey) return null;
+  try {
+    return await consentsClient.getEntity(tenantId, rowKey);
+  } catch (_) {
+    return null;
+  }
+}
+
+async function upsertPhoneConsent(consentsClient, tenantId, phone, status, extra = {}) {
+  const rowKey = phoneConsentRowKey(phone);
+  const phoneE164 = normalizeE164(phone);
+  if (!rowKey || !status) return;
+  const now = new Date().toISOString();
+  await consentsClient.upsertEntity(
+    {
+      partitionKey: tenantId,
+      rowKey,
+      phoneE164,
+      phoneKey: rowKey.replace(/^phone-/, ""),
+      status,
+      updatedAt: now,
+      ...extra
+    },
+    "Merge"
+  );
+}
+
+async function applyKnownPhoneConsent(customersClient, tenantId, customer, phoneConsent) {
+  if (!customer || !customer.id || !isSmsConsentOptedIn(phoneConsent)) return;
+  await setCustomerConsentStatus(customersClient, tenantId, customer.id, "opted-in", {
+    smsConsentConfirmedAt: asString(phoneConsent.confirmedAt || phoneConsent.smsConsentConfirmedAt),
+    smsConsentKeyword: asString(phoneConsent.keyword || phoneConsent.smsConsentKeyword),
+    smsConsentMethod: asString(phoneConsent.method || "sms-keyword"),
+    smsConsentSource: asString(phoneConsent.source || "smsconsents"),
+    smsConsentPromptError: ""
+  });
+}
+
 function parseUserLocationIds(userEntity) {
   const parsed = parseJson(userEntity && userEntity.locationIdsJson, []);
   const out = new Set();
@@ -625,9 +682,12 @@ async function listTenantNotificationRecipients(usersClient, tenantId) {
     const email = normalizeEmail(entity.email || entity.rowKey);
     const userId = asString(entity.userId || email);
     if (!email && !userId) continue;
-    const dedupe = `${userId}|${email}`;
-    if (seen.has(dedupe)) continue;
-    seen.add(dedupe);
+    const keys = [
+      email ? `email:${email}` : "",
+      userId ? `user:${userId}` : ""
+    ].filter(Boolean);
+    if (keys.some(key => seen.has(key))) continue;
+    keys.forEach(key => seen.add(key));
     out.push({
       targetUserId: userId || "",
       targetEmail: email || "",
@@ -649,7 +709,7 @@ async function createLeadNotifications(notificationClient, usersClient, tenantId
   for (const recipient of recipients) {
     const recipientKey = asString(recipient.targetEmail || recipient.targetUserId);
     if (!recipientKey) continue;
-    const id = rowKeyForLeadNotification(leadId, customer, recipientKey);
+    const id = rowKeyForLeadNotification(leadId, recipientKey);
     try {
       await notificationClient.upsertEntity(
         {
@@ -689,7 +749,7 @@ async function createLeadNotifications(notificationClient, usersClient, tenantId
   return created;
 }
 
-async function findExistingLeadForCustomer(workItemsClient, laneId, customerId, tenantId) {
+async function findExistingLeadForCustomer(workItemsClient, laneId, customerId, tenantId, inbound) {
   const safeTenant = escapedFilterValue(tenantId);
   const safeLane = escapedFilterValue(laneId);
   const safeCustomer = escapedFilterValue(customerId);
@@ -698,10 +758,13 @@ async function findExistingLeadForCustomer(workItemsClient, laneId, customerId, 
 
   let latest = null;
   for await (const entity of iter) {
+    if (asString(entity.source) !== "web" || asString(entity.message) !== asString(inbound.message) ||
+        asString(entity.vin) !== asString(inbound.vin)) continue;
     const createdAt = asString(entity.createdAt);
     const updatedAt = asString(entity.updatedAt);
     const ts = Date.parse(updatedAt || createdAt || "");
-    if (!latest || (Number.isFinite(ts) && ts > latest.ts)) {
+    if (!Number.isFinite(ts) || Date.now() - ts > 10 * 60 * 1000) continue;
+    if (!latest || ts > latest.ts) {
       latest = { id: asString(entity.rowKey), ts: Number.isFinite(ts) ? ts : 0 };
     }
   }
@@ -762,6 +825,13 @@ async function createLead(workItemsClient, laneId, inbound, customer, tenantId) 
       vehicleModel: asString(inbound.vehicleModel),
       vehicleTrim: asString(inbound.vehicleTrim),
       message: asString(inbound.message),
+      duplicateReviewStatus: asString(customer.duplicateReviewStatus),
+      duplicateReviewCandidateId: asString(customer.duplicateReviewCandidateId),
+      duplicateReviewCandidateName: asString(customer.duplicateReviewCandidateName),
+      duplicateReviewConfidence: Number(customer.duplicateReviewConfidence) || 0,
+      duplicateReviewScore: Number(customer.duplicateReviewScore) || 0,
+      duplicateReviewReasons: asString(customer.duplicateReviewReasons),
+      duplicateReviewUpdatedAt: asString(customer.duplicateReviewUpdatedAt),
       createdAt: now,
       updatedAt: now
     },
@@ -794,6 +864,13 @@ async function touchLead(workItemsClient, id, inbound, tenantId, laneId, custome
       vehicleModel: asString(inbound.vehicleModel),
       vehicleTrim: asString(inbound.vehicleTrim),
       message: asString(inbound.message),
+      duplicateReviewStatus: asString(customer && customer.duplicateReviewStatus),
+      duplicateReviewCandidateId: asString(customer && customer.duplicateReviewCandidateId),
+      duplicateReviewCandidateName: asString(customer && customer.duplicateReviewCandidateName),
+      duplicateReviewConfidence: Number(customer && customer.duplicateReviewConfidence) || 0,
+      duplicateReviewScore: Number(customer && customer.duplicateReviewScore) || 0,
+      duplicateReviewReasons: asString(customer && customer.duplicateReviewReasons),
+      duplicateReviewUpdatedAt: asString(customer && customer.duplicateReviewUpdatedAt),
       ...(Number.isFinite(Number(nextSort)) ? { sort: Number(nextSort) } : {})
     },
     "Merge"
@@ -821,23 +898,65 @@ function optInKeyword() {
   return asString(process.env.WIDGET_SMS_CONFIRM_KEYWORD || "START").toUpperCase();
 }
 
+function customerSafeBrandFallback(value) {
+  const brand = asString(value);
+  return brand && brand.toLowerCase() !== "pathflow" ? brand : "";
+}
+
 function defaultOptInMessage() {
   const keyword = optInKeyword();
-  const brand = asString(process.env.WIDGET_BRAND_NAME || "Pathflow");
+  const brand = customerSafeBrandFallback(process.env.WIDGET_BRAND_NAME) || "Your service team";
   return `${brand}: Reply ${keyword} or YES to confirm SMS updates for your service request. Msg freq varies. Msg&data rates may apply. Reply STOP to opt out, HELP for help.`;
 }
 
-function buildOptInMessage() {
-  const raw = asString(process.env.WIDGET_SMS_OPT_IN_MESSAGE);
-  if (!raw) return defaultOptInMessage();
-  return raw
-    .replace(/\{keyword\}/gi, optInKeyword())
-    .replace(/\{brand\}/gi, asString(process.env.WIDGET_BRAND_NAME || "Pathflow"));
+function parseSettingValue(value) {
+  const raw = asString(value);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
-function shouldSendOptInConfirmation(inbound) {
+async function resolveWidgetBrandName(settingsClient, tenantId) {
+  const candidates = [
+    tenantId,
+    process.env.DEFAULT_TENANT_ID,
+    "primary-location",
+    "main"
+  ]
+    .map(value => sanitizeTenantId(value))
+    .filter((value, index, all) => value && all.indexOf(value) === index);
+
+  for (const candidate of candidates) {
+    try {
+      const entity = await settingsClient.getEntity(candidate, BUSINESS_PROFILE_KEY);
+      const profile = parseSettingValue(entity && entity.valueJson);
+      const companyName = customerSafeBrandFallback(profile && profile.companyName);
+      if (companyName) return companyName;
+    } catch (_) {}
+  }
+  return customerSafeBrandFallback(process.env.WIDGET_BRAND_NAME) || "Your service team";
+}
+
+async function buildOptInMessage(settingsClient, tenantId) {
+  const brand = await resolveWidgetBrandName(settingsClient, tenantId);
+  const raw = asString(process.env.WIDGET_SMS_OPT_IN_MESSAGE);
+  if (!raw) {
+    const keyword = optInKeyword();
+    return `${brand}: Reply ${keyword} or YES to confirm SMS updates for your service request. Msg freq varies. Msg&data rates may apply. Reply STOP to opt out, HELP for help.`;
+  }
+  return raw
+    .replace(/\{keyword\}/gi, optInKeyword())
+    .replace(/\{brand\}/gi, brand);
+}
+
+function shouldSendOptInConfirmation(inbound, phoneConsent) {
   if (!inbound.smsOptIn) return false;
   if (!inbound.phoneE164) return false;
+  if (isSmsConsentOptedIn(phoneConsent)) return false;
+  if (isRecentPendingConsent(phoneConsent)) return false;
   return asString(process.env.WIDGET_SEND_OPT_IN_CONFIRMATION || "true").toLowerCase() !== "false";
 }
 
@@ -970,7 +1089,7 @@ function inboundFromBody(req, body) {
     firstName,
     lastName,
     email,
-    phone,
+    phone: normalizeE164(phone) || phone,
     phoneE164: normalizeE164(phone),
     vin,
     message,
@@ -1057,6 +1176,10 @@ module.exports = async function (context, req) {
     const workItemsClient = await getTableClient(WORKITEMS_TABLE);
     const notificationsClient = await getTableClient(NOTIFICATIONS_TABLE);
     const usersClient = await getTableClient(USERS_TABLE);
+    const smsConsentsClient = await getTableClient(SMS_CONSENTS_TABLE);
+    const phoneConsent = inbound.phoneE164
+      ? await getPhoneConsent(smsConsentsClient, tenantId, inbound.phoneE164)
+      : null;
 
     const match = await findMatchingCustomer(customersClient, inbound, tenantId);
     const matchAction = duplicateMatchAction(match && Number(match.confidence));
@@ -1065,25 +1188,22 @@ module.exports = async function (context, req) {
     let customerCreated = false;
     let matchedBy = [];
 
-    if (match && match.customer && (forceReuse || matchAction === "auto-merge")) {
+    if (match && match.customer && forceReuse) {
       customer = match.customer;
       matchedBy = match.reasons;
       await updateCustomerFromInbound(customersClient, match.customer, inbound, tenantId);
     } else {
       customer = await createCustomer(customersClient, inbound, tenantId);
       customerCreated = true;
-      if (match && match.customer && matchAction === "review") {
+      if (match && match.customer) {
         const now = new Date().toISOString();
+        const review = duplicateReviewFields(match);
+        Object.assign(customer, review);
         await customersClient.upsertEntity(
           {
             partitionKey: tenantId,
             rowKey: customer.id,
-            duplicateReviewStatus: "pending",
-            duplicateReviewCandidateId: asString(match.customer.id),
-            duplicateReviewCandidateName: asString(match.customer.name),
-            duplicateReviewConfidence: Number(match.confidence) || 0,
-            duplicateReviewScore: Number(match.score) || 0,
-            duplicateReviewReasons: Array.isArray(match.reasons) ? match.reasons.join(",") : "",
+            ...review,
             duplicateReviewUpdatedAt: now,
             updatedAt: now
           },
@@ -1092,13 +1212,23 @@ module.exports = async function (context, req) {
       }
     }
 
+    try {
+      await applyKnownPhoneConsent(customersClient, tenantId, customer, phoneConsent);
+    } catch (consentError) {
+      context.log.warn("[widget-lead][consent] could not apply known consent", {
+        tenantId,
+        customerId: asString(customer && customer.id),
+        error: asString(consentError && consentError.message || consentError)
+      });
+    }
+
     const leadsLane = await ensureLeadsLane(lanesClient, tenantId);
     const allowDuplicates = asString(process.env.WIDGET_CREATE_DUPLICATE_LEADS).toLowerCase() === "true";
     let leadId = "";
     let leadCreated = false;
 
     if (!allowDuplicates && customer && customer.id) {
-      const existing = await findExistingLeadForCustomer(workItemsClient, leadsLane.id, customer.id, tenantId);
+      const existing = await findExistingLeadForCustomer(workItemsClient, leadsLane.id, customer.id, tenantId, inbound);
       if (existing && existing.id) {
         leadId = existing.id;
         await touchLead(workItemsClient, leadId, inbound, tenantId, leadsLane.id, customer);
@@ -1108,43 +1238,86 @@ module.exports = async function (context, req) {
     if (!leadId) {
       leadId = await createLead(workItemsClient, leadsLane.id, inbound, customer, tenantId);
       leadCreated = true;
-      await createLeadNotifications(notificationsClient, usersClient, tenantId, leadId, customer);
+      try {
+        await createLeadNotifications(notificationsClient, usersClient, tenantId, leadId, customer);
+      } catch (notificationError) {
+        context.log.warn("[widget-lead][notification] lead captured but notification failed", {
+          tenantId,
+          leadId,
+          error: asString(notificationError && notificationError.message || notificationError)
+        });
+      }
     }
 
-    let consentStatus = initialConsentStatus(inbound);
+    let consentStatus = isSmsConsentOptedIn(phoneConsent) ? "opted-in" : initialConsentStatus(inbound);
     let confirmation = {
       attempted: false,
       sent: false,
       simulated: false,
-      status: "not-requested",
+      status: isSmsConsentOptedIn(phoneConsent) ? "already-opted-in" : "not-requested",
       messageId: "",
       error: ""
     };
 
-    if (shouldSendOptInConfirmation(inbound)) {
-      const senderClient = await getTableClient(SENDER_TABLE);
-      const smsClient = await getTableClient(SMS_TABLE);
-      const sender = await resolveSenderNumber(senderClient, tenantId);
-      const message = buildOptInMessage();
-      confirmation = await sendOptInConfirmation(inbound.phoneE164, sender, message, context);
-      if (confirmation.sent) {
-        await saveSmsOutboundConfirmation(smsClient, tenantId, customer, inbound.phoneE164, sender, message, confirmation);
-        consentStatus = "pending-confirmation";
-      }
-      if (customer && customer.id) {
-        const keyword = optInKeyword();
-        await setCustomerConsentStatus(
-          customersClient,
+    if (shouldSendOptInConfirmation(inbound, phoneConsent)) {
+      try {
+        const senderClient = await getTableClient(SENDER_TABLE);
+        const smsClient = await getTableClient(SMS_TABLE);
+        const settingsClient = await getTableClient(SETTINGS_TABLE);
+        const sender = await resolveSenderNumber(senderClient, tenantId);
+        const message = await buildOptInMessage(settingsClient, tenantId);
+        confirmation = await sendOptInConfirmation(inbound.phoneE164, sender, message, context);
+        if (confirmation.sent) {
+          await saveSmsOutboundConfirmation(smsClient, tenantId, customer, inbound.phoneE164, sender, message, confirmation);
+          consentStatus = "pending-confirmation";
+          await upsertPhoneConsent(smsConsentsClient, tenantId, inbound.phoneE164, "pending-confirmation", {
+            customerId: customer && customer.id ? customer.id : "",
+            promptSentAt: new Date().toISOString(),
+            promptMessageId: asString(confirmation.messageId),
+            expectedKeyword: optInKeyword(),
+            source: "widget-lead"
+          });
+        }
+        if (customer && customer.id) {
+          const keyword = optInKeyword();
+          await setCustomerConsentStatus(
+            customersClient,
+            tenantId,
+            customer.id,
+            consentStatus,
+            {
+              smsConsentExpectedKeyword: keyword,
+              smsConsentPromptSentAt: confirmation.sent ? new Date().toISOString() : "",
+              smsConsentPromptMessageId: asString(confirmation.messageId),
+              smsConsentPromptError: asString(confirmation.error)
+            }
+          );
+        }
+      } catch (confirmationError) {
+        confirmation = {
+          attempted: true,
+          sent: false,
+          simulated: false,
+          status: "failed",
+          messageId: "",
+          error: asString(confirmationError && confirmationError.message || confirmationError).slice(0, 500)
+        };
+        context.log.warn("[widget-lead][sms-opt-in] lead captured but confirmation failed", {
           tenantId,
-          customer.id,
-          consentStatus,
-          {
-            smsConsentExpectedKeyword: keyword,
-            smsConsentPromptSentAt: confirmation.sent ? new Date().toISOString() : "",
-            smsConsentPromptMessageId: asString(confirmation.messageId),
-            smsConsentPromptError: asString(confirmation.error)
-          }
-        );
+          leadId,
+          error: confirmation.error
+        });
+      }
+    } else if (isRecentPendingConsent(phoneConsent)) {
+      consentStatus = "pending-confirmation";
+      confirmation.status = "pending-confirmation";
+      if (customer && customer.id) {
+        await setCustomerConsentStatus(customersClient, tenantId, customer.id, "pending-confirmation", {
+          smsConsentExpectedKeyword: asString(phoneConsent.expectedKeyword || optInKeyword()),
+          smsConsentPromptSentAt: asString(phoneConsent.promptSentAt || phoneConsent.smsConsentPromptSentAt),
+          smsConsentPromptMessageId: asString(phoneConsent.promptMessageId || phoneConsent.smsConsentPromptMessageId),
+          smsConsentPromptError: ""
+        });
       }
     }
 

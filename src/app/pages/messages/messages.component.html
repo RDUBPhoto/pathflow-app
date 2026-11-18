@@ -1,24 +1,30 @@
-<ion-header class="glass-header">
-  <ion-toolbar>
-    <ion-buttons slot="start">
+<header class="ui-header app-header">
+  <div class="ui-toolbar">
+    <div class="ui-buttons" slot="start">
       <app-page-back-button></app-page-back-button>
-    </ion-buttons>
-    <ion-title>Messages Hub</ion-title>
+    </div>
+    <h1 class="ui-title">Messages Hub</h1>
     <app-company-switcher></app-company-switcher>
     <div class="toolbar-actions" slot="end">
       <app-user-menu></app-user-menu>
     </div>
-  </ion-toolbar>
-</ion-header>
-
-<ion-content class="glass-bg messages-page ion-padding">
-  <div class="feedback-overlay" *ngIf="status() || error()">
-    <div class="page-feedback success" *ngIf="status()">{{ status() }}</div>
-    <div class="page-feedback error" *ngIf="error()">{{ error() }}</div>
   </div>
+</header>
+
+<div class="ui-content app-content messages-page app-padding">
+  @if (status() || error()) {
+    <div class="feedback-overlay">
+      @if (status()) {
+        <div class="page-feedback success">{{ status() }}</div>
+      }
+      @if (error()) {
+        <div class="page-feedback error">{{ error() }}</div>
+      }
+    </div>
+  }
 
   <section class="messages-layout">
-    <aside class="threads-pane glass-surface">
+    <aside class="threads-pane app-surface">
       <div class="threads-head">
         <div class="threads-title">Conversations</div>
         <div class="channel-toggle" role="tablist" aria-label="Message channel">
@@ -27,7 +33,7 @@
             class="channel-btn"
             [class.active]="activeChannel() === 'sms'"
             (click)="setChannel('sms')">
-            <ion-icon name="chatbubble-ellipses-outline"></ion-icon>
+            <ui-icon name="message-dots"></ui-icon>
             SMS
           </button>
           <button
@@ -35,179 +41,209 @@
             class="channel-btn"
             [class.active]="activeChannel() === 'email'"
             (click)="setChannel('email')">
-            <ion-icon name="mail-outline"></ion-icon>
+            <ui-icon name="mail"></ui-icon>
             Email
           </button>
         </div>
       </div>
 
-      <ion-item class="search-item">
-        <ion-icon name="search-outline" slot="start"></ion-icon>
-        <ion-input
+      <div class="ui-item search-item">
+        <ui-icon name="search" slot="start"></ui-icon>
+        <ui-input
           [ngModel]="searchTerm()"
           (ngModelChange)="searchTerm.set($event)"
           placeholder="Search customer, contact, or message">
-        </ion-input>
-      </ion-item>
-
-      <div class="threads-loading" *ngIf="loadingThreads()">
-        <ion-spinner name="crescent"></ion-spinner>
+        </ui-input>
       </div>
 
-      <div class="threads-empty" *ngIf="!loadingThreads() && !filteredThreads().length">
-        No {{ activeChannel() === 'sms' ? 'SMS' : 'email' }} conversations yet.
-      </div>
+      @if (loadingThreads()) {
+        <div class="threads-loading">
+          <span class="spinner-border spinner-border-sm ui-spinner" role="status" aria-label="Loading"></span>
+        </div>
+      }
 
-      <div class="threads-list" *ngIf="filteredThreads().length">
-        <button
-          type="button"
-          class="thread-row"
-          *ngFor="let thread of filteredThreads(); trackBy: trackThread"
-          [class.active]="selectedThreadId() === thread.id"
-          (click)="selectThread(thread)">
-          <div class="thread-avatar" [style.--avatar-color]="thread.color">{{ thread.initials }}</div>
-          <div class="thread-meta">
-            <div class="thread-name">{{ thread.displayName }}</div>
-            <div class="thread-preview">
-              <strong *ngIf="thread.channel === 'email' && thread.latestEmailSubject">{{ thread.latestEmailSubject }}:</strong>
-              {{ thread.latestPreview }}
-            </div>
-          </div>
-          <div class="thread-trailing">
-            <div class="thread-time">{{ relativeTimeLabel(thread.latestAt) }}</div>
-            <div
-              class="thread-status"
-              *ngIf="thread.channel === 'sms' && thread.latestDirection === 'outbound'"
-              [ngClass]="threadDeliveryClass(thread)">
-              {{ threadDeliveryLabel(thread) }}
-            </div>
-            <ion-badge *ngIf="thread.unread > 0" color="primary">{{ thread.unread }}</ion-badge>
-          </div>
-        </button>
-      </div>
+      @if (!loadingThreads() && !filteredThreads().length) {
+        <div class="threads-empty">
+          No {{ activeChannel() === 'sms' ? 'SMS' : 'email' }} conversations yet.
+        </div>
+      }
+
+      @if (filteredThreads().length) {
+        <div class="threads-list">
+          @for (thread of filteredThreads(); track trackThread($index, thread)) {
+            <button
+              type="button"
+              class="thread-row"
+              [class.active]="selectedThreadId() === thread.id"
+              (click)="selectThread(thread)">
+              <div class="thread-avatar" [style.--avatar-color]="thread.color">{{ thread.initials }}</div>
+              <div class="thread-meta">
+                <div class="thread-name">{{ thread.displayName }}</div>
+                <div class="thread-preview">
+                  @if (thread.channel === 'email' && thread.latestEmailSubject) {
+                    <strong>{{ thread.latestEmailSubject }}:</strong>
+                  }
+                  {{ thread.latestPreview }}
+                </div>
+              </div>
+              <div class="thread-trailing">
+                <div class="thread-time">{{ relativeTimeLabel(thread.latestAt) }}</div>
+                @if (threadHasFailedDelivery(thread)) {
+                  <div
+                    class="thread-status"
+                    [ngClass]="threadDeliveryClass(thread)">
+                    !
+                  </div>
+                }
+                @if (thread.unread > 0) {
+                  <span class="ui-badge" uiBadge color="primary">{{ thread.unread }}</span>
+                }
+              </div>
+            </button>
+          }
+        </div>
+      }
     </aside>
 
-    <section class="chat-pane glass-surface" *ngIf="selectedThread() as thread; else noThreadSelected">
-      <div class="chat-head">
-        <div class="chat-user">
-          <div class="thread-avatar" [style.--avatar-color]="thread.color">{{ thread.initials }}</div>
-          <div class="chat-user-copy">
-            <div class="chat-name">{{ thread.displayName }}</div>
-            <div class="chat-contact">{{ thread.displayContact || (thread.channel === 'sms' ? 'No phone on file' : 'No email on file') }}</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="chat-thread" #messageScroll>
-        <div class="messages-loading" *ngIf="loadingMessages()">Loading conversation...</div>
-
-        <ng-container *ngIf="!loadingMessages() && thread.channel === 'sms'">
-          <div class="messages-empty" *ngIf="!selectedSmsMessages().length">No messages yet.</div>
-
-          <div
-            class="chat-row"
-            *ngFor="let message of selectedSmsMessages(); trackBy: trackSmsMessage"
-            [class.outbound]="message.direction === 'outbound'"
-            [class.inbound]="message.direction === 'inbound'">
-            <div class="chat-bubble">
-              <div class="chat-meta">
-                <span>{{ message.direction === 'inbound' ? thread.displayName : 'You' }}</span>
-                <span
-                  class="chat-delivery"
-                  *ngIf="message.direction === 'outbound'"
-                  [ngClass]="messageDeliveryClass(message)"
-                  [attr.title]="messageDeliveryTitle(message)">
-                  {{ messageDeliveryLabel(message) }}
-                </span>
-                <span>{{ dateLabel(message.createdAt) }}</span>
-              </div>
-              <div class="chat-message">{{ message.message }}</div>
+    @if (selectedThread(); as thread) {
+      <section class="chat-pane app-surface">
+        <div class="chat-head">
+          <div class="chat-user">
+            <div class="thread-avatar" [style.--avatar-color]="thread.color">{{ thread.initials }}</div>
+            <div class="chat-user-copy">
+              @if (thread.customerId) {
+                <button
+                  type="button"
+                  class="chat-name chat-name-link"
+                  (click)="goToCustomerProfile(thread, $event)"
+                  [attr.aria-label]="'Open customer profile for ' + thread.displayName">
+                  {{ thread.displayName }}
+                </button>
+              } @else {
+                <div class="chat-name">{{ thread.displayName }}</div>
+              }
+              <div class="chat-contact">{{ thread.displayContact || (thread.channel === 'sms' ? 'No phone on file' : 'No email on file') }}</div>
             </div>
           </div>
-        </ng-container>
-
-        <ng-container *ngIf="!loadingMessages() && thread.channel === 'email'">
-          <div class="messages-empty" *ngIf="!selectedEmailMessages().length">No emails yet.</div>
-
-          <div
-            class="chat-row"
-            *ngFor="let message of selectedEmailMessages(); trackBy: trackEmailMessage"
-            [class.outbound]="message.direction === 'outbound'"
-            [class.inbound]="message.direction === 'inbound'">
-            <div class="chat-bubble email-bubble">
-              <div class="chat-meta">
-                <span>{{ message.direction === 'inbound' ? (message.from || thread.displayName) : 'You' }}</span>
-                <span>{{ dateLabel(message.createdAt) }}</span>
-              </div>
-              <div class="email-subject">{{ message.subject || '(no subject)' }}</div>
-              <div class="chat-message">{{ message.message }}</div>
-            </div>
-          </div>
-        </ng-container>
-      </div>
-
-      <div class="chat-compose">
-        <ng-container *ngIf="thread.channel === 'email'">
-          <div class="compose-email-actions">
-            <ion-button size="small" fill="outline" (click)="prepareReplyEmail()">
-              <ion-icon name="arrow-undo-outline" slot="start"></ion-icon>
-              Reply
-            </ion-button>
-            <ion-button size="small" fill="outline" (click)="prepareForwardEmail()">
-              <ion-icon name="arrow-redo-outline" slot="start"></ion-icon>
-              Forward
-            </ion-button>
-          </div>
-
-          <ion-item class="compose-item">
-            <ion-label position="stacked">To</ion-label>
-            <ion-input [(ngModel)]="outgoingEmailTo" placeholder="customer@example.com"></ion-input>
-          </ion-item>
-
-          <ion-item class="compose-item" *ngIf="emailTemplates().length">
-            <ion-label position="stacked">Template</ion-label>
-            <ion-select
-              interface="popover"
-              [value]="selectedEmailTemplateId"
-              (ionChange)="applyEmailTemplate($event.detail.value)">
-              <ion-select-option value="">None</ion-select-option>
-              <ion-select-option *ngFor="let template of emailTemplates()" [value]="template.id">
-                {{ template.name }}
-              </ion-select-option>
-            </ion-select>
-          </ion-item>
-
-          <ion-item class="compose-item">
-            <ion-label position="stacked">Subject</ion-label>
-            <ion-input [(ngModel)]="outgoingEmailSubject" placeholder="Email subject"></ion-input>
-          </ion-item>
-        </ng-container>
-
-        <ion-item class="compose-item">
-          <ion-label position="stacked">{{ thread.channel === 'sms' ? 'Message' : 'Body' }}</ion-label>
-          <ion-textarea
-            [(ngModel)]="outgoingMessage"
-            [autoGrow]="true"
-            [rows]="thread.channel === 'sms' ? 2 : 6"
-            maxlength="12000"
-            [placeholder]="thread.channel === 'sms' ? 'Type a message...' : 'Write your email...'"
-            (keydown)="onComposerKeydown($event)">
-          </ion-textarea>
-        </ion-item>
-
-        <div class="compose-actions">
-          <ion-button (click)="sendMessage()" [disabled]="!canSendMessage()">
-            <ion-icon name="paper-plane-outline" slot="start"></ion-icon>
-            {{ sending() ? 'Sending...' : (thread.channel === 'sms' ? 'Send SMS' : 'Send Email') }}
-          </ion-button>
         </div>
-      </div>
-    </section>
+        <div class="chat-thread" #messageScroll>
+          @if (loadingMessages()) {
+            <div class="messages-loading">Loading conversation...</div>
+          }
+          @if (!loadingMessages() && thread.channel === 'sms') {
+            @if (!selectedSmsMessages().length) {
+              <div class="messages-empty">No messages yet.</div>
+            }
+            @for (message of selectedSmsMessages(); track trackSmsMessage($index, message)) {
+              <div
+                class="chat-row"
+                [class.outbound]="message.direction === 'outbound'"
+                [class.inbound]="message.direction === 'inbound'"
+                [class.failed]="isFailedSmsMessage(message)">
+                <div class="chat-message-stack">
+                  <div class="chat-bubble">
+                    <div class="chat-meta">
+                      <span>{{ message.direction === 'inbound' ? thread.displayName : 'You' }}</span>
+                      <span>{{ dateLabel(message.createdAt) }}</span>
+                    </div>
+                    <div class="chat-message">{{ message.message }}</div>
+                  </div>
+                  @if (isFailedSmsMessage(message)) {
+                    <div class="chat-failure-reason">
+                      {{ messageFailureReason(message) }}
+                    </div>
+                  }
+                </div>
+                @if (isFailedSmsMessage(message)) {
+                  <span
+                    class="chat-failed-icon"
+                    [attr.title]="messageDeliveryTitle(message)"
+                  aria-label="Message failed to send">!</span>
+                }
+              </div>
+            }
+          }
+          @if (!loadingMessages() && thread.channel === 'email') {
+            @if (!selectedEmailMessages().length) {
+              <div class="messages-empty">No emails yet.</div>
+            }
+            @for (message of selectedEmailMessages(); track trackEmailMessage($index, message)) {
+              <div
+                class="chat-row"
+                [class.outbound]="message.direction === 'outbound'"
+                [class.inbound]="message.direction === 'inbound'">
+                <div class="chat-bubble email-bubble">
+                  <div class="chat-meta">
+                    <span>{{ message.direction === 'inbound' ? (message.from || thread.displayName) : 'You' }}</span>
+                    <span>{{ dateLabel(message.createdAt) }}</span>
+                  </div>
+                  <div class="email-subject">{{ message.subject || '(no subject)' }}</div>
+                  <div class="chat-message">{{ message.message }}</div>
+                </div>
+              </div>
+            }
+          }
+        </div>
+        <div class="chat-compose">
+          @if (thread.channel === 'email') {
+            <div class="compose-email-actions">
+              <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="prepareReplyEmail()">
+                <ui-icon name="arrow-back-up" slot="start"></ui-icon>
+                Reply
+              </button>
+              <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="prepareForwardEmail()">
+                <ui-icon name="arrow-forward-up" slot="start"></ui-icon>
+                Forward
+              </button>
+            </div>
+            <div class="ui-item compose-item">
+              <span class="ui-label">To</span>
+              <ui-input aria-label="To" [(ngModel)]="outgoingEmailTo" placeholder="customer@example.com"></ui-input>
+            </div>
+            @if (emailTemplates().length) {
+              <div class="ui-item compose-item">
+                <span class="ui-label">Template</span>
+                <select class="form-select" aria-label="Template"
+                  [ngModel]="selectedEmailTemplateId"
+                  (ngModelChange)="applyEmailTemplate($event)">
+                  <option value="">None</option>
+                  @for (template of emailTemplates(); track template) {
+                    <option [ngValue]="template.id">
+                      {{ template.name }}
+                    </option>
+                  }
+                </select>
+              </div>
+            }
+            <div class="ui-item compose-item">
+              <span class="ui-label">Subject</span>
+              <ui-input aria-label="Subject" [(ngModel)]="outgoingEmailSubject" placeholder="Email subject"></ui-input>
+            </div>
+          }
+          <div class="ui-item compose-item">
+            <span class="ui-label">{{ thread.channel === 'sms' ? 'Message' : 'Body' }}</span>
+            <ui-textarea
+              [(ngModel)]="outgoingMessage"
+              [autoGrow]="true"
+              [rows]="thread.channel === 'sms' ? 2 : 6"
+              maxlength="12000"
+              [placeholder]="thread.channel === 'sms' ? 'Type a message...' : 'Write your email...'"
+              (keydown)="onComposerKeydown($event)">
+            </ui-textarea>
+          </div>
+          <div class="compose-actions">
+            <button class="btn ui-button btn-primary" type="button" (click)="sendMessage()" [disabled]="!canSendMessage()">
+              <ui-icon name="send" slot="start"></ui-icon>
+              {{ sending() ? 'Sending...' : (thread.channel === 'sms' ? 'Send SMS' : 'Send Email') }}
+            </button>
+          </div>
+        </div>
+      </section>
+    } @else {
+      <section class="chat-pane app-surface empty-state">
+        <div>Select a conversation from the left.</div>
+      </section>
+    }
   </section>
 
-  <ng-template #noThreadSelected>
-    <section class="chat-pane glass-surface empty-state">
-      <div>Select a conversation from the left.</div>
-    </section>
-  </ng-template>
-</ion-content>
+</div>

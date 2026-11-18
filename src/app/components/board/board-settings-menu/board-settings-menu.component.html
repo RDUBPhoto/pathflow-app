@@ -1,48 +1,43 @@
-<ion-menu [menuId]="menuId" side="end" [contentId]="contentId">
-  <ion-header>
-    <ion-toolbar>
-      <ion-title>Board Settings</ion-title>
-    </ion-toolbar>
-  </ion-header>
+<aside class="ui-menu" hidden>
+  <header class="ui-header">
+    <div class="ui-toolbar">
+      <h1 class="ui-title">Board Settings</h1>
+    </div>
+  </header>
 
-  <ion-content class="glass-bg no-vscroll" [scrollY]="false">
-    <ion-list>
-      <ion-item>
-        <ion-label position="stacked">Add New lane</ion-label>
-        <ion-input
+  <div class="ui-content app-content no-vscroll" [class.ui-no-scroll]="true">
+    <div class="ui-list">
+      <div class="ui-item">
+        <span class="ui-label">Add New lane</span>
+        <ui-input aria-label="Add New lane"
           [ngModel]="newLane"
           (ngModelChange)="newLaneChange.emit($event)">
-        </ion-input>
-      </ion-item>
-      <div style="margin-top:8px;">
-        <ion-button (click)="addLane.emit()">Add</ion-button>
+        </ui-input>
       </div>
-    </ion-list>
+      <div style="margin-top:8px;">
+        <button class="btn ui-button btn-primary" type="button" (click)="addLane.emit()">Add</button>
+      </div>
+    </div>
 
-    <ion-list>
-      <ion-item lines="full">
-        <ion-label>Lane colors</ion-label>
-      </ion-item>
+    <div class="ui-list">
+      <div class="ui-item">
+        <span class="ui-label">Lane colors</span>
+      </div>
 
-      <ion-item *ngFor="let l of lanes">
-        <ion-label class="ion-text-wrap">
+      <div class="ui-item" *ngFor="let l of lanes">
+        <span class="ui-label text-wrap">
           <div style="font-weight:600">{{ l.name }}</div>
-        </ion-label>
+        </span>
 
-        <ion-select
-          interface="popover"
-          [value]="getLaneColor(l.id)"
-          (ionChange)="onPickColor(l.id, $event.detail.value)">
-          <ion-select-option value="">None</ion-select-option>
-          <ion-select-option *ngFor="let c of palette" [value]="c.hex">
-            <span
-              style="display:inline-block;width:12px;height:12px;border-radius:50%;border:1px solid rgba(0,0,0,.2);margin-right:8px;vertical-align:middle;"
-              [style.background]="c.hex">
-            </span>
+        <select class="form-select" aria-label="Lane colors"
+          [ngModel]="getLaneColor(l.id)"
+          (ngModelChange)="onPickColor(l.id, $event)">
+          <option value="">None</option>
+          <option *ngFor="let c of palette" [ngValue]="c.hex">
             {{ c.label }}
-          </ion-select-option>
-        </ion-select>
-      </ion-item>
-    </ion-list>
-  </ion-content>
-</ion-menu>
+          </option>
+        </select>
+      </div>
+    </div>
+  </div>
+</aside>

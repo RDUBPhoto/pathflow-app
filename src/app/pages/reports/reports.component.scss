@@ -209,7 +209,7 @@
   color: var(--app-text-muted);
 }
 
-.kpi-head ion-icon {
+.kpi-head ui-icon {
   font-size: 15px;
 }
 
@@ -228,7 +228,7 @@
   position: relative;
 }
 
-.kpi-info ion-icon {
+.kpi-info ui-icon {
   font-size: 16px;
 }
 
@@ -289,15 +289,15 @@
   border-bottom: 1px solid rgba(148, 163, 184, 0.16);
 }
 
-ion-card {
+.ui-card {
   border-radius: 14px;
   border: 1px solid var(--app-border-subtle);
   border-top: 2px solid var(--section-card-accent, var(--app-border-subtle));
   margin: 0;
 }
 
-.section-pipeline-cards ion-card { --section-card-accent: #3b82f6; }
-.section-profitability-cards ion-card { --section-card-accent: #f59e0b; }
+.section-pipeline-cards .ui-card { --section-card-accent: #3b82f6; }
+.section-profitability-cards .ui-card { --section-card-accent: #f59e0b; }
 .section-labor-card { --section-card-accent: #a78bfa; }
 
 .section-labor-card {
@@ -306,7 +306,7 @@ ion-card {
   border-bottom: 1px solid rgba(148, 163, 184, 0.16);
 }
 
-ion-card-title {
+.ui-card-title {
   font-size: 16px;
   display: inline-flex;
   align-items: center;

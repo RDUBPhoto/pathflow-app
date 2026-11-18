@@ -13,12 +13,16 @@ const {
   verifyRegistrationResponse
 } = require("@simplewebauthn/server");
 const { sanitizeTenantId } = require("../_shared/tenant");
+const { issuePasswordReset, claimPasswordReset } = require("../_shared/password-reset");
 const {
   hashPassword,
   verifyPassword,
   resolvePrincipal: resolveAuthPrincipal,
   issueSession,
   revokeSession,
+  isDevelopmentRuntime,
+  isLocalDevelopmentRequest,
+  SessionStorageUnavailableError,
   createSessionCookie,
   clearSessionCookie
 } = require("../_shared/auth");
@@ -37,6 +41,18 @@ const PASSKEY_REGISTRATION_PARTITION = "registration";
 const PASSKEY_AUTHENTICATION_PARTITION = "authentication";
 const VERIFY_TOKEN_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7;
 const PASSKEY_CHALLENGE_MAX_AGE_MS = 1000 * 60 * 5;
+const APP_ACCESS_AREAS = [
+  "dashboard",
+  "inventory",
+  "jobs",
+  "purchase-orders",
+  "tasks",
+  "quotes",
+  "invoices",
+  "customers",
+  "reports",
+  "settings-admin"
+];
 
 function asString(value) {
   return value == null ? "" : String(value).trim();
@@ -260,6 +276,7 @@ function getAuthRuntimeConfig() {
 
   return {
     primaryProvider,
+    subscriptionBillingEnabled: asBool(process.env.SUBSCRIPTION_BILLING_ENABLED),
     providers: Array.from(providers),
     hostedEmailEnabled: hostedEmailEnabled && !!hostedEmailProvider,
     hostedEmailProvider: hostedEmailEnabled && hostedEmailProvider ? hostedEmailProvider : "",
@@ -317,67 +334,20 @@ function isAllNines(value) {
   return !!digits && /^9+$/.test(digits);
 }
 
-function normalizeBillingPayload(rawBilling) {
-  const billing = asObject(rawBilling);
-  const cardholderName = asString(billing.cardholderName || billing.name);
-  const cardNumber = digitsOnly(billing.cardNumber || billing.number);
-  const expiryMonthRaw = digitsOnly(billing.expiryMonth || billing.expMonth || billing.month);
-  const expiryYearRaw = digitsOnly(billing.expiryYear || billing.expYear || billing.year);
-  const cvc = digitsOnly(billing.cvc || billing.cvv || billing.securityCode);
-  const postalCode = digitsOnly(billing.postalCode || billing.zip || billing.zipCode);
-
-  if (!cardNumber) {
-    return { ok: false, error: "Billing card number is required." };
-  }
-
-  if (isAllNines(cardNumber) && cardNumber.length >= 5) {
+function normalizeBillingPayload(rawBilling, req) {
+  if (!isLocalDevelopmentRequest(req)) {
     return {
-      ok: true,
-      mode: "sandbox",
-      last4: "9999"
+      ok: false,
+      status: 503,
+      error: "Online subscription billing is being configured. Contact Pathflow support to activate a paid plan."
     };
   }
-
-  if (cardholderName.length < 2) {
-    return { ok: false, error: "Cardholder name is required." };
+  const billing = asObject(rawBilling);
+  const cardNumber = digitsOnly(billing.cardNumber || billing.number);
+  if (isAllNines(cardNumber) && cardNumber.length >= 5) {
+    return { ok: true, mode: "sandbox", last4: "9999" };
   }
-  if (cardNumber.length < 13 || cardNumber.length > 19) {
-    return { ok: false, error: "Card number must be between 13 and 19 digits." };
-  }
-  if (expiryMonthRaw.length < 1 || expiryMonthRaw.length > 2) {
-    return { ok: false, error: "Expiry month is required." };
-  }
-  if (expiryYearRaw.length < 2 || expiryYearRaw.length > 4) {
-    return { ok: false, error: "Expiry year is required." };
-  }
-  if (cvc.length < 3 || cvc.length > 4) {
-    return { ok: false, error: "CVC must be 3 or 4 digits." };
-  }
-  if (postalCode.length < 5) {
-    return { ok: false, error: "Postal code must be at least 5 digits." };
-  }
-
-  const month = Number(expiryMonthRaw);
-  if (!Number.isFinite(month) || month < 1 || month > 12) {
-    return { ok: false, error: "Expiry month must be between 1 and 12." };
-  }
-
-  const now = new Date();
-  const currentYear = now.getUTCFullYear();
-  const currentMonth = now.getUTCMonth() + 1;
-  const parsedYear = expiryYearRaw.length === 2 ? Number(`20${expiryYearRaw}`) : Number(expiryYearRaw);
-  if (!Number.isFinite(parsedYear) || parsedYear < currentYear || parsedYear > currentYear + 25) {
-    return { ok: false, error: "Expiry year is invalid." };
-  }
-  if (parsedYear === currentYear && month < currentMonth) {
-    return { ok: false, error: "Card is expired." };
-  }
-
-  return {
-    ok: true,
-    mode: "pending",
-    last4: cardNumber.slice(-4)
-  };
+  return { ok: false, error: "Use the all-9 test card for local subscription testing." };
 }
 
 function normalizePlanCycle(value) {
@@ -387,13 +357,12 @@ function normalizePlanCycle(value) {
 function normalizeBillingStatus(value) {
   const normalized = asString(value).toLowerCase();
   if (!normalized) return "trial";
-  if (normalized === "pending") return "active";
   return normalized;
 }
 
 function billingStatusAllowsAccess(status) {
   const normalized = normalizeBillingStatus(status);
-  return normalized === "active" || normalized === "sandbox";
+  return normalized === "active" || normalized === "sandbox" && isDevelopmentRuntime();
 }
 
 function getEmailMode() {
@@ -631,7 +600,9 @@ async function getTableClient(connectionString, tableName) {
   const client = TableClient.fromConnectionString(connectionString, tableName);
   try {
     await client.createTable();
-  } catch (_) {}
+  } catch (error) {
+    if (error?.statusCode !== 409) throw error;
+  }
   return client;
 }
 
@@ -677,8 +648,9 @@ async function getUserEntity(userClient, email) {
   if (!rowKey) return null;
   try {
     return await userClient.getEntity(USERS_PARTITION, rowKey);
-  } catch {
-    return null;
+  } catch (error) {
+    if (error?.statusCode === 404) return null;
+    throw error;
   }
 }
 
@@ -687,8 +659,9 @@ async function getLocalAccountEntity(localAccountClient, email) {
   if (!rowKey) return null;
   try {
     return await localAccountClient.getEntity(LOCAL_ACCOUNTS_PARTITION, rowKey);
-  } catch {
-    return null;
+  } catch (error) {
+    if (error?.statusCode === 404) return null;
+    throw error;
   }
 }
 
@@ -840,6 +813,20 @@ function parseUserRoles(userEntity) {
   return normalizeRoleList(Array.isArray(parsed) ? parsed : []);
 }
 
+function normalizeAreaAccessMap(value) {
+  const parsed = typeof value === "string" ? parseJson(value, {}) : asObject(value);
+  const out = {};
+  for (const area of APP_ACCESS_AREAS) {
+    if (!Object.prototype.hasOwnProperty.call(parsed, area)) continue;
+    out[area] = parsed[area] !== false;
+  }
+  return out;
+}
+
+function parseUserAreaAccess(userEntity) {
+  return normalizeAreaAccessMap(userEntity && userEntity.areaAccessJson);
+}
+
 function userIsRevoked(userEntity) {
   if (!userEntity || typeof userEntity !== "object") return false;
   if (asBool(userEntity.accessRevoked) || asBool(userEntity.disabled)) return true;
@@ -981,6 +968,10 @@ function pickBillingTenant(userEntity, allTenants, defaultLocationId, locations)
 }
 
 function buildBillingProfileFromTenant(tenant, userEntity) {
+  if (!getAuthRuntimeConfig().subscriptionBillingEnabled) {
+    return { billingStatus: "complimentary", trialStartsAt: "", trialEndsAt: "",
+      accessLocked: false, accessLockReason: "", planCycle: normalizePlanCycle(tenant?.planCycle) };
+  }
   const billingStatus = normalizeBillingStatus(
     (tenant && tenant.billingStatus) || (userEntity && userEntity.billingStatus)
   );
@@ -1090,6 +1081,7 @@ function buildMeResponse(principal, userEntity, allTenants, canBootstrap) {
       displayName: asString(userEntity.displayName || principal.displayName || principal.email),
       isSuperAdmin,
       roles: isSuperAdmin ? normalizeRoleList([...roles, "admin"]) : roles,
+      areaAccess: isSuperAdmin || roles.includes("admin") ? {} : parseUserAreaAccess(effectiveUserEntity),
       defaultLocationId,
       locations,
       emailVerified: asBool(userEntity.emailVerified) || !!asString(userEntity.emailVerifiedAt),
@@ -1114,7 +1106,8 @@ function json(status, body) {
   return {
     status,
     headers: {
-      "content-type": "application/json"
+      "content-type": "application/json",
+      "cache-control": "private, no-store"
     },
     body
   };
@@ -1125,6 +1118,7 @@ function jsonWithHeaders(status, body, extraHeaders) {
     status,
     headers: {
       "content-type": "application/json",
+      "cache-control": "private, no-store",
       ...(extraHeaders || {})
     },
     body
@@ -1203,12 +1197,10 @@ async function sendWelcomeEmail(context, payload) {
   });
 }
 
-function buildPasswordResetUrl(req) {
-  const explicit = asString(process.env.PASSWORD_RESET_URL);
-  if (explicit) return explicit;
+function buildPasswordResetUrl(req, token) {
   const base = buildVerifyBaseUrl(req);
   const login = new URL("/login", `${base}/`);
-  login.searchParams.set("reset", "1");
+  login.hash = `reset_${token}`;
   return login.toString();
 }
 
@@ -1272,7 +1264,7 @@ function inviteEmailMarkup(payload) {
 async function sendPasswordResetEmail(context, req, payload) {
   const email = normalizeEmail(payload && payload.email);
   if (!email) return false;
-  const resetUrl = buildPasswordResetUrl(req);
+  const resetUrl = buildPasswordResetUrl(req, payload.token);
   const display = asString(payload && payload.displayName || email);
   const firstName = display.split(/\s+/).filter(Boolean)[0] || "there";
   const workspaceName = asString(payload && payload.workspaceName || "your Pathflow workspace");
@@ -1312,7 +1304,8 @@ async function listWorkspaceUsers(userClient, tenantId) {
       name: asString(entity.displayName || email),
       email,
       role: parseUserRoles(entity).includes("admin") ? "admin" : "user",
-      status: userIsRevoked(entity) ? "disabled" : normalizeUserStatus(entity.status)
+      status: userIsRevoked(entity) ? "disabled" : normalizeUserStatus(entity.status),
+      areaAccess: parseUserAreaAccess(entity)
     });
   }
   out.sort((a, b) => a.name.localeCompare(b.name) || a.email.localeCompare(b.email));
@@ -1424,8 +1417,8 @@ module.exports = async function (context, req) {
 
   try {
     const connectionString = asString(process.env.STORAGE_CONNECTION_STRING);
-    if (!connectionString) {
-      context.res = json(500, { ok: false, error: "Missing STORAGE_CONNECTION_STRING" });
+    if (!connectionString && !isSqlBackendEnabled()) {
+      context.res = json(503, { ok: false, error: "Sign-in storage is temporarily unavailable." });
       return;
     }
 
@@ -1442,7 +1435,7 @@ module.exports = async function (context, req) {
 
       if (anonymousOp === "passkey-authentication-options") {
         const authConfig = getAuthRuntimeConfig();
-        if (!authConfig.localPasswordEnabled && !isLocalRequest(req)) {
+        if (!authConfig.localPasswordEnabled && !isLocalDevelopmentRequest(req)) {
           context.res = json(403, { ok: false, error: "Email/password authentication is disabled." });
           return;
         }
@@ -1476,7 +1469,7 @@ module.exports = async function (context, req) {
 
       if (anonymousOp === "passkey-authentication-verify") {
         const authConfig = getAuthRuntimeConfig();
-        if (!authConfig.localPasswordEnabled && !isLocalRequest(req)) {
+        if (!authConfig.localPasswordEnabled && !isLocalDevelopmentRequest(req)) {
           context.res = json(403, { ok: false, error: "Email/password authentication is disabled." });
           return;
         }
@@ -1540,6 +1533,9 @@ module.exports = async function (context, req) {
           return;
         }
         const roles = userEntity ? parseUserRoles(userEntity) : normalizeRoleList(["authenticated"]);
+        if (userEntity?.status === "invited") await userClient.upsertEntity({
+          partitionKey: USERS_PARTITION, rowKey: email, status: "active", updatedAt: new Date().toISOString()
+        }, "Merge");
         const session = await issueSession({
           userId: asString((userEntity && userEntity.userId) || email),
           email,
@@ -1561,7 +1557,7 @@ module.exports = async function (context, req) {
 
       if (anonymousOp === "password-signup") {
         const authConfig = getAuthRuntimeConfig();
-        if (!authConfig.localPasswordEnabled && !isLocalRequest(req)) {
+        if (!authConfig.localPasswordEnabled && !isLocalDevelopmentRequest(req)) {
           context.res = json(403, { ok: false, error: "Email/password authentication is disabled." });
           return;
         }
@@ -1589,8 +1585,9 @@ module.exports = async function (context, req) {
         const userClient = await getTableClient(connectionString, USERS_TABLE);
         const localAccountClient = await getTableClient(connectionString, LOCAL_ACCOUNTS_TABLE);
         const existingAccount = await getLocalAccountEntity(localAccountClient, email);
-        if (existingAccount) {
-          context.res = json(409, { ok: false, error: "An account with this email already exists. Try signing in." });
+        const userEntity = await getUserEntity(userClient, email);
+        if (existingAccount || userEntity) {
+          context.res = json(409, { ok: false, error: "An account with this email already exists. Sign in or use the password reset link." });
           return;
         }
 
@@ -1601,7 +1598,6 @@ module.exports = async function (context, req) {
           phone
         });
 
-        const userEntity = await getUserEntity(userClient, email);
         if (userIsRevoked(userEntity)) {
           context.res = json(403, { ok: false, error: "Your account access has been removed. Contact your workspace admin." });
           return;
@@ -1628,7 +1624,7 @@ module.exports = async function (context, req) {
 
       if (anonymousOp === "password-login") {
         const authConfig = getAuthRuntimeConfig();
-        if (!authConfig.localPasswordEnabled && !isLocalRequest(req)) {
+        if (!authConfig.localPasswordEnabled && !isLocalDevelopmentRequest(req)) {
           context.res = json(403, { ok: false, error: "Email/password authentication is disabled." });
           return;
         }
@@ -1683,6 +1679,52 @@ module.exports = async function (context, req) {
         return;
       }
 
+      if (anonymousOp === "reset-password") {
+        if (!getAuthRuntimeConfig().localPasswordEnabled && !isLocalDevelopmentRequest(req)) {
+          context.res = json(403, { ok: false, error: "Email/password authentication is disabled." });
+          return;
+        }
+        const password = asString(anonymousBody.password);
+        if (password.length < 8 || password.length > 1024) {
+          context.res = json(400, { ok: false, error: "Use a password between 8 and 1024 characters." });
+          return;
+        }
+        const email = await claimPasswordReset(await getTableClient(connectionString, "authpasswordresets"), asString(anonymousBody.token));
+        if (!email) {
+          context.res = json(400, { ok: false, error: "This password reset link is invalid or expired. Request a new link." });
+          return;
+        }
+        const users = await getTableClient(connectionString, USERS_TABLE);
+        const user = await getUserEntity(users, email);
+        if (userIsRevoked(user)) {
+          context.res = json(403, { ok: false, error: "Your account access has been removed. Contact your workspace admin." });
+          return;
+        }
+        const accounts = await getTableClient(connectionString, LOCAL_ACCOUNTS_TABLE);
+        const account = await getLocalAccountEntity(accounts, email);
+        if (asString(account?.status).toLowerCase() === "disabled" || (!account && !user)) {
+          context.res = json(403, { ok: false, error: "Contact your workspace admin to restore this account." });
+          return;
+        }
+        const sessions = await getTableClient(connectionString, "authsessions");
+        // Revoke prior sessions before changing the credential, so a partial
+        // storage failure cannot leave an earlier session authorized.
+        for await (const session of sessions.listEntities({ queryOptions: {
+          filter: `PartitionKey eq 'v1' and email eq '${escapedFilterValue(email)}'`
+        } })) await sessions.deleteEntity("v1", session.rowKey);
+        await upsertLocalAccount(accounts, {
+          email, password, displayName: account?.displayName || user?.displayName || email, phone: account?.phone || user?.phone
+        });
+        if (user?.status === "invited") await users.upsertEntity({
+          partitionKey: USERS_PARTITION, rowKey: email, status: "active", emailVerified: true,
+          emailVerifiedAt: new Date().toISOString()
+        }, "Merge");
+        context.res = jsonWithHeaders(200, { ok: true, message: "Password saved. Sign in with your new password." }, {
+          "set-cookie": clearSessionCookie()
+        });
+        return;
+      }
+
       if (anonymousOp === "request-password-reset") {
         const userClient = await getTableClient(connectionString, USERS_TABLE);
         const tenantClient = await getTableClient(connectionString, TENANTS_TABLE);
@@ -1693,6 +1735,7 @@ module.exports = async function (context, req) {
           const targetUser = await getUserEntity(userClient, targetEmail);
           const localAccount = targetUser ? null : await getLocalAccountEntity(localAccountClient, targetEmail);
           if (targetUser || localAccount) {
+            const token = await issuePasswordReset(await getTableClient(connectionString, "authpasswordresets"), targetEmail);
             let workspaceName = "your Pathflow workspace";
             if (targetTenantId) {
               try {
@@ -1701,6 +1744,7 @@ module.exports = async function (context, req) {
               } catch {}
             }
             await sendPasswordResetEmail(context, req, {
+              token,
               email: targetEmail,
               displayName: asString((targetUser && targetUser.displayName) || (localAccount && localAccount.displayName) || targetEmail),
               workspaceName
@@ -1722,21 +1766,17 @@ module.exports = async function (context, req) {
         (isLocalRequest(req) && !scopeFromQuery)
       );
       if (allowAnonymousProfileProbe) {
-        context.res = jsonWithHeaders(200, {
+        context.res = json(200, {
           ok: false,
           error: "Not authenticated.",
           principal: null,
           profile: null,
           roles: [],
           canBootstrap: false
-        }, {
-          "set-cookie": clearSessionCookie()
         });
         return;
       }
-      context.res = jsonWithHeaders(401, { ok: false, error: "Not authenticated." }, {
-        "set-cookie": clearSessionCookie()
-      });
+      context.res = json(401, { ok: false, error: "Not authenticated." });
       return;
     }
 
@@ -1753,6 +1793,10 @@ module.exports = async function (context, req) {
       const isDevPrincipal = asString(principal.identityProvider).toLowerCase() === "dev-local";
       if (!userEntity && isDevPrincipal) {
         userEntity = buildDevUserEntity(principal, tenantHint);
+      }
+      if (userEntity?.status === "invited") {
+        userEntity = { ...userEntity, status: "active", updatedAt: new Date().toISOString() };
+        await userClient.upsertEntity(userEntity, "Merge");
       }
       const canBootstrap = !storedUserEntity && !principalIsConfiguredSuperAdmin(principal);
 
@@ -1777,7 +1821,13 @@ module.exports = async function (context, req) {
         return;
       }
 
-      context.res = json(200, buildMeResponse(principal, userEntity, allTenants, canBootstrap));
+      const profile = buildMeResponse(principal, userEntity, allTenants, canBootstrap);
+      if (principal.source === "swa" && !userIsRevoked(userEntity)) {
+        const session = await issueSession({ ...principal, userRoles: profile.profile?.roles || ["authenticated"] });
+        context.res = jsonWithHeaders(200, profile, { "set-cookie": createSessionCookie(session.token) });
+      } else {
+        context.res = json(200, profile);
+      }
       return;
     }
 
@@ -1794,6 +1844,7 @@ module.exports = async function (context, req) {
       "passkey-registration-options",
       "passkey-registration-verify",
       "invite-user",
+      "update-user-access",
       "remove-user-access",
       "delete-user",
       "reset-user-password",
@@ -1816,7 +1867,7 @@ module.exports = async function (context, req) {
 
     if (op === "passkey-registration-options") {
       const authConfig = getAuthRuntimeConfig();
-      if (!authConfig.localPasswordEnabled && !isLocalRequest(req)) {
+      if (!authConfig.localPasswordEnabled && !isLocalDevelopmentRequest(req)) {
         context.res = json(403, { ok: false, error: "Email/password authentication is disabled." });
         return;
       }
@@ -1853,7 +1904,7 @@ module.exports = async function (context, req) {
 
     if (op === "passkey-registration-verify") {
       const authConfig = getAuthRuntimeConfig();
-      if (!authConfig.localPasswordEnabled && !isLocalRequest(req)) {
+      if (!authConfig.localPasswordEnabled && !isLocalDevelopmentRequest(req)) {
         context.res = json(403, { ok: false, error: "Email/password authentication is disabled." });
         return;
       }
@@ -1922,7 +1973,7 @@ module.exports = async function (context, req) {
       return;
     }
 
-    if (op === "invite-user" || op === "remove-user-access" || op === "delete-user" || op === "reset-user-password") {
+    if (op === "invite-user" || op === "update-user-access" || op === "remove-user-access" || op === "delete-user" || op === "reset-user-password") {
       if (!userEntity) {
         context.res = json(403, { ok: false, error: "Admin access is required." });
         return;
@@ -1987,7 +2038,8 @@ module.exports = async function (context, req) {
           humanizeTenantId(tenantId);
         const firstName = targetName.split(/\s+/).filter(Boolean)[0] || "there";
         const loginUrl = buildInviteLoginUrl(req, { email: targetEmail, tenantId });
-        const signupUrl = buildInviteSignupUrl(req, { email: targetEmail, tenantId });
+        const resetToken = await issuePasswordReset(await getTableClient(connectionString, "authpasswordresets"), targetEmail);
+        const signupUrl = buildPasswordResetUrl(req, resetToken);
         const inviteMarkup = inviteEmailMarkup({
           workspaceName,
           tenantId,
@@ -2002,6 +2054,26 @@ module.exports = async function (context, req) {
           text: inviteMarkup.text,
           html: inviteMarkup.html
         });
+        const users = await listWorkspaceUsers(userClient, tenantId);
+        context.res = json(200, { ok: true, items: users, tenantId });
+        return;
+      }
+
+      if (op === "update-user-access") {
+        const targetUser = await getUserEntity(userClient, targetEmail);
+        if (!targetUser) {
+          context.res = json(404, { ok: false, error: "User not found." });
+          return;
+        }
+        await userClient.upsertEntity(
+          {
+            partitionKey: USERS_PARTITION,
+            rowKey: targetEmail,
+            areaAccessJson: JSON.stringify(normalizeAreaAccessMap(body.areaAccess)),
+            updatedAt: now
+          },
+          "Merge"
+        );
         const users = await listWorkspaceUsers(userClient, tenantId);
         context.res = json(200, { ok: true, items: users, tenantId });
         return;
@@ -2110,9 +2182,9 @@ module.exports = async function (context, req) {
         return;
       }
 
-      const billing = normalizeBillingPayload(body.billing);
+      const billing = normalizeBillingPayload(body.billing, req);
       if (!billing.ok) {
-        context.res = json(400, { ok: false, error: billing.error || "Billing information is invalid." });
+        context.res = json(billing.status || 400, { ok: false, error: billing.error || "Billing information is invalid." });
         return;
       }
 
@@ -2172,9 +2244,9 @@ module.exports = async function (context, req) {
       let billing = null;
       const billingInput = asObject(body.billing);
       if (Object.keys(billingInput).length > 0) {
-        const normalized = normalizeBillingPayload(billingInput);
+        const normalized = normalizeBillingPayload(billingInput, req);
         if (!normalized.ok) {
-          context.res = json(400, { ok: false, error: normalized.error || "Billing information is invalid." });
+          context.res = json(normalized.status || 400, { ok: false, error: normalized.error || "Billing information is invalid." });
           return;
         }
         billing = normalized;
@@ -2310,11 +2382,9 @@ module.exports = async function (context, req) {
     const finalTenants = await listTenants(tenantClient);
     context.res = json(200, buildMeResponse(principal, userEntity, finalTenants, false));
   } catch (err) {
-    context.log.error(err);
-    context.res = json(500, {
-      ok: false,
-      error: "Server error",
-      detail: String((err && err.message) || err)
-    });
+    context.log.error("Access request failed.", { name: err?.name, code: err?.code, status: err?.statusCode });
+    context.res = err instanceof SessionStorageUnavailableError
+      ? json(503, { ok: false, error: "Sign-in is temporarily unavailable. Please try again." })
+      : json(500, { ok: false, error: "Could not complete the access request. Please try again." });
   }
 };

@@ -1,615 +1,877 @@
-<ion-header class="glass-header">
-  <ion-toolbar>
-    <ion-buttons slot="start">
+<header class="ui-header app-header">
+  <div class="ui-toolbar">
+    <div class="ui-buttons" slot="start">
       <app-page-back-button></app-page-back-button>
-    </ion-buttons>
-    <ion-title>{{ documentTypeLabel() }} Detail</ion-title>
+    </div>
+    <h1 class="ui-title">{{ documentTypeLabel() }} Detail</h1>
     <app-company-switcher></app-company-switcher>
-    <ion-buttons slot="end" class="ion-margin-end">
+    <div slot="end" class="ui-buttons me-2">
       <app-user-menu></app-user-menu>
-    </ion-buttons>
-  </ion-toolbar>
-</ion-header>
+    </div>
+  </div>
+</header>
 
-<ion-content class="glass-bg invoice-detail-content ion-padding">
+<div class="ui-content app-content invoice-detail-content app-padding">
+  @if (documentSyncError()) {
+    <p role="alert">{{ documentSyncError() }}</p>
+  }
   <div class="invoice-detail-stack">
-    <ng-container *ngIf="!loading(); else loadingState">
-      <section class="glass-surface state-card" *ngIf="error(); else detailState">
-        <h2>{{ documentTypeLabel() }} Unavailable</h2>
-        <p>{{ error() }}</p>
-        <ion-button size="small" (click)="openInvoiceList()">Back To {{ invoice()?.documentType === 'quote' ? 'Quotes' : 'Invoices' }}</ion-button>
+    @if (!loading()) {
+      @if (error()) {
+        <section class="app-surface state-card">
+          <h2>{{ documentTypeLabel() }} Unavailable</h2>
+          <p>{{ error() }}</p>
+          <button class="btn ui-button btn-primary btn-sm" type="button" (click)="openInvoiceList()">Back To {{ invoice()?.documentType === 'quote' ? 'Quotes' : 'Invoices' }}</button>
+        </section>
+      } @else {
+        @if (invoice(); as detail) {
+          <section class="app-surface invoice-header-card">
+            <div class="invoice-head-main">
+              <div class="invoice-eyebrow">{{ documentTypeLabel() }}</div>
+              <h2>{{ detail.invoiceNumber }}</h2>
+              <div class="invoice-meta">
+                <span>{{ detail.customerName }}</span>
+                <span>{{ detail.template }}</span>
+                @if (detail.documentType === 'invoice' && detail.stage === 'completed') {
+                  <span class="status-chip completed">
+                    Completed
+                  </span>
+                }
+              </div>
+            </div>
+            <div class="invoice-head-actions">
+              @if (detail.customerId) {
+                <button class="btn btn-outline-secondary btn-sm" type="button" (click)="openCustomerPortal()">
+                  Customer Portal
+                </button>
+              }
+              <label class="field stage-field">
+                <span>Stage</span>
+                <select class="form-select" (change)="setStage($any($event.target).value)">
+                  @for (stage of stageOptions(); track stage) {
+                    <option [value]="stage" [selected]="stage === selectedStageValue()">
+                      {{ stageDisplayLabel(stage) }}
+                    </option>
+                  }
+                </select>
+              </label>
+              @if (detail.documentType !== 'quote' && !isFinalInvoiceMode()) {
+                <button type="button"
+                  class="btn ui-button btn-ghost-primary btn-sm secondary-header-action"
+                  (click)="openInvoiceList()">
+                  Back To Invoices
+                </button>
+              }
+              @if (detail.documentType === 'invoice' && (detail.jobNumber || detail.lineItems.length)) {
+                <button type="button"
+                  class="btn ui-button btn-ghost-primary btn-sm secondary-header-action"
+                  [routerLink]="['/jobs/detail']"
+                  [queryParams]="invoiceJobDetailQueryParams(detail)">
+                  Open Job
+                </button>
+              }
+              @if (detail.documentType === 'quote' && detail.stage === 'accepted') {
+                <button class="btn ui-button btn-outline-primary btn-sm" type="button"
+                  (click)="createInvoiceFromQuote()">
+                  Create Invoice
+                </button>
+              }
+              @if (detail.documentType === 'invoice') {
+                <button type="button"
+                  class="btn ui-button btn-primary btn-sm primary-header-action"
+                  [disabled]="sendingInvoice() || isFinalInvoiceSendDisabled()"
+                  (click)="openSendInvoiceModal()">
+                  {{ sendingInvoice() ? 'Sending...' : sendInvoiceLabel() }}
+                </button>
+              }
+              <button class="btn ui-button btn-primary btn-sm" type="button" (click)="save()" [disabled]="!canSave()">
+                {{ saving() ? 'Saving...' : ('Save ' + documentTypeLabel()) }}
+              </button>
+              @if (detail.documentType === 'invoice') {
+                <div
+                  class="invoice-actions-menu"
+                  (click)="$event.stopPropagation()">
+                  <button
+                    type="button"
+                    class="invoice-actions-trigger"
+                    aria-label="More invoice actions"
+                    (click)="toggleInvoiceActionsMenu($event)">
+                    &#8942;
+                  </button>
+                  @if (invoiceActionsMenuOpen()) {
+                    <div class="invoice-actions-popover">
+                      @if (paymentAvailability().provider?.key === 'paylynx' && amountDue() > 0 && detail.stage !== 'canceled' && detail.stage !== 'expired') {
+                        <button
+                          type="button" class="invoice-actions-item" [disabled]="hasChanges()" (click)="openPaylynxCharge()">
+                          Charge Card
+                        </button>
+                      }
+                      @for (payment of paylynxRefunds(); track payment) {
+                        <button
+                          type="button"
+                          class="invoice-actions-item"
+                          [disabled]="refundingCustomer() || hasChanges()"
+                          (click)="openPaylynxReturn(payment)">
+                          Return or void payment {{ payment.originalTransactionId }}
+                        </button>
+                      }
+                      @if (overpaymentAmount() > 0) {
+                        <button
+                          type="button"
+                          class="invoice-actions-item"
+                          [disabled]="refundingCustomer()"
+                          (click)="refundCustomerOverpayment()">
+                          {{ refundingCustomer() ? 'Refunding...' : 'Refund Customer' }}
+                        </button>
+                      }
+                      <button
+                        type="button"
+                        class="invoice-actions-item"
+                        (click)="printPaidInvoice()">
+                        Print Invoice
+                      </button>
+                      <button
+                        type="button"
+                        class="invoice-actions-item danger"
+                        [disabled]="!canCancelInvoice()"
+                        (click)="cancelInvoice()">
+                        Cancel Invoice
+                      </button>
+                    </div>
+                  }
+                </div>
+              }
+            </div>
+          </section>
+        }
+        @if (returnResult()) {
+          <div class="alert alert-success" role="status">{{ returnResult() }}</div>
+        }
+        @if (invoice(); as detail) {
+          <section class="editor-grid">
+            <article class="app-surface form-card">
+              <h3>Customer + Job</h3>
+              <div class="field-grid two-col">
+                <label class="field">
+                  <span>Customer Name</span>
+                  <input class="form-control"
+                    type="text"
+                    [value]="detail.customerName"
+                    (input)="updateField('customerName', $any($event.target).value)" />
+                </label>
+                <label class="field">
+                  <span>Customer Email</span>
+                  <input class="form-control"
+                    type="email"
+                    [value]="detail.customerEmail"
+                    (input)="updateField('customerEmail', $any($event.target).value)" />
+                </label>
+                <label class="field">
+                  <span>Customer Phone</span>
+                  <input class="form-control"
+                    type="text"
+                    [value]="detail.customerPhone"
+                    (input)="updateField('customerPhone', $any($event.target).value)" />
+                </label>
+                <label class="field">
+                  <span>Vehicle</span>
+                  <input class="form-control"
+                    type="text"
+                    [value]="detail.vehicle"
+                    (input)="updateField('vehicle', $any($event.target).value)" />
+                </label>
+                <label class="field full address-autocomplete">
+                  <span>Customer Address</span>
+                  <input class="form-control"
+                    type="text"
+                    [value]="detail.customerAddress"
+                    (input)="onCustomerAddressInput($any($event.target).value)"
+                    (blur)="onCustomerAddressBlur()" />
+                  @if (customerAddressSearching() || customerAddressSuggestions().length || customerAddressNoMatches()) {
+                    <div class="address-lookup-box">
+                      @if (customerAddressSearching()) {
+                        <div class="address-lookup-state">Searching addresses...</div>
+                      }
+                      @for (item of customerAddressSuggestions(); track item) {
+                        <button
+                          type="button"
+                          class="address-lookup-option"
+                          (mousedown)="$event.preventDefault()"
+                          (click)="selectCustomerAddressSuggestion(item)">
+                          {{ item.display }}
+                        </button>
+                      }
+                      @if (!customerAddressSearching() && customerAddressNoMatches()) {
+                        <div class="address-lookup-state">
+                          No address matches found.
+                        </div>
+                      }
+                    </div>
+                  }
+                </label>
+                <label class="field">
+                  <span>Template</span>
+                  <input class="form-control"
+                    type="text"
+                    [value]="detail.template"
+                    (input)="updateField('template', $any($event.target).value)" />
+                </label>
+                <label class="field">
+                  <span>Job Type</span>
+                  <input class="form-control"
+                    type="text"
+                    [value]="detail.jobType"
+                    (input)="updateField('jobType', $any($event.target).value)" />
+                </label>
+                <label class="field">
+                  <span>Referral Source</span>
+                  <input class="form-control"
+                    type="text"
+                    [value]="detail.referralSource"
+                    (input)="updateField('referralSource', $any($event.target).value)" />
+                </label>
+                <label class="field">
+                  <span>Flags / Markers</span>
+                  <input class="form-control"
+                    type="text"
+                    [value]="detail.flags"
+                    (input)="updateField('flags', $any($event.target).value)" />
+                </label>
+                <label class="field full">
+                  <span>Description</span>
+                  <textarea class="form-control"
+                    rows="2"
+                    [value]="detail.description"
+                  (input)="updateField('description', $any($event.target).value)"></textarea>
+                </label>
+                <label class="field">
+                  <span>Issue Date</span>
+                  <input class="form-control"
+                    type="date"
+                    [value]="detail.issueDate"
+                    (input)="updateField('issueDate', $any($event.target).value)" />
+                </label>
+                <label class="field">
+                  <span>Due Date</span>
+                  <input class="form-control"
+                    type="date"
+                    [value]="detail.dueDate"
+                    (input)="updateField('dueDate', $any($event.target).value)" />
+                </label>
+                <label class="field">
+                  <span>Payment Date</span>
+                  <input class="form-control"
+                    type="date"
+                    [value]="detail.paymentDate"
+                    (input)="updateField('paymentDate', $any($event.target).value)" />
+                </label>
+                <label class="field">
+                  <span>Exported Date</span>
+                  <input class="form-control"
+                    type="date"
+                    [value]="detail.exportedDate"
+                    (input)="updateField('exportedDate', $any($event.target).value)" />
+                </label>
+              </div>
+            </article>
+            <article class="app-surface form-card">
+              <h3>Business + Notes</h3>
+              <div class="field-grid two-col">
+                <label class="field">
+                  <span>Business Name</span>
+                  <input class="form-control"
+                    type="text"
+                    [value]="detail.businessName"
+                    (input)="updateField('businessName', $any($event.target).value)" />
+                </label>
+                <label class="field">
+                  <span>Business Email</span>
+                  <input class="form-control"
+                    type="email"
+                    [value]="detail.businessEmail"
+                    (input)="updateField('businessEmail', $any($event.target).value)" />
+                </label>
+                <label class="field">
+                  <span>Business Phone</span>
+                  <input class="form-control"
+                    type="text"
+                    [value]="detail.businessPhone"
+                    (input)="updateField('businessPhone', $any($event.target).value)" />
+                </label>
+                <label class="field">
+                  <span>Business Logo URL</span>
+                  <input class="form-control"
+                    type="text"
+                    [value]="detail.businessLogoUrl"
+                    (input)="updateField('businessLogoUrl', $any($event.target).value)" />
+                </label>
+                <label class="field full address-autocomplete">
+                  <span>Business Address</span>
+                  <input class="form-control"
+                    type="text"
+                    [value]="detail.businessAddress"
+                    (input)="onBusinessAddressInput($any($event.target).value)"
+                    (blur)="onBusinessAddressBlur()" />
+                  @if (businessAddressSearching() || businessAddressSuggestions().length || businessAddressNoMatches()) {
+                    <div class="address-lookup-box">
+                      @if (businessAddressSearching()) {
+                        <div class="address-lookup-state">Searching addresses...</div>
+                      }
+                      @for (item of businessAddressSuggestions(); track item) {
+                        <button
+                          type="button"
+                          class="address-lookup-option"
+                          (mousedown)="$event.preventDefault()"
+                          (click)="selectBusinessAddressSuggestion(item)">
+                          {{ item.display }}
+                        </button>
+                      }
+                      @if (!businessAddressSearching() && businessAddressNoMatches()) {
+                        <div class="address-lookup-state">
+                          No address matches found.
+                        </div>
+                      }
+                    </div>
+                  }
+                </label>
+                <label class="field full">
+                  <span>Staff Note</span>
+                  <textarea class="form-control"
+                    rows="3"
+                    [value]="detail.staffNote"
+                  (input)="updateField('staffNote', $any($event.target).value)"></textarea>
+                </label>
+                <label class="field full">
+                  <span>Customer Note</span>
+                  <textarea class="form-control"
+                    rows="3"
+                    [value]="detail.customerNote"
+                  (input)="updateField('customerNote', $any($event.target).value)"></textarea>
+                </label>
+              </div>
+              <div class="payment-panel">
+                <div class="payment-head">
+                  <h4>Payment Link</h4>
+                  <label class="check-row">
+                    <input class="form-check-input"
+                      type="checkbox"
+                      [checked]="detail.includePaymentLink"
+                      [disabled]="!paymentAvailability().enabled && !detail.includePaymentLink"
+                      (change)="togglePaymentLink($any($event.target).checked)" />
+                    <span>Include payment link</span>
+                  </label>
+                </div>
+                @if (paymentAvailability().provider; as provider) {
+                  <div class="provider-row">
+                    Provider: {{ provider.label }}
+                  </div>
+                }
+                @if (!paymentAvailability().enabled) {
+                  <div class="provider-row muted">
+                    {{ paymentAvailability().reason || 'Need to connect your payment provider' }}
+                    <button type="button" class="inline-link" (click)="openAdminSettings()">Open Admin Settings</button>
+                  </div>
+                }
+                @if (detail.includePaymentLink) {
+                  <label class="field">
+                    <span>Payment URL</span>
+                    <input class="form-control"
+                      type="text"
+                      [readonly]="!paymentAvailability().enabled"
+                      [value]="detail.paymentLinkUrl"
+                      (input)="updateField('paymentLinkUrl', $any($event.target).value)" />
+                  </label>
+                }
+              </div>
+            </article>
+          </section>
+        }
+        @if (invoice(); as detail) {
+          <section class="app-surface line-items-card">
+            <header class="line-items-head">
+              <h3>Parts + Labor</h3>
+              <div class="line-item-actions">
+                <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="addLineItem('part')">+ Part</button>
+                <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="addLineItem('labor')">+ Labor</button>
+              </div>
+            </header>
+            <div class="line-table-wrap">
+              <table class="line-table">
+                <thead>
+                  <tr>
+                    <th>Type</th>
+                    <th>Part Status</th>
+                    <th>Description</th>
+                    <th>Qty</th>
+                    <th>Price</th>
+                    <th>Tax %</th>
+                    <th>Line Total</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                @if (lineItems().length) {
+                  <tbody>
+                    @for (line of pagedLineItems(); track trackLineItem($index, line)) {
+                      <tr>
+                        <td>
+                          <span class="line-muted">{{ line.type === 'labor' ? 'Labor' : 'Part' }}</span>
+                        </td>
+                        <td>
+                          @if (line.type === 'part') {
+                            <select class="form-select"
+                              [value]="line.partStatus || 'out-of-stock'"
+                              (change)="updateLineItemField(line.id, 'partStatus', $any($event.target).value)">
+                              @for (option of partStatusOptions; track option) {
+                                <option [value]="option.value">
+                                  {{ option.label }}
+                                </option>
+                              }
+                            </select>
+                          } @else {
+                            <span class="line-muted">N/A</span>
+                          }
+                        </td>
+                        <td>
+                          <input class="form-control"
+                            type="text"
+                            [placeholder]="line.type === 'part' ? 'Part description' : 'Labor description'"
+                            [value]="line.description"
+                            (input)="updateLineItemField(line.id, 'description', $any($event.target).value)" />
+                        </td>
+                        <td>
+                          <input class="form-control"
+                            type="number"
+                            min="0"
+                            step="1"
+                            [value]="line.quantity"
+                            (input)="updateLineItemField(line.id, 'quantity', $any($event.target).value)" />
+                        </td>
+                        <td>
+                          <input class="form-control"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            [value]="line.unitPrice"
+                            (input)="updateLineItemField(line.id, 'unitPrice', $any($event.target).value)" />
+                        </td>
+                        <td>
+                          <input class="form-control"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            [value]="line.taxRate"
+                            (input)="updateLineItemField(line.id, 'taxRate', $any($event.target).value)" />
+                        </td>
+                        <td class="amount">{{ line.lineTotal | currency:'USD':'symbol':'1.2-2' }}</td>
+                        <td class="remove-cell">
+                          <button type="button" class="remove-line" (click)="removeLineItem(line.id)">Remove</button>
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                } @else {
+                  <div class="line-empty">No line items yet. Add part or labor rows above.</div>
+                }
+              </table>
+            </div>
+            @if (lineItems().length > 0) {
+              <div class="table-pager">
+                <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="prevLineItemsPage()" [disabled]="lineItemsPage() <= 1">
+                  Previous
+                </button>
+                <span>Page {{ lineItemsPage() }} of {{ lineItemsTotalPages() }}</span>
+                <button class="btn ui-button btn-outline-primary btn-sm" type="button"
+                  (click)="nextLineItemsPage()"
+                  [disabled]="lineItemsPage() >= lineItemsTotalPages()">
+                  Next
+                </button>
+              </div>
+            }
+          </section>
+        }
+        <ui-modal [isOpen]="partPickerOpen()" (didDismiss)="closePartPicker()" label="Select Part">
+          <ng-template>
+            <header class="ui-header app-header">
+              <div class="ui-toolbar">
+                <h1 class="ui-title">Select Part</h1>
+                <div class="ui-buttons" slot="end">
+                  <button class="btn ui-button btn-ghost-primary" type="button" (click)="closePartPicker()">Close</button>
+                </div>
+              </div>
+            </header>
+            <div class="ui-content part-picker-modal-content app-padding" [class.ui-no-scroll]="true">
+              <div class="part-picker-panel">
+                <div class="part-picker-search-row">
+                  <label class="field part-picker-search">
+                    <span>Search inventory</span>
+                    <input class="form-control"
+                      type="text"
+                      placeholder="Part name, SKU, or vendor"
+                      [value]="partPickerQuery()"
+                      (input)="setPartPickerQuery($any($event.target).value)" />
+                  </label>
+                  <button class="btn ui-button btn-outline-primary" type="button" (click)="addCustomPartFromPicker()">Custom Part</button>
+                </div>
+                <div class="part-picker-count">
+                  {{ partPickerResults().length }} result{{ partPickerResults().length === 1 ? '' : 's' }} shown
+                </div>
+                @if (partPickerResults().length) {
+                  <div class="part-picker-table-wrap">
+                    <table class="part-picker-table">
+                      <thead>
+                        <tr>
+                          <th>Part</th>
+                          <th>SKU</th>
+                          <th>Cost</th>
+                          <th class="part-picker-action-col">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        @for (item of partPickerResults(); track item) {
+                          <tr>
+                            <td>
+                              <strong>{{ inventoryName(item) || 'Part' }}</strong>
+                              <span>{{ inventoryVendor(item) || inventoryCategory(item) || 'No supplier' }}</span>
+                            </td>
+                            <td>{{ inventorySku(item) || '--' }}</td>
+                            <td>{{ item.unitCost | currency:'USD':'symbol':'1.2-2' }}</td>
+                            <td class="part-picker-action-col">
+                              <button type="button" class="part-picker-add" (click)="addInventoryPartFromPicker(item)">Add</button>
+                            </td>
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
+                  </div>
+                } @else {
+                  <div class="line-empty">No matching inventory parts. Try another search or add a custom part.</div>
+                }
+              </div>
+            </div>
+          </ng-template>
+        </ui-modal>
+        @if (invoice(); as detail) {
+          <section class="app-surface ordered-parts-card">
+            @if (detail.documentType === 'invoice') {
+              <header class="ordered-parts-head">
+                <div>
+                  <h3>Purchase Orders + Tracking</h3>
+                  <span>Vendor orders connected to this invoice</span>
+                </div>
+                <button class="btn ui-button btn-outline-primary btn-sm" type="button"
+                  [routerLink]="['/jobs/detail']"
+                  [queryParams]="invoiceJobDetailQueryParams(detail)">
+                  Open Job
+                </button>
+              </header>
+              @if (linkedPurchaseOrderRows().length) {
+                <div class="line-table-wrap ordered-parts-wrap">
+                  <table class="line-table ordered-parts-table">
+                    <thead>
+                      <tr>
+                        <th>PO</th>
+                        <th>Part</th>
+                        <th>Status</th>
+                        <th>Order #</th>
+                        <th>Tracking</th>
+                        <th>ETA</th>
+                        <th>Received</th>
+                        <th>Open</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      @for (row of linkedPurchaseOrderRows(); track row) {
+                        <tr>
+                          <td>{{ row.order.id }}</td>
+                          <td>
+                            <strong>{{ row.line.partName || 'Part' }}</strong>
+                            <span>SKU {{ row.line.sku || 'N/A' }}</span>
+                          </td>
+                          <td>{{ row.order.status }}</td>
+                          <td>{{ row.line.orderNumber || 'N/A' }}</td>
+                          <td>
+                            @if (row.line.trackingNumber) {
+                              <a [href]="trackingUrl(row.line.trackingNumber)" target="_blank" rel="noreferrer">
+                                {{ row.line.trackingNumber }}
+                              </a>
+                            } @else {
+                              N/A
+                            }
+                          </td>
+                          <td>{{ formatDateOnly(row.line.etaDate) }}</td>
+                          <td>{{ poReceivedProgress(row.line) }}</td>
+                          <td class="po-link-actions">
+                            <a [routerLink]="['/purchase-orders']" [queryParams]="{ id: row.order.id }">PO</a>
+                            <a [routerLink]="['/jobs/detail']" [queryParams]="poJobDetailQueryParams(row)">Job</a>
+                          </td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
+              } @else {
+                <div class="line-empty">
+                  No purchase orders are linked to this invoice yet. Open the job workfile to create a PO from job parts.
+                </div>
+              }
+            }
+          </section>
+        }
+        @if (invoice(); as detail) {
+          <section class="summary-grid">
+            <article class="app-surface timeline-card">
+              <h3>Timeline</h3>
+              @if (!detail.timeline.length) {
+                <div class="timeline-empty">No timeline entries yet.</div>
+              }
+              @if (detail.timeline.length) {
+                <ul class="timeline-list">
+                  @for (entry of detail.timeline; track entry) {
+                    <li
+                      class="timeline-item"
+                      [class.timeline-right]="isCustomerTimelineEntry(entry)"
+                      [class.timeline-left]="!isCustomerTimelineEntry(entry)">
+                      <div
+                        class="timeline-marker"
+                        [class.is-draft]="timelineMarkerKind(entry.message) === 'draft'"
+                        [class.is-sent]="timelineMarkerKind(entry.message) === 'sent'"
+                        [class.is-accepted]="timelineMarkerKind(entry.message) === 'accepted'"
+                        [class.is-declined]="timelineMarkerKind(entry.message) === 'declined'"
+                        [class.is-paused]="timelineMarkerKind(entry.message) === 'paused'">
+                        <ui-icon [name]="timelineMarkerGlyph(entry.message)"></ui-icon>
+                      </div>
+                      <article
+                        class="timeline-content"
+                        [class.is-system-entry]="!isCustomerTimelineEntry(entry)"
+                        [class.is-customer-entry]="isCustomerTimelineEntry(entry)">
+                        <div class="timeline-actor-row">
+                          <span class="timeline-actor-label">{{ timelineActorName(entry) }}</span>
+                        </div>
+                        <div class="timeline-time">{{ entry.createdAt | date:'short' }}</div>
+                        <div class="timeline-message">{{ entry.message }}</div>
+                      </article>
+                    </li>
+                  }
+                </ul>
+              }
+            </article>
+            <article class="app-surface totals-card">
+              <h3>Totals</h3>
+              <div class="total-row">
+                <span>Subtotal</span>
+                <strong>{{ totals().subtotal | currency:'USD':'symbol':'1.2-2' }}</strong>
+              </div>
+              <div class="total-row">
+                <span>Tax</span>
+                <strong>{{ totals().taxTotal | currency:'USD':'symbol':'1.2-2' }}</strong>
+              </div>
+              @if (detail.returnCreditAmount) {
+                <div class="total-row">
+                  <span>Return Credit</span>
+                  <strong>−{{ detail.returnCreditAmount | currency:'USD':'symbol':'1.2-2' }}</strong>
+                </div>
+              }
+              <div class="total-row total-grand">
+                <span>Total</span>
+                <strong>{{ totals().total | currency:'USD':'symbol':'1.2-2' }}</strong>
+              </div>
+              @if (detail.documentType === 'invoice') {
+                <div class="total-row">
+                  <span>Paid To Date</span>
+                  <strong>{{ paidAmount() | currency:'USD':'symbol':'1.2-2' }}</strong>
+                </div>
+              }
+              @if (detail.documentType === 'invoice' && overpaymentAmount() > 0) {
+                <div class="total-row total-overpay">
+                  <span>Overpaid</span>
+                  <strong>{{ overpaymentAmount() | currency:'USD':'symbol':'1.2-2' }}</strong>
+                </div>
+              }
+              @if (detail.documentType === 'invoice') {
+                <div class="total-row total-grand">
+                  <span>Amount Due</span>
+                  <strong>{{ amountDue() | currency:'USD':'symbol':'1.2-2' }}</strong>
+                </div>
+              }
+            </article>
+          </section>
+        }
+      }
+    } @else {
+      <section class="app-surface state-card">
+        <h2>Loading {{ documentTypeLabel() }}...</h2>
+        <p>Please wait while we pull details.</p>
       </section>
-    </ng-container>
+    }
   </div>
 
-  <ng-template #loadingState>
-    <section class="glass-surface state-card">
-      <h2>Loading {{ documentTypeLabel() }}...</h2>
-      <p>Please wait while we pull details.</p>
-    </section>
-  </ng-template>
 
-  <ng-template #detailState>
-    <section class="glass-surface invoice-header-card" *ngIf="invoice() as detail">
-      <div class="invoice-head-main">
-        <div class="invoice-eyebrow">{{ documentTypeLabel() }}</div>
-        <h2>{{ detail.invoiceNumber }}</h2>
-        <div class="invoice-meta">
-          <span>{{ detail.customerName }}</span>
-          <span>{{ detail.template }}</span>
-          <span class="status-chip completed" *ngIf="detail.documentType === 'invoice' && detail.stage === 'completed'">
-            Completed
-          </span>
-        </div>
-      </div>
 
-      <div class="invoice-head-actions">
-        <label class="field stage-field">
-          <span>Stage</span>
-          <select (change)="setStage($any($event.target).value)">
-            <option *ngFor="let stage of stageOptions()" [value]="stage" [selected]="stage === selectedStageValue()">
-              {{ stageDisplayLabel(stage) }}
-            </option>
-          </select>
-        </label>
-        <ion-button size="small" fill="outline" *ngIf="detail.documentType !== 'quote' && !isFinalInvoiceMode()" (click)="openInvoiceList()">
-          Back To Invoices
-        </ion-button>
-        <ion-button
-          size="small"
-          fill="outline"
-          *ngIf="detail.documentType === 'quote' && detail.stage === 'accepted'"
-          (click)="createInvoiceFromQuote()">
-          Create Invoice
-        </ion-button>
-        <ion-button
-          size="small"
-          [fill]="isFinalInvoiceMode() ? 'solid' : 'outline'"
-          *ngIf="detail.documentType === 'invoice'"
-          [disabled]="sendingInvoice() || isFinalInvoiceSendDisabled()"
-          (click)="openSendInvoiceModal()">
-          {{ sendingInvoice() ? 'Sending...' : sendInvoiceLabel() }}
-        </ion-button>
-        <ion-button size="small" (click)="save()" [disabled]="!canSave()">
-          {{ saving() ? 'Saving...' : ('Save ' + documentTypeLabel()) }}
-        </ion-button>
-        <div
-          class="invoice-actions-menu"
-          *ngIf="detail.documentType === 'invoice'"
-          (click)="$event.stopPropagation()">
-          <button
-            type="button"
-            class="invoice-actions-trigger"
-            aria-label="More invoice actions"
-            (click)="toggleInvoiceActionsMenu($event)">
-            &#8942;
-          </button>
-          <div class="invoice-actions-popover" *ngIf="invoiceActionsMenuOpen()">
-            <button
-              type="button"
-              class="invoice-actions-item"
-              *ngIf="overpaymentAmount() > 0"
-              [disabled]="refundingCustomer()"
-              (click)="refundCustomerOverpayment()">
-              {{ refundingCustomer() ? 'Refunding...' : 'Refund Customer' }}
-            </button>
-            <button
-              type="button"
-              class="invoice-actions-item"
-              (click)="printPaidInvoice()">
-              Print Invoice
-            </button>
-            <button
-              type="button"
-              class="invoice-actions-item danger"
-              [disabled]="!canCancelInvoice()"
-              (click)="cancelInvoice()">
-              Cancel Invoice
-            </button>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="editor-grid" *ngIf="invoice() as detail">
-      <article class="glass-surface form-card">
-        <h3>Customer + Job</h3>
-        <div class="field-grid two-col">
-          <label class="field">
-            <span>Customer Name</span>
-            <input
-              type="text"
-              [value]="detail.customerName"
-              (input)="updateField('customerName', $any($event.target).value)" />
-          </label>
-          <label class="field">
-            <span>Customer Email</span>
-            <input
-              type="email"
-              [value]="detail.customerEmail"
-              (input)="updateField('customerEmail', $any($event.target).value)" />
-          </label>
-          <label class="field">
-            <span>Customer Phone</span>
-            <input
-              type="text"
-              [value]="detail.customerPhone"
-              (input)="updateField('customerPhone', $any($event.target).value)" />
-          </label>
-          <label class="field">
-            <span>Vehicle</span>
-            <input
-              type="text"
-              [value]="detail.vehicle"
-              (input)="updateField('vehicle', $any($event.target).value)" />
-          </label>
-          <label class="field full address-autocomplete">
-            <span>Customer Address</span>
-            <input
-              type="text"
-              [value]="detail.customerAddress"
-              (input)="onCustomerAddressInput($any($event.target).value)"
-              (blur)="onCustomerAddressBlur()" />
-            <div class="address-lookup-box" *ngIf="customerAddressSearching() || customerAddressSuggestions().length || customerAddressNoMatches()">
-              <div class="address-lookup-state" *ngIf="customerAddressSearching()">Searching addresses...</div>
-              <button
-                type="button"
-                class="address-lookup-option"
-                *ngFor="let item of customerAddressSuggestions()"
-                (mousedown)="$event.preventDefault()"
-                (click)="selectCustomerAddressSuggestion(item)">
-                {{ item.display }}
-              </button>
-              <div class="address-lookup-state" *ngIf="!customerAddressSearching() && customerAddressNoMatches()">
-                No address matches found.
-              </div>
+  <ui-modal [isOpen]="!!paylynxReturn()" [backdropDismiss]="!refundingCustomer()" (didDismiss)="closePaylynxReturn()" label="PayLynx return">
+    <ng-template>
+      @if (paylynxReturn(); as payment) {
+        <div class="app-padding send-invoice-modal-content">
+          <h2>{{ returnPreview()?.operation === 'void' ? 'Void Payment' : 'Return or Refund Payment' }}</h2>
+          <p class="text-secondary">PayLynx transaction {{ payment.originalTransactionId }}@if (payment.accountNumber) {
+            <span> · {{ payment.accountNumber }}</span>
+          }</p>
+          @if (loadingReturn()) {
+            <p role="status">Checking payment status…</p>
+          }
+          @if (returnError()) {
+            <div class="alert alert-danger" role="alert">{{ returnError() }}</div>
+          }
+          @if (!loadingReturn() && !returnPreview() && !returnNeedsReview()) {
+            <button class="btn btn-outline-primary" type="button"
+            (click)="loadPaylynxReturn()">Check Payment Status</button>
+          }
+          @if (returnPreview(); as preview) {
+            <div class="d-flex flex-column gap-3">
+              @if (preview.operation === 'void') {
+                <div class="alert alert-info mb-0">
+                  This payment has yet to settle. PayLynx can void the full {{ preview.originalAmount | currency }}.
+                </div>
+              }
+              <label class="form-label mb-0">
+                Invoice treatment
+                <select class="form-select mt-1" [disabled]="refundingCustomer() || returnNeedsReview()"
+                  [value]="returnMode()" (change)="returnMode.set($any($event.target).value)">
+                  <option value="payment">Reverse payment and restore balance due</option>
+                  <option value="credit">Return and credit the invoice</option>
+                </select>
+              </label>
+              @if (preview.operation === 'refund') {
+                <label class="form-label mb-0">
+                  Return amount (up to {{ preview.refundableAmount | currency }})
+                  <input class="form-control mt-1" inputmode="decimal" [value]="returnAmount()"
+                    [disabled]="refundingCustomer() || returnNeedsReview()" (input)="returnAmount.set($any($event.target).value)" />
+                </label>
+              }
+              @if (preview.operation === 'refund' && returnMode() === 'credit') {
+                <label class="form-label mb-0">
+                  Card fee to retain (optional)
+                  <input class="form-control mt-1" inputmode="decimal" placeholder="0.00" [value]="returnFee()"
+                    [disabled]="refundingCustomer() || returnNeedsReview()" (input)="returnFee.set($any($event.target).value)" />
+                </label>
+              }
+              <label class="form-label mb-0">
+                {{ returnMode() === 'credit' ? 'Reason for return (required)' : 'Reason (optional)' }}
+                <input class="form-control mt-1" maxlength="256" [value]="returnReason()"
+                  [disabled]="refundingCustomer() || returnNeedsReview()" (input)="returnReason.set($any($event.target).value)" />
+              </label>
+              <dl class="mb-0">
+                <div class="d-flex justify-content-between"><dt>{{ preview.operation === 'void' ? 'Amount to void' : 'Customer receives' }}</dt>
+                <dd class="mb-0">{{ returnNetAmount() | currency }}</dd></div>
+                @if (returnMode() === 'credit') {
+                  <div class="d-flex justify-content-between">
+                    <dt>Invoice credit</dt><dd class="mb-0">{{ returnNetAmount() | currency }}</dd>
+                  </div>
+                }
+              </dl>
             </div>
-          </label>
-          <label class="field">
-            <span>Template</span>
-            <input
-              type="text"
-              [value]="detail.template"
-              (input)="updateField('template', $any($event.target).value)" />
-          </label>
-          <label class="field">
-            <span>Job Type</span>
-            <input
-              type="text"
-              [value]="detail.jobType"
-              (input)="updateField('jobType', $any($event.target).value)" />
-          </label>
-          <label class="field">
-            <span>Referral Source</span>
-            <input
-              type="text"
-              [value]="detail.referralSource"
-              (input)="updateField('referralSource', $any($event.target).value)" />
-          </label>
-          <label class="field">
-            <span>Flags / Markers</span>
-            <input
-              type="text"
-              [value]="detail.flags"
-              (input)="updateField('flags', $any($event.target).value)" />
-          </label>
-          <label class="field full">
-            <span>Description</span>
-            <textarea
-              rows="2"
-              [value]="detail.description"
-              (input)="updateField('description', $any($event.target).value)"></textarea>
-          </label>
-          <label class="field">
-            <span>Issue Date</span>
-            <input
-              type="date"
-              [value]="detail.issueDate"
-              (input)="updateField('issueDate', $any($event.target).value)" />
-          </label>
-          <label class="field">
-            <span>Due Date</span>
-            <input
-              type="date"
-              [value]="detail.dueDate"
-              (input)="updateField('dueDate', $any($event.target).value)" />
-          </label>
-          <label class="field">
-            <span>Payment Date</span>
-            <input
-              type="date"
-              [value]="detail.paymentDate"
-              (input)="updateField('paymentDate', $any($event.target).value)" />
-          </label>
-          <label class="field">
-            <span>Exported Date</span>
-            <input
-              type="date"
-              [value]="detail.exportedDate"
-              (input)="updateField('exportedDate', $any($event.target).value)" />
-          </label>
-        </div>
-      </article>
-
-      <article class="glass-surface form-card">
-        <h3>Business + Notes</h3>
-        <div class="field-grid two-col">
-          <label class="field">
-            <span>Business Name</span>
-            <input
-              type="text"
-              [value]="detail.businessName"
-              (input)="updateField('businessName', $any($event.target).value)" />
-          </label>
-          <label class="field">
-            <span>Business Email</span>
-            <input
-              type="email"
-              [value]="detail.businessEmail"
-              (input)="updateField('businessEmail', $any($event.target).value)" />
-          </label>
-          <label class="field">
-            <span>Business Phone</span>
-            <input
-              type="text"
-              [value]="detail.businessPhone"
-              (input)="updateField('businessPhone', $any($event.target).value)" />
-          </label>
-          <label class="field">
-            <span>Business Logo URL</span>
-            <input
-              type="text"
-              [value]="detail.businessLogoUrl"
-              (input)="updateField('businessLogoUrl', $any($event.target).value)" />
-          </label>
-          <label class="field full address-autocomplete">
-            <span>Business Address</span>
-            <input
-              type="text"
-              [value]="detail.businessAddress"
-              (input)="onBusinessAddressInput($any($event.target).value)"
-              (blur)="onBusinessAddressBlur()" />
-            <div class="address-lookup-box" *ngIf="businessAddressSearching() || businessAddressSuggestions().length || businessAddressNoMatches()">
-              <div class="address-lookup-state" *ngIf="businessAddressSearching()">Searching addresses...</div>
-              <button
-                type="button"
-                class="address-lookup-option"
-                *ngFor="let item of businessAddressSuggestions()"
-                (mousedown)="$event.preventDefault()"
-                (click)="selectBusinessAddressSuggestion(item)">
-                {{ item.display }}
+          }
+          <div class="send-invoice-actions">
+            <button class="btn btn-outline-secondary" type="button" [disabled]="refundingCustomer()" (click)="closePaylynxReturn()">Close</button>
+            @if (returnPreview()) {
+              <button class="btn btn-primary" type="button" [disabled]="!canSubmitReturn()" (click)="confirmPaylynxReturn()">
+                {{ refundingCustomer() ? 'Processing…' : (returnPreview()?.operation === 'void' ? 'Confirm Void' : 'Confirm Refund') }}
               </button>
-              <div class="address-lookup-state" *ngIf="!businessAddressSearching() && businessAddressNoMatches()">
-                No address matches found.
-              </div>
-            </div>
-          </label>
-          <label class="field full">
-            <span>Staff Note</span>
-            <textarea
-              rows="3"
-              [value]="detail.staffNote"
-              (input)="updateField('staffNote', $any($event.target).value)"></textarea>
-          </label>
-          <label class="field full">
-            <span>Customer Note</span>
-            <textarea
-              rows="3"
-              [value]="detail.customerNote"
-              (input)="updateField('customerNote', $any($event.target).value)"></textarea>
-          </label>
+            }
+          </div>
         </div>
+      }
+    </ng-template>
+  </ui-modal>
 
-        <div class="payment-panel">
-          <div class="payment-head">
-            <h4>Payment Link</h4>
-            <label class="check-row">
-              <input
-                type="checkbox"
-                [checked]="detail.includePaymentLink"
-                [disabled]="!paymentAvailability().enabled && !detail.includePaymentLink"
-                (change)="togglePaymentLink($any($event.target).checked)" />
-              <span>Include payment link</span>
-            </label>
+  <ui-modal [isOpen]="portalOpen()" (didDismiss)="portalOpen.set(false)" label="Customer Portal">
+    <ng-template>
+      <div class="p-4">
+        <h2>Customer Portal</h2>
+        <p>Share the link for this visit with the customer.</p>
+        @if (portalBusy()) { <p role="status">Updating portal…</p> }
+        @if (portalError()) { <p class="alert alert-danger" role="alert">{{ portalError() }}</p> }
+        @if (portalFeedback()) { <p class="alert alert-success" role="status">{{ portalFeedback() }}</p> }
+        @if (portalUrl()) {
+          <label class="form-label" for="customer-portal-link">Visit link</label>
+          <input id="customer-portal-link" class="form-control" [value]="portalUrl()" readonly />
+          <div class="d-flex flex-wrap gap-2 my-3">
+            <button type="button" class="btn btn-primary" [disabled]="portalBusy()" (click)="copyCustomerPortal()">Copy link</button>
+            <button type="button" class="btn btn-outline-primary" [disabled]="portalBusy() || !invoiceEmailTarget()" (click)="sendCustomerPortal('email')">Email link</button>
+            <button type="button" class="btn btn-outline-primary" [disabled]="portalBusy() || !invoiceSmsTarget()" (click)="sendCustomerPortal('sms')">Text link</button>
+            <button type="button" class="btn btn-outline-danger" [disabled]="portalBusy()" (click)="updatePortalAccess('revoke')">Revoke link</button>
           </div>
+        } @else if (portalStatus() === 'revoked' || portalStatus() === 'expired') {
+          <p>The previous link is {{ portalStatus() }}.</p>
+          <button type="button" class="btn btn-primary" [disabled]="portalBusy()" (click)="updatePortalAccess('rotate')">Create new link</button>
+        }
+        <button type="button" class="btn btn-outline-secondary mt-2" (click)="portalOpen.set(false)">Close</button>
+      </div>
+    </ng-template>
+  </ui-modal>
 
-          <div class="provider-row" *ngIf="paymentAvailability().provider as provider">
-            Provider: {{ provider.label }}
+  <ui-modal [isOpen]="sendInvoiceModalOpen()" (didDismiss)="closeSendInvoiceModal()">
+    <ng-template>
+      <header class="ui-header">
+        <div class="ui-toolbar">
+          <h1 class="ui-title">{{ sendInvoiceLabel() }}</h1>
+          <div class="ui-buttons" slot="end">
+            <button class="btn ui-button btn-primary" type="button" [disabled]="sendingInvoice()" (click)="closeSendInvoiceModal()">Close</button>
           </div>
-
-          <div class="provider-row muted" *ngIf="!paymentAvailability().enabled">
-            {{ paymentAvailability().reason || 'Need to connect your payment provider' }}
-            <button type="button" class="inline-link" (click)="openAdminSettings()">Open Admin Settings</button>
-          </div>
-
-          <label class="field" *ngIf="detail.includePaymentLink">
-            <span>Payment URL</span>
-            <input
-              type="text"
-              [readonly]="!paymentAvailability().enabled"
-              [value]="detail.paymentLinkUrl"
-              (input)="updateField('paymentLinkUrl', $any($event.target).value)" />
-          </label>
-        </div>
-      </article>
-    </section>
-
-    <section class="glass-surface line-items-card" *ngIf="invoice() as detail">
-      <header class="line-items-head">
-        <h3>Parts + Labor</h3>
-        <div class="line-item-actions">
-          <ion-button size="small" fill="outline" (click)="addLineItem('part')">+ Part</ion-button>
-          <ion-button size="small" fill="outline" (click)="addLineItem('labor')">+ Labor</ion-button>
         </div>
       </header>
-
-      <div class="line-table-wrap">
-        <table class="line-table">
-          <thead>
-            <tr>
-              <th>Type</th>
-              <th>Part Status</th>
-              <th>Description</th>
-              <th>Qty</th>
-              <th>Price</th>
-              <th>Tax %</th>
-              <th>Line Total</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody *ngIf="lineItems().length; else noLines">
-            <tr *ngFor="let line of pagedLineItems(); trackBy: trackLineItem">
-              <td>
-                <span class="line-muted">{{ line.type === 'labor' ? 'Labor' : 'Part' }}</span>
-              </td>
-              <td>
-                <select
-                  *ngIf="line.type === 'part'; else laborStatus"
-                  [value]="line.partStatus || 'out-of-stock'"
-                  (change)="updateLineItemField(line.id, 'partStatus', $any($event.target).value)">
-                  <option *ngFor="let option of partStatusOptions" [value]="option.value">
-                    {{ option.label }}
-                  </option>
-                </select>
-                <ng-template #laborStatus>
-                  <span class="line-muted">N/A</span>
-                </ng-template>
-              </td>
-              <td>
-                <div class="line-search">
-                  <input
-                    type="text"
-                    [placeholder]="line.type === 'part' ? 'Search parts...' : 'Search labor...'"
-                    [value]="lineItemSearchValue(line)"
-                    (focus)="onLineItemSearchFocus(line.id)"
-                    (input)="onLineItemSearchInput(line, $any($event.target).value)"
-                    (blur)="onLineItemSearchBlur(line.id)" />
-                  <div class="line-search-results" *ngIf="isLineItemSearchOpen(line)">
-                    <button
-                      type="button"
-                      class="line-search-option"
-                      *ngFor="let option of lineItemSearchOptions(line)"
-                      (mousedown)="$event.preventDefault()"
-                      (click)="selectLineItemSearchOption(line, option)">
-                      <span class="line-search-label">{{ option.label }}</span>
-                      <span class="line-search-meta">{{ option.meta }}</span>
-                    </button>
-                    <div class="line-search-empty" *ngIf="!lineItemSearchOptions(line).length">
-                      No matches found.
-                    </div>
-                  </div>
-                </div>
-              </td>
-              <td>
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  [value]="line.quantity"
-                  (input)="updateLineItemField(line.id, 'quantity', $any($event.target).value)" />
-              </td>
-              <td>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  [value]="line.unitPrice"
-                  (input)="updateLineItemField(line.id, 'unitPrice', $any($event.target).value)" />
-              </td>
-              <td>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  [value]="line.taxRate"
-                  (input)="updateLineItemField(line.id, 'taxRate', $any($event.target).value)" />
-              </td>
-              <td class="amount">{{ line.lineTotal | currency:'USD':'symbol':'1.2-2' }}</td>
-              <td class="remove-cell">
-                <button type="button" class="remove-line" (click)="removeLineItem(line.id)">Remove</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div class="table-pager" *ngIf="lineItems().length > 0">
-        <ion-button size="small" fill="outline" (click)="prevLineItemsPage()" [disabled]="lineItemsPage() <= 1">
-          Previous
-        </ion-button>
-        <span>Page {{ lineItemsPage() }} of {{ lineItemsTotalPages() }}</span>
-        <ion-button
-          size="small"
-          fill="outline"
-          (click)="nextLineItemsPage()"
-          [disabled]="lineItemsPage() >= lineItemsTotalPages()">
-          Next
-        </ion-button>
-      </div>
-
-      <ng-template #noLines>
-        <div class="line-empty">No line items yet. Add part or labor rows above.</div>
-      </ng-template>
-    </section>
-
-    <section class="glass-surface ordered-parts-card" *ngIf="invoice() as detail">
-      <ng-container *ngIf="detail.documentType === 'invoice'">
-        <header class="ordered-parts-head">
-          <h3>Ordered Parts</h3>
-          <span>{{ orderedPartLines().length }} item(s)</span>
-        </header>
-
-        <div class="line-table-wrap ordered-parts-wrap" *ngIf="orderedPartLines().length; else noOrderedParts">
-          <table class="line-table ordered-parts-table">
-            <thead>
-              <tr>
-                <th>Part Name</th>
-                <th>SKU</th>
-                <th>Quantity</th>
-                <th>Price</th>
-                <th>Tracking</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr *ngFor="let line of orderedPartLines(); trackBy: trackLineItem">
-                <td>{{ line.description || 'Part' }}</td>
-                <td>{{ line.code || '—' }}</td>
-                <td>{{ line.quantity }}</td>
-                <td>{{ line.unitPrice | currency:'USD':'symbol':'1.2-2' }}</td>
-                <td>
-                  <input
-                    type="text"
-                    placeholder="Add tracking number"
-                    [value]="line.trackingNumber || ''"
-                    (input)="updateLineItemField(line.id, 'trackingNumber', $any($event.target).value)" />
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <ng-template #noOrderedParts>
-          <div class="line-empty">No ordered parts yet. Set a part status to Ordered to track shipments here.</div>
-        </ng-template>
-      </ng-container>
-    </section>
-
-    <section class="summary-grid" *ngIf="invoice() as detail">
-      <article class="glass-surface timeline-card">
-        <h3>Timeline</h3>
-        <div class="timeline-empty" *ngIf="!detail.timeline.length">No timeline entries yet.</div>
-        <ul class="timeline-list" *ngIf="detail.timeline.length">
-          <li
-            class="timeline-item"
-            *ngFor="let entry of detail.timeline"
-            [class.timeline-right]="isCustomerTimelineEntry(entry)"
-            [class.timeline-left]="!isCustomerTimelineEntry(entry)">
-            <div
-              class="timeline-marker"
-              [class.is-draft]="timelineMarkerKind(entry.message) === 'draft'"
-              [class.is-sent]="timelineMarkerKind(entry.message) === 'sent'"
-              [class.is-accepted]="timelineMarkerKind(entry.message) === 'accepted'"
-              [class.is-declined]="timelineMarkerKind(entry.message) === 'declined'"
-              [class.is-paused]="timelineMarkerKind(entry.message) === 'paused'">
-              <ion-icon [name]="timelineMarkerGlyph(entry.message)"></ion-icon>
-            </div>
-            <article
-              class="timeline-content"
-              [class.is-system-entry]="!isCustomerTimelineEntry(entry)"
-              [class.is-customer-entry]="isCustomerTimelineEntry(entry)">
-              <div class="timeline-actor-row">
-                <span class="timeline-actor-label">{{ timelineActorName(entry) }}</span>
-              </div>
-              <div class="timeline-time">{{ entry.createdAt | date:'short' }}</div>
-              <div class="timeline-message">{{ entry.message }}</div>
-            </article>
-          </li>
-        </ul>
-      </article>
-
-      <article class="glass-surface totals-card">
-        <h3>Totals</h3>
-        <div class="total-row">
-          <span>Subtotal</span>
-          <strong>{{ totals().subtotal | currency:'USD':'symbol':'1.2-2' }}</strong>
-        </div>
-        <div class="total-row">
-          <span>Tax</span>
-          <strong>{{ totals().taxTotal | currency:'USD':'symbol':'1.2-2' }}</strong>
-        </div>
-        <div class="total-row total-grand">
-          <span>Total</span>
-          <strong>{{ totals().total | currency:'USD':'symbol':'1.2-2' }}</strong>
-        </div>
-        <div class="total-row" *ngIf="detail.documentType === 'invoice'">
-          <span>Paid To Date</span>
-          <strong>{{ paidAmount() | currency:'USD':'symbol':'1.2-2' }}</strong>
-        </div>
-        <div class="total-row total-overpay" *ngIf="detail.documentType === 'invoice' && overpaymentAmount() > 0">
-          <span>Overpaid</span>
-          <strong>{{ overpaymentAmount() | currency:'USD':'symbol':'1.2-2' }}</strong>
-        </div>
-        <div class="total-row total-grand" *ngIf="detail.documentType === 'invoice'">
-          <span>Amount Due</span>
-          <strong>{{ amountDue() | currency:'USD':'symbol':'1.2-2' }}</strong>
-        </div>
-      </article>
-    </section>
-  </ng-template>
-
-  <ion-modal [isOpen]="sendInvoiceModalOpen()" (didDismiss)="closeSendInvoiceModal()">
-    <ng-template>
-      <ion-header>
-        <ion-toolbar>
-          <ion-title>{{ sendInvoiceLabel() }}</ion-title>
-          <ion-buttons slot="end">
-            <ion-button [disabled]="sendingInvoice()" (click)="closeSendInvoiceModal()">Close</ion-button>
-          </ion-buttons>
-        </ion-toolbar>
-      </ion-header>
-      <ion-content class="ion-padding send-invoice-modal-content">
+      <div class="ui-content app-padding send-invoice-modal-content">
         <div class="send-invoice-options">
           <p>Select how to send this invoice:</p>
           <p class="send-due">Amount due to request: <strong>{{ amountDue() | currency:'USD':'symbol':'1.2-2' }}</strong></p>
 
           <label class="check-row modal-check-row">
             <span class="modal-check-main">
-              <input
+              <input class="form-check-input"
                 type="checkbox"
                 [checked]="sendInvoiceViaEmail()"
                 [disabled]="!canSendInvoiceViaEmail() || sendingInvoice()"
                 (change)="setSendInvoiceViaEmail($any($event.target).checked)" />
               <span>Email</span>
             </span>
-            <span class="channel-target" *ngIf="invoiceEmailTarget()">{{ invoiceEmailTarget() }}</span>
-            <span class="channel-target missing" *ngIf="!invoiceEmailTarget()">No customer email on file</span>
+            @if (invoiceEmailTarget()) {
+              <span class="channel-target">{{ invoiceEmailTarget() }}</span>
+            }
+            @if (!invoiceEmailTarget()) {
+              <span class="channel-target missing">No customer email on file</span>
+            }
           </label>
 
           <label class="check-row modal-check-row">
             <span class="modal-check-main">
-              <input
+              <input class="form-check-input"
                 type="checkbox"
                 [checked]="sendInvoiceViaSms()"
                 [disabled]="!canSendInvoiceViaSms() || sendingInvoice()"
                 (change)="setSendInvoiceViaSms($any($event.target).checked)" />
               <span>SMS</span>
             </span>
-            <span class="channel-target" *ngIf="invoiceSmsTarget()">{{ invoiceSmsTarget() }}</span>
-            <span class="channel-target missing" *ngIf="!invoiceSmsTarget()">No customer phone on file</span>
+            @if (invoiceSmsTarget()) {
+              <span class="channel-target">{{ invoiceSmsTarget() }}</span>
+            }
+            @if (!invoiceSmsTarget()) {
+              <span class="channel-target missing">No customer phone on file</span>
+            }
           </label>
 
-          <p class="send-invoice-error" *ngIf="sendInvoiceModalError()">{{ sendInvoiceModalError() }}</p>
+          @if (sendInvoiceModalError()) {
+            <p class="send-invoice-error">{{ sendInvoiceModalError() }}</p>
+          }
         </div>
 
         <div class="send-invoice-actions">
-          <ion-button fill="outline" [disabled]="sendingInvoice()" (click)="closeSendInvoiceModal()">
+          <button class="btn ui-button btn-outline-primary" type="button" [disabled]="sendingInvoice()" (click)="closeSendInvoiceModal()">
             Cancel
-          </ion-button>
-          <ion-button [disabled]="sendingInvoice()" (click)="confirmSendInvoiceModal()">
+          </button>
+          <button class="btn ui-button btn-primary" type="button" [disabled]="sendingInvoice()" (click)="confirmSendInvoiceModal()">
             {{ sendingInvoice() ? 'Sending...' : 'Send Now' }}
-          </ion-button>
+          </button>
         </div>
-      </ion-content>
+      </div>
     </ng-template>
-  </ion-modal>
-</ion-content>
+  </ui-modal>
+</div>

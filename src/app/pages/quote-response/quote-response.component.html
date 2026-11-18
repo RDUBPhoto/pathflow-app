@@ -1,34 +1,47 @@
-<ion-content class="quote-response-content">
+<div class="ui-content quote-response-content">
   <div class="quote-response-wrap">
-    <section class="quote-response-card">
-      <p class="status-pill" [class.accepted]="action() === 'accept'" [class.declined]="action() === 'decline'">
+    <section class="card quote-response-card">
+      <p class="status-pill" [class.accepted]="responseState() === 'success' && action() === 'accept'" [class.declined]="responseState() === 'success' && action() === 'decline'">
         {{ title() }}
       </p>
 
-      <ng-container *ngIf="action() === 'view'; else responseOnly">
+      @if (action() === 'view') {
         <div class="quote-head">
           <div>
             <h1>{{ quoteNumber() }}</h1>
             <p class="vehicle">{{ vehicle() }}</p>
             <p class="message">{{ message() }}</p>
           </div>
-          <img *ngIf="businessLogoUrl()" [src]="businessLogoUrl()" alt="Business logo" class="business-logo" />
+          @if (businessLogoUrl()) {
+            <img [src]="businessLogoUrl()" alt="Business logo" class="business-logo" />
+          }
         </div>
-
         <div class="quote-meta-grid">
           <div class="meta-card">
             <h3>Customer</h3>
             <p>{{ customerName() }}</p>
-            <p *ngIf="customerEmail()">{{ customerEmail() }}</p>
-            <p *ngIf="customerPhone()">{{ customerPhone() }}</p>
-            <p *ngIf="customerAddress()">{{ customerAddress() }}</p>
+            @if (customerEmail()) {
+              <p>{{ customerEmail() }}</p>
+            }
+            @if (customerPhone()) {
+              <p>{{ customerPhone() }}</p>
+            }
+            @if (customerAddress()) {
+              <p>{{ customerAddress() }}</p>
+            }
           </div>
           <div class="meta-card">
             <h3>Business</h3>
             <p>{{ businessName() }}</p>
-            <p *ngIf="businessEmail()">{{ businessEmail() }}</p>
-            <p *ngIf="businessPhone()">{{ businessPhone() }}</p>
-            <p *ngIf="businessAddress()">{{ businessAddress() }}</p>
+            @if (businessEmail()) {
+              <p>{{ businessEmail() }}</p>
+            }
+            @if (businessPhone()) {
+              <p>{{ businessPhone() }}</p>
+            }
+            @if (businessAddress()) {
+              <p>{{ businessAddress() }}</p>
+            }
           </div>
           <div class="meta-card">
             <h3>Dates</h3>
@@ -36,11 +49,10 @@
             <p>Due: {{ dueDate() || '—' }}</p>
           </div>
         </div>
-
         <div class="line-items-card">
           <h3>Quote Breakdown</h3>
           <div class="line-items-scroll">
-            <table>
+            <table class="table table-vcenter">
               <thead>
                 <tr>
                   <th>Type</th>
@@ -52,17 +64,21 @@
                 </tr>
               </thead>
               <tbody>
-                <tr *ngFor="let line of lineItems()">
-                  <td>{{ line.type === 'labor' ? 'Labor' : 'Part' }}</td>
-                  <td>{{ line.code || '—' }}</td>
-                  <td>{{ line.description || '—' }}</td>
-                  <td class="num">{{ line.quantity }}</td>
-                  <td class="num">{{ line.unitPrice | currency:'USD':'symbol':'1.2-2' }}</td>
-                  <td class="num">{{ line.lineTotal | currency:'USD':'symbol':'1.2-2' }}</td>
-                </tr>
-                <tr *ngIf="!lineItems().length">
-                  <td colspan="6" class="empty">No line items provided.</td>
-                </tr>
+                @for (line of lineItems(); track line) {
+                  <tr>
+                    <td>{{ line.type === 'labor' ? 'Labor' : 'Part' }}</td>
+                    <td>{{ line.code || '—' }}</td>
+                    <td>{{ line.description || '—' }}</td>
+                    <td class="num">{{ line.quantity }}</td>
+                    <td class="num">{{ line.unitPrice | currency:'USD':'symbol':'1.2-2' }}</td>
+                    <td class="num">{{ line.lineTotal | currency:'USD':'symbol':'1.2-2' }}</td>
+                  </tr>
+                }
+                @if (!lineItems().length) {
+                  <tr>
+                    <td colspan="6" class="empty">No line items provided.</td>
+                  </tr>
+                }
               </tbody>
             </table>
           </div>
@@ -72,26 +88,39 @@
             <div class="total"><span>Total</span><strong>{{ total() | currency:'USD':'symbol':'1.2-2' }}</strong></div>
           </div>
         </div>
-
-        <p class="note" *ngIf="description()"><strong>Description:</strong> {{ description() }}</p>
-        <p class="note" *ngIf="customerNote()"><strong>Customer Note:</strong> {{ customerNote() }}</p>
-        <p class="note" *ngIf="staffNote()"><strong>Terms:</strong> {{ staffNote() }}</p>
-
+        @if (description()) {
+          <p class="note"><strong>Description:</strong> {{ description() }}</p>
+        }
+        @if (customerNote()) {
+          <p class="note"><strong>Customer Note:</strong> {{ customerNote() }}</p>
+        }
         <div class="actions">
-          <a [href]="acceptUrl()" class="action-btn accept">Accept Quote</a>
-          <a [href]="declineUrl()" class="action-btn decline">Decline Quote</a>
+          <button type="button" class="btn btn-success" [disabled]="responseSubmitting()" (click)="submitResponse('accept')">Accept Quote</button>
+          <button type="button" class="btn btn-outline-danger" [disabled]="responseSubmitting()" (click)="submitResponse('decline')">Decline Quote</button>
         </div>
-
         <p class="business">Business: {{ businessName() }}</p>
-      </ng-container>
-
-      <ng-template #responseOnly>
+      } @else {
         <h1>{{ quoteNumber() }}</h1>
         <p class="vehicle">{{ vehicle() }}</p>
         <p class="message">{{ message() }}</p>
-        <p class="tracking" *ngIf="trackingMessage()">{{ trackingMessage() }}</p>
+        @if (trackingMessage()) {
+          <p class="tracking">{{ trackingMessage() }}</p>
+        }
+        @if (responseState() === 'error') {
+          <button type="button" class="btn btn-success" (click)="retryResponse()">Retry response</button>
+        }
         <p class="business">Business: {{ businessName() }}</p>
-      </ng-template>
+      }
+
     </section>
   </div>
-</ion-content>
+  @if (responseSubmitting()) {
+    <div class="public-action-overlay" role="status" aria-live="assertive" aria-busy="true">
+      <div class="card public-action-dialog">
+        <div class="spinner-border text-primary" aria-hidden="true"></div>
+        <strong>Recording your {{ action() === 'accept' ? 'acceptance' : 'decline' }}...</strong>
+        <span>Please keep this page open until confirmation appears.</span>
+      </div>
+    </div>
+  }
+</div>

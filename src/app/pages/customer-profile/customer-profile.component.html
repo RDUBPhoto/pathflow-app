@@ -1,314 +1,361 @@
-<ion-header class="glass-header">
-  <ion-toolbar>
-    <ion-buttons slot="start">
+<header class="ui-header app-header">
+  <div class="ui-toolbar">
+    <div class="ui-buttons" slot="start">
       <app-page-back-button></app-page-back-button>
-    </ion-buttons>
-    <ion-title>{{ customerId() ? 'Customer Profile' : 'New Customer' }}</ion-title>
+    </div>
+    <h1 class="ui-title">{{ customerId() ? 'Customer Profile' : 'New Customer' }}</h1>
     <app-company-switcher></app-company-switcher>
     <div class="toolbar-actions" slot="end">
       <app-user-menu></app-user-menu>
     </div>
-  </ion-toolbar>
-</ion-header>
+  </div>
+</header>
 
-<ion-content class="glass-bg customer-profile-content ion-padding">
-  <section class="customer-hero glass-surface">
+<div class="ui-content app-content customer-profile-content app-padding">
+  <section class="customer-hero app-surface">
     <div class="hero-main">
       <div class="hero-avatar" [style.--avatar-color]="avatarColor()">{{ avatarInitials() }}</div>
       <div class="hero-copy">
         <div class="hero-name-row">
           <h1>{{ displayName() }}</h1>
-          <div class="hero-overflow" *ngIf="canDeleteCustomer()">
-            <ion-button
-              fill="clear"
-              size="small"
-              class="hero-overflow-trigger"
-              (click)="toggleHeroMenu($event)"
-              [disabled]="saving() || loading()"
-              aria-label="More customer actions">
-              <ion-icon name="ellipsis-vertical-outline"></ion-icon>
-            </ion-button>
-            <div class="hero-overflow-menu glass-surface" *ngIf="heroMenuOpen()">
-              <button
-                type="button"
-                class="hero-overflow-item danger"
-                (click)="openDeleteCustomerModalFromMenu($event)"
-                [disabled]="saving() || loading()">
-                <ion-icon name="trash-outline"></ion-icon>
-                <span>Delete Customer</span>
+          @if (canDeleteCustomer()) {
+            <div class="hero-overflow">
+              <button type="button"
+                class="btn ui-button btn-ghost-primary btn-sm hero-overflow-trigger"
+                (click)="toggleHeroMenu($event)"
+                [disabled]="saving() || loading()"
+                aria-label="More customer actions">
+                <ui-icon name="dots-vertical"></ui-icon>
               </button>
+              @if (heroMenuOpen()) {
+                <div class="hero-overflow-menu app-surface">
+                  <button
+                    type="button"
+                    class="hero-overflow-item danger"
+                    (click)="openDeleteCustomerModalFromMenu($event)"
+                    [disabled]="saving() || loading()">
+                    <ui-icon name="trash"></ui-icon>
+                    <span>Delete Customer</span>
+                  </button>
+                </div>
+              }
             </div>
-          </div>
+          }
         </div>
-        <div class="hero-since" *ngIf="customerCreatedAt">Customer since {{ customerSinceLabel() }}</div>
+        @if (customerCreatedAt) {
+          <div class="hero-since">Customer since {{ customerSinceLabel() }}</div>
+        }
         <div class="hero-meta">
           <span>{{ email || 'No email set' }}</span>
-          <span *ngIf="secondaryEmail">Alt: {{ secondaryEmail }}</span>
-          <button
-            type="button"
-            class="phone-link-btn"
-            *ngIf="phone; else noPrimaryPhone"
-            (click)="openSmsFromPhone($event)">
-            {{ phone }}
-          </button>
-          <ng-template #noPrimaryPhone><span>No phone set</span></ng-template>
-          <button
-            type="button"
-            class="phone-link-btn secondary-phone-link"
-            *ngIf="secondaryPhone"
-            (click)="openSmsFromPhone($event)">
-            Alt: {{ secondaryPhone }}
-          </button>
+          @if (secondaryEmail) {
+            <span>Alt: {{ secondaryEmail }}</span>
+          }
+          @if (phone) {
+            <button
+              type="button"
+              class="phone-link-btn"
+              (click)="openSmsFromPhone($event)">
+              {{ phone }}
+            </button>
+          } @else {
+            <span>No phone set</span>
+          }
+          @if (secondaryPhone) {
+            <button
+              type="button"
+              class="phone-link-btn secondary-phone-link"
+              (click)="openSmsFromPhone($event)">
+              Alt: {{ secondaryPhone }}
+            </button>
+          }
         </div>
       </div>
     </div>
 
     <div class="hero-actions-wrap">
-      <div class="hero-actions" *ngIf="!isMobileLayout()">
-        <ion-button (click)="saveCustomer()" [disabled]="saving() || loading() || !canSaveCustomer()">
-          <ion-spinner *ngIf="saving()" name="crescent" slot="start"></ion-spinner>
-          <ion-icon *ngIf="!saving()" name="save-outline" slot="start"></ion-icon>
-          {{ saving() ? 'Saving...' : 'Save Customer' }}
-        </ion-button>
+      @if (!isMobileLayout()) {
+        <div class="hero-actions">
+          <button class="btn ui-button btn-primary" type="button" (click)="saveCustomer()" [disabled]="saving() || loading() || !canSaveCustomer()">
+            @if (saving()) {
+              <span class="spinner-border spinner-border-sm ui-spinner" role="status" aria-label="Loading" slot="start"></span>
+            }
+            @if (!saving()) {
+              <ui-icon name="device-floppy" slot="start"></ui-icon>
+            }
+            {{ saving() ? 'Saving...' : 'Save Customer' }}
+          </button>
+        </div>
+      }
+      @if (status()) {
+        <div class="save-feedback success">{{ status() }}</div>
+      }
+      @if (error()) {
+        <div class="save-feedback error">{{ error() }}</div>
+      }
+    </div>
+  </section>
+
+  @if (duplicateSavePrompt(); as pending) {
+    <section class="duplicate-decision-banner app-surface">
+      <div class="duplicate-banner-copy">
+        <strong>Possible duplicate detected</strong>
+        <span>
+          {{ pending.candidate.name || 'Existing customer' }} matches by
+          {{ duplicateReasonsLabel(pending.candidate.reasons) }}
+          ({{ duplicateConfidence(pending.candidate) }}% confidence).
+        </span>
+        <span>{{ duplicateRecommendationLabel(pending.candidate) }}</span>
       </div>
-      <div class="save-feedback success" *ngIf="status()">{{ status() }}</div>
-      <div class="save-feedback error" *ngIf="error()">{{ error() }}</div>
-    </div>
-  </section>
+      <div class="duplicate-decision-actions">
+        <button class="btn ui-button btn-warning btn-sm" type="button" (click)="mergeAfterDuplicatePrompt()" [disabled]="saving()">
+          Merge into Existing
+        </button>
+        <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="saveAsSeparateAfterDuplicate()" [disabled]="saving()">
+          Save as Separate
+        </button>
+        @if (pending.mode === 'update') {
+          <button class="btn ui-button btn-ghost-primary btn-sm" type="button"
+            (click)="reviewDuplicate(pending.candidate.id)"
+            [disabled]="saving()">
+            Review Pair
+          </button>
+        }
+        @if (pending.mode === 'update') {
+          <button class="btn ui-button btn-ghost-primary btn-sm" type="button"
+            (click)="ignoreDuplicateSavePrompt()"
+            [disabled]="saving()">
+            Ignore Match
+          </button>
+        }
+        <button class="btn ui-button btn-ghost-primary btn-sm" type="button" (click)="dismissDuplicateSavePrompt()" [disabled]="saving()">
+          Dismiss
+        </button>
+      </div>
+    </section>
+  }
 
-  <section class="duplicate-decision-banner glass-surface" *ngIf="duplicateSavePrompt() as pending">
-    <div class="duplicate-banner-copy">
-      <strong>Possible duplicate detected</strong>
-      <span>
-        {{ pending.candidate.name || 'Existing customer' }} matches by
-        {{ duplicateReasonsLabel(pending.candidate.reasons) }}
-        ({{ duplicateConfidence(pending.candidate) }}% confidence).
-      </span>
-      <span>{{ duplicateRecommendationLabel(pending.candidate) }}</span>
-    </div>
-    <div class="duplicate-decision-actions">
-      <ion-button size="small" color="warning" (click)="mergeAfterDuplicatePrompt()" [disabled]="saving()">
-        Merge into Existing
-      </ion-button>
-      <ion-button size="small" fill="outline" (click)="saveAsSeparateAfterDuplicate()" [disabled]="saving()">
-        Save as Separate
-      </ion-button>
-      <ion-button
-        size="small"
-        fill="clear"
-        *ngIf="pending.mode === 'update'"
-        (click)="reviewDuplicate(pending.candidate.id)"
-        [disabled]="saving()">
-        Review Pair
-      </ion-button>
-      <ion-button
-        size="small"
-        fill="clear"
-        *ngIf="pending.mode === 'update'"
-        (click)="ignoreDuplicateSavePrompt()"
-        [disabled]="saving()">
-        Ignore Match
-      </ion-button>
-      <ion-button size="small" fill="clear" (click)="dismissDuplicateSavePrompt()" [disabled]="saving()">
-        Dismiss
-      </ion-button>
-    </div>
-  </section>
-
-  <section class="duplicate-banner glass-surface" *ngIf="customerId() && duplicateMatches().length > 0">
-    <div class="duplicate-banner-copy">
-      <strong>Possible duplicate customer found</strong>
-      <span>
-        Matched by {{ duplicateReasonsLabel(duplicateMatches()[0].reasons) }} with
-        {{ duplicateMatches()[0].name || 'another profile' }}
-        ({{ duplicateConfidence(duplicateMatches()[0]) }}% confidence).
-      </span>
-      <span>{{ duplicateRecommendationLabel(duplicateMatches()[0]) }}</span>
-    </div>
-    <div class="duplicate-decision-actions">
-      <ion-button size="small" color="warning" (click)="reviewDuplicate()">Review &amp; Merge</ion-button>
-      <ion-button size="small" fill="clear" (click)="ignoreDuplicateForCurrent()">Ignore Match</ion-button>
-    </div>
-  </section>
+  @if (customerId() && duplicateMatches().length > 0) {
+    <section class="duplicate-banner app-surface">
+      <div class="duplicate-banner-copy">
+        <strong>Possible duplicate customer found</strong>
+        <span>
+          Matched by {{ duplicateReasonsLabel(duplicateMatches()[0].reasons) }} with
+          {{ duplicateMatches()[0].name || 'another profile' }}
+          ({{ duplicateConfidence(duplicateMatches()[0]) }}% confidence).
+        </span>
+        <span>{{ duplicateRecommendationLabel(duplicateMatches()[0]) }}</span>
+      </div>
+      <div class="duplicate-decision-actions">
+        <button class="btn ui-button btn-warning btn-sm" type="button" (click)="reviewDuplicate()">Review &amp; Merge</button>
+        <button class="btn ui-button btn-ghost-primary btn-sm" type="button" (click)="ignoreDuplicateForCurrent()">Ignore Match</button>
+      </div>
+    </section>
+  }
 
   <section class="customer-layout">
     <ng-template #contactPanelTemplate>
-      <section class="section-panel glass-surface contact-panel">
+      <section class="section-panel app-surface contact-panel">
         <div class="panel-title">
-          <ion-icon name="person-outline"></ion-icon>
+          <ui-icon name="user"></ui-icon>
           Contact Details
         </div>
 
         <div class="form-grid contact-grid">
           <div class="contact-row contact-row-name">
-            <ion-item>
-              <ion-label position="stacked">First Name *</ion-label>
-              <ion-input [(ngModel)]="firstName"></ion-input>
-            </ion-item>
+            <div class="ui-item">
+              <span class="ui-label">First Name *</span>
+              <ui-input aria-label="First Name *" [(ngModel)]="firstName"></ui-input>
+            </div>
 
-            <ion-item>
-              <ion-label position="stacked">Last Name *</ion-label>
-              <ion-input [(ngModel)]="lastName"></ion-input>
-            </ion-item>
+            <div class="ui-item">
+              <span class="ui-label">Last Name *</span>
+              <ui-input aria-label="Last Name *" [(ngModel)]="lastName"></ui-input>
+            </div>
           </div>
-          <div class="field-error" *ngIf="showInlineValidation() && (!firstName.trim() || !lastName.trim())">
-            First and last name are required.
-          </div>
-
-          <div class="contact-row contact-row-single">
-            <ion-item>
-              <ion-label position="stacked">Phone *</ion-label>
-              <ion-input [ngModel]="phone" (ngModelChange)="onPrimaryPhoneInput($event)" placeholder="(555) 555-5555"></ion-input>
-            </ion-item>
-            <ion-button
-              *ngIf="!showSecondaryPhone"
-              type="button"
-              size="small"
-              fill="outline"
-              class="add-secondary-btn"
-              aria-label="Add secondary phone"
-              title="Add secondary phone"
-              (click)="addSecondaryPhone()">
-              +
-            </ion-button>
-          </div>
-          <div class="field-error" *ngIf="showInlineValidation() && !isPhoneValid()">Enter a valid phone number.</div>
-
-          <div class="contact-row contact-row-single" *ngIf="showSecondaryPhone">
-            <ion-item>
-              <ion-label position="stacked">Secondary Phone</ion-label>
-              <ion-input [ngModel]="secondaryPhone" (ngModelChange)="onSecondaryPhoneInput($event)" placeholder="(555) 555-5555"></ion-input>
-            </ion-item>
-          </div>
-          <div class="field-error" *ngIf="showInlineValidation() && !isSecondaryPhoneValid()">
-            Enter a valid secondary phone number.
-          </div>
+          @if (showInlineValidation() && (!firstName.trim() || !lastName.trim())) {
+            <div class="field-error">
+              First and last name are required.
+            </div>
+          }
 
           <div class="contact-row contact-row-single">
-            <ion-item>
-              <ion-label position="stacked">Email *</ion-label>
-              <ion-input [(ngModel)]="email" type="email"></ion-input>
-            </ion-item>
-            <ion-button
-              *ngIf="!showSecondaryEmail"
-              type="button"
-              size="small"
-              fill="outline"
-              class="add-secondary-btn"
-              aria-label="Add secondary email"
-              title="Add secondary email"
-              (click)="addSecondaryEmail()">
-              +
-            </ion-button>
-          </div>
-          <div class="field-error" *ngIf="showInlineValidation() && !isEmailValid()">Enter a valid email address.</div>
-
-          <div class="contact-row contact-row-single" *ngIf="showSecondaryEmail">
-            <ion-item>
-              <ion-label position="stacked">Secondary Email</ion-label>
-              <ion-input [(ngModel)]="secondaryEmail" type="email"></ion-input>
-            </ion-item>
-          </div>
-          <div class="field-error" *ngIf="showInlineValidation() && !isSecondaryEmailValid()">
-            Enter a valid secondary email address.
-          </div>
-
-          <div class="address-field">
-            <ion-item class="address-item">
-              <ion-label position="stacked">Address</ion-label>
-              <ion-textarea
-                [(ngModel)]="address"
-                (ngModelChange)="onAddressChange($event)"
-                (ionBlur)="onAddressBlur()"
-                [autoGrow]="true"
-                rows="2"
-                placeholder="Start typing to validate address"></ion-textarea>
-            </ion-item>
-
-            <div class="address-lookup" *ngIf="addressSearching() || addressSuggestions().length || addressNoMatches()">
-              <div class="address-state" *ngIf="addressSearching()">Searching addresses...</div>
+            <div class="ui-item">
+              <span class="ui-label">Phone *</span>
+              <ui-input aria-label="Phone *" [ngModel]="phone" (ngModelChange)="onPrimaryPhoneInput($event)" placeholder="(555) 555-5555"></ui-input>
+            </div>
+            @if (!showSecondaryPhone) {
               <button
                 type="button"
-                class="address-suggestion"
-                *ngFor="let item of addressSuggestions()"
-                (mousedown)="$event.preventDefault()"
-                (click)="selectAddressSuggestion(item)">
-                {{ item.display }}
+                class="btn ui-button btn-outline-primary btn-sm add-secondary-btn"
+                aria-label="Add secondary phone"
+                title="Add secondary phone"
+                (click)="addSecondaryPhone()">
+                +
               </button>
-              <div class="address-state" *ngIf="!addressSearching() && addressNoMatches()">
-                No address matches found.
+            }
+          </div>
+          @if (showInlineValidation() && !isPhoneValid()) {
+            <div class="field-error">Enter a valid phone number.</div>
+          }
+
+          @if (showSecondaryPhone) {
+            <div class="contact-row contact-row-single">
+              <div class="ui-item">
+                <span class="ui-label">Secondary Phone</span>
+                <ui-input aria-label="Secondary Phone" [ngModel]="secondaryPhone" (ngModelChange)="onSecondaryPhoneInput($event)" placeholder="(555) 555-5555"></ui-input>
               </div>
             </div>
-            <div class="address-validation-hint" *ngIf="address.trim() && !addressValidated() && !addressSearching()">
-              Select a suggested address to validate.
+          }
+          @if (showInlineValidation() && !isSecondaryPhoneValid()) {
+            <div class="field-error">
+              Enter a valid secondary phone number.
             </div>
+          }
+
+          <div class="contact-row contact-row-single">
+            <div class="ui-item">
+              <span class="ui-label">Email *</span>
+              <ui-input aria-label="Email *" [(ngModel)]="email" type="email"></ui-input>
+            </div>
+            @if (!showSecondaryEmail) {
+              <button
+                type="button"
+                class="btn ui-button btn-outline-primary btn-sm add-secondary-btn"
+                aria-label="Add secondary email"
+                title="Add secondary email"
+                (click)="addSecondaryEmail()">
+                +
+              </button>
+            }
+          </div>
+          @if (showInlineValidation() && !isEmailValid()) {
+            <div class="field-error">Enter a valid email address.</div>
+          }
+
+          @if (showSecondaryEmail) {
+            <div class="contact-row contact-row-single">
+              <div class="ui-item">
+                <span class="ui-label">Secondary Email</span>
+                <ui-input aria-label="Secondary Email" [(ngModel)]="secondaryEmail" type="email"></ui-input>
+              </div>
+            </div>
+          }
+          @if (showInlineValidation() && !isSecondaryEmailValid()) {
+            <div class="field-error">
+              Enter a valid secondary email address.
+            </div>
+          }
+
+          <div class="address-field">
+            <div class="ui-item address-item">
+              <span class="ui-label">Address</span>
+              <ui-textarea aria-label="Address"
+                [(ngModel)]="address"
+                (ngModelChange)="onAddressChange($event)"
+                (controlBlur)="onAddressBlur()"
+                [autoGrow]="true"
+                rows="2"
+              placeholder="Start typing to validate address"></ui-textarea>
+            </div>
+
+            @if (addressSearching() || addressSuggestions().length || addressNoMatches()) {
+              <div class="address-lookup">
+                @if (addressSearching()) {
+                  <div class="address-state">Searching addresses...</div>
+                }
+                @for (item of addressSuggestions(); track item) {
+                  <button
+                    type="button"
+                    class="address-suggestion"
+                    (mousedown)="$event.preventDefault()"
+                    (click)="selectAddressSuggestion(item)">
+                    {{ item.display }}
+                  </button>
+                }
+                @if (!addressSearching() && addressNoMatches()) {
+                  <div class="address-state">
+                    No address matches found.
+                  </div>
+                }
+              </div>
+            }
+            @if (address.trim() && !addressValidated() && !addressSearching()) {
+              <div class="address-validation-hint">
+                Select a suggested address to validate.
+              </div>
+            }
           </div>
         </div>
 
         <div class="notes-block">
           <div class="panel-title notes-title">
-            <ion-icon name="document-text-outline"></ion-icon>
+            <ui-icon name="file-text"></ui-icon>
             Service Notes
           </div>
 
-          <ion-item>
-            <ion-label position="stacked">Add Note</ion-label>
-            <ion-textarea
+          <div class="ui-item">
+            <span class="ui-label">Add Note</span>
+            <ui-textarea aria-label="Add Note"
               [(ngModel)]="noteDraft"
               [autoGrow]="true"
               rows="3"
               maxlength="6000"
               placeholder="Add a note used for quoting and job details...">
-            </ion-textarea>
-          </ion-item>
+            </ui-textarea>
+          </div>
 
           <div class="notes-add-action">
-            <ion-button size="small" fill="outline" (click)="addNoteEntry()" [disabled]="!canAddNote()">
-              <ion-icon slot="start" name="add-outline"></ion-icon>
+            <button class="btn ui-button btn-outline-primary btn-sm" type="button" (click)="addNoteEntry()" [disabled]="!canAddNote()">
+              <ui-icon slot="start" name="plus"></ui-icon>
               Add Note
-            </ion-button>
+            </button>
           </div>
 
-          <div class="notes-history-empty" *ngIf="!hasNotesHistory()">
-            No notes yet.
-          </div>
+          @if (!hasNotesHistory()) {
+            <div class="notes-history-empty">
+              No notes yet.
+            </div>
+          }
 
-          <div class="notes-history-list" *ngIf="hasNotesHistory()">
-            <article class="note-history-item" *ngFor="let note of sortedNotesHistory(); trackBy: trackNote">
-              <div class="note-history-meta">
-                <strong>{{ noteCreatedByLabel(note) }}</strong>
-                <span>{{ noteDateLabel(note.createdAt) }}</span>
-              </div>
-              <div class="note-history-text">{{ note.text }}</div>
-            </article>
-          </div>
+          @if (hasNotesHistory()) {
+            <div class="notes-history-list">
+              @for (note of sortedNotesHistory(); track trackNote($index, note)) {
+                <article class="note-history-item">
+                  <div class="note-history-meta">
+                    <strong>{{ noteCreatedByLabel(note) }}</strong>
+                    <span>{{ noteDateLabel(note.createdAt) }}</span>
+                  </div>
+                  <div class="note-history-text">{{ note.text }}</div>
+                </article>
+              }
+            </div>
+          }
         </div>
       </section>
     </ng-template>
 
     <ng-template #vehicleDetailsTemplate>
       <div class="panel-title">
-        <ion-icon name="car-outline"></ion-icon>
+        <ui-icon name="car"></ui-icon>
         Vehicle Details
       </div>
 
       <div class="vin-row">
-        <ion-item>
-          <ion-label position="stacked">VIN</ion-label>
-          <ion-input [(ngModel)]="vin" (ngModelChange)="onVinInputChange($event)" maxlength="17"></ion-input>
-        </ion-item>
-        <ion-button class="vin-btn" fill="outline" (click)="lookupVIN()" [disabled]="!canDecodeVin()">Decode VIN</ion-button>
-        <ion-button class="vin-btn" fill="outline" (click)="openVinPhotoPicker()" [disabled]="isVinWorkflowBusy()">
+        <div class="ui-item">
+          <span class="ui-label">VIN</span>
+          <ui-input aria-label="VIN" [(ngModel)]="vin" (ngModelChange)="onVinInputChange($event)" maxlength="17"></ui-input>
+        </div>
+        <button type="button" class="btn ui-button btn-outline-primary vin-btn" (click)="lookupVIN()" [disabled]="!canDecodeVin()">Decode VIN</button>
+        <button type="button" class="btn ui-button btn-outline-primary vin-btn" (click)="openVinPhotoPicker()" [disabled]="isVinWorkflowBusy()">
           {{ vinPhotoOcrLoading ? 'Scanning photo...' : 'Scan VIN Photo' }}
-        </ion-button>
-        <ion-button
-          class="vin-btn remove-vehicle-btn"
-          color="danger"
-          fill="outline"
-          *ngIf="hasVehicleData()"
-          (click)="confirmRemoveVehicle()">
-          Remove Vehicle
-        </ion-button>
+        </button>
+        @if (hasVehicleData()) {
+          <button type="button"
+            class="btn ui-button btn-outline-danger vin-btn remove-vehicle-btn"
+            (click)="confirmRemoveVehicle()">
+            Remove Vehicle
+          </button>
+        }
       </div>
       <input
         #vinPhotoInput
@@ -318,589 +365,681 @@
         style="display:none"
         (change)="onVinPhotoSelected($event)" />
 
-      <div class="vin-status" *ngIf="vinStatus">{{ vinStatus }}</div>
+      @if (vinStatus) {
+        <div class="vin-status">{{ vinStatus }}</div>
+      }
 
-      <div class="vin-grid" *ngIf="hasVinDetails()">
-        <div class="vin-item" *ngFor="let kv of (vinDecoded() | keyvalue)">
-          <div class="vin-key">{{ kv.key }}</div>
-          <div class="vin-value">{{ kv.value || '—' }}</div>
+      @if (hasVinDetails()) {
+        <div class="vin-grid">
+          @for (kv of (vinDecoded() | keyvalue); track kv) {
+            <div class="vin-item">
+              <div class="vin-key">{{ kv.key }}</div>
+              <div class="vin-value">{{ kv.value || '—' }}</div>
+            </div>
+          }
         </div>
-      </div>
+      }
 
       <div class="form-grid">
-        <ion-item>
-          <ion-label position="stacked">Make</ion-label>
-          <ion-input [(ngModel)]="vehicleMake"></ion-input>
-        </ion-item>
-
-        <ion-item>
-          <ion-label position="stacked">Model</ion-label>
-          <ion-input [(ngModel)]="vehicleModel"></ion-input>
-        </ion-item>
-
-        <ion-item>
-          <ion-label position="stacked">Year</ion-label>
-          <ion-input [(ngModel)]="vehicleYear"></ion-input>
-        </ion-item>
-        <div class="field-error" *ngIf="showInlineValidation() && !isVehicleYearValid()">
-          Vehicle year must be 4 digits.
+        <div class="ui-item">
+          <span class="ui-label">Make</span>
+          <ui-input aria-label="Make" [(ngModel)]="vehicleMake"></ui-input>
         </div>
 
-        <ion-item>
-          <ion-label position="stacked">Trim</ion-label>
-          <ion-input [(ngModel)]="vehicleTrim"></ion-input>
-        </ion-item>
+        <div class="ui-item">
+          <span class="ui-label">Model</span>
+          <ui-input aria-label="Model" [(ngModel)]="vehicleModel"></ui-input>
+        </div>
 
-        <ion-item>
-          <ion-label position="stacked">Doors</ion-label>
-          <ion-input [(ngModel)]="vehicleDoors"></ion-input>
-        </ion-item>
+        <div class="ui-item">
+          <span class="ui-label">Year</span>
+          <ui-input aria-label="Year" [(ngModel)]="vehicleYear"></ui-input>
+        </div>
+        @if (showInlineValidation() && !isVehicleYearValid()) {
+          <div class="field-error">
+            Vehicle year must be 4 digits.
+          </div>
+        }
 
-        <ion-item>
-          <ion-label position="stacked">Bed Length</ion-label>
-          <ion-input [(ngModel)]="bedLength"></ion-input>
-        </ion-item>
+        <div class="ui-item">
+          <span class="ui-label">Trim</span>
+          <ui-input aria-label="Trim" [(ngModel)]="vehicleTrim"></ui-input>
+        </div>
 
-        <ion-item>
-          <ion-label position="stacked">Cab Type</ion-label>
-          <ion-input [(ngModel)]="cabType"></ion-input>
-        </ion-item>
+        <div class="ui-item">
+          <span class="ui-label">Doors</span>
+          <ui-input aria-label="Doors" [(ngModel)]="vehicleDoors"></ui-input>
+        </div>
 
-        <ion-item>
-          <ion-label position="stacked">Engine Cylinders</ion-label>
-          <ion-input [(ngModel)]="engineCylinders"></ion-input>
-        </ion-item>
+        <div class="ui-item">
+          <span class="ui-label">Bed Length</span>
+          <ui-input aria-label="Bed Length" [(ngModel)]="bedLength"></ui-input>
+        </div>
 
-        <ion-item>
-          <ion-label position="stacked">Transmission</ion-label>
-          <ion-input [(ngModel)]="transmissionStyle"></ion-input>
-        </ion-item>
+        <div class="ui-item">
+          <span class="ui-label">Cab Type</span>
+          <ui-input aria-label="Cab Type" [(ngModel)]="cabType"></ui-input>
+        </div>
 
-        <ion-item *ngIf="engineModel">
-          <ion-label position="stacked">Engine Model</ion-label>
-          <ion-input [value]="engineModel" readonly></ion-input>
-        </ion-item>
+        <div class="ui-item">
+          <span class="ui-label">Engine Cylinders</span>
+          <ui-input aria-label="Engine Cylinders" [(ngModel)]="engineCylinders"></ui-input>
+        </div>
+
+        <div class="ui-item">
+          <span class="ui-label">Transmission</span>
+          <ui-input aria-label="Transmission" [(ngModel)]="transmissionStyle"></ui-input>
+        </div>
+
+        @if (engineModel) {
+          <div class="ui-item">
+            <span class="ui-label">Engine Model</span>
+            <ui-input aria-label="Engine Model" [value]="engineModel" readonly></ui-input>
+          </div>
+        }
       </div>
 
       <div class="fitment-section">
         <div class="color-title">Wheel / Tire Fitment</div>
         <div class="fitment-grid">
-          <ion-item>
-            <ion-label position="stacked">Bolt Pattern</ion-label>
-            <ion-input [value]="boltPattern || '—'" readonly></ion-input>
-          </ion-item>
-          <ion-item>
-            <ion-label position="stacked">Rear Bolt Pattern</ion-label>
-            <ion-input [value]="rearBoltPattern || '—'" readonly></ion-input>
-          </ion-item>
-          <ion-item>
-            <ion-label position="stacked">PCD (mm)</ion-label>
-            <ion-input [value]="pcd || '—'" readonly></ion-input>
-          </ion-item>
-          <ion-item>
-            <ion-label position="stacked">Rear PCD (mm)</ion-label>
-            <ion-input [value]="rearPcd || '—'" readonly></ion-input>
-          </ion-item>
-          <ion-item>
-            <ion-label position="stacked">Front Tire</ion-label>
-            <ion-input [value]="frontTireSize || '—'" readonly></ion-input>
-          </ion-item>
-          <ion-item>
-            <ion-label position="stacked">Rear Tire</ion-label>
-            <ion-input [value]="rearTireSize || '—'" readonly></ion-input>
-          </ion-item>
-          <ion-item>
-            <ion-label position="stacked">Front Rim</ion-label>
-            <ion-input [value]="frontRimSize || '—'" readonly></ion-input>
-          </ion-item>
-          <ion-item>
-            <ion-label position="stacked">Rear Rim</ion-label>
-            <ion-input [value]="rearRimSize || '—'" readonly></ion-input>
-          </ion-item>
-          <ion-item>
-            <ion-label position="stacked">Centre Bore</ion-label>
-            <ion-input [value]="centreBore || '—'" readonly></ion-input>
-          </ion-item>
-          <ion-item>
-            <ion-label position="stacked">Wheel Fasteners</ion-label>
-            <ion-input [value]="wheelFasteners || '—'" readonly></ion-input>
-          </ion-item>
-          <ion-item>
-            <ion-label position="stacked">Wheel Torque</ion-label>
-            <ion-input [value]="wheelTorque || '—'" readonly></ion-input>
-          </ion-item>
+          <div class="ui-item">
+            <span class="ui-label">Bolt Pattern</span>
+            <ui-input aria-label="Bolt Pattern" [value]="boltPattern || '—'" readonly></ui-input>
+          </div>
+          <div class="ui-item">
+            <span class="ui-label">Rear Bolt Pattern</span>
+            <ui-input aria-label="Rear Bolt Pattern" [value]="rearBoltPattern || '—'" readonly></ui-input>
+          </div>
+          <div class="ui-item">
+            <span class="ui-label">PCD (mm)</span>
+            <ui-input aria-label="PCD (mm)" [value]="pcd || '—'" readonly></ui-input>
+          </div>
+          <div class="ui-item">
+            <span class="ui-label">Rear PCD (mm)</span>
+            <ui-input aria-label="Rear PCD (mm)" [value]="rearPcd || '—'" readonly></ui-input>
+          </div>
+          <div class="ui-item">
+            <span class="ui-label">Front Tire</span>
+            <ui-input aria-label="Front Tire" [value]="frontTireSize || '—'" readonly></ui-input>
+          </div>
+          <div class="ui-item">
+            <span class="ui-label">Rear Tire</span>
+            <ui-input aria-label="Rear Tire" [value]="rearTireSize || '—'" readonly></ui-input>
+          </div>
+          <div class="ui-item">
+            <span class="ui-label">Front Rim</span>
+            <ui-input aria-label="Front Rim" [value]="frontRimSize || '—'" readonly></ui-input>
+          </div>
+          <div class="ui-item">
+            <span class="ui-label">Rear Rim</span>
+            <ui-input aria-label="Rear Rim" [value]="rearRimSize || '—'" readonly></ui-input>
+          </div>
+          <div class="ui-item">
+            <span class="ui-label">Centre Bore</span>
+            <ui-input aria-label="Centre Bore" [value]="centreBore || '—'" readonly></ui-input>
+          </div>
+          <div class="ui-item">
+            <span class="ui-label">Wheel Fasteners</span>
+            <ui-input aria-label="Wheel Fasteners" [value]="wheelFasteners || '—'" readonly></ui-input>
+          </div>
+          <div class="ui-item">
+            <span class="ui-label">Wheel Torque</span>
+            <ui-input aria-label="Wheel Torque" [value]="wheelTorque || '—'" readonly></ui-input>
+          </div>
         </div>
       </div>
 
       <div class="color-wrap">
         <div class="color-title">Vehicle Color</div>
         <div class="color-palette">
-          <button
-            type="button"
-            class="color-btn"
-            *ngFor="let opt of palette"
-            [class.active]="vehicleColor === opt.hex"
-            (click)="vehicleColor = opt.hex">
-            <span class="swatch" [style.background]="opt.hex"></span>
-            <span>{{ opt.label }}</span>
-          </button>
+          @for (opt of palette; track opt) {
+            <button
+              type="button"
+              class="color-btn"
+              [class.active]="vehicleColor === opt.hex"
+              (click)="vehicleColor = opt.hex">
+              <span class="swatch" [style.background]="opt.hex"></span>
+              <span>{{ opt.label }}</span>
+            </button>
+          }
         </div>
       </div>
     </ng-template>
 
-    <div class="left-column" *ngIf="!isMobileLayout()">
-      <ng-container *ngTemplateOutlet="contactPanelTemplate"></ng-container>
-    </div>
+    @if (!isMobileLayout()) {
+      <div class="left-column">
+        <ng-container *ngTemplateOutlet="contactPanelTemplate"></ng-container>
+      </div>
+    }
 
-    <nav class="tab-rail glass-surface" *ngIf="!isMobileLayout()" aria-label="Customer detail tabs">
-      <button
-        type="button"
-        class="tab-rail-btn"
-        *ngFor="let tab of tabs"
-        [class.active]="activeTab() === tab.key"
-        [attr.title]="tab.label"
-        [attr.aria-label]="tab.label"
-        (click)="selectTab(tab.key)">
-        <ion-icon [name]="tab.icon"></ion-icon>
-        <span
-          *ngIf="tabHasActivity(tab.key)"
-          class="tab-activity-dot"
-          [attr.title]="tabActivityTitle(tab.key)"
-          aria-hidden="true">
-          {{ tabActivityCount(tab.key) > 9 ? '9+' : tabActivityCount(tab.key) }}
-        </span>
-      </button>
-    </nav>
+    @if (!isMobileLayout()) {
+      <nav class="tab-rail app-surface" aria-label="Customer detail tabs">
+        @for (tab of tabs; track tab) {
+          <button
+            type="button"
+            class="tab-rail-btn"
+            [class.active]="activeTab() === tab.key"
+            [attr.title]="tab.label"
+            [attr.aria-label]="tab.label"
+            (click)="selectTab(tab.key)">
+            <ui-icon [name]="tab.icon"></ui-icon>
+            @if (tabHasActivity(tab.key)) {
+              <span
+                class="tab-activity-dot"
+                [attr.title]="tabActivityTitle(tab.key)"
+                aria-hidden="true">
+                {{ tabActivityCount(tab.key) > 9 ? '9+' : tabActivityCount(tab.key) }}
+              </span>
+            }
+          </button>
+        }
+      </nav>
+    }
 
     <section
-      class="right-column glass-surface"
+      class="right-column app-surface"
       [class.sms-active]="activeTab() === 'sms'"
       [class.email-active]="activeTab() === 'email'">
       <div class="right-header">
-        <div class="right-header-title" style="display:flex;align-items:center;gap:8px;min-width:0;" *ngIf="!isMobileLayout()">
-          <ion-icon [name]="tabIcon(activeTab())"></ion-icon>
-          <span>{{ activeTabLabel() }}</span>
-          <ion-badge *ngIf="tabActivityCount(activeTab()) > 0" color="primary">
-            {{ tabActivityCount(activeTab()) }}
-          </ion-badge>
-        </div>
-        <div class="mobile-header-select" *ngIf="isMobileLayout()">
-          <ion-item lines="none">
-            <ion-select
-              interface="popover"
-              [value]="mobileTab()"
-              (ionChange)="onMobileTabSelect($event.detail.value)">
-              <ion-select-option *ngFor="let tab of mobileTabs" [value]="tab.key">
-                {{ tab.label }}{{ mobileTabActivityCount(tab.key) > 0 ? ' (' + mobileTabActivityCount(tab.key) + ')' : '' }}
-              </ion-select-option>
-            </ion-select>
-          </ion-item>
-        </div>
-        <div
-          class="right-header-actions"
-          style="display:flex;"
-          *ngIf="(!isMobileLayout() && (activeTab() === 'schedule' || activeTab() === 'invoices'))
-            || (isMobileLayout() && (mobileTab() === 'schedule' || mobileTab() === 'invoices'))">
-          <ion-button
-            size="small"
-            *ngIf="(!isMobileLayout() && activeTab() === 'schedule') || (isMobileLayout() && mobileTab() === 'schedule')"
-            (click)="openScheduleAppointmentModal()"
-            [disabled]="!customerId() || scheduleLoading()">
-            <ion-icon slot="start" name="add-outline"></ion-icon>
-            Add Appointment
-          </ion-button>
-          <ion-button
-            size="small"
-            fill="outline"
-            *ngIf="(!isMobileLayout() && activeTab() === 'invoices') || (isMobileLayout() && mobileTab() === 'invoices')"
-            (click)="openCreateInvoice()"
-            [disabled]="!customerId()">
-            Create Invoice
-          </ion-button>
-        </div>
+        @if (!isMobileLayout()) {
+          <div class="right-header-title" style="display:flex;align-items:center;gap:8px;min-width:0;">
+            <ui-icon [name]="tabIcon(activeTab())"></ui-icon>
+            <span>{{ activeTabLabel() }}</span>
+            @if (tabActivityCount(activeTab()) > 0) {
+              <span class="ui-badge" uiBadge color="primary">
+                {{ tabActivityCount(activeTab()) }}
+              </span>
+            }
+          </div>
+        }
+        @if (isMobileLayout()) {
+          <div class="mobile-header-select">
+            <div class="ui-item">
+              <select class="form-select"
+                [ngModel]="mobileTab()"
+                (ngModelChange)="onMobileTabSelect($event)">
+                @for (tab of mobileTabs; track tab) {
+                  <option [ngValue]="tab.key">
+                    {{ tab.label }}{{ mobileTabActivityCount(tab.key) > 0 ? ' (' + mobileTabActivityCount(tab.key) + ')' : '' }}
+                  </option>
+                }
+              </select>
+            </div>
+          </div>
+        }
+        @if ((!isMobileLayout() && (activeTab() === 'schedule' || activeTab() === 'invoices'))
+          || (isMobileLayout() && (mobileTab() === 'schedule' || mobileTab() === 'invoices'))) {
+          <div
+            class="right-header-actions"
+            style="display:flex;"
+            >
+            @if ((!isMobileLayout() && activeTab() === 'schedule') || (isMobileLayout() && mobileTab() === 'schedule')) {
+              <button class="btn ui-button btn-primary btn-sm" type="button"
+                (click)="openScheduleAppointmentModal()"
+                [disabled]="!customerId() || scheduleLoading()">
+                <ui-icon slot="start" name="plus"></ui-icon>
+                Add Appointment
+              </button>
+            }
+            @if ((!isMobileLayout() && activeTab() === 'invoices') || (isMobileLayout() && mobileTab() === 'invoices')) {
+              <button class="btn ui-button btn-outline-primary btn-sm" type="button"
+                (click)="openCreateInvoice()"
+                [disabled]="!customerId()">
+                Create Invoice
+              </button>
+            }
+          </div>
+        }
       </div>
 
       <div
         class="right-content"
         [class.sms-active]="activeTab() === 'sms'"
         [class.email-active]="activeTab() === 'email'">
-        <section class="right-panel" *ngIf="isMobileLayout() && mobileTab() === 'profile'">
-          <ng-container *ngTemplateOutlet="contactPanelTemplate"></ng-container>
-        </section>
+        @if (isMobileLayout() && mobileTab() === 'profile') {
+          <section class="right-panel">
+            <ng-container *ngTemplateOutlet="contactPanelTemplate"></ng-container>
+          </section>
+        }
 
-        <section class="right-panel" *ngIf="(!isMobileLayout() && activeTab() === 'vehicle') || (isMobileLayout() && mobileTab() === 'vehicle')">
-          <ng-container *ngTemplateOutlet="vehicleDetailsTemplate"></ng-container>
-        </section>
+        @if ((!isMobileLayout() && activeTab() === 'vehicle') || (isMobileLayout() && mobileTab() === 'vehicle')) {
+          <section class="right-panel">
+            <ng-container *ngTemplateOutlet="vehicleDetailsTemplate"></ng-container>
+          </section>
+        }
 
-        <section class="right-panel schedule-panel" *ngIf="(!isMobileLayout() && activeTab() === 'schedule') || (isMobileLayout() && mobileTab() === 'schedule')">
-          <div class="schedule-toolbar">
-            <div class="invoice-date">Upcoming Appointments</div>
-          </div>
-
-          <div class="sms-disabled" *ngIf="!customerId()">
-            Save this customer first to manage scheduled dates.
-          </div>
-          <div class="sms-loading" *ngIf="customerId() && scheduleLoading()">Loading schedule...</div>
-
-          <ng-container *ngIf="customerId() && !scheduleLoading()">
-            <div class="schedule-section">
-              <div class="sms-empty" *ngIf="!upcomingScheduleEntries().length">No upcoming appointments.</div>
-              <div class="schedule-list" *ngIf="upcomingScheduleEntries().length">
-                <article class="schedule-card" *ngFor="let entry of upcomingScheduleEntries(); trackBy: trackScheduleDraft">
-                  <div class="schedule-grid">
-                    <ion-item>
-                      <ion-label position="stacked">Start</ion-label>
-                      <ion-input
-                        type="datetime-local"
-                        [ngModel]="entry.startInput"
-                        (ngModelChange)="entry.startInput = ($event || '')">
-                      </ion-input>
-                    </ion-item>
-
-                    <ion-item>
-                      <ion-label position="stacked">End</ion-label>
-                      <ion-input
-                        type="datetime-local"
-                        [ngModel]="entry.endInput"
-                        (ngModelChange)="entry.endInput = ($event || '')">
-                      </ion-input>
-                    </ion-item>
-
-                    <ion-item>
-                      <ion-label position="stacked">Bay</ion-label>
-                      <ion-select
-                        interface="popover"
-                        [value]="entry.resource"
-                        (ionChange)="entry.resource = ($event.detail.value || '').toString()">
-                        <ion-select-option *ngFor="let bay of scheduleBays()" [value]="bay.id">
-                          {{ bay.name }}
-                        </ion-select-option>
-                        <ion-select-option [value]="entry.resource" *ngIf="entry.resource && !isKnownScheduleBay(entry.resource)">
-                          Unmapped ({{ entry.resource }})
-                        </ion-select-option>
-                      </ion-select>
-                    </ion-item>
-                  </div>
-
-                  <ion-item>
-                    <ion-label position="stacked">Notes</ion-label>
-                    <ion-textarea
-                      [autoGrow]="true"
-                      rows="3"
-                      [ngModel]="entry.notes"
-                      (ngModelChange)="entry.notes = ($event || '')">
-                    </ion-textarea>
-                  </ion-item>
-
-                  <div class="schedule-actions">
-                    <ion-button
-                      (click)="saveScheduleDraft(entry)"
-                      [disabled]="!isScheduleDraftValid(entry) || scheduleSavingId() === entry.localId || scheduleDeletingId() === entry.localId">
-                      <ion-spinner slot="start" *ngIf="scheduleSavingId() === entry.localId" name="crescent"></ion-spinner>
-                      {{ scheduleSavingId() === entry.localId ? 'Saving...' : 'Save Appointment' }}
-                    </ion-button>
-                  </div>
-                </article>
+        @if ((!isMobileLayout() && activeTab() === 'schedule') || (isMobileLayout() && mobileTab() === 'schedule')) {
+          <section class="right-panel schedule-panel">
+            <div class="schedule-toolbar">
+              <div class="invoice-date">Upcoming Appointments</div>
+            </div>
+            @if (!customerId()) {
+              <div class="sms-disabled">
+                Save this customer first to manage scheduled dates.
               </div>
-            </div>
-
-            <div class="schedule-section">
-              <div class="invoice-date">Appointment History</div>
-              <div class="sms-empty" *ngIf="!historyScheduleEntries().length">No appointment history yet.</div>
-              <div class="schedule-list" *ngIf="historyScheduleEntries().length">
-                <article class="schedule-card" *ngFor="let entry of historyScheduleEntries(); trackBy: trackScheduleDraft">
-                  <div class="invoice-line" style="align-items:flex-start;">
-                    <div style="display:grid;gap:2px;min-width:0;">
-                      <span class="invoice-date">Start</span>
-                      <strong>{{ scheduleDateLabel(entry.startInput) }}</strong>
-                    </div>
-                    <div style="display:grid;gap:2px;min-width:0;text-align:right;">
-                      <span class="invoice-date">End</span>
-                      <strong>{{ scheduleDateLabel(entry.endInput) }}</strong>
-                    </div>
+            }
+            @if (customerId() && scheduleLoading()) {
+              <div class="sms-loading">Loading schedule...</div>
+            }
+            @if (customerId() && !scheduleLoading()) {
+              <div class="schedule-section">
+                @if (!upcomingScheduleEntries().length) {
+                  <div class="sms-empty">No upcoming appointments.</div>
+                }
+                @if (upcomingScheduleEntries().length) {
+                  <div class="schedule-list">
+                    @for (entry of upcomingScheduleEntries(); track trackScheduleDraft($index, entry)) {
+                      <article class="schedule-card">
+                        <div class="schedule-grid">
+                          <div class="ui-item">
+                            <span class="ui-label">Start</span>
+                            <ui-input aria-label="Start"
+                              type="datetime-local"
+                              [ngModel]="entry.startInput"
+                              (ngModelChange)="entry.startInput = ($event || '')">
+                            </ui-input>
+                          </div>
+                          <div class="ui-item">
+                            <span class="ui-label">End</span>
+                            <ui-input aria-label="End"
+                              type="datetime-local"
+                              [ngModel]="entry.endInput"
+                              (ngModelChange)="entry.endInput = ($event || '')">
+                            </ui-input>
+                          </div>
+                          <div class="ui-item">
+                            <span class="ui-label">Bay</span>
+                            <select class="form-select" aria-label="Bay"
+                              [ngModel]="entry.resource"
+                              (ngModelChange)="entry.resource = ($event || '').toString()">
+                              @for (bay of scheduleBays(); track bay) {
+                                <option [ngValue]="bay.id">
+                                  {{ bay.name }}
+                                </option>
+                              }
+                              @if (entry.resource && !isKnownScheduleBay(entry.resource)) {
+                                <option [ngValue]="entry.resource">
+                                  Unmapped ({{ entry.resource }})
+                                </option>
+                              }
+                            </select>
+                          </div>
+                        </div>
+                        <div class="ui-item">
+                          <span class="ui-label">Notes</span>
+                          <ui-textarea aria-label="Notes"
+                            [autoGrow]="true"
+                            rows="3"
+                            [ngModel]="entry.notes"
+                            (ngModelChange)="entry.notes = ($event || '')">
+                          </ui-textarea>
+                        </div>
+                        <div class="schedule-actions">
+                          <button class="btn ui-button btn-primary" type="button"
+                            (click)="saveScheduleDraft(entry)"
+                            [disabled]="!isScheduleDraftValid(entry) || scheduleSavingId() === entry.localId || scheduleDeletingId() === entry.localId">
+                            @if (scheduleSavingId() === entry.localId) {
+                              <span class="spinner-border spinner-border-sm ui-spinner" role="status" aria-label="Loading" slot="start"></span>
+                            }
+                            {{ scheduleSavingId() === entry.localId ? 'Saving...' : 'Save Appointment' }}
+                          </button>
+                        </div>
+                      </article>
+                    }
                   </div>
-                  <div class="invoice-date">Bay: {{ scheduleBayLabel(entry.resource) }}</div>
-                  <div class="invoice-note">{{ entry.notes.trim() || 'No notes.' }}</div>
-                </article>
+                }
               </div>
-            </div>
-          </ng-container>
+              <div class="schedule-section">
+                <div class="invoice-date">Appointment History</div>
+                @if (!historyScheduleEntries().length) {
+                  <div class="sms-empty">No appointment history yet.</div>
+                }
+                @if (historyScheduleEntries().length) {
+                  <div class="schedule-list">
+                    @for (entry of historyScheduleEntries(); track trackScheduleDraft($index, entry)) {
+                      <article class="schedule-card">
+                        <div class="invoice-line" style="align-items:flex-start;">
+                          <div style="display:grid;gap:2px;min-width:0;">
+                            <span class="invoice-date">Start</span>
+                            <strong>{{ scheduleDateLabel(entry.startInput) }}</strong>
+                          </div>
+                          <div style="display:grid;gap:2px;min-width:0;text-align:right;">
+                            <span class="invoice-date">End</span>
+                            <strong>{{ scheduleDateLabel(entry.endInput) }}</strong>
+                          </div>
+                        </div>
+                        <div class="invoice-date">Bay: {{ scheduleBayLabel(entry.resource) }}</div>
+                        <div class="invoice-note">{{ entry.notes.trim() || 'No notes.' }}</div>
+                      </article>
+                    }
+                  </div>
+                }
+              </div>
+            }
+            @if (scheduleStatus()) {
+              <div class="sms-feedback success">{{ scheduleStatus() }}</div>
+            }
+            @if (scheduleError()) {
+              <div class="sms-feedback error">{{ scheduleError() }}</div>
+            }
+          </section>
+        }
 
-          <div class="sms-feedback success" *ngIf="scheduleStatus()">{{ scheduleStatus() }}</div>
-          <div class="sms-feedback error" *ngIf="scheduleError()">{{ scheduleError() }}</div>
-        </section>
-
-        <section class="right-panel" *ngIf="(!isMobileLayout() && activeTab() === 'invoices') || (isMobileLayout() && mobileTab() === 'invoices')">
-          <div class="invoice-card">
-            <div class="invoice-line">
-              <strong>Issue Refund</strong>
-              <span class="invoice-date">Attach to a paid invoice</span>
-            </div>
-            <div class="schedule-grid">
-              <ion-item>
-                <ion-label position="stacked">Invoice Reference</ion-label>
-                <ion-select
-                  [(ngModel)]="refundInvoiceId"
-                  (ionChange)="onRefundInvoiceChange($event.detail.value || '')"
-                  interface="popover">
-                  <ion-select-option value="">Select paid invoice</ion-select-option>
-                  <ion-select-option *ngFor="let invoice of refundableInvoices(); trackBy: trackInvoice" [value]="invoice.id">
-                    {{ invoice.invoiceNumber }} • {{ invoice.total | currency:'USD':'symbol':'1.2-2' }}
-                  </ion-select-option>
-                </ion-select>
-              </ion-item>
-              <ion-item>
-                <ion-label position="stacked">Refund Amount</ion-label>
-                <ion-input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  [(ngModel)]="refundAmount">
-                </ion-input>
-              </ion-item>
-            </div>
-            <ion-item>
-              <ion-label position="stacked">Refund Reason (Optional)</ion-label>
-              <ion-textarea
-                [autoGrow]="true"
-                rows="2"
-                [(ngModel)]="refundReason">
-              </ion-textarea>
-            </ion-item>
-            <div class="schedule-actions">
-              <ion-button (click)="issueRefund()" [disabled]="refundSubmitting()">
-                {{ refundSubmitting() ? 'Issuing Refund...' : 'Issue Refund' }}
-              </ion-button>
-            </div>
-            <div class="sms-feedback success" *ngIf="refundStatus()">{{ refundStatus() }}</div>
-            <div class="sms-feedback error" *ngIf="refundError()">{{ refundError() }}</div>
-          </div>
-
-          <div class="invoice-filters">
-            <button
-              type="button"
-              class="invoice-filter-btn"
-              *ngFor="let option of docFilterOptions"
-              [class.is-active]="docsFilter() === option.id"
-              (click)="setDocsFilter(option.id)">
-              {{ option.label }}
-            </button>
-          </div>
-          <div class="invoice-grid" *ngIf="filteredCustomerInvoices().length; else noCustomerInvoices">
-            <article
-              class="invoice-card invoice-card-link"
-              *ngFor="let invoice of filteredCustomerInvoices(); trackBy: trackInvoice"
-              role="button"
-              tabindex="0"
-              (click)="openInvoice(invoice)"
-              (keydown.enter)="openInvoice(invoice)"
-              (keydown.space)="openInvoice(invoice); $event.preventDefault()">
+        @if ((!isMobileLayout() && activeTab() === 'invoices') || (isMobileLayout() && mobileTab() === 'invoices')) {
+          <section class="right-panel">
+            <div class="invoice-card">
               <div class="invoice-line">
-                <strong>{{ invoice.invoiceNumber }}</strong>
-                <ion-badge [color]="invoiceBadgeColor(invoice)">
-                  {{ invoiceStatusLabel(invoice) }}
-                </ion-badge>
+                <strong>Issue Refund</strong>
+                <span class="invoice-date">Attach to a paid invoice</span>
               </div>
-              <div class="invoice-date">Type: {{ invoice.documentType === 'quote' ? 'Quote' : 'Invoice' }}</div>
-              <div class="invoice-date">Template: {{ invoice.template }}</div>
-              <div class="invoice-date">Vehicle: {{ invoice.vehicle }}</div>
-              <div class="invoice-amount">{{ invoice.total | currency:'USD':'symbol':'1.2-2' }}</div>
-              <div class="invoice-date">Invoiced: {{ invoice.invoicedAt }}</div>
-            </article>
-          </div>
-          <ng-template #noCustomerInvoices>
-            <div class="invoice-note">No matching quotes or invoices for this filter.</div>
-          </ng-template>
-        </section>
-
-        <section class="right-panel sms-panel" *ngIf="(!isMobileLayout() && activeTab() === 'sms') || (isMobileLayout() && mobileTab() === 'sms')">
-          <div class="sms-disabled" *ngIf="!canUseSms()">
-            Save this customer first to enable SMS history and messaging.
-          </div>
-
-          <div class="sms-chat-shell" *ngIf="canUseSms()">
-            <div class="sms-thread" #smsThreadContainer>
-              <div class="sms-loading" *ngIf="smsLoading()">Loading messages...</div>
-              <div class="sms-empty" *ngIf="!smsLoading() && !smsThread().length">No SMS history yet.</div>
-
-              <div
-                class="sms-entry"
-                *ngFor="let msg of smsThread(); trackBy: trackSms"
-                [class.outbound]="msg.direction === 'outbound'"
-                [class.inbound]="msg.direction === 'inbound'">
-                <div class="sms-bubble">
-                  <div class="sms-meta-line">
-                    <span>{{ msg.direction === 'inbound' ? 'Customer' : 'You' }}</span>
-                    <span
-                      class="sms-delivery-badge"
-                      *ngIf="msg.direction === 'outbound'"
-                      [ngClass]="smsDeliveryClass(msg)"
-                      [attr.title]="smsDeliveryTitle(msg)">
-                      {{ smsDeliveryLabel(msg) }}
-                    </span>
-                    <span>{{ smsDateLabel(msg.createdAt) }}</span>
-                  </div>
-                  <div class="sms-message">{{ msg.message }}</div>
+              <div class="schedule-grid">
+                <div class="ui-item">
+                  <span class="ui-label">Invoice Reference</span>
+                  <select class="form-select" aria-label="Invoice Reference"
+                    [ngModel]="refundInvoiceId"
+                    (ngModelChange)="onRefundInvoiceChange($event || '')">
+                    <option value="">Select paid invoice</option>
+                    @for (invoice of refundableInvoices(); track trackInvoice($index, invoice)) {
+                      <option [ngValue]="invoice.id">
+                        {{ invoice.invoiceNumber }} • {{ invoice.total | currency:'USD':'symbol':'1.2-2' }}
+                      </option>
+                    }
+                  </select>
+                </div>
+                <div class="ui-item">
+                  <span class="ui-label">Refund Amount</span>
+                  <ui-input aria-label="Refund Amount"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    [(ngModel)]="refundAmount">
+                  </ui-input>
                 </div>
               </div>
-            </div>
-
-            <div class="sms-compose-wrap">
-              <ion-item class="sms-compose-item">
-                <ion-label position="stacked">Message</ion-label>
-                <ion-textarea
-                  [(ngModel)]="outgoingMessage"
+              <div class="ui-item">
+                <span class="ui-label">Refund Reason (Optional)</span>
+                <ui-textarea aria-label="Refund Reason (Optional)"
                   [autoGrow]="true"
                   rows="2"
-                  maxlength="1000"
-                  (keydown)="onSmsComposerKeydown($event)"
-                  placeholder="Type a message..."></ion-textarea>
-              </ion-item>
-              <div class="sms-compose-actions">
-                <ion-button fill="outline" (click)="logIncomingMessage()" [disabled]="smsSending() || !canSubmitSms()">
-                  Log Incoming
-                </ion-button>
-                <ion-button (click)="sendSmsToCustomer()" [disabled]="smsSending() || !canSubmitSms()">
-                  {{ smsSending() ? 'Sending...' : 'Send SMS' }}
-                </ion-button>
+                  [(ngModel)]="refundReason">
+                </ui-textarea>
               </div>
+              <div class="schedule-actions">
+                <button class="btn ui-button btn-primary" type="button" (click)="issueRefund()" [disabled]="refundSubmitting()">
+                  {{ refundSubmitting() ? 'Issuing Refund...' : 'Issue Refund' }}
+                </button>
+              </div>
+              @if (refundStatus()) {
+                <div class="sms-feedback success">{{ refundStatus() }}</div>
+              }
+              @if (refundError()) {
+                <div class="sms-feedback error">{{ refundError() }}</div>
+              }
             </div>
-          </div>
-
-          <div class="sms-feedback success" *ngIf="smsStatus()">{{ smsStatus() }}</div>
-          <div class="sms-feedback error" *ngIf="smsError()">{{ smsError() }}</div>
-        </section>
-
-        <section class="right-panel email-panel" *ngIf="(!isMobileLayout() && activeTab() === 'email') || (isMobileLayout() && mobileTab() === 'email')">
-          <div class="sms-disabled" *ngIf="!canUseEmail()">
-            Save this customer first to enable email history and sending.
-          </div>
-
-          <div class="email-shell" *ngIf="canUseEmail()">
-            <div class="email-topbar">
-              <ion-button
-                fill="outline"
-                size="small"
-                *ngIf="emailView() !== 'list'"
-                (click)="backToEmailList()">
-                <ion-icon slot="start" name="arrow-back-outline"></ion-icon>
-                Back
-              </ion-button>
-
-              <ion-button size="small" *ngIf="emailView() === 'list'" (click)="startNewEmail()">
-                <ion-icon slot="start" name="add-outline"></ion-icon>
-                New Email
-              </ion-button>
-
-              <ion-button size="small" *ngIf="emailView() === 'detail'" (click)="startReplyEmail()">
-                <ion-icon slot="start" name="paper-plane-outline"></ion-icon>
-                Reply
-              </ion-button>
+            <div class="invoice-filters">
+              @for (option of docFilterOptions; track option) {
+                <button
+                  type="button"
+                  class="invoice-filter-btn"
+                  [class.is-active]="docsFilter() === option.id"
+                  (click)="setDocsFilter(option.id)">
+                  {{ option.label }}
+                </button>
+              }
             </div>
+            @if (filteredCustomerInvoices().length) {
+              <div class="invoice-grid">
+                @for (invoice of filteredCustomerInvoices(); track trackInvoice($index, invoice)) {
+                  <article
+                    class="invoice-card invoice-card-link"
+                    role="button"
+                    tabindex="0"
+                    (click)="openInvoice(invoice)"
+                    (keydown.enter)="openInvoice(invoice)"
+                    (keydown.space)="openInvoice(invoice); $event.preventDefault()">
+                    <div class="invoice-line">
+                      <strong>{{ invoice.invoiceNumber }}</strong>
+                      <span class="ui-badge" uiBadge [color]="invoiceBadgeColor(invoice)">
+                        {{ invoiceStatusLabel(invoice) }}
+                      </span>
+                    </div>
+                    <div class="invoice-date">Type: {{ invoice.documentType === 'quote' ? 'Quote' : 'Invoice' }}</div>
+                    <div class="invoice-date">Template: {{ invoice.template }}</div>
+                    <div class="invoice-date">Vehicle: {{ invoice.vehicle }}</div>
+                    <div class="invoice-amount">{{ invoice.total | currency:'USD':'symbol':'1.2-2' }}</div>
+                    <div class="invoice-date">Invoiced: {{ invoice.invoicedAt }}</div>
+                  </article>
+                }
+              </div>
+            } @else {
+              <div class="invoice-note">No matching quotes or invoices for this filter.</div>
+            }
+          </section>
+        }
 
-            <div class="sms-loading" *ngIf="emailLoading()">Loading emails...</div>
-
-            <div class="email-list" *ngIf="!emailLoading() && emailView() === 'list'">
-              <button
-                type="button"
-                class="email-list-item"
-                *ngFor="let message of emailThread(); trackBy: trackEmail"
-                (click)="openEmailMessage(message.id)">
-                <div class="email-line">
-                  <ion-badge [color]="message.direction === 'inbound' ? 'tertiary' : 'primary'">
-                    {{ message.direction === 'inbound' ? 'Inbound' : 'Outbound' }}
-                  </ion-badge>
-                  <span class="email-date">{{ emailDateLabel(message.createdAt) }}</span>
+        @if ((!isMobileLayout() && activeTab() === 'sms') || (isMobileLayout() && mobileTab() === 'sms')) {
+          <section class="right-panel sms-panel">
+            @if (!canUseSms()) {
+              <div class="sms-disabled">
+                Save this customer first to enable SMS history and messaging.
+              </div>
+            }
+            @if (canUseSms()) {
+              <div class="sms-chat-shell">
+                <div class="sms-thread" #smsThreadContainer>
+                  @if (smsLoading()) {
+                    <div class="sms-loading">Loading messages...</div>
+                  }
+                  @if (!smsLoading() && !smsThread().length) {
+                    <div class="sms-empty">No SMS history yet.</div>
+                  }
+                  @for (msg of smsThread(); track trackSms($index, msg)) {
+                    <div
+                      class="sms-entry"
+                      [class.outbound]="msg.direction === 'outbound'"
+                      [class.inbound]="msg.direction === 'inbound'"
+                      [class.failed]="isFailedSms(msg)">
+                      <div class="sms-stack">
+                        <div class="sms-bubble">
+                          <div class="sms-meta-line">
+                            <span>{{ msg.direction === 'inbound' ? 'Customer' : 'You' }}</span>
+                            <span>{{ smsDateLabel(msg.createdAt) }}</span>
+                          </div>
+                          <div class="sms-message">{{ msg.message }}</div>
+                        </div>
+                        @if (isFailedSms(msg)) {
+                          <div class="sms-failure-reason">
+                            {{ smsFailureReason(msg) }}
+                          </div>
+                        }
+                      </div>
+                      @if (isFailedSms(msg)) {
+                        <span
+                          class="sms-failed-icon"
+                          [attr.title]="smsDeliveryTitle(msg)"
+                        aria-label="Message failed to send">!</span>
+                      }
+                    </div>
+                  }
                 </div>
-                <div class="email-subject">{{ message.subject || '(no subject)' }}</div>
-                <div class="email-from">
-                  {{ message.direction === 'inbound' ? (message.from || 'unknown sender') : (message.to || 'unknown recipient') }}
+                <div class="sms-compose-wrap">
+                  <div class="ui-item sms-compose-item">
+                    <span class="ui-label">Message</span>
+                    <ui-textarea aria-label="Message"
+                      [(ngModel)]="outgoingMessage"
+                      [autoGrow]="true"
+                      rows="2"
+                      maxlength="1000"
+                      (keydown)="onSmsComposerKeydown($event)"
+                    placeholder="Type a message..."></ui-textarea>
+                  </div>
+                  <div class="sms-compose-actions">
+                    <button class="btn ui-button btn-outline-primary" type="button" (click)="logIncomingMessage()" [disabled]="smsSending() || !canSubmitSms()">
+                      Log Incoming
+                    </button>
+                    <button class="btn ui-button btn-primary" type="button" (click)="sendSmsToCustomer()" [disabled]="smsSending() || !canSubmitSms()">
+                      {{ smsSending() ? 'Sending...' : 'Send SMS' }}
+                    </button>
+                  </div>
                 </div>
-                <div class="email-preview">{{ emailPreviewText(message) }}</div>
-              </button>
-
-              <div class="sms-empty" *ngIf="!emailThread().length">
-                No emails yet. Click <strong>New Email</strong> to create one.
               </div>
-            </div>
+            }
+            @if (smsStatus()) {
+              <div class="sms-feedback success">{{ smsStatus() }}</div>
+            }
+            @if (smsError()) {
+              <div class="sms-feedback error">{{ smsError() }}</div>
+            }
+          </section>
+        }
 
-            <div class="email-detail" *ngIf="!emailLoading() && emailView() === 'detail' && selectedEmail() as message">
-              <div class="email-line">
-                <ion-badge [color]="message.direction === 'inbound' ? 'tertiary' : 'primary'">
-                  {{ message.direction === 'inbound' ? 'Inbound' : 'Outbound' }}
-                </ion-badge>
-                <span class="email-date">{{ emailDateLabel(message.createdAt) }}</span>
+        @if ((!isMobileLayout() && activeTab() === 'email') || (isMobileLayout() && mobileTab() === 'email')) {
+          <section class="right-panel email-panel">
+            @if (!canUseEmail()) {
+              <div class="sms-disabled">
+                Save this customer first to enable email history and sending.
               </div>
-              <div class="email-subject">{{ message.subject || '(no subject)' }}</div>
-              <div class="email-from">From: {{ message.from || 'unknown sender' }}</div>
-              <div class="email-from">To: {{ message.to || 'unknown recipient' }}</div>
-              <pre class="email-body">{{ message.message }}</pre>
-            </div>
-
-            <div class="email-compose" *ngIf="!emailLoading() && emailView() === 'compose'">
-              <ion-item>
-                <ion-label position="stacked">To</ion-label>
-                <ion-input [(ngModel)]="emailTo" placeholder="customer@example.com"></ion-input>
-              </ion-item>
-
-              <ion-item>
-                <ion-label position="stacked">Template</ion-label>
-                <ion-select
-                  interface="popover"
-                  [value]="selectedTemplateId"
-                  (ionChange)="applySelectedTemplate($event.detail.value)">
-                  <ion-select-option value="">None</ion-select-option>
-                  <ion-select-option *ngFor="let template of emailTemplates()" [value]="template.id">
-                    {{ template.name }}
-                  </ion-select-option>
-                </ion-select>
-              </ion-item>
-
-              <ion-item>
-                <ion-label position="stacked">Subject</ion-label>
-                <ion-input [(ngModel)]="emailSubject" placeholder="Email subject"></ion-input>
-              </ion-item>
-
-              <ion-item>
-                <ion-label position="stacked">Message</ion-label>
-                <ion-textarea
-                  class="email-message-input"
-                  [(ngModel)]="emailMessage"
-                  rows="8"
-                  maxlength="12000"
-                  placeholder="Write your email...">
-                </ion-textarea>
-              </ion-item>
-
-              <div class="email-compose-actions">
-                <ion-button (click)="sendEmailToCustomer()" [disabled]="emailSending() || !canSubmitEmail()">
-                  <ion-icon slot="start" name="paper-plane-outline"></ion-icon>
-                  {{ emailSending() ? 'Sending...' : 'Send Email' }}
-                </ion-button>
+            }
+            @if (canUseEmail()) {
+              <div class="email-shell">
+                <div class="email-topbar">
+                  @if (emailView() !== 'list') {
+                    <button class="btn ui-button btn-outline-primary btn-sm" type="button"
+                      (click)="backToEmailList()">
+                      <ui-icon slot="start" name="arrow-left"></ui-icon>
+                      Back
+                    </button>
+                  }
+                  @if (emailView() === 'list') {
+                    <button class="btn ui-button btn-primary btn-sm" type="button" (click)="startNewEmail()">
+                      <ui-icon slot="start" name="plus"></ui-icon>
+                      New Email
+                    </button>
+                  }
+                  @if (emailView() === 'detail') {
+                    <button class="btn ui-button btn-primary btn-sm" type="button" (click)="startReplyEmail()">
+                      <ui-icon slot="start" name="send"></ui-icon>
+                      Reply
+                    </button>
+                  }
+                </div>
+                @if (emailLoading()) {
+                  <div class="sms-loading">Loading emails...</div>
+                }
+                @if (!emailLoading() && emailView() === 'list') {
+                  <div class="email-list">
+                    @for (message of emailThread(); track trackEmail($index, message)) {
+                      <button
+                        type="button"
+                        class="email-list-item"
+                        (click)="openEmailMessage(message.id)">
+                        <div class="email-line">
+                          <span class="ui-badge" uiBadge [color]="message.direction === 'inbound' ? 'tertiary' : 'primary'">
+                            {{ message.direction === 'inbound' ? 'Inbound' : 'Outbound' }}
+                          </span>
+                          <span class="email-date">{{ emailDateLabel(message.createdAt) }}</span>
+                        </div>
+                        <div class="email-subject">{{ message.subject || '(no subject)' }}</div>
+                        <div class="email-from">
+                          {{ message.direction === 'inbound' ? (message.from || 'unknown sender') : (message.to || 'unknown recipient') }}
+                        </div>
+                        <div class="email-preview">{{ emailPreviewText(message) }}</div>
+                      </button>
+                    }
+                    @if (!emailThread().length) {
+                      <div class="sms-empty">
+                        No emails yet. Click <strong>New Email</strong> to create one.
+                      </div>
+                    }
+                  </div>
+                }
+                @if (!emailLoading() && emailView() === 'detail' && selectedEmail(); as message) {
+                  <div class="email-detail">
+                    <div class="email-line">
+                      <span class="ui-badge" uiBadge [color]="message.direction === 'inbound' ? 'tertiary' : 'primary'">
+                        {{ message.direction === 'inbound' ? 'Inbound' : 'Outbound' }}
+                      </span>
+                      <span class="email-date">{{ emailDateLabel(message.createdAt) }}</span>
+                    </div>
+                    <div class="email-subject">{{ message.subject || '(no subject)' }}</div>
+                    <div class="email-from">From: {{ message.from || 'unknown sender' }}</div>
+                    <div class="email-from">To: {{ message.to || 'unknown recipient' }}</div>
+                    <pre class="email-body">{{ message.message }}</pre>
+                  </div>
+                }
+                @if (!emailLoading() && emailView() === 'compose') {
+                  <div class="email-compose">
+                    <div class="ui-item">
+                      <span class="ui-label">To</span>
+                      <ui-input aria-label="To" [(ngModel)]="emailTo" placeholder="customer@example.com"></ui-input>
+                    </div>
+                    <div class="ui-item">
+                      <span class="ui-label">Template</span>
+                      <select class="form-select" aria-label="Template"
+                        [ngModel]="selectedTemplateId"
+                        (ngModelChange)="applySelectedTemplate($event)">
+                        <option value="">None</option>
+                        @for (template of emailTemplates(); track template) {
+                          <option [ngValue]="template.id">
+                            {{ template.name }}
+                          </option>
+                        }
+                      </select>
+                    </div>
+                    <div class="ui-item">
+                      <span class="ui-label">Subject</span>
+                      <ui-input aria-label="Subject" [(ngModel)]="emailSubject" placeholder="Email subject"></ui-input>
+                    </div>
+                    <div class="ui-item">
+                      <span class="ui-label">Message</span>
+                      <ui-textarea aria-label="Message"
+                        class="email-message-input"
+                        [(ngModel)]="emailMessage"
+                        rows="8"
+                        maxlength="12000"
+                        placeholder="Write your email...">
+                      </ui-textarea>
+                    </div>
+                    <div class="email-compose-actions">
+                      <button class="btn ui-button btn-primary" type="button" (click)="sendEmailToCustomer()" [disabled]="emailSending() || !canSubmitEmail()">
+                        <ui-icon slot="start" name="send"></ui-icon>
+                        {{ emailSending() ? 'Sending...' : 'Send Email' }}
+                      </button>
+                    </div>
+                  </div>
+                }
               </div>
-            </div>
-          </div>
-
-          <div class="sms-feedback success" *ngIf="emailStatus()">{{ emailStatus() }}</div>
-          <div class="sms-feedback error" *ngIf="emailError()">{{ emailError() }}</div>
-        </section>
+            }
+            @if (emailStatus()) {
+              <div class="sms-feedback success">{{ emailStatus() }}</div>
+            }
+            @if (emailError()) {
+              <div class="sms-feedback error">{{ emailError() }}</div>
+            }
+          </section>
+        }
       </div>
     </section>
   </section>
 
-  <div class="mobile-sticky-save" *ngIf="isMobileLayout() && hasCustomerChanges()">
-    <ion-button
-      expand="block"
-      (click)="saveCustomer()"
-      [disabled]="saving() || loading() || !canSaveCustomer()">
-      <ion-spinner *ngIf="saving()" name="crescent" slot="start"></ion-spinner>
-      <ion-icon *ngIf="!saving()" name="save-outline" slot="start"></ion-icon>
-      {{ saving() ? 'Saving...' : 'Save Customer' }}
-    </ion-button>
-  </div>
+  @if (isMobileLayout() && hasCustomerChanges()) {
+    <div class="mobile-sticky-save">
+      <button class="btn ui-button btn-primary w-100" type="button"
+        (click)="saveCustomer()"
+        [disabled]="saving() || loading() || !canSaveCustomer()">
+        @if (saving()) {
+          <span class="spinner-border spinner-border-sm ui-spinner" role="status" aria-label="Loading" slot="start"></span>
+        }
+        @if (!saving()) {
+          <ui-icon name="device-floppy" slot="start"></ui-icon>
+        }
+        {{ saving() ? 'Saving...' : 'Save Customer' }}
+      </button>
+    </div>
+  }
 
-  <div
-    *ngIf="isVinWorkflowBusy()"
+  @if (isVinWorkflowBusy()) {
+    <div
     style="
       position: fixed;
       inset: 0;
@@ -911,8 +1050,8 @@
       backdrop-filter: blur(2px);
       padding: 20px;
       text-align: center;">
-    <div
-      class="glass-surface"
+      <div
+        class="app-surface"
       style="
         min-width: 220px;
         max-width: 320px;
@@ -923,34 +1062,35 @@
         display: grid;
         gap: 10px;
         justify-items: center;">
-      <ion-spinner name="crescent"></ion-spinner>
-      <strong>{{ vinWorkflowMessage() }}</strong>
-      <div style="font-size:12px;color:var(--app-text-muted);">Please wait...</div>
+        <span class="spinner-border spinner-border-sm ui-spinner" role="status" aria-label="Loading"></span>
+        <strong>{{ vinWorkflowMessage() }}</strong>
+        <div style="font-size:12px;color:var(--app-text-muted);">Please wait...</div>
+      </div>
     </div>
-  </div>
+  }
 
-</ion-content>
+</div>
 
-<ion-modal [isOpen]="deleteModalOpen()" (didDismiss)="cancelDeleteCustomerModal()">
+<ui-modal [isOpen]="deleteModalOpen()" (didDismiss)="cancelDeleteCustomerModal()" label="Delete Customer">
   <ng-template>
-    <ion-header>
-      <ion-toolbar>
-        <ion-title>Delete Customer</ion-title>
-        <ion-buttons slot="end">
-          <ion-button (click)="cancelDeleteCustomerModal()">Close</ion-button>
-        </ion-buttons>
-      </ion-toolbar>
-    </ion-header>
-    <ion-content class="ion-padding">
+    <header class="ui-header">
+      <div class="ui-toolbar">
+        <h1 class="ui-title">Delete Customer</h1>
+        <div class="ui-buttons" slot="end">
+          <button class="btn ui-button btn-primary" type="button" (click)="cancelDeleteCustomerModal()">Close</button>
+        </div>
+      </div>
+    </header>
+    <div class="ui-content app-padding">
       <p>
         Delete <strong>{{ displayName() }}</strong>? This cannot be undone.
       </p>
       <div style="display:flex;justify-content:flex-end;gap:8px;">
-        <ion-button fill="outline" (click)="cancelDeleteCustomerModal()">Cancel</ion-button>
-        <ion-button color="danger" (click)="confirmDeleteCustomerFromModal()">
+        <button class="btn ui-button btn-outline-primary" type="button" (click)="cancelDeleteCustomerModal()">Cancel</button>
+        <button class="btn ui-button btn-danger" type="button" (click)="confirmDeleteCustomerFromModal()">
           Delete
-        </ion-button>
+        </button>
       </div>
-    </ion-content>
+    </div>
   </ng-template>
-</ion-modal>
+</ui-modal>

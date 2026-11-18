@@ -1,3 +1,4 @@
+const { scopedTenantPartition, TENANT_SCOPE_DELIMITER } = require("../_shared/notification-partition");
 const { TableClient } = require("../_shared/table-client");
 const { randomUUID } = require("crypto");
 const { resolveTenantId, sanitizeTenantId } = require("../_shared/tenant");
@@ -6,7 +7,6 @@ const { requirePrincipal } = require("../_shared/auth");
 const NOTIFICATIONS_TABLE = "notifications";
 const USERS_TABLE = "useraccess";
 const USERS_PARTITION = "v1";
-const TENANT_SCOPE_DELIMITER = "::";
 const DEFAULT_RECENT_LIMIT = 3;
 const DEFAULT_ALL_LIMIT = 100;
 const MAX_LIMIT = 250;
@@ -178,24 +178,6 @@ function isLocalRequest(req) {
   return host.includes("localhost") || host.includes("127.0.0.1");
 }
 
-function isLocalRuntime() {
-  const websiteHostname = asString(process.env.WEBSITE_HOSTNAME).toLowerCase();
-  if (!websiteHostname) return true;
-  return websiteHostname.includes("localhost") || websiteHostname.includes("127.0.0.1");
-}
-
-function notificationsScope() {
-  const explicit = sanitizeTenantId(
-    asString(process.env.NOTIFICATIONS_NAMESPACE || process.env.APP_ENV || process.env.NODE_ENV)
-  );
-  if (explicit && explicit !== "tenant-unassigned") return explicit;
-  return isLocalRuntime() ? "local" : "prod";
-}
-
-function scopedTenantPartition(tenantId) {
-  const baseTenant = sanitizeTenantId(asString(tenantId) || "main");
-  return `${baseTenant}${TENANT_SCOPE_DELIMITER}${notificationsScope()}`;
-}
 
 function baseTenantFromPartition(partitionKey) {
   const raw = asString(partitionKey);
@@ -290,9 +272,27 @@ function logicalNotificationKey(item) {
   const entityType = asString(item && item.entityType).toLowerCase();
   const entityId = asString(item && item.entityId);
   if (source === "widget-lead" || source === "dashboard-new-lead" || entityType === "lead") {
+    const leadItemId = asString(metadata.leadItemId);
+    if (leadItemId) return `lead-submission:${leadItemId}`;
     const titleKey = asString(item && item.title).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
     const submittedPersonKey = customerEmail || customerPhone || customerName || customerId || entityId || titleKey;
     if (submittedPersonKey) return `lead-submission:${submittedPersonKey}`;
+  }
+  if (entityType === "invoice" && entityId) {
+    const action = asString(metadata.action).toLowerCase();
+    const title = asString(item && item.title).toLowerCase();
+    const paymentSources = new Set([
+      "public-invoice-link",
+      "invoice-paid",
+      "response-sync",
+      "dashboard-response-sync"
+    ]);
+    if ((action === "pay" || title.includes(" paid")) && (paymentSources.has(source) || title.includes("invoice"))) {
+      return `invoice-payment:${entityId}:${asString(metadata.paymentKind) || "initial"}`;
+    }
+    if (action === "parts-to-order") {
+      return `invoice-parts-to-order:${entityId}`;
+    }
   }
   if (entityType && entityId) {
     return [

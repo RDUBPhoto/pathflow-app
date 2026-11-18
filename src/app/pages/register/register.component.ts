@@ -1,17 +1,12 @@
-import { Component, OnDestroy, computed, effect, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { UiInput } from '../../ui/controls';
+import { environment } from '../../../environments/environment';
+import { Component, OnDestroy, computed, effect, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+
 import { FormsModule } from '@angular/forms';
-import {
-  IonButton,
-  IonContent,
-  IonInput,
-  IonItem,
-  IonLabel,
-  IonSpinner
-} from '@ionic/angular/standalone';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { Subscription, finalize, firstValueFrom } from 'rxjs';
 import { AuthService } from '../../auth/auth.service';
+import { normalizeAuthRedirect } from '../../auth/auth-redirect';
 import { TenantContextService } from '../../services/tenant-context.service';
 import { BusinessProfileService } from '../../services/business-profile.service';
 import { AddressLookupService, AddressSuggestion } from '../../services/address-lookup.service';
@@ -21,16 +16,12 @@ import { formatUsPhoneInput, phoneDigits } from '../../utils/phone-format';
   selector: 'app-register',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
-    IonContent,
-    IonItem,
-    IonLabel,
-    IonInput,
-    IonButton,
-    IonSpinner
+    RouterLink,
+    UiInput
   ],
   templateUrl: './register.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./register.component.scss']
 })
 export default class RegisterComponent implements OnDestroy {
@@ -41,6 +32,8 @@ export default class RegisterComponent implements OnDestroy {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
 
+  readonly localBillingSandbox = environment.auth.devBypass &&
+    ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname);
   readonly saving = signal(false);
   readonly error = signal('');
   readonly locationName = signal('Pathflow HQ');
@@ -68,10 +61,10 @@ export default class RegisterComponent implements OnDestroy {
   private businessAddressLookupSub: Subscription | null = null;
   private businessAddressSearchTimer: ReturnType<typeof setTimeout> | null = null;
 
-  readonly isBillingUpdateMode = computed(() => this.auth.isAccessLocked() || this.billingMode());
+  readonly isBillingUpdateMode = computed(() => this.auth.subscriptionBillingEnabled() && (this.auth.isAccessLocked() || this.billingMode()));
   readonly showTrialOption = computed(() => !this.isBillingUpdateMode());
-  readonly requiresBilling = computed(() => this.isBillingUpdateMode() || this.selectedPlan() !== 'trial');
-  readonly showBillingSection = computed(() => this.requiresBilling() || this.showOptionalBilling());
+  readonly requiresBilling = computed(() => this.auth.subscriptionBillingEnabled() && (this.isBillingUpdateMode() || this.selectedPlan() !== 'trial'));
+  readonly showBillingSection = computed(() => this.auth.subscriptionBillingEnabled() && (this.requiresBilling() || this.showOptionalBilling()));
   readonly planCycleForBilling = computed<'monthly' | 'annual'>(() => this.selectedPlan() === 'annual' ? 'annual' : 'monthly');
   readonly annualSavingsPercent = computed(() => {
     const monthly = this.monthlyPrice();
@@ -92,6 +85,7 @@ export default class RegisterComponent implements OnDestroy {
   ));
 
   readonly isSandboxCard = computed(() => {
+    if (!this.localBillingSandbox) return false;
     const cardDigits = this.digitsOnly(this.cardNumber());
     if (!/^9{5,}$/.test(cardDigits)) return false;
 
@@ -143,7 +137,7 @@ export default class RegisterComponent implements OnDestroy {
     (this.isBillingUpdateMode() || this.auth.canBootstrapRegistration()) &&
     (this.isBillingUpdateMode() || this.registrationLocationsValid()) &&
     (this.isBillingUpdateMode() || this.registrationBusinessValid()) &&
-    (!this.requiresBilling() || this.billingValid())
+    (!this.requiresBilling() || this.localBillingSandbox && this.isSandboxCard())
   );
   readonly registrationLocationsValid = computed(() => {
     const base = this.locationName().trim();
@@ -177,7 +171,7 @@ export default class RegisterComponent implements OnDestroy {
     if (this.requiresBilling()) {
       return this.planCycleForBilling() === 'annual' ? 'Start Annual Plan' : 'Start Monthly Plan';
     }
-    return 'Start 7-Day Free Trial';
+    return this.auth.subscriptionBillingEnabled() ? 'Start 7-Day Free Trial' : 'Create workspace';
   });
 
   constructor() {
@@ -349,9 +343,7 @@ export default class RegisterComponent implements OnDestroy {
   }
 
   private normalizeRedirect(path: string | null): string {
-    const value = (path || '').trim();
-    if (!value.startsWith('/')) return '/dashboard';
-    if (value.startsWith('/.auth/')) return '/dashboard';
+    const value = normalizeAuthRedirect(path);
     if (value.startsWith('/register')) return '/dashboard';
     return value;
   }

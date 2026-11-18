@@ -1,18 +1,8 @@
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { UiInput } from '../../ui/controls';
+import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router, RouterLink } from '@angular/router';
-import {
-  IonButton,
-  IonButtons,
-  IonContent,
-  IonHeader,
-  IonInput,
-  IonItem,
-  IonLabel,
-  IonTitle,
-  IonToolbar
-} from '@ionic/angular/standalone';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { PageBackButtonComponent } from '../../components/navigation/page-back-button/page-back-button.component';
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
 import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
@@ -28,7 +18,8 @@ import {
   InvoicesDataService
 } from '../../services/invoices-data.service';
 import { JobPartDraft, JobPartsFoundationService } from '../../services/job-parts-foundation.service';
-import { PurchaseOrderLine, PurchaseOrdersApiService } from '../../services/purchase-orders-api.service';
+import { PurchaseOrder, PurchaseOrderLine, PurchaseOrdersApiService } from '../../services/purchase-orders-api.service';
+import { Vendor, VendorsApiService } from '../../services/vendors-api.service';
 
 type InventoryEditor = {
   id: string;
@@ -42,9 +33,26 @@ type InventoryEditor = {
   onOrder: number;
   unitCost: number;
   price: number;
+  vendorContactName: string;
+  vendorEmail: string;
+  vendorPhone: string;
+  vendorWebsite: string;
+  vendorAccountNumber: string;
 };
 
-type InventorySection = 'stock' | 'job-parts' | 'to-order' | 'on-order' | 'received' | 'attention';
+type InventorySection = 'catalog' | 'stock' | 'job-parts' | 'to-order' | 'on-order' | 'received' | 'purchase-orders' | 'vendors' | 'attention';
+type InventorySortKey =
+  | 'name'
+  | 'sku'
+  | 'vendor'
+  | 'category'
+  | 'onHand'
+  | 'onOrder'
+  | 'reorderAt'
+  | 'unitCost'
+  | 'price'
+  | 'value'
+  | 'lastUpdated';
 
 type JobPartView = {
   id: string;
@@ -70,6 +78,7 @@ type JobPartView = {
   qtyInstalled: number;
   status: JobPartStatus;
   legacyNeedStatus: string;
+  purchaseOrderId: string;
   note: string;
   attentionReasons: string[];
 };
@@ -81,21 +90,14 @@ type JobPartView = {
     CommonModule,
     FormsModule,
     RouterLink,
-    IonHeader,
-    IonToolbar,
-    IonTitle,
-    IonButtons,
-    IonContent,
-    IonButton,
-    IonItem,
-    IonLabel,
-    IonInput,
+    UiInput,
     PageBackButtonComponent,
     UserMenuComponent,
     CompanySwitcherComponent,
     VendorPickerComponent
   ],
   templateUrl: './inventory.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./inventory.component.scss']
 })
 export default class InventoryComponent implements OnInit {
@@ -104,7 +106,9 @@ export default class InventoryComponent implements OnInit {
   private readonly invoicesData = inject(InvoicesDataService);
   private readonly jobPartsFoundation = inject(JobPartsFoundationService);
   private readonly purchaseOrdersApi = inject(PurchaseOrdersApiService);
+  private readonly vendorsApi = inject(VendorsApiService);
   private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
 
   readonly loading = signal(false);
   readonly saving = signal(false);
@@ -114,14 +118,19 @@ export default class InventoryComponent implements OnInit {
   readonly page = signal(1);
   readonly items = signal<InventoryItem[]>([]);
   readonly needs = signal<InventoryNeed[]>([]);
-  readonly activeSection = signal<InventorySection>('stock');
+  readonly vendors = signal<Vendor[]>([]);
+  readonly purchaseOrders = signal<PurchaseOrder[]>([]);
+  readonly activeSection = signal<InventorySection>('catalog');
   readonly selectedJobPartIds = signal<Set<string>>(new Set());
   readonly selectedItemId = signal('');
   readonly editor = signal<InventoryEditor | null>(null);
+  readonly itemModalOpen = signal(false);
+  readonly sortKey = signal<InventorySortKey>('name');
+  readonly sortDirection = signal<'asc' | 'desc'>('asc');
 
   readonly filteredItems = computed(() => {
     const query = this.search().trim().toLowerCase();
-    return this.items().filter(item => {
+    const filtered = this.items().filter(item => {
       if (!query) return true;
       const haystack = [
         item.name,
@@ -131,6 +140,7 @@ export default class InventoryComponent implements OnInit {
       ].join(' ').toLowerCase();
       return haystack.includes(query);
     });
+    return this.sortFilteredItems(filtered);
   });
   readonly totalPages = computed(() => Math.max(1, Math.ceil(this.filteredItems().length / this.pageSize)));
   readonly pagedItems = computed(() => {
@@ -151,19 +161,10 @@ export default class InventoryComponent implements OnInit {
     return this.items().find(item => item.id === id) || null;
   });
   readonly totalOnHand = computed(() => this.items().reduce((sum, item) => sum + this.toNumber(item.onHand, 0), 0));
-  readonly totalInventoryValue = computed(() =>
-    this.items().reduce(
-      (sum, item) => sum + (this.toNumber(item.onHand, 0) * this.toNumber(item.unitCost, 0)),
-      0
-    )
-  );
-  readonly inventorySections: Array<{ id: InventorySection; label: string }> = [
-    { id: 'stock', label: 'Stock' },
-    { id: 'job-parts', label: 'Job Parts' },
-    { id: 'to-order', label: 'To Order' },
-    { id: 'on-order', label: 'On Order' },
-    { id: 'received', label: 'Received / Ready' },
-    { id: 'attention', label: 'Attention' }
+  readonly inventorySections: Array<{ id: InventorySection; label: string; helper: string }> = [
+    { id: 'catalog', label: 'Catalog', helper: 'Reusable parts/products for quotes, invoices, and jobs.' },
+    { id: 'stock', label: 'Stock', helper: 'Physical on-hand parts and reorder details.' },
+    { id: 'vendors', label: 'Vendors', helper: 'Supplier list used by parts and purchase orders.' }
   ];
   readonly jobPartRows = computed(() => this.buildJobPartRows());
   readonly allJobParts = computed(() => this.jobPartRows());
@@ -215,18 +216,34 @@ export default class InventoryComponent implements OnInit {
     })
   );
   ngOnInit(): void {
+    this.route.queryParamMap.subscribe(query => {
+      const section = query.get('section') as InventorySection | null;
+      const search = String(query.get('search') || '').trim();
+      const itemId = String(query.get('itemId') || '').trim();
+      if (section && this.inventorySections.some(item => item.id === section)) {
+        this.activeSection.set(section);
+      }
+      if (search) {
+        this.search.set(search);
+      }
+      if (itemId && this.items().length) {
+        this.syncSelection(this.items(), itemId);
+      }
+    });
     this.loadInventoryItems();
   }
 
   loadInventoryItems(): void {
     this.loading.set(true);
     this.error.set('');
+    this.loadVendors();
+    this.loadPurchaseOrders();
     this.inventoryApi.getState().subscribe({
       next: res => {
         const items = this.sortItems(Array.isArray(res?.items) ? res.items : []);
         this.items.set(items);
         this.needs.set(Array.isArray(res?.needs) ? res.needs : []);
-        this.syncSelection(items);
+        this.syncSelection(items, String(this.route.snapshot.queryParamMap.get('itemId') || '').trim());
         this.page.set(1);
         this.loading.set(false);
       },
@@ -234,6 +251,26 @@ export default class InventoryComponent implements OnInit {
         this.error.set(this.extractError(err, 'Could not load inventory.'));
         this.loading.set(false);
       }
+    });
+  }
+
+  loadVendors(): void {
+    this.vendorsApi.list('', true).subscribe({
+      next: res => {
+        this.vendors.set(Array.isArray(res?.vendors) ? res.vendors : []);
+        const selected = this.selectedItem();
+        if (selected) this.editor.set(this.toEditor(selected));
+      },
+      error: () => {
+        this.vendors.set([]);
+      }
+    });
+  }
+
+  loadPurchaseOrders(): void {
+    this.purchaseOrdersApi.list().subscribe({
+      next: res => this.purchaseOrders.set(Array.isArray(res?.items) ? res.items : []),
+      error: () => this.purchaseOrders.set([])
     });
   }
 
@@ -255,6 +292,15 @@ export default class InventoryComponent implements OnInit {
     this.error.set('');
   }
 
+  openItemDetails(item: InventoryItem): void {
+    this.selectItem(item);
+    this.itemModalOpen.set(true);
+  }
+
+  closeItemDetails(): void {
+    this.itemModalOpen.set(false);
+  }
+
   isSelected(item: InventoryItem): boolean {
     return this.selectedItemId() === item.id;
   }
@@ -268,13 +314,27 @@ export default class InventoryComponent implements OnInit {
     });
   }
 
-  setEditorVendor(selection: { vendorId: string; vendorName: string }): void {
+  setEditorVendor(selection: { vendorId: string; vendorName: string; vendor?: Vendor | null }): void {
     const current = this.editor();
     if (!current) return;
     this.editor.set({
       ...current,
       vendorId: selection.vendorId || '',
-      vendor: selection.vendorName || ''
+      vendor: selection.vendorName || '',
+      vendorContactName: selection.vendor?.contactName || current.vendorContactName || '',
+      vendorEmail: selection.vendor?.email || current.vendorEmail || '',
+      vendorPhone: selection.vendor?.phone || current.vendorPhone || '',
+      vendorWebsite: selection.vendor?.website || current.vendorWebsite || '',
+      vendorAccountNumber: selection.vendor?.accountNumber || current.vendorAccountNumber || ''
+    });
+  }
+
+  setEditorVendorText(field: 'vendorContactName' | 'vendorEmail' | 'vendorPhone' | 'vendorWebsite' | 'vendorAccountNumber', value: unknown): void {
+    const current = this.editor();
+    if (!current) return;
+    this.editor.set({
+      ...current,
+      [field]: String(value || '')
     });
   }
 
@@ -296,6 +356,7 @@ export default class InventoryComponent implements OnInit {
       this.normalizeText(item.sku) !== this.normalizeText(draft.sku) ||
       this.normalizeText(item.vendor) !== this.normalizeText(draft.vendor) ||
       this.normalizeText((item as any).vendorId) !== this.normalizeText(draft.vendorId) ||
+      this.vendorDetailsChanged(item, draft) ||
       this.normalizeText(item.category) !== this.normalizeText(draft.category) ||
       this.toNumber(item.onHand, 0) !== this.toNumber(draft.onHand, 0) ||
       this.toNumber(item.reorderAt, 0) !== this.toNumber(draft.reorderAt, 0) ||
@@ -347,16 +408,74 @@ export default class InventoryComponent implements OnInit {
           this.items().map(item => item.id === saved.id ? saved : item)
         );
         this.items.set(nextItems);
-        this.selectedItemId.set(saved.id);
-        this.editor.set(this.toEditor(saved));
-        this.status.set(`Saved ${saved.name || saved.sku || 'part'}.`);
-        this.saving.set(false);
+        this.saveVendorDetailsIfNeeded(draft, saved);
       },
       error: err => {
         this.error.set(this.extractError(err, 'Could not save this part.'));
         this.saving.set(false);
       }
     });
+  }
+
+  private saveVendorDetailsIfNeeded(draft: InventoryEditor, saved: InventoryItem): void {
+    const vendorName = this.normalizeText(draft.vendor);
+    const vendorPayload = {
+      name: vendorName,
+      contactName: this.normalizeText(draft.vendorContactName),
+      email: this.normalizeText(draft.vendorEmail),
+      phone: this.normalizeText(draft.vendorPhone),
+      website: this.normalizeText(draft.vendorWebsite),
+      accountNumber: this.normalizeText(draft.vendorAccountNumber)
+    };
+    const hasVendorDetails = !!(
+      vendorPayload.contactName
+      || vendorPayload.email
+      || vendorPayload.phone
+      || vendorPayload.website
+      || vendorPayload.accountNumber
+    );
+
+    if (!vendorName || !hasVendorDetails) {
+      this.finishPartSave(saved);
+      return;
+    }
+
+    const request = draft.vendorId
+      ? this.vendorsApi.update(draft.vendorId, vendorPayload)
+      : this.vendorsApi.create(vendorPayload);
+
+    request.subscribe({
+      next: res => {
+        const vendor = res?.vendor;
+        if (vendor) {
+          this.vendors.set([
+            vendor,
+            ...this.vendors().filter(item => item.id !== vendor.id)
+          ].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))));
+          const patched = {
+            ...saved,
+            vendorId: vendor.id,
+            vendor: vendor.name
+          };
+          this.items.set(this.sortItems(this.items().map(item => item.id === saved.id ? patched : item)));
+          this.finishPartSave(patched);
+          return;
+        }
+        this.finishPartSave(saved);
+      },
+      error: err => {
+        this.error.set(this.extractError(err, 'Part saved, but supplier details could not be saved.'));
+        this.saving.set(false);
+      }
+    });
+  }
+
+  private finishPartSave(saved: InventoryItem): void {
+    this.selectedItemId.set(saved.id);
+    this.editor.set(this.toEditor(saved));
+    this.status.set(`Saved ${saved.name || saved.sku || 'part'}.`);
+    this.itemModalOpen.set(false);
+    this.saving.set(false);
   }
 
   formatCurrency(value: number): string {
@@ -382,6 +501,21 @@ export default class InventoryComponent implements OnInit {
     this.page.set(1);
   }
 
+  sortBy(key: InventorySortKey): void {
+    if (this.sortKey() === key) {
+      this.sortDirection.set(this.sortDirection() === 'asc' ? 'desc' : 'asc');
+    } else {
+      this.sortKey.set(key);
+      this.sortDirection.set(key === 'lastUpdated' || key === 'value' ? 'desc' : 'asc');
+    }
+    this.page.set(1);
+  }
+
+  sortIndicator(key: InventorySortKey): string {
+    if (this.sortKey() !== key) return '';
+    return this.sortDirection() === 'asc' ? ' ↑' : ' ↓';
+  }
+
   prevPage(): void {
     this.page.update(value => Math.max(1, value - 1));
   }
@@ -395,22 +529,130 @@ export default class InventoryComponent implements OnInit {
   }
 
   sectionCount(section: InventorySection): number {
-    if (section === 'stock') return this.filteredItems().length;
+    if (section === 'catalog' || section === 'stock') return this.filteredItems().length;
     if (section === 'job-parts') return this.allJobParts().length;
     if (section === 'to-order') return this.toOrderParts().length;
     if (section === 'on-order') return this.onOrderParts().length;
     if (section === 'received') return this.receivedParts().length;
+    if (section === 'purchase-orders') return this.purchaseOrders().length;
+    if (section === 'vendors') return this.vendors().length;
     return this.attentionParts().length;
   }
 
   activeSectionLabel(): string {
     const section = this.activeSection();
+    if (section === 'catalog') return 'Catalog';
     if (section === 'job-parts') return 'Job Parts';
     if (section === 'to-order') return 'Parts To Order';
     if (section === 'on-order') return 'Parts On Order';
     if (section === 'received') return 'Received / Ready';
+    if (section === 'purchase-orders') return 'Purchase Orders';
+    if (section === 'vendors') return 'Vendors';
     if (section === 'attention') return 'Attention';
     return 'Stock';
+  }
+
+  activeSectionDescription(): string {
+    const section = this.activeSection();
+    if (section === 'catalog') return 'Reusable products and parts used on quotes and invoices.';
+    if (section === 'stock') return 'Physical on-hand inventory, reorder levels, and supplier details.';
+    if (section === 'to-order') return 'Job-linked parts that still need a vendor order.';
+    if (section === 'on-order') return 'Parts already on purchase orders but not fully received.';
+    if (section === 'received') return 'Received parts that are ready to pull, label, or install.';
+    if (section === 'purchase-orders') return 'Vendor order management, tracking, receiving, and PO printouts.';
+    if (section === 'vendors') return 'Supplier records reused by inventory, job parts, and purchase orders.';
+    if (section === 'attention') return 'Backordered, partial, missing, late, or install-date-risk parts.';
+    return 'Job-linked parts from paid invoices, schedule requests, and inventory needs.';
+  }
+
+  activeSectionHelper(): string {
+    return this.inventorySections.find(section => section.id === this.activeSection())?.helper || this.activeSectionDescription();
+  }
+
+  emptyStateTitle(): string {
+    const section = this.activeSection();
+    if (section === 'catalog') return 'No catalog parts yet';
+    if (section === 'stock') return 'No physical stock yet';
+    if (section === 'to-order') return 'No parts to order';
+    if (section === 'on-order') return 'No parts on order';
+    if (section === 'received') return 'No received parts ready';
+    if (section === 'purchase-orders') return 'No purchase orders yet';
+    if (section === 'vendors') return 'No vendors yet';
+    if (section === 'attention') return 'No attention items';
+    return 'No job parts yet';
+  }
+
+  emptyStateBody(): string {
+    const section = this.activeSection();
+    if (section === 'catalog') return 'Reusable products will appear here after they are added or imported.';
+    if (section === 'stock') return 'Parts with on-hand quantities will appear here.';
+    if (section === 'to-order') return 'Paid invoice parts that still need vendor orders will appear here.';
+    if (section === 'on-order') return 'Submitted vendor orders stay here until they are fully received.';
+    if (section === 'received') return 'Received job parts will appear here for pull sheets and labels.';
+    if (section === 'purchase-orders') return 'Create a PO draft from parts that need ordering, then manage it here.';
+    if (section === 'vendors') return 'Add suppliers from inventory parts or purchase orders.';
+    if (section === 'attention') return 'Backordered, missing, late, or partial parts will be flagged here.';
+    return 'Job-linked parts from paid invoices and scheduled work will appear here.';
+  }
+
+  purchaseOrdersByStatus(status: 'draft' | 'ordered' | 'received' | 'attention'): PurchaseOrder[] {
+    const orders = this.purchaseOrders();
+    if (status === 'attention') {
+      return orders.filter(order => {
+        if (order.status === 'cancelled') return false;
+        const lines = order.lines || [];
+        return lines.some(line => {
+          const qty = Math.max(this.toNumber(line.qty, 0), this.toNumber(line.qtyNeeded, 0));
+          const received = this.toNumber(line.qtyReceived, 0);
+          return received > 0 && received < qty || !!this.normalizeText(line.trackingLastError);
+        });
+      });
+    }
+    return orders.filter(order => order.status === status);
+  }
+
+  purchaseOrderStatusLabel(order: PurchaseOrder): string {
+    const status = this.normalizeText(order.status).toLowerCase();
+    const total = (order.lines || []).reduce((sum, line) => sum + Math.max(this.toNumber(line.qty, 0), this.toNumber(line.qtyNeeded, 0)), 0);
+    const received = (order.lines || []).reduce((sum, line) => sum + this.toNumber(line.qtyReceived, 0), 0);
+    if (status === 'cancelled') return 'Cancelled';
+    if (total > 0 && received > 0 && received < total) return 'Partially Received';
+    if (status === 'received' || total > 0 && received >= total) return 'Received';
+    if (status === 'ordered') return this.purchaseOrderTrackingSummary(order) === 'No tracking yet' ? 'Ordered' : 'In Transit';
+    return 'PO Draft';
+  }
+
+  purchaseOrderStatusClass(order: PurchaseOrder): string {
+    const label = this.purchaseOrderStatusLabel(order).toLowerCase();
+    if (label.includes('cancel')) return 'queue-status-backordered';
+    if (label.includes('partial')) return 'queue-status-partial';
+    if (label.includes('received')) return 'queue-status-received';
+    if (label.includes('ordered') || label.includes('transit')) return 'queue-status-in-stock';
+    return 'queue-status-needs-order';
+  }
+
+  purchaseOrderProgress(order: PurchaseOrder): string {
+    const total = (order.lines || []).reduce((sum, line) => sum + Math.max(this.toNumber(line.qty, 0), this.toNumber(line.qtyNeeded, 0)), 0);
+    const received = (order.lines || []).reduce((sum, line) => sum + this.toNumber(line.qtyReceived, 0), 0);
+    if (total <= 0) return 'No quantities';
+    return `${this.formatQty(received)} / ${this.formatQty(total)} received`;
+  }
+
+  purchaseOrderTrackingSummary(order: PurchaseOrder): string {
+    const line = (order.lines || []).find(row => this.normalizeText(row.trackingNumber || row.carrier || row.etaDate || row.estimatedDeliveryDate || row.trackingStatus));
+    if (!line) return 'No tracking yet';
+    return [
+      line.carrier,
+      line.trackingStatus,
+      line.trackingNumber,
+      line.etaDate || line.estimatedDeliveryDate ? `ETA ${this.formatDateOnly(line.etaDate || line.estimatedDeliveryDate || '')}` : ''
+    ].map(value => this.normalizeText(value)).filter(Boolean).join(' · ');
+  }
+
+  formatDateOnly(value: string): string {
+    const timestamp = Date.parse(value);
+    if (!Number.isFinite(timestamp)) return value || '--';
+    return new Date(timestamp).toLocaleDateString();
   }
 
   trackJobPart(_index: number, row: JobPartView): string {
@@ -437,6 +679,28 @@ export default class InventoryComponent implements OnInit {
       && row.status !== 'pulled'
       && row.status !== 'installed'
       && row.status !== 'returned';
+  }
+
+  workflowStatusLabel(row: JobPartView): string {
+    const legacyStatus = this.normalizeText(row.legacyNeedStatus).toLowerCase();
+    if (row.status === 'backordered') return 'Backordered';
+    if (row.status === 'returned') return 'Returned';
+    if (row.qtyInstalled >= row.qtyNeeded && row.qtyNeeded > 0) return 'Installed';
+    if (row.qtyPulled >= row.qtyNeeded && row.qtyNeeded > 0) return 'Pulled / Ready for Install';
+    if (row.qtyReceived >= row.qtyNeeded && row.qtyNeeded > 0) return 'Ready to Pull';
+    if (row.qtyReceived > 0 && row.qtyReceived < row.qtyNeeded) return 'Partially Received';
+    if (legacyStatus === 'po-draft') return 'PO Draft';
+    if (row.qtyOrdered > 0 || row.status === 'ordered') return 'Ordered';
+    return 'Needs PO';
+  }
+
+  workflowStatusClass(row: JobPartView): string {
+    const label = this.workflowStatusLabel(row).toLowerCase();
+    if (label.includes('backordered') || label.includes('returned')) return 'queue-status-backordered';
+    if (label.includes('partially')) return 'queue-status-partial';
+    if (label.includes('ready') || label.includes('installed') || label.includes('pulled')) return 'queue-status-received';
+    if (label.includes('draft') || label.includes('ordered')) return 'queue-status-in-stock';
+    return 'queue-status-needs-order';
   }
 
   createPurchaseOrderDraft(): void {
@@ -603,6 +867,7 @@ export default class InventoryComponent implements OnInit {
       qtyInstalled,
       status,
       legacyNeedStatus: this.normalizeText(draft.legacyNeedStatus || (need as any)?.status),
+      purchaseOrderId: this.normalizeText((need as any)?.purchaseOrderId),
       note: this.normalizeText(draft.note || draft.description || (need as any)?.note),
       attentionReasons: []
     };
@@ -623,8 +888,10 @@ export default class InventoryComponent implements OnInit {
   private attentionReasonsForPart(row: JobPartView): string[] {
     const reasons: string[] = [];
     if (row.status === 'backordered') reasons.push('Backordered');
-    if (row.qtyReceived < row.qtyNeeded) reasons.push('Not fully received');
     if (row.qtyReceived > 0 && row.qtyReceived < row.qtyNeeded) reasons.push('Partial received');
+    if (row.qtyReceived <= 0 && row.qtyOrdered > 0) reasons.push('Ordered, awaiting receipt');
+    if (row.qtyOrdered <= 0 && row.qtyReceived < row.qtyNeeded) reasons.push('Needs PO');
+    if (row.qtyReceived < row.qtyNeeded) reasons.push('Not fully received');
     if (this.isInstallApproaching(row.installDate) && row.qtyReceived < row.qtyNeeded) {
       reasons.push('Install approaching');
     }
@@ -650,14 +917,16 @@ export default class InventoryComponent implements OnInit {
     return 'quoted';
   }
 
-  private syncSelection(items: InventoryItem[]): void {
+  private syncSelection(items: InventoryItem[], requestedItemId = ''): void {
     if (!items.length) {
       this.selectedItemId.set('');
       this.editor.set(null);
       return;
     }
     const currentId = this.selectedItemId();
-    const selected = items.find(item => item.id === currentId) || items[0];
+    const selected = items.find(item => item.id === requestedItemId)
+      || items.find(item => item.id === currentId)
+      || items[0];
     if (!selected) {
       this.selectedItemId.set('');
       this.editor.set(null);
@@ -668,23 +937,88 @@ export default class InventoryComponent implements OnInit {
   }
 
   private toEditor(item: InventoryItem): InventoryEditor {
+    const vendor = this.vendorForItem(item);
     return {
       id: String(item.id || ''),
       name: String(item.name || ''),
       sku: String(item.sku || ''),
-      vendorId: String((item as any).vendorId || ''),
-      vendor: String(item.vendor || ''),
+      vendorId: String((item as any).vendorId || vendor?.id || ''),
+      vendor: String(item.vendor || vendor?.name || ''),
       category: String(item.category || ''),
       onHand: this.toNumber(item.onHand, 0),
       reorderAt: this.toNumber(item.reorderAt, 0),
       onOrder: this.toNumber(item.onOrder, 0),
       unitCost: this.toNumber(item.unitCost, 0),
-      price: this.toNumber(item.price, 0)
+      price: this.toNumber(item.price, 0),
+      vendorContactName: String(vendor?.contactName || ''),
+      vendorEmail: String(vendor?.email || ''),
+      vendorPhone: String(vendor?.phone || ''),
+      vendorWebsite: String(vendor?.website || ''),
+      vendorAccountNumber: String(vendor?.accountNumber || '')
     };
+  }
+
+  vendorForItem(item: InventoryItem): Vendor | null {
+    const vendorId = this.normalizeText((item as any)?.vendorId);
+    const vendorName = this.normalizeText(item?.vendor).toLowerCase();
+    return this.vendors().find(vendor => vendorId && vendor.id === vendorId)
+      || this.vendors().find(vendor => vendorName && this.normalizeText(vendor.name).toLowerCase() === vendorName)
+      || null;
+  }
+
+  phoneHref(value: unknown): string {
+    const phone = this.phoneDialValue(value);
+    return phone ? `tel:${phone}` : '';
+  }
+
+  emailHref(value: unknown): string {
+    const email = this.normalizeText(value);
+    return email ? `mailto:${email}` : '';
+  }
+
+  websiteHref(value: unknown): string {
+    const raw = this.normalizeText(value);
+    if (!raw) return '';
+    return /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  }
+
+  compactWebsite(value: unknown): string {
+    const href = this.websiteHref(value);
+    if (!href) return '--';
+    try {
+      const url = new URL(href);
+      const host = url.hostname.replace(/^www\./i, '');
+      const path = url.pathname && url.pathname !== '/' ? url.pathname.replace(/\/$/, '') : '';
+      const display = `${host}${path}`;
+      return display.length > 34 ? `${display.slice(0, 31)}...` : display;
+    } catch {
+      const raw = this.normalizeText(value).replace(/^https?:\/\//i, '').replace(/^www\./i, '');
+      return raw.length > 34 ? `${raw.slice(0, 31)}...` : raw;
+    }
+  }
+
+  private vendorDetailsChanged(item: InventoryItem, draft: InventoryEditor): boolean {
+    const vendor = this.vendorForItem(item);
+    return (
+      this.normalizeText(vendor?.contactName) !== this.normalizeText(draft.vendorContactName) ||
+      this.normalizeText(vendor?.email) !== this.normalizeText(draft.vendorEmail) ||
+      this.normalizeText(vendor?.phone) !== this.normalizeText(draft.vendorPhone) ||
+      this.normalizeText(vendor?.website) !== this.normalizeText(draft.vendorWebsite) ||
+      this.normalizeText(vendor?.accountNumber) !== this.normalizeText(draft.vendorAccountNumber)
+    );
   }
 
   private normalizeText(value: unknown): string {
     return String(value || '').trim();
+  }
+
+  private phoneDialValue(value: unknown): string {
+    const raw = this.normalizeText(value);
+    if (!raw) return '';
+    const hasPlus = raw.startsWith('+');
+    const digits = raw.replace(/[^\d]/g, '');
+    if (!digits) return '';
+    return `${hasPlus ? '+' : ''}${digits}`;
   }
 
   private asMillis(value: unknown): number {
@@ -745,6 +1079,39 @@ export default class InventoryComponent implements OnInit {
         sensitivity: 'base'
       })
     );
+  }
+
+  private sortFilteredItems(items: InventoryItem[]): InventoryItem[] {
+    const key = this.sortKey();
+    const direction = this.sortDirection() === 'asc' ? 1 : -1;
+    const textFor = (item: InventoryItem): string => {
+      if (key === 'name') return this.normalizeText(item.name || item.sku);
+      if (key === 'sku') return this.normalizeText(item.sku);
+      if (key === 'vendor') return this.normalizeText(item.vendor);
+      if (key === 'category') return this.normalizeText(item.category);
+      if (key === 'lastUpdated') return this.normalizeText(item.lastUpdated);
+      return '';
+    };
+    const numberFor = (item: InventoryItem): number => {
+      if (key === 'onHand') return this.toNumber(item.onHand, 0);
+      if (key === 'onOrder') return this.toNumber(item.onOrder, 0);
+      if (key === 'reorderAt') return this.toNumber(item.reorderAt, 0);
+      if (key === 'unitCost') return this.toNumber(item.unitCost, 0);
+      if (key === 'price') return this.toNumber(item.price, 0);
+      if (key === 'value') return this.toNumber(item.onHand, 0) * this.toNumber(item.unitCost, 0);
+      if (key === 'lastUpdated') return this.asMillis(item.lastUpdated);
+      return 0;
+    };
+    return [...items].sort((a, b) => {
+      if (['onHand', 'onOrder', 'reorderAt', 'unitCost', 'price', 'value', 'lastUpdated'].includes(key)) {
+        const diff = numberFor(a) - numberFor(b);
+        if (diff !== 0) return diff * direction;
+      } else {
+        const diff = textFor(a).localeCompare(textFor(b), undefined, { sensitivity: 'base' });
+        if (diff !== 0) return diff * direction;
+      }
+      return this.normalizeText(a.name || a.sku).localeCompare(this.normalizeText(b.name || b.sku), undefined, { sensitivity: 'base' });
+    });
   }
 
   private extractError(err: any, fallback: string): string {

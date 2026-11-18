@@ -11,7 +11,7 @@ const LOCAL_THEME_KEY = 'pathflow.ui.theme';
 export class ThemeService {
   private readonly auth = inject(AuthService);
   private readonly userSettings = inject(UserScopedSettingsService);
-  readonly mode = signal<ThemeMode>('dark');
+  readonly mode = signal<ThemeMode>('light');
   private themeLoadToken = 0;
 
   constructor() {
@@ -35,7 +35,7 @@ export class ThemeService {
       const token = ++this.themeLoadToken;
       this.userSettings.getValue<ThemeMode>(THEME_SETTING_KEY).subscribe(value => {
         if (token !== this.themeLoadToken) return;
-        const next: ThemeMode = value === 'light' ? 'light' : 'dark';
+        const next = value === 'light' || value === 'dark' ? value : this.readLocalMode();
         this.mode.set(next);
         this.writeLocalMode(next);
         this.applyMode(next);
@@ -58,15 +58,16 @@ export class ThemeService {
 
   private applyMode(mode: ThemeMode): void {
     document.documentElement.setAttribute('data-theme', mode);
+    document.documentElement.setAttribute('data-bs-theme', mode);
     document.documentElement.style.colorScheme = mode;
   }
 
   private readLocalMode(): ThemeMode {
     try {
       const raw = String(localStorage.getItem(LOCAL_THEME_KEY) || '').trim().toLowerCase();
-      return raw === 'light' ? 'light' : 'dark';
+      return raw === 'dark' ? 'dark' : 'light';
     } catch {
-      return 'dark';
+      return 'light';
     }
   }
 

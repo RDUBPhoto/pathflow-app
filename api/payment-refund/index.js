@@ -2,6 +2,7 @@ const https = require("https");
 const { TableClient } = require("../_shared/table-client");
 const { resolveTenantId } = require("../_shared/tenant");
 const { requirePrincipal } = require("../_shared/auth");
+const { reversePaylynxPayment } = require("./paylynx-reversal");
 
 const SETTINGS_TABLE = "appsettings";
 const PAYMENT_GATEWAY_SETTINGS_KEY = "billing.paymentProviders";
@@ -325,19 +326,17 @@ module.exports = async function (context, req) {
     context.res = { status: 204 };
     return;
   }
-  const principal = await requirePrincipal(context, req);
-  if (!principal) return;
-
-  if (method !== "POST") {
+  if (!["GET", "POST"].includes(method)) {
     context.res = json(405, { ok: false, error: "Method not allowed." });
     return;
   }
 
-  const invoiceId = asString(body.invoiceId || body.id);
+  const input = method === "GET" ? req.query || {} : body;
+  const invoiceId = asString(input.invoiceId || input.id);
   const invoiceNumber = asString(body.invoiceNumber || invoiceId || "");
-  const provider = asString(body.provider).toLowerCase();
+  const provider = asString(input.provider).toLowerCase();
   const amount = sanitizeAmount(body.amount);
-  const originalTransactionId = asString(body.originalTransactionId || body.refTransId);
+  const originalTransactionId = asString(input.originalTransactionId || input.refTransId);
   const accountNumber = maskRefundCard(body.accountNumber || body.cardNumber);
 
   if (!invoiceId) {
@@ -348,7 +347,7 @@ module.exports = async function (context, req) {
     context.res = json(400, { ok: false, error: "provider is required." });
     return;
   }
-  if (!amount) {
+  if (method === "POST" && !amount) {
     context.res = json(400, { ok: false, error: "Valid amount is required." });
     return;
   }
@@ -356,6 +355,26 @@ module.exports = async function (context, req) {
     context.res = json(400, { ok: false, error: "originalTransactionId is required." });
     return;
   }
+
+  if (provider === "paylynx") {
+    try {
+      const result = await reversePaylynxPayment(req, tenantId, { invoiceId, originalTransactionId, amount }, getTableClient);
+      context.res = json(result.status, result.body);
+    } catch (error) {
+      context.log.error("PayLynx reversal could not be confirmed in Pathflow.");
+      context.res = json(503, { ok: false, code: method === "POST" ? "reversal_pending" : "gateway_unavailable",
+        error: method === "POST" ? "PayLynx reversal could not be confirmed here. Check PayLynx before retrying."
+          : "PayLynx could not provide the payment status. Try loading the return again." });
+    }
+    return;
+  }
+
+  if (method === "GET") {
+    context.res = json(405, { ok: false, error: "This gateway does not support reversal previews." });
+    return;
+  }
+  const principal = await requirePrincipal(context, req);
+  if (!principal) return;
 
   if (provider !== "authorize-net") {
     context.res = json(400, {

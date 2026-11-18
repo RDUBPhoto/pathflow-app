@@ -1,20 +1,13 @@
-import { Component, computed, effect, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { UiIcon } from '../../ui/icons';
+import { UiInput } from '../../ui/controls';
+import { Component, computed, effect, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+
 import { FormsModule } from '@angular/forms';
-import {
-  IonButton,
-  IonContent,
-  IonIcon,
-  IonInput,
-  IonItem,
-  IonLabel,
-  IonSpinner
-} from '@ionic/angular/standalone';
 import { ActivatedRoute, Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
-import { addIcons } from 'ionicons';
-import { keyOutline, logoGoogle, shieldCheckmarkOutline } from 'ionicons/icons';
 import { AuthService } from '../../auth/auth.service';
+import { normalizeAuthRedirect } from '../../auth/auth-redirect';
+import { environment } from '../../../environments/environment';
 import { BusinessProfileService } from '../../services/business-profile.service';
 import { formatUsPhoneInput, phoneDigits } from '../../utils/phone-format';
 
@@ -24,17 +17,12 @@ type SignupMethod = 'email' | 'aad' | 'google';
   selector: 'app-signup',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
-    IonContent,
-    IonButton,
-    IonIcon,
-    IonItem,
-    IonLabel,
-    IonInput,
-    IonSpinner
-  ],
+    UiIcon,
+    UiInput
+],
   templateUrl: './signup.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./signup.component.scss']
 })
 export default class SignupComponent {
@@ -45,7 +33,7 @@ export default class SignupComponent {
 
   private readonly isLocalHost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
   private readonly isLikelySwaCli = this.isLocalHost && window.location.port === '4280';
-  readonly localServerMode = this.isLocalHost && !this.isLikelySwaCli;
+  readonly localServerMode = environment.auth.devBypass && this.isLocalHost && !this.isLikelySwaCli;
 
   readonly redirectTo = signal('/dashboard');
   readonly googleEnabled = computed(() => this.auth.isProviderEnabled('google'));
@@ -118,11 +106,6 @@ export default class SignupComponent {
   });
 
   constructor() {
-    addIcons({
-      'shield-checkmark-outline': shieldCheckmarkOutline,
-      'key-outline': keyOutline,
-      'logo-google': logoGoogle
-    });
 
     this.route.queryParamMap.subscribe(params => {
       this.redirectTo.set(this.normalizeRedirect(params.get('redirect')));
@@ -341,9 +324,7 @@ export default class SignupComponent {
   }
 
   private normalizeRedirect(path: string | null): string {
-    const value = (path || '').trim();
-    if (!value.startsWith('/')) return '/dashboard';
-    if (value.startsWith('/.auth/')) return '/dashboard';
+    const value = normalizeAuthRedirect(path);
     if (value.startsWith('/register') || value.startsWith('/signup')) return '/dashboard';
     return value;
   }

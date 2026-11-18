@@ -16,3 +16,27 @@ export function formatUsPhoneInput(value: unknown): string {
   if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
   return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
 }
+
+export function normalizePhoneToE164(value: unknown, defaultCountryCode = '1'): string {
+  const text = String(value ?? '').trim();
+  const digits = phoneDigits(text);
+  if (!digits) return '';
+
+  if (text.startsWith('+') && digits.length >= 8 && digits.length <= 15) {
+    return `+${digits}`;
+  }
+
+  const country = phoneDigits(defaultCountryCode) || '1';
+  if (country === '1') {
+    if (digits.length === 10) return `+1${digits}`;
+    if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  }
+
+  if (digits.startsWith(country) && digits.length > country.length) {
+    return `+${digits}`;
+  }
+  if (digits.length >= 8 && digits.length <= 15) {
+    return `+${country}${digits}`;
+  }
+  return '';
+}

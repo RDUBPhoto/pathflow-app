@@ -1,28 +1,9 @@
-import { Component, OnDestroy, OnInit, ViewChild, computed, effect, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import {
-  IonAvatar,
-  IonButton,
-  IonContent,
-  IonIcon,
-  IonItem,
-  IonLabel,
-  IonList,
-  IonPopover,
-  IonToggle
-} from '@ionic/angular/standalone';
+import { UiIcon } from '../../../ui/icons';
+import { UiPopover } from '../../../ui/overlays';
+import { UiCheckbox } from '../../../ui/controls';
+import { Component, OnDestroy, OnInit, ViewChild, computed, effect, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+
 import { Router, RouterLink } from '@angular/router';
-import { addIcons } from 'ionicons';
-import {
-  chevronDownOutline,
-  checkmarkDoneOutline,
-  closeOutline,
-  logOutOutline,
-  notificationsOutline,
-  openOutline,
-  personCircleOutline,
-  shieldCheckmarkOutline
-} from 'ionicons/icons';
 import { AuthService } from '../../../auth/auth.service';
 import { AppNotification, NotificationsApiService } from '../../../services/notifications-api.service';
 import { ThemeService } from '../../../services/theme.service';
@@ -35,19 +16,13 @@ const NOTIFICATION_ACK_STATE_KEY = 'pathflow.notifications.ack.v1';
   selector: 'app-user-menu',
   standalone: true,
   imports: [
-    CommonModule,
     RouterLink,
-    IonButton,
-    IonAvatar,
-    IonIcon,
-    IonPopover,
-    IonContent,
-    IonList,
-    IonItem,
-    IonLabel,
-    IonToggle
-  ],
+    UiIcon,
+    UiPopover,
+    UiCheckbox
+],
   templateUrl: './user-menu.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./user-menu.component.scss']
 })
 export class UserMenuComponent implements OnInit, OnDestroy {
@@ -57,7 +32,7 @@ export class UserMenuComponent implements OnInit, OnDestroy {
   private readonly notificationsApi = inject(NotificationsApiService);
   readonly setupProgress = inject(AdminSetupProgressService);
   readonly setupNavigating = signal(false);
-  @ViewChild('notificationsPopover') private notificationsPopover?: IonPopover;
+  @ViewChild('notificationsPopover') private notificationsPopover?: UiPopover;
 
   readonly menuOpen = signal(false);
   readonly menuEvent = signal<Event | null>(null);
@@ -132,16 +107,6 @@ export class UserMenuComponent implements OnInit, OnDestroy {
   private lastAvatarUrl = '';
 
   constructor() {
-    addIcons({
-      'chevron-down-outline': chevronDownOutline,
-      'person-circle-outline': personCircleOutline,
-      'shield-checkmark-outline': shieldCheckmarkOutline,
-      'log-out-outline': logOutOutline,
-      'notifications-outline': notificationsOutline,
-      'close-outline': closeOutline,
-      'checkmark-done-outline': checkmarkDoneOutline,
-      'open-outline': openOutline
-    });
 
     effect(() => {
       const currentUrl = this.avatarUrl();

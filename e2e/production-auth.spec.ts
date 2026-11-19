@@ -120,10 +120,16 @@ test('a protected API 401 rechecks the session and avoids an injection error', a
   await expect(page).toHaveURL(/\/dashboard$/);
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
-  await page.route('**/api/customers', route => route.fulfill({ status: 401, json: { error: 'Expired' } }));
-  await page.route('**/api/access?scope=me', route => route.fulfill({ json: { ok: false, principal: null } }));
-  await page.getByRole('link', { name: 'Customers', exact: true }).click();
+  let rejected = false;
+  await page.route('**/api/customers', route => {
+    rejected = true;
+    return route.fulfill({ status: 401, json: { error: 'Expired' } });
+  });
+  await page.route('**/api/access?scope=me', route => rejected
+    ? route.fulfill({ json: { ok: false, principal: null } }) : route.continue());
+  await page.goto('/customers');
   await expect(page).toHaveURL(/\/login\?redirect=/);
+  expect(rejected).toBeTruthy();
   expect(errors.filter(message => /NG0203|inject\(\)/.test(message))).toEqual([]);
 });
 
@@ -295,12 +301,24 @@ test('a business reset clears cached quotes without uploading them again', async
   const key = 'pathflow.invoices.v1.' + account.tenant;
   await expect.poll(() => page.evaluate(key => localStorage.getItem(key), key)).toContain(id);
   const uploads: string[] = [];
+  const recreatedCards: string[] = [];
+  await page.route('**/api/workitems', async route => {
+    if (route.request().method() === 'GET') return route.fulfill({ json: [] });
+    recreatedCards.push(route.request().postData() || '');
+    return route.fulfill({ status: 409, json: { code: 'BUSINESS_DATA_RESET' } });
+  });
   await page.route('**/api/service-documents', async route => {
-    if (route.request().method() === 'GET') return route.fulfill({ json: { items: [], resetVersion: 'fresh-business-reset' } });
+    if (route.request().method() === 'GET') {
+      // Let the board finish loading before the reset response arrives.
+      await new Promise(resolve => setTimeout(resolve, 500));
+      return route.fulfill({ json: { items: [], resetVersion: 'fresh-business-reset' } });
+    }
     uploads.push(route.request().postData() || '');
     return route.fulfill({ json: { ok: true } });
   });
   await page.reload();
   await expect.poll(() => page.evaluate(key => localStorage.getItem(key), key)).not.toContain(id);
   expect(uploads.some(body => body.includes(id))).toBeFalsy();
+  await expect(page.locator('.cards .card')).toHaveCount(0);
+  expect(recreatedCards).toEqual([]);
 });

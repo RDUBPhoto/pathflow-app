@@ -585,6 +585,8 @@ export class InvoicesDataService {
   private readonly syncing = new Set<string>();
   private readonly syncState = new Map<string, DocumentSync>();
   readonly documentSyncError = signal('');
+  private readonly sharedDocumentsReady = signal(false);
+  readonly documentSyncReady = computed(() => !this.http || this.sharedDocumentsReady());
 
   readonly invoiceDetails = computed(() => this.state().map(item => this.cloneInvoice(item)));
   readonly invoices = computed(() => this.state().map(item => this.toCard(item)));
@@ -595,6 +597,7 @@ export class InvoicesDataService {
         const tenantId = this.storageTenantId();
         const loaded = this.loadFromStorage(tenantId);
         this.state.set(loaded);
+        this.sharedDocumentsReady.set(false);
         this.documentSyncError.set('');
       },
       { allowSignalWrites: true }
@@ -1589,6 +1592,7 @@ export class InvoicesDataService {
   }
 
   private queueDocument(sync: DocumentSync, id: string, document: InvoiceDetail | null): void {
+    this.sharedDocumentsReady.set(false);
     const pending = sync.pending[id];
     sync.pending[id] = { ...pending, document, revision: pending ? pending.revision : sync.revisions[id] ?? null };
   }
@@ -1679,6 +1683,7 @@ export class InvoicesDataService {
       if (isActive()) this.documentSyncError.set(Object.values(sync.pending).some(row => row.conflict)
         ? 'Another session changed a quote or invoice. Your local edits are still on this device.'
         : '');
+      if (isActive()) this.sharedDocumentsReady.set(true);
     } catch {
       if (isActive()) this.documentSyncError.set('Shared documents are unavailable. Edits on this device are waiting to sync.');
     } finally {

@@ -12,6 +12,7 @@ describe('dashboard loading resilience', () => {
     const component = Object.create(DashboardComponent.prototype) as any;
     const originalItems = { quotes: [existing] };
     component.auth = { initialized: () => true, isAuthenticated: () => true };
+    component.invoicesData = { documentSyncReady: () => true };
     component.loading = signal(false);
     component.status = signal('');
     component.boardLoadError = signal('');
@@ -68,6 +69,15 @@ describe('dashboard loading resilience', () => {
     expect(component.boardLoadError()).toBe('');
     expect(component.items()).toEqual({ quotes: [] });
     expect(component.pruneDuplicateDocumentCards).toHaveBeenCalledTimes(1);
+  });
+
+  it('waits for shared documents before reconciling an empty board against the browser cache', () => {
+    const { component } = board([]);
+    component.invoicesData.documentSyncReady = () => false;
+    component.loadAll();
+    expect(component.items()).toEqual({ quotes: [] });
+    expect(component.pruneDuplicateDocumentCards).not.toHaveBeenCalled();
+    expect(component.ensureDocumentCardsExist).not.toHaveBeenCalled();
   });
 
   it('reports a non-timeout request failure accurately', () => {

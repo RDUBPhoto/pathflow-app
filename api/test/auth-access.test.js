@@ -358,6 +358,10 @@ test('a business reset rejects stale document uploads and allows documents from 
   const document = { id: 'stale-invoice', documentType: 'invoice', customerName: 'Old browser customer' };
   const stale = await invoke(documents, 'POST', { id: document.id, document });
   assert.equal(stale.status, 409);
+  const workitems = require('../workitems');
+  const staleCard = await invoke(workitems, 'POST', { title: 'Old quote [doc=stale-invoice]', laneId: 'quotes' });
+  assert.equal(staleCard.status, 409);
+  assert.equal(staleCard.body.code, 'BUSINESS_DATA_RESET');
   assert.equal(stale.body.code, 'BUSINESS_DATA_RESET');
   assert.equal(context.rows('servicedocuments').size, 0);
   const empty = await invoke(documents, 'GET');
@@ -365,5 +369,7 @@ test('a business reset rejects stale document uploads and allows documents from 
   assert.deepEqual(empty.body.items, []);
   const fresh = await invoke(documents, 'POST', { id: document.id, document, resetVersion: version });
   assert.equal(fresh.status, 200);
+  const freshCard = await invoke(workitems, 'POST', { title: 'New quote [doc=stale-invoice]', laneId: 'quotes' });
+  assert.equal(freshCard.status, 200);
   assert.equal(context.rows('servicedocuments').size, 1);
 }));

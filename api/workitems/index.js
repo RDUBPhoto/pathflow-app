@@ -147,6 +147,22 @@ module.exports = async function (context, req) {
       if (!rid && (!title || !laneId)) { context.res = { status: 400, headers: { "content-type": "application/json" }, body: { error: "title and laneId required" } }; return; }
 
       if (!rid) {
+        const documentId = title.match(/\[doc=([^\]]+)\]/i)?.[1]?.trim();
+        if (documentId) {
+          const settings = TableClient.fromConnectionString(conn, "appsettings");
+          let reset;
+          try { reset = await settings.getEntity(tenantId, "business.dataResetVersion"); }
+          catch (error) { if (error.statusCode !== 404) throw error; }
+          if (reset?.valueJson && JSON.parse(reset.valueJson)) {
+            let document;
+            try { document = await TableClient.fromConnectionString(conn, "servicedocuments").getEntity(tenantId, documentId); }
+            catch (error) { if (error.statusCode !== 404) throw error; }
+            if (!document || document.deleted) {
+              context.res = { status: 409, body: { code: "BUSINESS_DATA_RESET", error: "This document is no longer available. Refresh the dashboard." } };
+              return;
+            }
+          }
+        }
         let max = 0;
         const iter = items.listEntities({ queryOptions: { filter: `PartitionKey eq '${tenantId}' and laneId eq '${laneId.replace(/'/g,"''")}'` } });
         for await (const e of iter) max = Math.max(max, num(e.sort));

@@ -233,6 +233,7 @@ export default class DashboardComponent implements OnDestroy {
 
     this.updateResponsiveLayout();
     effect(() => {
+      if (!this.invoicesData.documentSyncReady()) return;
       this.boardDocumentKey();
       // Shared documents can finish loading after the lanes and work items.
       if (this.hasLoadedBoard) untracked(() => this.loadAll());
@@ -1800,6 +1801,10 @@ export default class DashboardComponent implements OnDestroy {
           return;
         }
 
+        if (!this.invoicesData.documentSyncReady()) {
+          this.loading.set(false);
+          return;
+        }
         const pruned = this.pruneDuplicateDocumentCards(map, lanes || []);
         if (pruned) {
           this.loading.set(false);

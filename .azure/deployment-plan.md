@@ -1,10 +1,35 @@
 # Azure Deployment Plan
 
-> **Status:** Vehicle support validated locally; production release and authorized business-data reset pending.
+> **Status:** Multiple vehicles deployed and production business data reset; final cache-race hardening and hosted verification in progress.
 
 ## Current rollout scope
 
 ### Multiple vehicles and production fresh start authorized on 2026-11-19
+
+#### Release and reset proof
+
+- Vehicle release `1d2b95d0b99224be798accdf7c192de9315ae167` deployed successfully through
+  GitHub Actions run 44555013343. CI: 113 API tests passed with one existing skip, 51 Angular,
+  two startup browser, 12 production authentication/vehicle/reset browser and 25 shop workflow
+  tests passed. Both dependency security audits reported zero vulnerabilities.
+- Hosted index exactly matched the tested artifact. Real hosted sign-in, returning website
+  intake, preservation of the original vehicle, selection of the new vehicle for a quote,
+  independent tab edits and persistence after reload passed at 2026-11-19T15:34:36.958Z.
+  Only synthetic QA contact data was used; no customer SMS/email was requested by this check.
+- At 2026-11-19T15:35:15.410Z the authorized SQL reset committed: 6,571 customer/workflow rows
+  were backed up and cleared, including 5,209 customer records (one from the hosted check).
+  The private gzip backup was verified before deleting. All protected entity fingerprints
+  matched inside the serializable transaction, including 6,671 inventory rows, both vendors,
+  existing accounts and settings. The cache generation marker was written atomically.
+- The real old-browser verification caught a dashboard race: cached documents could trigger
+  creation of a missing card before the document reset response arrived. The document itself
+  stayed deleted, but one empty quote card reappeared. Follow-up hardening makes reconciliation
+  wait for document synchronization and rejects cards for absent documents in reset workspaces
+  on the server. A delayed-response browser test and a dashboard loading unit test cover it.
+- Remove only recreated cards referencing the backed-up cleared documents and their associated
+  events after deploying this guard. Preserve any new legitimate records created since reset.
+  Keep these cleanup rows alongside the original private backup for recovery/audit.
+
 
 - The user explicitly requested preserving a returning website customer's existing vehicle,
   adding the new vehicle separately with profile tabs, and clearing production customers,

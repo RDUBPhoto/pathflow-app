@@ -58,6 +58,7 @@ export default class LoginComponent {
 
   readonly localAuthHint = signal('');
   readonly passwordLoginError = signal('');
+  readonly idleLogout = signal(false);
   readonly passkeyLoginError = signal('');
   readonly passkeyLoginBusy = signal(false);
   readonly postLoginSetupBusy = signal(false);
@@ -80,6 +81,7 @@ export default class LoginComponent {
   constructor() {
 
     this.route.queryParamMap.subscribe(params => {
+      this.idleLogout.set(params.get('reason') === 'idle');
       this.redirectTo.set(normalizeAuthRedirect(params.get('redirect')));
       const inviteEmail = String(params.get('email') || '').trim();
       if (inviteEmail && !this.localLoginEmail) {

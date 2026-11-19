@@ -15,7 +15,10 @@ if (!outputRoot) {
 } else {
   const indexPath = path.join(outputRoot, 'index.html');
   const indexHtml = fs.readFileSync(indexPath, 'utf8');
-  if (!/main-[A-Z0-9]+\.js/i.test(indexHtml)) fail('index.html does not reference a hashed production main bundle.');
+  if (!fs.existsSync(path.join(outputRoot, 'asset-recovery.js')) || !indexHtml.includes('src="/asset-recovery.js"')) {
+    fail('Early asset recovery script is missing from the deploy output.');
+  }
+  if (!/main-[A-Z0-9_-]+\.js/i.test(indexHtml)) fail('index.html does not reference a hashed production main bundle.');
   const configPath = path.join(outputRoot, 'staticwebapp.config.json');
   if (!fs.existsSync(configPath)) {
     fail('staticwebapp.config.json is missing from the deploy output.');

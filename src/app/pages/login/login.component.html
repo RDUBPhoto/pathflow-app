@@ -8,6 +8,10 @@
         <p class="auth-subtitle">Run your shop from one command center.</p>
       </header>
 
+      @if (idleLogout()) {
+        <p class="alert alert-info" role="status">You were signed out after 30 minutes of inactivity. Sign in to continue.</p>
+      }
+
       <p class="inline-link-row">
         Need an account?
         <button type="button" class="inline-link-btn" (click)="startRegistration()">Register now</button>

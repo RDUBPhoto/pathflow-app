@@ -122,5 +122,8 @@
       "/*.txt",
       "/browser/*"
     ]
+  },
+  "globalHeaders": {
+    "Cache-Control": "no-cache"
   }
 }

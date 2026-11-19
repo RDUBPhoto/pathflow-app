@@ -1,7 +1,20 @@
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
+import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
+
+async function downloadPdf(page: Page, button: Locator, filename: RegExp) {
+  const downloaded = page.waitForEvent('download');
+  await button.click();
+  const file = await downloaded;
+  expect(file.suggestedFilename()).toMatch(filename);
+  expect(await file.failure()).toBeNull();
+  const bytes = await readFile((await file.path())!);
+  expect(bytes.subarray(0, 5).toString()).toBe('%PDF-');
+  expect(bytes.length).toBeGreaterThan(1000);
+  return bytes;
+}
 
 async function staffWorkspace(request: APIRequestContext, email = `shop-${randomUUID()}@example.test`, password = randomUUID()): Promise<string> {
   const signup = await request.post('/api/access', {
@@ -1092,6 +1105,7 @@ test('one customer visit link follows the quote, invoice, appointment and pickup
     openHour: 0, closeHour: 24, timeZone: 'America/Chicago', showWeekends: true
   } });
 
+  await page.context().clearCookies();
   await signInToDashboard(page, email, password);
   await page.goto(`/invoices/new?type=quote&customerId=${customerId}`);
   const next = page.getByRole('button', { name: 'Continue', exact: true });
@@ -1121,6 +1135,9 @@ test('one customer visit link follows the quote, invoice, appointment and pickup
     await customer.goto(link.href);
     await expect(customer.getByText('Wheel alignment', { exact: false })).toBeVisible();
     await expect(customer.getByText('INTERNAL SHOP NOTE')).toHaveCount(0);
+    const timeline = customer.getByRole('region', { name: 'Visit timeline', exact: true });
+    await expect(timeline.locator('[aria-current="step"]')).toContainText('Quote & approval');
+    await downloadPdf(customer, timeline.getByRole('button', { name: 'Download quote', exact: true }), /^quote-.*\.pdf$/);
     await customer.getByRole('button', { name: 'Accept Quote', exact: true }).click();
     await expect(customer.getByText('Quote accepted.', { exact: true })).toBeVisible();
     await page.waitForURL(/\/quotes\/[^/]+$/);
@@ -1139,6 +1156,9 @@ test('one customer visit link follows the quote, invoice, appointment and pickup
 
     const token = link.hash.slice(1);
     await customer.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await expect(timeline.locator('[aria-current="step"]')).toContainText('Payment');
+    await timeline.getByRole('button', { name: /^Invoice / }).click();
+    await downloadPdf(customer, timeline.getByRole('button', { name: 'Download invoice', exact: true }), /^invoice-.*\.pdf$/);
     await customer.getByRole('link', { name: 'Pay Invoice', exact: true }).click();
     await expect(customer.getByRole('link', { name: 'Back to your visit' })).toBeVisible();
     await expect(customer.getByRole('button', { name: 'Checkout & Pay' })).toBeVisible();
@@ -1191,19 +1211,23 @@ test('one customer visit link follows the quote, invoice, appointment and pickup
     await customer.getByRole('button', { name: 'Refresh', exact: true }).click();
     await expect(customer.getByRole('heading', { name: 'Appointment', exact: true })).toBeVisible();
     await expect(customer.getByRole('heading', { name: 'Payment history', exact: true })).toBeVisible();
-    const receipt = customer.waitForEvent('download');
-    await customer.getByRole('button', { name: 'Download receipt' }).click();
-    expect((await receipt).suggestedFilename()).toMatch(/^receipt-/);
+    await expect(timeline.locator('[aria-current="step"]')).toContainText('Scheduled');
+    await downloadPdf(customer, customer.getByRole('button', { name: 'Download receipt' }), /^receipt-.*\.pdf$/);
     await post('workitems', { id: job.id, checkedInAt: new Date().toISOString(), workClockAction: 'check-in' });
     await post('workitems', { id: job.id, workClockAction: 'start' });
     await customer.getByRole('button', { name: 'Refresh', exact: true }).click();
-    await expect(customer.getByText('In the shop', { exact: true })).toBeVisible();
+    await expect(customer.locator('.status-card').getByText('In the shop', { exact: true })).toBeVisible();
+    await expect(timeline.locator('[aria-current="step"]')).toContainText('In the shop');
     await post('workitems', { id: job.id, completedAt: new Date().toISOString() });
     await customer.getByRole('button', { name: 'Refresh', exact: true }).click();
-    await expect(customer.getByText('Ready for pickup', { exact: true })).toBeVisible();
+    await expect(customer.locator('.status-card').getByText('Ready for pickup', { exact: true })).toBeVisible();
+    await expect(timeline.locator('[aria-current="step"]')).toContainText('Ready for pickup');
     await post('workitems', { id: job.id, markPickedUp: true });
     await customer.getByRole('button', { name: 'Refresh', exact: true }).click();
-    await expect(customer.getByText('Picked up', { exact: true })).toBeVisible();
+    await expect(customer.locator('.status-card').getByText('Picked up', { exact: true })).toBeVisible();
+    await expect(timeline.locator('.timeline-step.is-complete')).toHaveCount(7);
+    await timeline.getByRole('button', { name: /^Picked up / }).click();
+    await downloadPdf(customer, timeline.getByRole('button', { name: /^Receipt ·/ }), /^receipt-.*\.pdf$/);
     await expect(customer.getByText('Paperwork is available through', { exact: false })).toBeVisible();
     await expect(customer.getByRole('link', { name: 'Pay Invoice', exact: true })).toHaveCount(0);
     await page.goto(invoicePath);

@@ -3,19 +3,30 @@ import { Injectable, inject } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { InvoicesDataService } from './invoices-data.service';
 
-type PortalLine = { description: string; quantity: number; total: number };
+type PortalLine = { description: string; quantity: number; total: number; subtotal?: number; unitPrice?: number };
 export type PortalPayment = { kind: string; date: string; amount: number; reference?: string };
+export type PortalActivity = { at: string; label: string; stepId?: string; paymentIndex?: number };
+export type PortalVisitStep = {
+  id: string; label: string; icon: string; description: string; at: string;
+  state: 'complete' | 'current' | 'upcoming' | 'closed'; events: PortalActivity[];
+};
+export type PortalDocument = {
+  id: string; number: string; total: number; lines: PortalLine[];
+  subtotal?: number; tax?: number; note?: string; issuedAt?: string;
+};
 export type CustomerVisit = {
   businessName: string;
+  businessContact?: { address: string; phone: string; email: string };
   customerName: string;
   vehicle: string;
   progress: string;
   status: 'active' | 'read-only';
   expiresAt: string;
   appointment: { start: string; end: string; timeZone: string } | null;
-  activity: Array<{ at: string; label: string }>;
-  quote: { id: string; number: string; stage: string; total: number; note: string; lines: PortalLine[]; canRespond: boolean } | null;
-  invoice: { id: string; number: string; total: number; balance: number; dueDate: string; lines: PortalLine[]; canPay: boolean } | null;
+  activity: PortalActivity[];
+  timeline: PortalVisitStep[];
+  quote: (PortalDocument & { stage: string; canRespond: boolean }) | null;
+  invoice: (PortalDocument & { balance: number; dueDate: string; canPay: boolean; returnCredit?: number }) | null;
   payments: PortalPayment[];
 };
 

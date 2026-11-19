@@ -2,7 +2,7 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './e2e',
-  testMatch: 'production-auth.spec.ts',
+  testMatch: ['production-auth.spec.ts', 'customer-portal.spec.ts'],
   timeout: 45000,
   workers: 1,
   reporter: [['list']],

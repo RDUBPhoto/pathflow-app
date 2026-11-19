@@ -1,15 +1,17 @@
 import { CommonModule } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
-import { Component, DestroyRef, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, DestroyRef, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { combineLatest, firstValueFrom } from 'rxjs';
-import { CustomerPortalApi, CustomerVisit, PortalPayment } from '../../services/customer-portal-api.service';
+import { CustomerPortalApi, CustomerVisit, PortalVisitStep } from '../../services/customer-portal-api.service';
 import { QuoteResponseAction, QuoteResponseApiService } from '../../services/quote-response-api.service';
+import { UiIcon } from '../../ui/icons';
+import { downloadPortalDocument, portalDocument, PortalDocumentKind } from './portal-document';
 
 @Component({
   standalone: true,
-  imports: [CommonModule, RouterLink],
+  imports: [CommonModule, RouterLink, UiIcon],
   templateUrl: './customer-portal.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './customer-portal.component.scss'
@@ -27,6 +29,10 @@ export default class CustomerPortalComponent {
   readonly decisionError = signal('');
   readonly pendingDecision = signal<QuoteResponseAction | null>(null);
   readonly message = signal('');
+  readonly timeline = computed(() => this.visit()?.timeline || []);
+  readonly expandedStep = signal<string | null>(null);
+  readonly downloadBusy = signal('');
+  readonly downloadError = signal('');
   private loadGeneration = 0;
 
   constructor() {
@@ -37,6 +43,8 @@ export default class CustomerPortalComponent {
       this.message.set('');
       this.decisionError.set('');
       this.pendingDecision.set(null);
+      this.expandedStep.set(null);
+      this.downloadError.set('');
       void this.load();
     });
   }
@@ -94,23 +102,33 @@ export default class CustomerPortalComponent {
     }).format(date);
   }
 
-  downloadReceipt(payment: PortalPayment, index: number): void {
+  isStepExpanded(step: PortalVisitStep): boolean {
+    return this.expandedStep() === null ? step.state === 'current' || step.state === 'closed' : this.expandedStep() === step.id;
+  }
+
+  toggleStep(step: PortalVisitStep): void {
+    this.expandedStep.set(this.isStepExpanded(step) ? '' : step.id);
+  }
+
+  stepStateLabel(step: PortalVisitStep): string {
+    if (step.state === 'upcoming' && this.timeline().some(item => item.state === 'closed')) return 'Not started';
+    return { complete: 'Complete', current: 'You are here', upcoming: 'Upcoming', closed: 'Closed' }[step.state];
+  }
+
+  async downloadPdf(kind: PortalDocumentKind, index?: number): Promise<void> {
     const visit = this.visit();
-    if (!visit || !visit.invoice || ['Void', 'Refund'].includes(payment.kind)) return;
-    const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
-    const contents = [
-      visit.businessName || 'Payment receipt', 'Payment receipt', '',
-      `Invoice: ${visit.invoice.number}`, `Customer: ${visit.customerName}`,
-      `Vehicle: ${visit.vehicle || '—'}`, `Date: ${payment.date}`,
-      `Amount received: ${money.format(payment.amount)}`,
-      ...(payment.reference ? [`Reference: ${payment.reference}`] : [])
-    ].join('\n');
-    const href = URL.createObjectURL(new Blob([contents], { type: 'text/plain;charset=utf-8' }));
-    const link = document.createElement('a');
-    link.href = href;
-    link.download = `receipt-${visit.invoice.number.replace(/[^a-z0-9-]/gi, '-')}-${index + 1}.txt`;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(href), 1000);
+    if (!visit || this.downloadBusy()) return;
+    const document = portalDocument(visit, kind, index);
+    if (!document) return;
+    this.downloadBusy.set(kind + (index ?? ''));
+    this.downloadError.set('');
+    try {
+      await downloadPortalDocument(document);
+    } catch {
+      this.downloadError.set('Could not download this PDF. Please try again.');
+    } finally {
+      this.downloadBusy.set('');
+    }
   }
 
   private errorMessage(error: unknown, fallback: string): string {

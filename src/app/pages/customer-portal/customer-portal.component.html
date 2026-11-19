@@ -39,6 +39,68 @@
     </section>
 
     @if (message()) { <p class="alert alert-success my-3" role="status">{{ message() }}</p> }
+    @if (downloadError()) { <p class="alert alert-danger mt-3" role="alert">{{ downloadError() }}</p> }
+    @if (downloadBusy()) { <p class="text-secondary mt-3 mb-0" role="status">Preparing your PDF…</p> }
+    @if (timeline().length) {
+      <section class="card mt-3 visit-timeline" aria-labelledby="visit-timeline-title">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title mb-1" id="visit-timeline-title">Visit timeline</h2>
+            <p class="text-secondary mb-0">Follow your progress. Select a step for details and paperwork.</p>
+          </div>
+        </div>
+        <ol class="timeline-steps">
+          @for (step of timeline(); track step.id) {
+            <li class="timeline-step" [class.is-complete]="step.state === 'complete'" [class.is-current]="step.state === 'current'" [class.is-closed]="step.state === 'closed'">
+              <button type="button" class="timeline-step-trigger" [attr.aria-expanded]="isStepExpanded(step)"
+                [attr.aria-controls]="'visit-step-' + step.id" [attr.aria-current]="step.state === 'current' ? 'step' : null" (click)="toggleStep(step)">
+                <span class="timeline-marker"><ui-icon [name]="step.state === 'complete' ? 'check' : step.icon"></ui-icon></span>
+                <span class="timeline-step-heading">
+                  <strong>{{ step.label }}</strong>
+                  @if (step.at) { <time [attr.datetime]="step.at">{{ step.at | date:'MMM d, y' }}</time> }
+                </span>
+                <span class="timeline-state">{{ stepStateLabel(step) }}</span>
+                <ui-icon class="timeline-chevron" [name]="isStepExpanded(step) ? 'chevron-up' : 'chevron-down'"></ui-icon>
+              </button>
+              <div class="timeline-details" [id]="'visit-step-' + step.id" [hidden]="!isStepExpanded(step)">
+                <p>{{ step.description }}</p>
+                @if (step.events.length) {
+                  <ul class="timeline-events">
+                    @for (event of step.events; track $index) {
+                      <li>
+                        <span>{{ event.label }}</span>
+                        <time [attr.datetime]="event.at">{{ event.at | date:'MMM d, y, h:mm a' }}</time>
+                      </li>
+                    }
+                  </ul>
+                }
+                <div class="visit-actions">
+                  @if (step.id === 'quote' && data.quote) {
+                    <button type="button" class="btn btn-sm btn-outline-primary" [disabled]="!!downloadBusy()" (click)="downloadPdf('quote')">
+                      <ui-icon name="download"></ui-icon> Download quote
+                    </button>
+                  }
+                  @if ((step.id === 'invoice' || step.id === 'ready' || step.id === 'pickup') && data.invoice) {
+                    <button type="button" class="btn btn-sm btn-outline-primary" [disabled]="!!downloadBusy()" (click)="downloadPdf('invoice')">
+                      <ui-icon name="download"></ui-icon> Download invoice
+                    </button>
+                  }
+                  @if ((step.id === 'payment' || step.id === 'pickup') && data.invoice) {
+                    @for (payment of data.payments; track $index) {
+                      <button type="button" class="btn btn-sm btn-outline-primary" [disabled]="!!downloadBusy()" (click)="downloadPdf('receipt', $index)">
+                        <ui-icon name="download"></ui-icon>
+                        {{ payment.kind === 'Void' || payment.kind === 'Refund' ? payment.kind + ' confirmation' : 'Receipt' }} · {{ payment.amount | currency }}
+                      </button>
+                    }
+                  }
+                </div>
+              </div>
+            </li>
+          }
+        </ol>
+      </section>
+    }
+
     <div class="visit-documents">
       @if (data.quote; as quote) {
         <section class="card">
@@ -54,6 +116,11 @@
             }
             <div class="visit-total"><span>Total</span><strong>{{ quote.total | currency }}</strong></div>
             @if (quote.note) { <p class="visit-note">{{ quote.note }}</p> }
+            <div class="visit-actions">
+              <button type="button" class="btn btn-outline-secondary btn-sm" [disabled]="!!downloadBusy()" (click)="downloadPdf('quote')">
+                <ui-icon name="download"></ui-icon> Download quote
+              </button>
+            </div>
             @if (decisionError()) { <p class="alert alert-danger mt-3" role="alert">{{ decisionError() }}</p> }
             @if (quote.canRespond) {
               <div class="visit-actions">
@@ -82,6 +149,11 @@
             }
             <div class="visit-total"><span>Invoice total</span><strong>{{ invoice.total | currency }}</strong></div>
             <div class="visit-total"><span>Balance due</span><strong>{{ invoice.balance | currency }}</strong></div>
+            <div class="visit-actions">
+              <button type="button" class="btn btn-outline-secondary btn-sm" [disabled]="!!downloadBusy()" (click)="downloadPdf('invoice')">
+                <ui-icon name="download"></ui-icon> Download invoice
+              </button>
+            </div>
             @if (invoice.canPay) {
               <div class="visit-actions">
                 <a class="btn btn-primary" [routerLink]="['/invoice-payment']"
@@ -106,28 +178,15 @@
                   <td>{{ payment.kind }}</td>
                   <td>{{ payment.amount | currency }}</td>
                   <td>
-                    @if (payment.kind !== 'Void' && payment.kind !== 'Refund') {
-                      <button type="button" class="btn btn-sm btn-outline-secondary" (click)="downloadReceipt(payment, $index)">Download receipt</button>
-                    }
+                    <button type="button" class="btn btn-sm btn-outline-secondary" [disabled]="!!downloadBusy()" (click)="downloadPdf('receipt', $index)">
+                      {{ payment.kind === 'Void' || payment.kind === 'Refund' ? 'Download confirmation' : 'Download receipt' }}
+                    </button>
                   </td>
                 </tr>
               }
             </tbody>
           </table>
         </div>
-      </section>
-    }
-
-    @if (data.activity.length) {
-      <section class="card mt-3">
-        <div class="card-header"><h2 class="card-title">Visit history</h2></div>
-        <ul class="list-group list-group-flush">
-          @for (event of data.activity; track $index) {
-            <li class="list-group-item d-flex justify-content-between gap-3">
-              <span>{{ event.label }}</span><time class="text-secondary" [attr.datetime]="event.at">{{ event.at | date:'MMM d, y' }}</time>
-            </li>
-          }
-        </ul>
       </section>
     }
 

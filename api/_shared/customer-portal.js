@@ -2,6 +2,7 @@ const { createHash, randomBytes, timingSafeEqual } = require("node:crypto");
 const { TableClient, isSqlBackendEnabled } = require("./table-client");
 const { invoiceBalance, invoicePreviouslyPaid, invoicePublishedTotal, sanitizeAmount } = require("./invoice-balances");
 const { makeShopCalendar, readShopHours } = require("./shop-hours");
+const { visitTimeline } = require("./visit-timeline");
 
 const PORTALS = "customerportals";
 const GRACE_PERIOD_MS = 30 * 86400000;
@@ -229,7 +230,10 @@ async function managePortal(tenant, id, action) {
 function lineItems(data) {
   return Array.isArray(data?.lineItems) ? data.lineItems.map(line => ({
     description: text(line?.description), quantity: sanitizeAmount(line?.quantity),
-    total: sanitizeAmount(line?.lineTotal)
+    total: sanitizeAmount(line?.lineTotal),
+    subtotal: sanitizeAmount(line?.lineSubtotal ?? (sanitizeAmount(line?.lineTotal) - sanitizeAmount(line?.taxAmount))),
+    unitPrice: sanitizeAmount(line?.unitPrice ?? (sanitizeAmount(line?.quantity) ?
+      sanitizeAmount(line?.lineSubtotal ?? line?.lineTotal) / sanitizeAmount(line.quantity) : 0))
   })) : [];
 }
 
@@ -274,33 +278,39 @@ async function publicSummary(tenant, visit) {
   }
   const reversals = json(invoice?.reversalHistoryJson, []);
   for (const row of Array.isArray(reversals) ? reversals : []) {
-    history.push({ kind: row.operation === "void" ? "Void" : "Refund", amount: sanitizeAmount(row.amount), date: text(row.createdAt) });
+    history.push({ kind: row.operation === "void" ? "Void" : "Refund", amount: sanitizeAmount(row.amount),
+      date: text(row.createdAt), reference: text(row.refundTransactionId || row.transactionId || row.originalTransactionId) });
   }
   history.sort((a, b) => time(a.date) - time(b.date));
-  const activity = [
-    { at: quote?.snapshotUpdatedAt, label: "Quote shared" },
-    { at: ["accepted", "declined"].includes(quote?.stage) ? quote.updatedAt : "", label: `Quote ${quote?.stage}` },
-    { at: invoice?.snapshotUpdatedAt, label: "Invoice shared" },
-    { at: workItem?.checkedInAt, label: "Vehicle checked in" },
-    { at: workItem?.completedAt, label: "Work completed" },
-    { at: workItem?.pickedUpAt, label: "Vehicle picked up" }
-  ].filter(event => time(event.at)).sort((a, b) => time(a.at) - time(b.at));
+  const total = invoicePublished ? invoicePublishedTotal(invoice) : sanitizeAmount(invoiceDoc?.total);
+  const balance = invoicePublished ? invoiceBalance(invoice) : Math.max(0, total - sanitizeAmount(invoiceDoc?.paidAmount));
+  const { timeline, activity } = visitTimeline({ ...visit, appointment, payments: history, total, balance });
   return {
     status: visit.status, expiresAt: visit.expiresAt, progress: progress({ ...visit, appointment }),
     businessName: text(invoice?.businessName || quote?.businessName || invoiceDoc?.businessName || quoteDoc?.businessName),
+    businessContact: {
+      address: text(invoiceData.businessAddress || quoteData.businessAddress),
+      phone: text(invoiceData.businessPhone || quoteData.businessPhone),
+      email: text(invoiceData.businessEmail || quoteData.businessEmail)
+    },
     customerName: text(invoice?.customerName || quote?.customerName || invoiceDoc?.customerName || quoteDoc?.customerName),
     vehicle: text(invoice?.vehicle || quote?.vehicle || invoiceDoc?.vehicle || quoteDoc?.vehicle),
     appointment: appointment || null,
-    activity,
+    activity, timeline,
     quote: quote?.snapshotUpdatedAt ? {
       id: quoteDoc.id, number: text(quote.quoteNumber), stage: text(quote.stage || quoteDoc.stage),
       total: sanitizeAmount(quoteData.total), note: text(quoteData.customerNote), lines: lineItems(quoteData),
+      subtotal: sanitizeAmount(quoteData.subtotal ?? (sanitizeAmount(quoteData.total) - sanitizeAmount(quoteData.taxTotal))), tax: sanitizeAmount(quoteData.taxTotal),
+      issuedAt: text(quoteData.issueDate || quote.snapshotUpdatedAt),
       canRespond: quoteDecisionAllowed(visit)
     } : null,
     invoice: invoicePublished || history.length ? {
       id: invoiceDoc.id, number: text(invoice?.invoiceNumber || invoiceDoc.invoiceNumber),
-      total: invoicePublished ? invoicePublishedTotal(invoice) : sanitizeAmount(invoiceDoc.total),
-      balance: invoicePublished ? invoiceBalance(invoice) : Math.max(0, sanitizeAmount(invoiceDoc.total) - sanitizeAmount(invoiceDoc.paidAmount)),
+      total, balance,
+      subtotal: invoicePublished ? sanitizeAmount(invoiceData.subtotal ?? (sanitizeAmount(invoiceData.total) - sanitizeAmount(invoiceData.taxTotal))) : total,
+      tax: invoicePublished ? sanitizeAmount(invoiceData.taxTotal) : 0,
+      returnCredit: sanitizeAmount(invoice?.returnCreditAmount), note: text(invoiceData.customerNote),
+      issuedAt: text(invoiceData.issueDate || invoice?.snapshotUpdatedAt),
       dueDate: text(invoice?.dueDate), lines: invoicePublished ? lineItems(invoiceData) : [],
       canPay: invoiceCheckoutAllowed(visit) && !!text(invoice.snapshotPaymentProvider || invoice.paymentProvider) && invoiceBalance(invoice) > 0
     } : null,

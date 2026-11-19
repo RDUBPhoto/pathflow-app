@@ -13,6 +13,8 @@ export type ScheduleItem = {
   resource: string;
   customerId?: string;
   workItemId?: string;
+  vehicle?: string;
+  vehicleId?: string;
   isBlocked?: boolean;
   title?: string;
   notes?: string;

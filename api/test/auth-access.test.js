@@ -373,3 +373,22 @@ test('a business reset rejects stale document uploads and allows documents from 
   assert.equal(freshCard.status, 200);
   assert.equal(context.rows('servicedocuments').size, 1);
 }));
+
+test('a linked appointment and its parts needs retain the job vehicle instead of the customer primary', () => fixture(async context => {
+  const invoke = await dataSession(context);
+  context.put('customers', { partitionKey: 'tenant-a', rowKey: 'multi-car', name: 'Vehicle Customer', vehicleYear: '2013', vehicleMake: 'Ford', vehicleModel: 'Raptor' });
+  context.put('workitems', { partitionKey: 'tenant-a', rowKey: 'paid-job', jobId: 'job-1', invoiceId: 'jeep-invoice', customerId: 'multi-car' });
+  context.put('servicedocuments', { partitionKey: 'tenant-a', rowKey: 'jeep-invoice', documentJson: JSON.stringify({ id: 'jeep-invoice', vehicle: '2021 Jeep Wrangler Sport', vehicleId: 'jeep-vehicle' }) });
+  const schedule = require('../schedule');
+  const created = await invoke(schedule, 'POST', { customerId: 'multi-car', workItemId: 'paid-job', resource: 'bay-1',
+    start: '2026-11-23T09:00:00', end: '2026-11-23T11:00:00', partRequests: [{ partName: 'Jeep part', qty: 1 }] });
+  assert.equal(created.status, 200);
+  let saved = (await invoke(schedule, 'GET')).body[0];
+  assert.equal(saved.vehicle, '2021 Jeep Wrangler Sport');
+  assert.equal(saved.vehicleId, 'jeep-vehicle');
+  assert.equal([...context.rows('inventoryneeds').values()][0].vehicle, '2021 Jeep Wrangler Sport');
+  await invoke(schedule, 'POST', { id: created.body.id, start: '2026-11-23T10:00:00', end: '2026-11-23T12:00:00' });
+  saved = (await invoke(schedule, 'GET')).body[0];
+  assert.equal(saved.vehicle, '2021 Jeep Wrangler Sport');
+  assert.equal([...context.rows('inventoryneeds').values()][0].vehicle, '2021 Jeep Wrangler Sport');
+}));

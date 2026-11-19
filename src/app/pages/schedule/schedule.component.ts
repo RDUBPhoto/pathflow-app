@@ -968,7 +968,7 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
         ? new Date(releasedMs).toLocaleTimeString([], { timeZone, hour: 'numeric', minute: '2-digit' })
         : '';
       const cust = it.customerId ? map[it.customerId] : null;
-      const vehicle = cust ? this.vehicleLabel(cust) : '';
+      const vehicle = it.vehicle || (cust ? this.vehicleLabel(cust) : '');
       const text = it.isBlocked
         ? (it.title || 'Closed')
         : (cust ? `${cust.name || 'Unnamed'}${vehicle ? ' — ' + vehicle : ''}` : 'Unassigned');
@@ -1640,7 +1640,7 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
 
   private calendarDetails(schedule: ScheduleItem): string {
     const customer = this.customerForSchedule(schedule);
-    const vehicle = customer ? this.vehicleLabel(customer) : '';
+    const vehicle = schedule.vehicle || (customer ? this.vehicleLabel(customer) : '');
     const lines = [
       `Appointment with ${this.businessDisplayName()}.`,
       customer?.name ? `Customer: ${customer.name}` : '',
@@ -1680,7 +1680,7 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
 
   private appointmentEmailHtml(message: string, schedule: ScheduleItem, portalUrl: string): string {
     const customer = this.customerForSchedule(schedule);
-    const vehicle = customer ? this.vehicleLabel(customer) : '';
+    const vehicle = schedule.vehicle || (customer ? this.vehicleLabel(customer) : '');
     const googleUrl = this.googleCalendarUrl(schedule);
     const outlookUrl = this.outlookCalendarUrl(schedule);
     return `<div style="font-family:Arial,Helvetica,sans-serif;line-height:1.55;color:#111827;">

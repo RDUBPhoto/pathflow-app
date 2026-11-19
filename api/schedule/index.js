@@ -116,6 +116,21 @@ function vehicleLabel(customer) {
     .join(" ");
 }
 
+async function jobVehicle(conn, tenantId, item) {
+  const invoiceId = asString(item.invoiceId) || asString(item.title).match(/\[doc=([^\]]+)\]/i)?.[1];
+  if (invoiceId) {
+    try {
+      const row = await (await getTableClient(conn, "servicedocuments")).getEntity(tenantId, invoiceId);
+      const document = !row.deleted && JSON.parse(row.documentJson || "null");
+      if (document?.vehicle && document.vehicle !== "Vehicle TBD") {
+        return { vehicle: asString(document.vehicle), vehicleId: asString(document.vehicleId) };
+      }
+    } catch (error) { if (error.statusCode !== 404) throw error; }
+  }
+  const vehicle = asString(item.vehicle) || vehicleLabel(item) || asString(item.title).match(/\(([^)]+)\)/)?.[1] || "";
+  return { vehicle, vehicleId: asString(item.vehicleId) };
+}
+
 async function getTableClient(conn, tableName) {
   const client = TableClient.fromConnectionString(conn, tableName);
   try { await client.createTable(); } catch (_) {}
@@ -166,7 +181,7 @@ async function syncScheduleNeeds(conn, tenantId, scheduleRecord) {
   const customersClient = await getTableClient(conn, CUSTOMERS_TABLE);
   const customer = await getCustomerSummary(customersClient, tenantId, scheduleRecord.customerId);
   const customerName = asString(customer && (customer.name || `${customer.firstName || ""} ${customer.lastName || ""}`)) || "";
-  const vehicle = vehicleLabel(customer);
+  const vehicle = asString(scheduleRecord.vehicle) || vehicleLabel(customer);
   const now = new Date().toISOString();
 
   const existingBySig = new Map();
@@ -285,6 +300,8 @@ module.exports = async function (context, req) {
           resource: pick(e.resource),
           customerId: pick(e.customerId),
           workItemId: pick(e.workItemId),
+          vehicle: pick(e.vehicle),
+          vehicleId: pick(e.vehicleId),
           isBlocked: bool(e.isBlocked),
           title: pick(e.title),
           notes: pick(e.notes),
@@ -327,6 +344,7 @@ module.exports = async function (context, req) {
         context.res = { status: 400, headers: { "content-type": "application/json" }, body: { error: "start, end, resource required" } };
         return;
       }
+      let linkedVehicle = null;
       if (workItemId) {
         try {
           const item = await (await getTableClient(conn, "workitems")).getEntity(resolvedTenantId, workItemId);
@@ -334,6 +352,7 @@ module.exports = async function (context, req) {
             context.res = { status: 409, body: { error: "Select the paid job's customer to schedule this appointment." } };
             return;
           }
+          linkedVehicle = await jobVehicle(conn, resolvedTenantId, item);
         } catch (error) {
           if (error.statusCode !== 404) throw error;
           context.res = { status: 404, body: { error: "The paid job could not be found." } };
@@ -352,6 +371,7 @@ module.exports = async function (context, req) {
           resource,
           customerId,
           workItemId,
+          ...(linkedVehicle || {}),
           isBlocked,
           title,
           notes,
@@ -374,6 +394,7 @@ module.exports = async function (context, req) {
           end,
           resource,
           customerId,
+          vehicle: entity.vehicle,
           isBlocked,
           partRequests: requestedPartRequests || []
         });
@@ -389,6 +410,7 @@ module.exports = async function (context, req) {
           : parsePartRequests(current && current.partRequests);
 
         const patch = { partitionKey: tenantId, rowKey: rid, updatedAt: new Date().toISOString() };
+        if (linkedVehicle) Object.assign(patch, linkedVehicle);
         if (workItemId) patch.workItemId = workItemId;
         if (current?.workItemId && Object.prototype.hasOwnProperty.call(b, "customerId") &&
             (customerId !== current.customerId || isBlocked)) {
@@ -418,6 +440,7 @@ module.exports = async function (context, req) {
           start: start || pick(current && current.start),
           end: end || pick(current && current.end),
           resource: resource || pick(current && current.resource),
+          vehicle: linkedVehicle?.vehicle || pick(current && current.vehicle),
           customerId: (customerId || Object.prototype.hasOwnProperty.call(b, "customerId"))
             ? customerId
             : pick(current && current.customerId),

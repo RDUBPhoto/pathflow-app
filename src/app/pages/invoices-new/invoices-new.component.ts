@@ -184,7 +184,8 @@ export default class InvoicesNewComponent {
           customer.secondaryEmail || '',
           customer.phone || '',
           customer.mobile || '',
-          this.customerVehicleSummary(customer)
+          this.customerVehicleSummary(customer),
+          ...customerVehicles(customer).map(vehicle => `${vehicleSummary(vehicle)} ${vehicle.vin || ''}`)
         ]
           .join(' ')
           .toLowerCase();

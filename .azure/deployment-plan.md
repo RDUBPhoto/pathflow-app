@@ -1,12 +1,46 @@
 # Azure Deployment Plan
 
-> **Status:** Multiple vehicles deployed and production business data reset; final cache-race hardening and hosted verification in progress.
+> **Status:** Vehicle intake/tabs and production reset verified; final appointment vehicle snapshots validated locally and releasing.
 
 ## Current rollout scope
 
 ### Multiple vehicles and production fresh start authorized on 2026-11-19
 
 #### Release and reset proof
+
+- Follow-through inspection found calendar entries, appointment messages and schedule-derived
+  parts needs still used the customer primary vehicle. Linked paid-job scheduling now persists
+  the invoice/job vehicle snapshot and vehicle ID. Rescheduling retains it, and calendar views,
+  Google/Outlook calendar links, email details and parts needs prefer that snapshot. Customer
+  and quote search includes secondary vehicle descriptions and VINs.
+- Added an API regression for a two-vehicle customer's linked appointment/parts needs, including
+  rescheduling; unit checks for shared appointment/calendar details; and production-browser
+  checks for secondary-vehicle search and its calendar event. Local production build, all API
+  tests, 54 Angular tests and 12 production browser tests passed. Release/CI proof to follow.
+- The production database remains cleared. This follow-up uses isolated test storage; no further
+  production CRM data reset is planned. Keep unrelated local payment/receipt work unstaged.
+
+
+- Final product release `fdfaf2ede9289b8ddd1dc9f4d5f01f21e35f8a70` deployed successfully in
+  run 44557326587. CI passed 113 API tests (one existing skip), 52 Angular tests, two startup,
+  12 production browser and 25 shop workflow tests. Hosted frontend matched its tested artifact.
+- Hosted verification at 2026-11-19T15:48:33.798Z reused the actual pre-reset browser
+  storage. Customers, documents and work items returned empty; dashboard and Jobs were empty;
+  all customer/sales/quote/invoice/workflow report metrics were zero. The old saved portal link
+  returned 404, and both stale document uploads and stale dashboard card creation returned
+  BUSINESS_DATA_RESET (409). PayLynx stayed connected in sandbox/test mode and SMS stayed in
+  Azure mode with the assigned sender number. No payment or message was sent by these checks.
+- The transient cards had already been pruned after cache synchronization. Backed up and removed
+  six orphaned post-reset history events in a scoped transaction. A later independent SQL read
+  found zero rows across the complete customer/workflow allowlist; the original recovery gzip
+  checksum still matched. Existing inventory, both vendors and all staff access remain.
+- Removed the temporary verification account and sessions at 2026-11-19T15:49:08.681Z.
+  The recovery manifest includes the scoped cleanup, checksum and final hosted/SQL proof.
+- A duplicate standalone CI run exposed test setup timing: initial legitimate card creation
+  could be counted as post-reset activity. Commit `aa1c782` waits for initial card creation
+  before installing reset interception. All 12 browser tests passed locally with that correction;
+  both clean CI reruns passed (44558640351 and 44558639815), and it deployed successfully. This commit changes only the test fixture, not product code.
+
 
 - Vehicle release `1d2b95d0b99224be798accdf7c192de9315ae167` deployed successfully through
   GitHub Actions run 44555013343. CI: 113 API tests passed with one existing skip, 51 Angular,

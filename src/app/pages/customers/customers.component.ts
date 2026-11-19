@@ -7,6 +7,7 @@ import { CustomersApi, Customer } from '../../services/customers-api.service';
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
 import { PageBackButtonComponent } from '../../components/navigation/page-back-button/page-back-button.component';
 import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
+import { customerVehicles, vehicleSummary } from '../../utils/customer-vehicles';
 
 type SortKey = 'name' | 'phone' | 'email';
 type SortDir = 'asc' | 'desc';
@@ -62,7 +63,8 @@ export default class CustomersComponent {
         const f5 = (c.vehicleMake || '').toLowerCase();
         const f6 = (c.vehicleModel || '').toLowerCase();
         const f7 = (c.vehicleTrim || '').toLowerCase();
-        return f1.includes(q) || f2.includes(q) || f3.includes(q) || f8.includes(q) || f4.includes(q) || f5.includes(q) || f6.includes(q) || f7.includes(q);
+        return f1.includes(q) || f2.includes(q) || f3.includes(q) || f8.includes(q) || f4.includes(q) || f5.includes(q) || f6.includes(q) || f7.includes(q)
+          || customerVehicles(c).some(vehicle => `${vehicleSummary(vehicle)} ${vehicle.vin || ''}`.toLowerCase().includes(q));
       });
     }
     arr.sort((a, b) => {

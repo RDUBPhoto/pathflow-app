@@ -253,6 +253,9 @@ test('a returning website lead keeps both vehicles and carries the new vehicle i
     const result = await (await request.get('/api/service-documents', { headers })).json();
     return result.items.some((row: any) => row.document?.vehicleId === jeep.id && row.document?.vehicle?.includes('Jeep'));
   }).toBeTruthy();
+  await page.goto('/customers');
+  await page.getByRole('textbox', { name: 'Name, phone, email, year/make/model', exact: true }).fill('Jeep');
+  await expect(page.locator('tbody tr').filter({ hasText: 'Returning Vehicle Customer' })).toHaveCount(1);
   await page.goto('/customers/' + id);
   const tabs = page.getByRole('tablist', { name: 'Customer vehicles' });
   await expect(tabs.getByRole('tab')).toHaveCount(2);
@@ -284,6 +287,12 @@ test('a returning website lead keeps both vehicles and carries the new vehicle i
   await expect(tabs.getByRole('tab')).toHaveCount(2);
   await expect(tabs).toContainText('SVT preserved');
   await expect(tabs).toContainText('Rubicon');
+  const today = new Date().toISOString().slice(0, 10);
+  await page.route('**/api/schedule', route => route.fulfill({ json: [{ id: 'second-vehicle-appointment',
+    customerId: id, vehicleId: jeep.id, vehicle: '2021 Jeep Wrangler Sport', resource: 'bay-1',
+    start: today + 'T09:00:00', end: today + 'T11:00:00' }] }));
+  await page.goto('/schedule');
+  await expect(page.getByText('Returning Vehicle Customer — 2021 Jeep Wrangler Sport', { exact: true }).first()).toBeVisible();
 });
 
 test('a business reset clears cached quotes without uploading them again', async ({ page, request }) => {

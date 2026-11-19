@@ -2498,7 +2498,7 @@ export default class DashboardComponent implements OnDestroy {
     this.markLeadSeen(it, lane);
     const customerId = (it.customerId || '').trim();
     if (!customerId) return;
-    this.router.navigate(['/customers', customerId], { queryParams: { vehicleId: it.vehicleId || undefined } });
+    this.router.navigate(['/customers', customerId], { queryParams: { vehicleId: this.vehicleForWorkItem(it)?.id || it.vehicleId || undefined } });
   }
 
   openCustomerActivity(it: WorkItem, lane: Lane, activity: 'sms' | 'email', event?: Event): void {
@@ -2933,7 +2933,7 @@ export default class DashboardComponent implements OnDestroy {
     const document = this.invoicesData.getInvoiceById(workItemDocumentRef(it));
     if (document?.vehicle && document.vehicle !== 'Vehicle TBD') return document.vehicle;
     const cust = this.customersMap()[it.customerId ?? ''] as any;
-    const matched = customerVehicles(cust).find(vehicle => vehicle.id === it.vehicleId || (!!it.vin && vehicle.vin === it.vin));
+    const matched = this.vehicleForWorkItem(it);
     const itemParts = [it.vehicleYear, it.vehicleMake, it.vehicleModel]
       .filter(Boolean)
       .map((s: string | undefined) => String(s || '').trim())
@@ -2950,12 +2950,21 @@ export default class DashboardComponent implements OnDestroy {
 
   colorOf(it: WorkItem): string {
     const cust = this.customersMap()[it.customerId ?? ''] as any;
-    const matched = customerVehicles(cust).find(vehicle => vehicle.id === it.vehicleId || (!!it.vin && vehicle.vin === it.vin));
-    const col = (it.vehicleColor || matched?.vehicleColor || (!it.vehicleId && !it.vin ? cust?.vehicleColor : '') || '').toString().trim();
+    const matched = this.vehicleForWorkItem(it);
+    const document = this.invoicesData.getInvoiceById(workItemDocumentRef(it));
+    const col = (it.vehicleColor || matched?.vehicleColor || (!it.vehicleId && !it.vin && !document?.vehicleId && !document?.vehicleVin ? cust?.vehicleColor : '') || '').toString().trim();
     if (col) return col;
 
     const m = (it.title || '').match(/\[c=([^\]]+)\]/);
     return m?.[1] ?? '';
+  }
+
+  private vehicleForWorkItem(it: WorkItem) {
+    const document = this.invoicesData.getInvoiceById(workItemDocumentRef(it));
+    const vehicleId = document?.vehicleId || it.vehicleId;
+    const vin = document?.vehicleVin || it.vin;
+    return customerVehicles(this.customersMap()[it.customerId ?? ''])
+      .find(vehicle => vehicle.id === vehicleId || (!!vin && vehicle.vin === vin));
   }
 
   notesListOf(it: WorkItem): string[] {
@@ -4535,7 +4544,7 @@ export default class DashboardComponent implements OnDestroy {
     };
     if (workItemId) queryParams['workItemId'] = workItemId;
     const workItem = Object.values(this.items()).flat().find(item => item.id === workItemId);
-    const vehicle = customerVehicles(customer).find(vehicle => vehicle.id === workItem?.vehicleId || (!!workItem?.vin && vehicle.vin === workItem.vin));
+    const vehicle = workItem ? this.vehicleForWorkItem(workItem) : undefined;
     if (vehicle) queryParams['vehicleId'] = vehicle.id;
     if (customer) {
       queryParams['customerName'] = customer.name || '';

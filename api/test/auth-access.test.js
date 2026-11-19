@@ -334,13 +334,16 @@ test('customer API saves separate vehicle edits and exposes legacy vehicles with
   const list = await invoke(customers, 'GET');
   const customer = list.body.find(row => row.id === created.body.id);
   assert.equal(customer.vehicles.length, 1);
-  const second = { id: 'second-vehicle', vehicleYear: '2021', vehicleMake: 'Jeep', vehicleModel: 'Wrangler' };
+  const second = { id: 'second-vehicle', vin: '1J4FA49S14P123456', vehicleYear: '2021', vehicleMake: 'Jeep', vehicleModel: 'Wrangler' };
   const updated = await invoke(customers, 'POST', { id: customer.id, vehicles: [...customer.vehicles, second], primaryVehicleId: customer.primaryVehicleId });
   assert.equal(updated.status, 200);
   const saved = (await invoke(customers, 'GET')).body.find(row => row.id === customer.id);
   assert.equal(saved.vehicles.length, 2);
   assert.equal(saved.vehicleModel, 'Raptor');
   assert.equal(saved.vehicles[1].vehicleModel, 'Wrangler');
+  const duplicate = await invoke(customers, 'POST', { op: 'findduplicates', vin: second.vin });
+  assert.equal(duplicate.body.items[0].id, customer.id);
+  assert.ok(duplicate.body.items[0].reasons.includes('vin'));
   await invoke(customers, 'POST', { id: customer.id, vehicles: [saved.vehicles[1]] });
   const removed = (await invoke(customers, 'GET')).body.find(row => row.id === customer.id);
   assert.equal(removed.vehicles.length, 1);

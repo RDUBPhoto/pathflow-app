@@ -478,7 +478,7 @@ function buildDuplicateCandidates(customers, probe, excludeId, ignoredKeys) {
     const reasons = [];
     let score = 0;
 
-    if (probe.vin && normalizeVin(customer.vin) === probe.vin) {
+    if (probe.vin && readVehicles(customer).some(vehicle => normalizeVin(vehicle.vin) === probe.vin)) {
       reasons.push("vin");
       score += DUPLICATE_REASON_WEIGHTS.vin;
     }
@@ -606,14 +606,14 @@ function buildDuplicateSummary(customers, limit, includeCustomers, ignoredKeys) 
     const emailsForCustomer = normalizedEmailList(customer.email, customer.secondaryEmail);
     const phone = normalizePhone(customer.phone || customer.mobile);
     const name = normalizeName(fullName(customer.firstName, customer.lastName, customer.name));
-    const vin = normalizeVin(customer.vin);
+    const vehicleVins = readVehicles(customer).map(vehicle => normalizeVin(vehicle.vin)).filter(Boolean);
 
     for (const email of emailsForCustomer) {
       addToGroup(emails, email, customerId);
     }
     addToGroup(phones, phone, customerId);
     addToGroup(names, name, customerId);
-    addToGroup(vins, vin, customerId);
+    for (const vin of new Set(vehicleVins)) addToGroup(vins, vin, customerId);
   }
 
   const pairMap = new Map();

@@ -6,6 +6,7 @@ const VEHICLE_FIELDS = ["vin", "vehicleYear", "vehicleMake", "vehicleModel", "ve
   "frontRimSize", "rearRimSize", "vehicleColor"];
 const text = value => String(value ?? "").trim();
 function fields(input = {}) {
+  input = input && typeof input === "object" ? input : {};
   return Object.fromEntries(VEHICLE_FIELDS.map(key => [key, key === "vin"
     ? text(input[key]).toUpperCase().replace(/\s/g, "") : text(input[key])]));
 }

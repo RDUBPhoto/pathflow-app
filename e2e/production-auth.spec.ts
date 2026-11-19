@@ -300,6 +300,8 @@ test('a business reset clears cached quotes without uploading them again', async
   await expect(page).toHaveURL(/\/dashboard$/);
   const key = 'pathflow.invoices.v1.' + account.tenant;
   await expect.poll(() => page.evaluate(key => localStorage.getItem(key), key)).toContain(id);
+  // Finish the original page's legitimate card creation before simulating a reset.
+  await expect(page.locator('.cards .card').filter({ hasText: 'QTE-CACHE-RESET' })).toHaveCount(1);
   const uploads: string[] = [];
   const recreatedCards: string[] = [];
   await page.route('**/api/workitems', async route => {

@@ -1188,7 +1188,7 @@ export default class InvoicesNewComponent {
       <tr>
         <td align="center" style="text-align:center;vertical-align:middle;">
           <a href="${this.escapeHtmlAttribute(this.quoteActionUrl('accept'))}" style="display:inline-block;background:#1d4ed8;border:1px solid #1d4ed8;color:#ffffff !important;text-decoration:none;font-weight:700;font-size:16px;line-height:1;padding:10px 16px;border-radius:6px;margin-right:16px;">Accept Quote</a>
-          <a href="${this.escapeHtmlAttribute(this.quoteActionUrl('decline'))}" style="display:inline-block;color:#0369a1 !important;text-decoration:underline;font-weight:600;font-size:16px;line-height:1;vertical-align:middle;">Decline Quote</a>
+          <a href="${this.escapeHtmlAttribute(this.quoteActionUrl('decline'))}" style="display:inline-block;color:#d63939 !important;text-decoration:underline;font-weight:600;font-size:16px;line-height:1;vertical-align:middle;">Decline Quote</a>
         </td>
       </tr>
     </table>`;

@@ -60,7 +60,7 @@
                 <button type="button" class="btn btn-primary" [disabled]="pendingDecision() || loading()" (click)="respond('accept')">
                   {{ pendingDecision() === 'accept' ? 'Accepting…' : 'Accept Quote' }}
                 </button>
-                <button type="button" class="btn btn-outline-secondary" [disabled]="pendingDecision() || loading()" (click)="respond('decline')">
+                <button type="button" class="btn btn-danger" [disabled]="pendingDecision() || loading()" (click)="respond('decline')">
                   {{ pendingDecision() === 'decline' ? 'Declining…' : 'Decline Quote' }}
                 </button>
               </div>

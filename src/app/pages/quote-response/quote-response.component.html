@@ -96,7 +96,7 @@
         }
         <div class="actions">
           <button type="button" class="btn btn-success" [disabled]="responseSubmitting()" (click)="submitResponse('accept')">Accept Quote</button>
-          <button type="button" class="btn btn-outline-danger" [disabled]="responseSubmitting()" (click)="submitResponse('decline')">Decline Quote</button>
+          <button type="button" class="btn btn-danger" [disabled]="responseSubmitting()" (click)="submitResponse('decline')">Decline Quote</button>
         </div>
         <p class="business">Business: {{ businessName() }}</p>
       } @else {

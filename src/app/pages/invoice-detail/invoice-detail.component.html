@@ -62,7 +62,7 @@
                   Back To Invoices
                 </button>
               }
-              @if (detail.documentType === 'invoice' && (detail.jobNumber || detail.lineItems.length)) {
+              @if (detail.documentType === 'invoice' && detail.stage !== 'draft' && (detail.jobNumber || detail.lineItems.length)) {
                 <button type="button"
                   class="btn ui-button btn-ghost-primary btn-sm secondary-header-action"
                   [routerLink]="['/jobs/detail']"
@@ -100,7 +100,7 @@
                   </button>
                   @if (invoiceActionsMenuOpen()) {
                     <div class="invoice-actions-popover">
-                      @if (paymentAvailability().provider?.key === 'paylynx' && amountDue() > 0 && detail.stage !== 'canceled' && detail.stage !== 'expired') {
+                      @if (paymentAvailability().provider?.key === 'paylynx' && amountDue() > 0 && detail.stage !== 'draft' && detail.stage !== 'canceled' && detail.stage !== 'expired') {
                         <button
                           type="button" class="invoice-actions-item" [disabled]="hasChanges()" (click)="openPaylynxCharge()">
                           Charge Card
@@ -558,11 +558,13 @@
                   <h3>Purchase Orders + Tracking</h3>
                   <span>Vendor orders connected to this invoice</span>
                 </div>
-                <button class="btn ui-button btn-outline-primary btn-sm" type="button"
-                  [routerLink]="['/jobs/detail']"
-                  [queryParams]="invoiceJobDetailQueryParams(detail)">
-                  Open Job
-                </button>
+                @if (detail.stage !== 'draft') {
+                  <button class="btn ui-button btn-outline-primary btn-sm" type="button"
+                    [routerLink]="['/jobs/detail']"
+                    [queryParams]="invoiceJobDetailQueryParams(detail)">
+                    Open Job
+                  </button>
+                }
               </header>
               @if (linkedPurchaseOrderRows().length) {
                 <div class="line-table-wrap ordered-parts-wrap">

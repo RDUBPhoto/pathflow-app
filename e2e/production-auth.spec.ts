@@ -334,6 +334,46 @@ test('a business reset clears cached quotes without uploading them again', async
   expect(recreatedCards).toEqual([]);
 });
 
+test('draft invoices hide job and card-charge actions while issued invoices keep the appropriate actions', async ({ page, request }) => {
+  const account = await workspace(request);
+  const headers = { 'x-tenant-id': account.tenant };
+  await page.route('**/api/settings?key=billing.paymentProviders', route => route.fulfill({ json: {
+    ok: true, value: { defaultProvider: 'paylynx', providers: [
+      { key: 'paylynx', label: 'PayLynx', connected: true, mode: 'test' }
+    ] }
+  } }));
+  const stages = ['draft', 'sent', 'accepted', 'completed'] as const;
+  const ids = new Map<string, string>();
+  for (const stage of stages) {
+    const id = randomUUID();
+    ids.set(stage, id);
+    const seeded = await request.post('/api/service-documents', { headers, data: { id, document: {
+      id, documentType: 'invoice', stage, invoiceNumber: 'INV-ACTIONS-' + stage.toUpperCase(),
+      customerName: 'Invoice Actions Customer', jobNumber: 'JOB-ACTIONS', subtotal: 200, taxTotal: 0,
+      total: 200, paidAmount: ['accepted', 'completed'].includes(stage) ? 200 : 0,
+      lineItems: [{ id: 'labor', type: 'labor', description: 'Installation', quantity: 2,
+        unitPrice: 100, taxRate: 0, lineSubtotal: 200, taxAmount: 0, lineTotal: 200 }], timeline: []
+    } } });
+    expect(seeded.ok(), await seeded.text()).toBeTruthy();
+  }
+  await signIn(page, account.email, account.password);
+  await expect(page).toHaveURL(/\/dashboard$/);
+  for (const stage of stages) {
+    await page.goto('/invoices/' + ids.get(stage));
+    await expect(page.locator('.stage-field select')).toHaveValue(stage);
+    await expect(page.getByRole('button', { name: 'Open Job', exact: true })).toHaveCount(stage === 'draft' ? 0 : 2);
+    if (stage === 'draft') {
+      await expect(page.getByRole('button', { name: 'Send Invoice', exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Save Invoice', exact: true })).toBeVisible();
+    }
+    await page.getByRole('button', { name: 'More invoice actions', exact: true }).click();
+    const charge = page.getByRole('button', { name: 'Charge Card', exact: true });
+    if (stage === 'sent') await expect(charge).toBeEnabled();
+    else await expect(charge).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Print Invoice', exact: true })).toBeVisible();
+  }
+});
+
 test('dragging an accepted quote into Invoices opens its new invoice and send dialog without sending', async ({ page, request }) => {
   await page.setViewportSize({ width: 1800, height: 1100 });
   const account = await workspace(request);

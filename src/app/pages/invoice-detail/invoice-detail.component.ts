@@ -1392,7 +1392,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
   openPaylynxCharge(): void {
     this.closeInvoiceActionsMenu();
     const detail = this.invoice();
-    if (!detail || this.hasChanges() || this.amountDue() <= 0) return;
+    if (!detail || detail.documentType !== 'invoice' || detail.stage === 'draft' || this.hasChanges() || this.amountDue() <= 0) return;
     void this.router.navigate(['/invoices', detail.id, 'charge'], { queryParams: { tenantId: this.tenantContext.tenantId() } });
   }
 

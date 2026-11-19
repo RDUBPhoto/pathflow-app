@@ -79,7 +79,7 @@ export class UiInput extends TextControl {
   providers: [{ provide: NG_VALUE_ACCESSOR, useExisting: forwardRef(() => UiTextarea), multi: true }],
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
-    <textarea class="form-control" [value]="value" [placeholder]="placeholder" [rows]="rows"
+    <textarea class="form-control" [id]="inputId" [attr.name]="name || null" [value]="value" [placeholder]="placeholder" [rows]="rows"
       [style.field-sizing]="autoGrow ? 'content' : null"
       [readOnly]="readonly !== false" [disabled]="disabled" [attr.maxlength]="maxlength"
       [attr.aria-label]="ariaLabel || label || placeholder || null" (input)="edit($any($event.target).value)"
@@ -87,6 +87,9 @@ export class UiInput extends TextControl {
   `
 })
 export class UiTextarea extends TextControl {
+  private static sequence = 0;
+  readonly inputId = `textarea-${++UiTextarea.sequence}`;
+  @Input() name = '';
   @Input() rows: number | string = 3;
   @Input() autoGrow: boolean | string = false;
 }
@@ -98,6 +101,7 @@ export class UiTextarea extends TextControl {
   template: `
     <label class="form-check m-0" [class.form-switch]="isSwitch">
       <input class="form-check-input" type="checkbox" [attr.role]="isSwitch ? 'switch' : null"
+        [id]="inputId" [attr.name]="name || null"
         [checked]="checked" [disabled]="disabled" [attr.aria-label]="ariaLabel || null"
         (change)="change($any($event.target).checked)" (blur)="touch()">
       <span class="form-check-label"><ng-content /></span>
@@ -105,6 +109,9 @@ export class UiTextarea extends TextControl {
   `
 })
 export class UiCheckbox extends FormControl {
+  private static sequence = 0;
+  readonly inputId = `checkbox-${++UiCheckbox.sequence}`;
+  @Input() name = '';
   readonly isSwitch = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement.localName === 'ui-switch';
   @Input('aria-label') ariaLabel = '';
   @Input() set checked(checked: boolean) { this.value = checked; }

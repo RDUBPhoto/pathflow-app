@@ -307,36 +307,36 @@
       }
       @if (quickSetupCurrent()?.id === 'business-profile') {
         <div class="quick-form">
-          <label>Business Name <input class="form-control" [value]="quickBusinessName" (input)="quickBusinessName=$any($event.target).value" /></label>
-          <label>Business Email <input class="form-control" [value]="quickBusinessEmail" (input)="quickBusinessEmail=$any($event.target).value" /></label>
-          <label>Business Phone <input class="form-control" [value]="quickBusinessPhone" (input)="quickBusinessPhone=$any($event.target).value" /></label>
-          <label>Business Address <input class="form-control" [value]="quickBusinessAddress" (input)="quickBusinessAddress=$any($event.target).value" /></label>
+          <label>Business Name <input name="quickBusinessName" class="form-control" [value]="quickBusinessName" (input)="quickBusinessName=$any($event.target).value" /></label>
+          <label>Business Email <input name="quickBusinessEmail" class="form-control" [value]="quickBusinessEmail" (input)="quickBusinessEmail=$any($event.target).value" /></label>
+          <label>Business Phone <input name="quickBusinessPhone" class="form-control" [value]="quickBusinessPhone" (input)="quickBusinessPhone=$any($event.target).value" /></label>
+          <label>Business Address <input name="quickBusinessAddress" class="form-control" [value]="quickBusinessAddress" (input)="quickBusinessAddress=$any($event.target).value" /></label>
         </div>
       }
       @if (quickSetupCurrent()?.id === 'logo') {
         <div class="quick-form">
-          <label>Upload Logo <input type="file" accept="image/*" (change)="quickUploadLogo($event)" /></label>
+          <label>Upload Logo <input name="quickLogo" type="file" accept="image/*" (change)="quickUploadLogo($event)" /></label>
         </div>
       }
       @if (quickSetupCurrent()?.id === 'business-hours') {
         <div class="quick-form">
-          <label>Open Hour (0-23) <input class="form-control" type="number" min="0" max="23" [value]="quickOpenHour" (input)="quickOpenHour=+$any($event.target).value || 7" /></label>
-          <label>Close Hour (1-24) <input class="form-control" type="number" min="1" max="24" [value]="quickCloseHour" (input)="quickCloseHour=+$any($event.target).value || 16" /></label>
+          <label>Open Hour (0-23) <input name="quickOpenHour" class="form-control" type="number" min="0" max="23" [value]="quickOpenHour" (input)="quickOpenHour=+$any($event.target).value || 7" /></label>
+          <label>Close Hour (1-24) <input name="quickCloseHour" class="form-control" type="number" min="1" max="24" [value]="quickCloseHour" (input)="quickCloseHour=+$any($event.target).value || 16" /></label>
         </div>
       }
       @if (quickSetupCurrent()?.id === 'payment-gateway') {
         <div class="quick-form">
           <label>Provider
-            <select class="form-select" [value]="quickPaymentProvider" (change)="quickPaymentProvider=$any($event.target).value">
+            <select name="quickPaymentProvider" class="form-select" [value]="quickPaymentProvider" (change)="quickPaymentProvider=$any($event.target).value">
               <option value="authorize-net">Authorize.net</option>
               <option value="stripe">Stripe</option>
               <option value="paypal">PayPal</option>
               <option value="quickbooks">QuickBooks</option>
             </select>
           </label>
-          <label>Account Label <input class="form-control" [value]="quickPaymentAccountLabel" (input)="quickPaymentAccountLabel=$any($event.target).value" /></label>
+          <label>Account Label <input name="quickPaymentAccountLabel" class="form-control" [value]="quickPaymentAccountLabel" (input)="quickPaymentAccountLabel=$any($event.target).value" /></label>
           <label>Mode
-            <select class="form-select" [value]="quickPaymentMode" (change)="quickPaymentMode=$any($event.target).value">
+            <select name="quickPaymentMode" class="form-select" [value]="quickPaymentMode" (change)="quickPaymentMode=$any($event.target).value">
               <option value="test">Test</option>
               <option value="live">Live</option>
             </select>
@@ -345,24 +345,24 @@
       }
       @if (quickSetupCurrent()?.id === 'email-sender') {
         <div class="quick-form">
-          <label>From Email <input class="form-control" [value]="quickSenderEmail" (input)="quickSenderEmail=$any($event.target).value" /></label>
-          <label>From Name <input class="form-control" [value]="quickSenderName" (input)="quickSenderName=$any($event.target).value" /></label>
-          <label>Reply-To <input class="form-control" [value]="quickSenderReplyTo" (input)="quickSenderReplyTo=$any($event.target).value" /></label>
+          <label>From Email <input name="quickSenderEmail" class="form-control" [value]="quickSenderEmail" (input)="quickSenderEmail=$any($event.target).value" /></label>
+          <label>From Name <input name="quickSenderName" class="form-control" [value]="quickSenderName" (input)="quickSenderName=$any($event.target).value" /></label>
+          <label>Reply-To <input name="quickSenderReplyTo" class="form-control" [value]="quickSenderReplyTo" (input)="quickSenderReplyTo=$any($event.target).value" /></label>
         </div>
       }
       @if (quickSetupCurrent()?.id === 'email-templates') {
         <div class="quick-form">
-          <label>Template Name <input class="form-control" [value]="quickTemplateName" (input)="quickTemplateName=$any($event.target).value" /></label>
-          <label>Subject <input class="form-control" [value]="quickTemplateSubject" (input)="quickTemplateSubject=$any($event.target).value" /></label>
-          <label>Body <textarea class="form-control" rows="5" [value]="quickTemplateBody" (input)="quickTemplateBody=$any($event.target).value"></textarea></label>
+          <label>Template Name <input name="quickTemplateName" class="form-control" [value]="quickTemplateName" (input)="quickTemplateName=$any($event.target).value" /></label>
+          <label>Subject <input name="quickTemplateSubject" class="form-control" [value]="quickTemplateSubject" (input)="quickTemplateSubject=$any($event.target).value" /></label>
+          <label>Body <textarea name="quickTemplateBody" class="form-control" rows="5" [value]="quickTemplateBody" (input)="quickTemplateBody=$any($event.target).value"></textarea></label>
         </div>
       }
       @if (quickSetupCurrent()?.id === 'user-access') {
         <div class="quick-form">
-          <label>Name <input class="form-control" [value]="quickUserName" (input)="quickUserName=$any($event.target).value" /></label>
-          <label>Email <input class="form-control" [value]="quickUserEmail" (input)="quickUserEmail=$any($event.target).value" /></label>
+          <label>Name <input name="quickUserName" class="form-control" [value]="quickUserName" (input)="quickUserName=$any($event.target).value" /></label>
+          <label>Email <input name="quickUserEmail" class="form-control" [value]="quickUserEmail" (input)="quickUserEmail=$any($event.target).value" /></label>
           <label>Role
-            <select class="form-select" [value]="quickUserRole" (change)="quickUserRole=$any($event.target).value">
+            <select name="quickUserRole" class="form-select" [value]="quickUserRole" (change)="quickUserRole=$any($event.target).value">
               <option value="user">User</option>
               <option value="admin">Admin</option>
             </select>

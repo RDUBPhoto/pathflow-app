@@ -53,7 +53,7 @@
       @if (!editorBlocked()) {
         <div class="ui-item">
           <span class="ui-label">Customer</span>
-          <select class="form-select" aria-label="Customer" [ngModel]="editorCustomerId()" (ngModelChange)="editorCustomerId.set($event || null)">
+          <select class="form-select" name="appointmentCustomer" aria-label="Customer" [ngModel]="editorCustomerId()" (ngModelChange)="editorCustomerId.set($event || null)">
             <option [ngValue]="null">Unassigned</option>
             @for (c of customers(); track c) {
               <option [ngValue]="c.id">

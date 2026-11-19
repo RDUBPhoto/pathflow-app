@@ -481,7 +481,7 @@
         @if (addingLead()) {
           <label class="d-block">
             Phone inquiry notes
-            <textarea class="form-control" [ngModel]="phoneInquiry()" (ngModelChange)="phoneInquiry.set($event)"
+            <textarea class="form-control" name="phoneInquiry" [ngModel]="phoneInquiry()" (ngModelChange)="phoneInquiry.set($event)"
             maxlength="1200" placeholder="Add the work requested during the call"></textarea>
           </label>
         }
@@ -575,6 +575,7 @@
         <section class="appointment-channel-panel">
           <label class="channel-row" [class.disabled]="!appointmentInfoEmailAddress()">
             <input class="form-check-input"
+              name="appointmentInfoEmail"
               type="checkbox"
               [ngModel]="appointmentInfoSendEmail()"
               (ngModelChange)="appointmentInfoSendEmail.set($event)"
@@ -586,6 +587,7 @@
           </label>
           <label class="channel-row" [class.disabled]="!appointmentInfoPhoneNumber()">
             <input class="form-check-input"
+              name="appointmentInfoSms"
               type="checkbox"
               [ngModel]="appointmentInfoSendSms()"
               (ngModelChange)="appointmentInfoSendSms.set($event)"

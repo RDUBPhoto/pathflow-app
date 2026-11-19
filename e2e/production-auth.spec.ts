@@ -333,3 +333,86 @@ test('a business reset clears cached quotes without uploading them again', async
   await expect(page.locator('.cards .card')).toHaveCount(0);
   expect(recreatedCards).toEqual([]);
 });
+
+test('dragging an accepted quote into Invoices opens its new invoice and send dialog without sending', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1800, height: 1100 });
+  const account = await workspace(request);
+  const headers = { 'x-tenant-id': account.tenant };
+  const customer = await request.post('/api/customers', { headers, data: {
+    name: 'Quote Drag Customer', email: 'quote-drag@example.invalid', phone: '+15125550127',
+    vehicleYear: '2021', vehicleMake: 'Jeep', vehicleModel: 'Wrangler'
+  } });
+  expect(customer.ok(), await customer.text()).toBeTruthy();
+  const { id: customerId } = await customer.json();
+  const acceptedId = 'accepted-' + randomUUID(), pendingId = 'pending-' + randomUUID(), historicalId = randomUUID();
+  for (const [id, documentType, stage, invoiceNumber] of [
+    [acceptedId, 'quote', 'accepted', 'QTE-DRAG-ACCEPTED'],
+    [pendingId, 'quote', 'sent', 'QTE-DRAG-PENDING'],
+    [historicalId, 'invoice', 'accepted', 'INV-OLDER-PAID']
+  ]) {
+    const seeded = await request.post('/api/service-documents', { headers, data: { id, document: {
+      id, documentType, stage, invoiceNumber, customerId, customerName: 'Quote Drag Customer',
+      customerEmail: 'quote-drag@example.invalid', customerPhone: '+15125550127', vehicle: '2021 Jeep Wrangler',
+      subtotal: 200, taxTotal: 0, total: 200, paidAmount: documentType === 'invoice' ? 200 : 0,
+      lineItems: [{ id: 'quoted-labor', type: 'labor', description: 'Quoted installation', quantity: 2,
+        unitPrice: 100, taxRate: 0, lineSubtotal: 200, taxAmount: 0, lineTotal: 200 }], timeline: []
+    } } });
+    expect(seeded.ok(), await seeded.text()).toBeTruthy();
+  }
+  const outbound: string[] = [];
+  page.on('request', request => {
+    if (request.method() !== 'POST' || !/\/api\/(sms|email)$/.test(new URL(request.url()).pathname)) return;
+    const body = request.postDataJSON();
+    if (body?.message || body?.subject || body?.op === 'send') outbound.push(request.url());
+  });
+  await signIn(page, account.email, account.password);
+  await expect(page).toHaveURL(/\/dashboard$/);
+  const quotes = page.locator('.lane').filter({ has: page.getByRole('button', { name: 'Add to Quotes', exact: true }) });
+  const invoices = page.locator('.lane').filter({ has: page.getByRole('button', { name: 'Add to Invoices', exact: true }) });
+  const accepted = quotes.locator('.cards > .card').filter({ hasText: 'QTE-DRAG-ACCEPTED' });
+  const pending = quotes.locator('.cards > .card').filter({ hasText: 'QTE-DRAG-PENDING' });
+  await expect(accepted).toBeVisible();
+  await expect(pending).toBeVisible();
+  const invoiceLaneId = await invoices.locator('.cards').getAttribute('id');
+  async function dragToInvoices(card: import('@playwright/test').Locator) {
+    const target = invoices.locator('.cards');
+    await target.scrollIntoViewIfNeeded();
+    const from = await card.locator('.card-drag-handle').boundingBox(), to = await target.boundingBox();
+    expect(from).not.toBeNull(); expect(to).not.toBeNull();
+    const x = from!.x + from!.width / 2, y = from!.y + from!.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + 10, y + 3, { steps: 3 });
+    await page.mouse.move(to!.x + to!.width / 2, to!.y + 60, { steps: 25 });
+    await expect(target).toHaveClass(/cdk-drop-list-dragging/);
+    await page.mouse.up();
+  }
+  await dragToInvoices(pending);
+  await expect(page.getByText('The quote must be accepted before creating an invoice.', { exact: true }).first()).toBeVisible();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(pending).toBeVisible();
+  const documents = async () => (await (await request.get('/api/service-documents', { headers })).json()).items.map((item: any) => item.document);
+  expect((await documents()).filter((item: any) => item?.sourceQuoteId === pendingId)).toHaveLength(0);
+  await dragToInvoices(accepted);
+  const invoiceId = 'invoice-' + acceptedId;
+  await expect(page).toHaveURL(new RegExp('/invoices/' + invoiceId + '(?:\\?|$)'));
+  const send = page.getByRole('dialog').filter({ has: page.getByText('Select how to send this invoice:', { exact: true }) });
+  await expect(send).toBeVisible();
+  await expect(send).toContainText('$200.00');
+  expect(outbound).toEqual([]);
+  await expect.poll(async () => (await documents()).filter((item: any) => item?.sourceQuoteId === acceptedId).length).toBe(1);
+  const saved = await documents();
+  expect(saved.find((item: any) => item.id === invoiceId)).toMatchObject({ documentType: 'invoice', stage: 'draft', customerId, sourceQuoteId: acceptedId, paidAmount: 0 });
+  expect(saved.find((item: any) => item.id === acceptedId).stage).toBe('accepted');
+  expect(saved.find((item: any) => item.id === historicalId).paidAmount).toBe(200);
+  await send.getByRole('button', { name: 'Close', exact: true }).click();
+  await page.reload();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await page.goto('/dashboard');
+  await expect(quotes.getByText('QTE-DRAG-ACCEPTED', { exact: false })).toHaveCount(0);
+  const workitems = await (await request.get('/api/workitems', { headers })).json();
+  const invoiceCards = workitems.filter((item: any) => item.title?.includes('[doc=' + invoiceId + ']'));
+  expect(invoiceCards).toHaveLength(1);
+  expect(invoiceCards[0].laneId).toBe(invoiceLaneId);
+  expect(outbound).toEqual([]);
+});

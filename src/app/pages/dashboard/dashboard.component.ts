@@ -4328,6 +4328,21 @@ export default class DashboardComponent implements OnDestroy {
       const targetRendered = Array.isArray(event.container.data) ? event.container.data : (map[targetId] || []);
       const moved = sourceRendered[event.previousIndex] || map[sourceId]?.[event.previousIndex];
       if (!moved) return;
+      const sourceLane = this.lanes().find(lane => lane.id === sourceId) || null;
+      const targetLane = this.lanes().find(lane => lane.id === targetLaneId) || null;
+      if (sourceLane && targetLane && this.laneStageKey(sourceLane) === 'quote' && this.laneStageKey(targetLane) === 'invoiced') {
+        const quote = this.linkedDocumentForCard(moved, sourceLane);
+        if (!quote) {
+          this.status.set('Create and accept a quote before creating its invoice.');
+        } else if (quote.stage !== 'accepted') {
+          this.status.set('The quote must be accepted before creating an invoice.');
+        } else if (!this.canCreateInvoiceFromQuote(moved, sourceLane)) {
+          this.status.set('This quote already has an invoice. Open it from Invoices.');
+        } else {
+          void this.createInvoiceFromQuoteCard(moved, sourceLane);
+        }
+        return;
+      }
       const movedId = String(moved.id || '').trim();
       map[sourceId] = (map[sourceId] || []).filter(row => String(row.id || '').trim() !== movedId);
       const targetExisting = (map[targetId] || []).filter(row => String(row.id || '').trim() !== movedId);
@@ -4345,8 +4360,6 @@ export default class DashboardComponent implements OnDestroy {
       map[targetId] = targetExisting;
       const movedCustomerId = this.effectiveCustomerIdForItem(moved);
       const launchQuoteAfterMove = this.isQuoteLaneById(targetLaneId);
-      const sourceLane = this.lanes().find(lane => lane.id === sourceId) || null;
-      const targetLane = this.lanes().find(lane => lane.id === targetLaneId) || null;
 
       // Prevent a temporary duplicate flash when a Scheduled card is dragged
       // back into a document lane that already has a card for the same linked doc.

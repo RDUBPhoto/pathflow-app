@@ -117,9 +117,29 @@ ui-icon { display: inline-block; width: 1.125em; height: 1.125em; flex: none; ve
 .ui-dialog .ui-footer { position: sticky; bottom: 0; z-index: 2; background: var(--app-header-bg); border-top: 1px solid var(--app-border-subtle); }
 .ui-popover-screen { position: fixed; inset: 0; z-index: 1059; }
 .ui-popover-panel { position: fixed; z-index: 1060; max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); overflow: auto; }
-.ui-toast { position: fixed; z-index: 1090; bottom: 1rem; left: 50%; transform: translateX(-50%); box-shadow: var(--tblr-shadow-lg); }
+.ui-toast {
+  position: fixed;
+  z-index: 1090;
+  bottom: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  width: max-content;
+  max-width: min(32rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  margin: 0;
+  padding: .625rem .75rem .625rem 1rem;
+  font-size: .875rem;
+  line-height: 1.5;
+  box-shadow: var(--tblr-shadow-lg);
+}
+.ui-toast-message { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.ui-toast > .btn-close { position: relative; flex: 0 0 2rem; width: 2rem; height: 2rem; margin: 0; padding: 0; }
 .ui-toast[data-position="top"] { top: 1rem; bottom: auto; }
-.ui-toast[data-position="middle"] { top: 50%; bottom: auto; }
+.ui-toast[data-position="middle"] { top: 50%; bottom: auto; transform: translate(-50%, -50%); }
 :where(button, a[href], summary) { cursor: pointer; }
 :where(button, a[href], input, select, textarea):focus-visible { outline: 2px solid var(--tblr-primary); outline-offset: 2px; }
 

@@ -137,11 +137,14 @@ export class ToastController {
       toast.classList.add(...extra.filter(Boolean));
       toast.dataset['position'] = options.position || 'bottom';
       toast.setAttribute('role', options.color === 'danger' ? 'alert' : 'status');
-      toast.textContent = options.message;
+      const message = this.document.createElement('span');
+      message.className = 'ui-toast-message';
+      message.textContent = options.message;
+      toast.append(message);
       if (options.buttons?.some(button => button.role === 'cancel')) {
         const close = this.document.createElement('button');
         close.type = 'button';
-        close.className = 'btn-close ms-2';
+        close.className = 'btn-close';
         close.setAttribute('aria-label', 'Dismiss notification');
         close.addEventListener('click', () => toast.remove(), { once: true });
         toast.append(close);

@@ -296,7 +296,7 @@
                     <h2>{{ selected.name || selected.sku || 'Part' }}</h2>
                     <div class="panel-meta">Last updated {{ selected.lastUpdated ? formatDateTime(selected.lastUpdated) : '--' }}</div>
                   </div>
-                  <button type="button" class="modal-close" (click)="closeItemDetails()">Close</button>
+                  <button type="button" class="btn-close app-close-button" (click)="closeItemDetails()" aria-label="Close part details" title="Close part details"></button>
                 </div>
                 <div class="detail-grid">
                   <div class="ui-item detail-item">

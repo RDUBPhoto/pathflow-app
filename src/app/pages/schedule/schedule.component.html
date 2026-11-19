@@ -132,7 +132,7 @@
       <div class="ui-toolbar">
         <h1 class="ui-title">Appointment</h1>
         <div class="ui-buttons" slot="end">
-          <button class="btn ui-button btn-primary" type="button" (click)="closeEditor()">Close</button>
+          <button class="btn-close app-close-button" type="button" (click)="closeEditor()" aria-label="Close appointment" title="Close appointment"></button>
         </div>
       </div>
     </header>
@@ -280,7 +280,7 @@
       <div class="ui-toolbar">
         <h1 class="ui-title">Send Scheduled Info</h1>
         <div class="ui-buttons" slot="end">
-          <button class="btn ui-button btn-primary" type="button" (click)="closeAppointmentInfoModal()">Close</button>
+          <button class="btn-close app-close-button" type="button" (click)="closeAppointmentInfoModal()" aria-label="Close appointment message" title="Close appointment message"></button>
         </div>
       </div>
     </header>

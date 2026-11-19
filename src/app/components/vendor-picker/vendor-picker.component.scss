@@ -120,17 +120,6 @@
   font-size: 24px;
 }
 
-.vendor-modal-close {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  border: 1px solid var(--app-border-subtle);
-  background: var(--app-control-bg);
-  color: var(--app-text-primary);
-  font-size: 24px;
-  line-height: 1;
-  cursor: pointer;
-}
 
 .vendor-modal-grid {
   display: grid;
@@ -201,8 +190,7 @@
 }
 
 .vendor-secondary:disabled,
-.vendor-primary:disabled,
-.vendor-modal-close:disabled {
+.vendor-primary:disabled {
   cursor: not-allowed;
   opacity: 0.6;
 }

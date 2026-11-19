@@ -758,7 +758,7 @@ test('the Tabler appointment editor supports selecting a bay and blocking it', a
   await expect(editor.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
   await editor.getByRole('textbox', { name: 'Block label' }).fill('Lift inspection');
   await expect(editor.getByRole('textbox', { name: 'Block label' })).toHaveValue('Lift inspection');
-  await editor.getByRole('button', { name: 'Close', exact: true }).click();
+  await editor.getByRole('button', { name: 'Close appointment', exact: true }).click();
   await expect(editor).toBeHidden();
 });
 

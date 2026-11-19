@@ -270,7 +270,8 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
-  padding: 14px 46px 10px 14px;
+  padding: 14px 60px 10px 14px;
+  min-height: 3.5rem;
   border-bottom: 1px solid var(--app-border-subtle, rgba(255, 255, 255, 0.14));
 }
 
@@ -310,21 +311,7 @@
   text-decoration: none;
 }
 
-.notifications-close {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  border: 1px solid var(--app-border-subtle, rgba(255, 255, 255, 0.2));
-  background: var(--app-control-bg, rgba(255, 255, 255, 0.5));
-  color: var(--app-text, #0f172a);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
+.notifications-close { position: absolute; top: 10px; right: 10px; }
 
 .notifications-body {
   flex: 1 1 auto;

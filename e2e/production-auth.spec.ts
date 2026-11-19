@@ -405,7 +405,7 @@ test('dragging an accepted quote into Invoices opens its new invoice and send di
   expect(saved.find((item: any) => item.id === invoiceId)).toMatchObject({ documentType: 'invoice', stage: 'draft', customerId, sourceQuoteId: acceptedId, paidAmount: 0 });
   expect(saved.find((item: any) => item.id === acceptedId).stage).toBe('accepted');
   expect(saved.find((item: any) => item.id === historicalId).paidAmount).toBe(200);
-  await send.getByRole('button', { name: 'Close', exact: true }).click();
+  await send.getByRole('button', { name: 'Close send invoice', exact: true }).click();
   await page.reload();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await page.goto('/dashboard');

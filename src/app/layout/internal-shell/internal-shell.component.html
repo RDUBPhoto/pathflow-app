@@ -241,7 +241,7 @@
     aria-label="Send feedback">
     <header class="feedback-head">
       <h3>Send Feedback</h3>
-      <button type="button" class="feedback-close" (click)="closeFeedback()" aria-label="Close feedback panel">Close</button>
+      <button type="button" class="btn-close app-close-button" (click)="closeFeedback()" aria-label="Close feedback panel" title="Close feedback panel"></button>
     </header>
     <label class="feedback-label" for="feedback-name">Name</label>
     <input
@@ -298,7 +298,7 @@
     <section class="quick-setup-card app-surface">
       <div class="quick-setup-head">
         <h3>Quick Setup</h3>
-        <button type="button" class="quick-close" (click)="closeQuickSetup()">Close</button>
+        <button type="button" class="btn-close app-close-button quick-close" (click)="closeQuickSetup()" aria-label="Close quick setup" title="Close quick setup"></button>
       </div>
       @if (quickSetupCurrent(); as step) {
         <div class="quick-step-meta">

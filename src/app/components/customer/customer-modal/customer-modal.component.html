@@ -2,7 +2,7 @@
   <div class="ui-toolbar">
     <h1 class="ui-title">{{ mode() === 'lead' ? 'New Phone Lead' : (customerId ? 'Edit Customer' : 'Add Customer') }}</h1>
     <div class="ui-buttons" slot="end">
-      <button class="btn ui-button btn-primary" type="button" [disabled]="loading()" (click)="close()">Close</button>
+      <button class="btn-close app-close-button" type="button" [disabled]="loading()" (click)="close()" aria-label="Close customer form" title="Close customer form"></button>
     </div>
   </div>
 </header>

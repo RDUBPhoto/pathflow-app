@@ -132,10 +132,7 @@
         <header class="modal-header biometric-header">
           <span class="biometric-icon"><ui-icon name="shield-check"></ui-icon></span>
           <h2 class="modal-title" tabindex="-1" autofocus>Sign in with Face&nbsp;ID / Touch&nbsp;ID</h2>
-          <button type="button" class="btn btn-icon btn-ghost-secondary biometric-close"
-            aria-label="Close biometric sign-in" (click)="usePasswordInstead()">
-            <ui-icon name="x"></ui-icon>
-          </button>
+          <button type="button" class="btn-close app-close-button biometric-close" (click)="usePasswordInstead()" aria-label="Close biometric sign-in" title="Close biometric sign-in"></button>
         </header>
         <div class="modal-body biometric-body">
           <p class="text-secondary">Use the passkey saved on this device.</p>

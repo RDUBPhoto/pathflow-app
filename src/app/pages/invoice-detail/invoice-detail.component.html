@@ -495,7 +495,7 @@
               <div class="ui-toolbar">
                 <h1 class="ui-title">Select Part</h1>
                 <div class="ui-buttons" slot="end">
-                  <button class="btn ui-button btn-ghost-primary" type="button" (click)="closePartPicker()">Close</button>
+                  <button class="btn-close app-close-button" type="button" (click)="closePartPicker()" aria-label="Close part picker" title="Close part picker"></button>
                 </div>
               </div>
             </header>
@@ -711,7 +711,10 @@
     <ng-template>
       @if (paylynxReturn(); as payment) {
         <div class="app-padding send-invoice-modal-content">
-          <h2>{{ returnPreview()?.operation === 'void' ? 'Void Payment' : 'Return or Refund Payment' }}</h2>
+          <div class="d-flex align-items-start justify-content-between gap-3 mb-3">
+            <h2 class="mb-0">{{ returnPreview()?.operation === 'void' ? 'Void Payment' : 'Return or Refund Payment' }}</h2>
+            <button class="btn-close app-close-button" type="button" [disabled]="refundingCustomer()" (click)="closePaylynxReturn()" aria-label="Close payment return" title="Close payment return"></button>
+          </div>
           <p class="text-secondary">PayLynx transaction {{ payment.originalTransactionId }}@if (payment.accountNumber) {
             <span> · {{ payment.accountNumber }}</span>
           }</p>
@@ -770,14 +773,13 @@
               </dl>
             </div>
           }
-          <div class="send-invoice-actions">
-            <button class="btn btn-outline-secondary" type="button" [disabled]="refundingCustomer()" (click)="closePaylynxReturn()">Close</button>
-            @if (returnPreview()) {
+          @if (returnPreview()) {
+            <div class="send-invoice-actions">
               <button class="btn btn-primary" type="button" [disabled]="!canSubmitReturn()" (click)="confirmPaylynxReturn()">
                 {{ refundingCustomer() ? 'Processing…' : (returnPreview()?.operation === 'void' ? 'Confirm Void' : 'Confirm Refund') }}
               </button>
-            }
-          </div>
+            </div>
+          }
         </div>
       }
     </ng-template>
@@ -786,7 +788,10 @@
   <ui-modal [isOpen]="portalOpen()" (didDismiss)="portalOpen.set(false)" label="Customer Portal">
     <ng-template>
       <div class="p-4">
-        <h2>Customer Portal</h2>
+        <div class="d-flex align-items-start justify-content-between gap-3 mb-3">
+          <h2 class="mb-0">Customer Portal</h2>
+          <button type="button" class="btn-close app-close-button" (click)="portalOpen.set(false)" aria-label="Close customer portal" title="Close customer portal"></button>
+        </div>
         <p>Share the link for this visit with the customer.</p>
         @if (portalBusy()) { <p role="status">Updating portal…</p> }
         @if (portalError()) { <p class="alert alert-danger" role="alert">{{ portalError() }}</p> }
@@ -804,7 +809,6 @@
           <p>The previous link is {{ portalStatus() }}.</p>
           <button type="button" class="btn btn-primary" [disabled]="portalBusy()" (click)="updatePortalAccess('rotate')">Create new link</button>
         }
-        <button type="button" class="btn btn-outline-secondary mt-2" (click)="portalOpen.set(false)">Close</button>
       </div>
     </ng-template>
   </ui-modal>
@@ -815,7 +819,7 @@
         <div class="ui-toolbar">
           <h1 class="ui-title">{{ sendInvoiceLabel() }}</h1>
           <div class="ui-buttons" slot="end">
-            <button class="btn ui-button btn-primary" type="button" [disabled]="sendingInvoice()" (click)="closeSendInvoiceModal()">Close</button>
+            <button class="btn-close app-close-button" type="button" [disabled]="sendingInvoice()" (click)="closeSendInvoiceModal()" aria-label="Close send invoice" title="Close send invoice"></button>
           </div>
         </div>
       </header>

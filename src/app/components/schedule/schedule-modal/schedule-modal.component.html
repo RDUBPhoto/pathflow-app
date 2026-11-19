@@ -4,7 +4,7 @@
       <div class="ui-toolbar">
         <h1 class="ui-title">Schedule</h1>
         <div class="ui-buttons" slot="end">
-          <button class="btn ui-button btn-primary" type="button" (click)="close()">Close</button>
+          <button class="btn-close app-close-button" type="button" (click)="close()" aria-label="Close schedule" title="Close schedule"></button>
         </div>
       </div>
     </header>
@@ -40,7 +40,7 @@
       <div class="ui-toolbar">
         <h1 class="ui-title">Appointment</h1>
         <div class="ui-buttons" slot="end">
-          <button class="btn ui-button btn-primary" type="button" (click)="closeEditor()">Close</button>
+          <button class="btn-close app-close-button" type="button" (click)="closeEditor()" aria-label="Close appointment" title="Close appointment"></button>
         </div>
       </div>
     </header>

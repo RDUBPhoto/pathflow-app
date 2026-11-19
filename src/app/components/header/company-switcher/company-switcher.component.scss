@@ -135,17 +135,6 @@
   padding: 0;
 }
 
-.global-search-close {
-  border: 0;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--app-text);
-  padding: 2px 8px;
-  font-size: 28px;
-  line-height: 1;
-  font-weight: 400;
-  cursor: pointer;
-}
 
 .global-search-input-row {
   margin: 4px 0 0;
@@ -301,11 +290,6 @@
   .global-search-input-row input {
     font-size: 26px;
     min-height: 42px;
-  }
-
-  .global-search-close {
-    font-size: 24px;
-    padding: 0 6px;
   }
 
   .search-bucket-head h4 {

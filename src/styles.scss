@@ -84,6 +84,20 @@ ui-checkbox, ui-switch { display: inline-flex; }
 ui-icon { display: inline-block; width: 1.125em; height: 1.125em; flex: none; vertical-align: -.16em;
   background: currentColor; mask-repeat: no-repeat; mask-position: center; mask-size: contain; }
 .ui-button { gap: .375rem; }
+.btn-close.app-close-button {
+  --tblr-btn-close-size: 1.5rem;
+  --tblr-btn-close-opacity: .65;
+  position: relative;
+  inset: auto;
+  z-index: auto;
+  flex: none;
+  width: 2.25rem;
+  height: 2.25rem;
+  min-width: 2.25rem;
+  margin: 0;
+  padding: 0;
+}
+.app-close-button:focus-visible { color: var(--tblr-primary); }
 .ui-badge {
   color: var(--tblr-primary);
   background: color-mix(in srgb, var(--tblr-primary) 10%, transparent);
@@ -144,6 +158,7 @@ ui-icon { display: inline-block; width: 1.125em; height: 1.125em; flex: none; ve
 :where(button, a[href], input, select, textarea):focus-visible { outline: 2px solid var(--tblr-primary); outline-offset: 2px; }
 
 @media (max-width: 600px) {
+  .btn-close.app-close-button { width: 2.75rem; height: 2.75rem; min-width: 2.75rem; }
   .ui-toolbar { gap: .375rem; padding-inline: .625rem; flex-wrap: wrap; }
   .ui-title { font-size: 1rem; }
   .app-padding { padding: .75rem; }

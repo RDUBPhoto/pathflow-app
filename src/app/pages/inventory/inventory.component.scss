@@ -739,16 +739,6 @@
   font-size: 20px;
 }
 
-.modal-close {
-  appearance: none;
-  border: 1px solid var(--app-border-subtle);
-  background: var(--app-control-bg);
-  color: var(--app-text-primary);
-  border-radius: 8px;
-  padding: 8px 12px;
-  font-weight: 800;
-  cursor: pointer;
-}
 
 .parts-list {
   display: grid;

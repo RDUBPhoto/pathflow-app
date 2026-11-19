@@ -378,7 +378,12 @@
     (didDismiss)="hiddenCardsOpen.set(false)" label="Hidden dashboard cards">
     <ng-template>
       <div class="app-padding">
-        <h2>Hidden dashboard cards</h2>
+        <div class="d-flex align-items-start justify-content-between gap-3 mb-3">
+          <h2 class="mb-0">Hidden dashboard cards</h2>
+          <button type="button" class="btn-close app-close-button" [disabled]="dashboardVisibilitySaving()"
+            (click)="hiddenCardsOpen.set(false); dashboardVisibilityError.set('')"
+            aria-label="Close hidden dashboard cards" title="Close hidden dashboard cards"></button>
+        </div>
         @if (!hiddenCards().length) {
           <p>There are no hidden cards to restore.</p>
         }
@@ -401,10 +406,6 @@
             }
           </ul>
         }
-        <div class="d-flex justify-content-end">
-          <button type="button" class="btn btn-secondary btn-sm" [disabled]="dashboardVisibilitySaving()"
-          (click)="hiddenCardsOpen.set(false); dashboardVisibilityError.set('')">Done</button>
-        </div>
       </div>
     </ng-template>
   </ui-modal>
@@ -415,7 +416,7 @@
         <div class="ui-toolbar">
           <h1 class="ui-title">Remove customer</h1>
           <div class="ui-buttons" slot="end">
-            <button class="btn ui-button btn-primary" type="button" (click)="cancelRemoveCustomer()">Close</button>
+            <button class="btn-close app-close-button" type="button" (click)="cancelRemoveCustomer()" aria-label="Close customer removal" title="Close customer removal"></button>
           </div>
         </div>
       </header>
@@ -467,7 +468,7 @@
         <div class="ui-toolbar">
           <h1 class="ui-title">Add to {{ laneNameById(searchLaneId()) }}</h1>
           <div class="ui-buttons" slot="end">
-            <button class="btn ui-button btn-primary" type="button" (click)="closeSearch()">Close</button>
+            <button class="btn-close app-close-button" type="button" (click)="closeSearch()" aria-label="Close customer search" title="Close customer search"></button>
           </div>
         </div>
       </header>
@@ -554,7 +555,7 @@
         <div class="ui-toolbar">
           <h1 class="ui-title">Send Scheduled Info</h1>
           <div class="ui-buttons" slot="end">
-            <button class="btn ui-button btn-primary" type="button" (click)="closeAppointmentInfoModal()">Close</button>
+            <button class="btn-close app-close-button" type="button" (click)="closeAppointmentInfoModal()" aria-label="Close appointment message" title="Close appointment message"></button>
           </div>
         </div>
       </header>

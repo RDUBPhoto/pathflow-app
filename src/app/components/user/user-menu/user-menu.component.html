@@ -128,11 +128,8 @@
         </div>
         <button
           type="button"
-          class="notifications-close"
-          aria-label="Close notifications"
-          (click)="closeNotifications($event)">
-          <ui-icon name="x"></ui-icon>
-        </button>
+          class="btn-close app-close-button notifications-close"
+          (click)="closeNotifications($event)" aria-label="Close notifications" title="Close notifications"></button>
       </header>
       @if (unreadNotifications() > 0) {
         <div class="notifications-top-actions">

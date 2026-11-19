@@ -334,6 +334,101 @@ test('a business reset clears cached quotes without uploading them again', async
   expect(recreatedCards).toEqual([]);
 });
 
+test('dragging a paid invoice into Scheduled opens its appointment flow and moves only the saved job', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1800, height: 1100 });
+  const account = await workspace(request);
+  const headers = { 'x-tenant-id': account.tenant };
+  async function post(path: string, data: object) {
+    const response = await request.post('/api/' + path, { headers, data });
+    expect(response.ok(), await response.text()).toBeTruthy();
+    return response.json();
+  }
+  const { id: customerId } = await post('customers', {
+    name: 'Invoice Scheduling Customer', email: 'schedule-drag@example.invalid', phone: '+15125550128',
+    vehicleYear: '2013', vehicleMake: 'Ford', vehicleModel: 'Raptor'
+  });
+  await post('settings', { key: 'schedule.settings', value: {
+    openHour: 0, closeHour: 24, timeZone: 'America/Chicago', showWeekends: true,
+    holidays: [], bays: [{ id: 'bay-1', name: 'Lift 1' }]
+  } });
+  await signIn(page, account.email, account.password);
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page.getByRole('button', { name: 'Add to Scheduled', exact: true })).toBeVisible();
+  const onboardingSaved = page.waitForResponse(response => response.url().endsWith('/api/settings')
+    && response.request().method() === 'POST'
+    && String(response.request().postDataJSON()?.key || '').endsWith('dashboard.onboarding.v1.completed'));
+  await page.getByRole('button', { name: 'Skip', exact: true }).click();
+  expect((await onboardingSaved).ok()).toBeTruthy();
+  const olderId = randomUUID(), invoiceId = randomUUID();
+  for (const [id, number, vehicle] of [[olderId, 'INV-SCHEDULE-OLDER', '2013 Ford Raptor'], [invoiceId, 'INV-SCHEDULE-NEW', '2024 Jeep Wrangler']]) {
+    const invoiceData = { total: 200, subtotal: 200, taxTotal: 0, lineItems: [{ id: 'labor', type: 'labor',
+      description: 'Installation', quantity: 2, unitPrice: 100, taxRate: 0, lineSubtotal: 200, taxAmount: 0, lineTotal: 200 }] };
+    await post('service-documents', { id, document: { id, documentType: 'invoice', stage: 'sent', invoiceNumber: number,
+      customerId, customerName: 'Invoice Scheduling Customer', vehicle, ...invoiceData, paidAmount: 0, timeline: [] } });
+    await post('invoice-response', { op: 'publish-snapshot', invoiceId: id, invoiceNumber: number,
+      publicToken: randomUUID(), customerName: 'Invoice Scheduling Customer', vehicle, amount: '200.00', invoiceData, paymentProvider: 'stripe' });
+    await post('invoice-response', { op: 'record-manual-payment', action: 'pay', invoiceId: id,
+      invoiceNumber: number, customerId, customerName: 'Invoice Scheduling Customer', paymentAmount: 200 });
+  }
+  const cards = await (await request.get('/api/workitems', { headers })).json();
+  const olderJob = cards.find((card: any) => card.invoiceId === olderId), job = cards.find((card: any) => card.invoiceId === invoiceId);
+  expect(job?.jobId).toBeTruthy();
+  expect(olderJob?.jobId).toBeTruthy();
+  const olderStart = new Date(Date.now() + 86400000).toISOString(), olderEnd = new Date(Date.now() + 90000000).toISOString();
+  const oldAppointment = await post('schedule', { start: olderStart, end: olderEnd, resource: 'bay-1', customerId, workItemId: olderJob.id });
+  await page.reload();
+  const invoices = page.locator('.lane').filter({ has: page.getByRole('button', { name: 'Add to Invoices', exact: true }) });
+  const scheduled = page.locator('.lane').filter({ has: page.getByRole('button', { name: 'Add to Scheduled', exact: true }) });
+  const card = invoices.locator('.cards > .card').filter({ hasText: 'INV-SCHEDULE-NEW' });
+  await expect(card.getByRole('button', { name: 'Schedule job', exact: true })).toBeVisible();
+  const invoiceLaneId = await invoices.locator('.cards').getAttribute('id');
+  const scheduledLaneId = await scheduled.locator('.cards').getAttribute('id');
+  async function dropIntoScheduled() {
+    const target = scheduled.locator('.cards');
+    await target.scrollIntoViewIfNeeded();
+    const from = await card.locator('.card-drag-handle').boundingBox(), to = await target.boundingBox();
+    const x = from!.x + from!.width / 2, y = from!.y + from!.height / 2;
+    await page.mouse.move(x, y); await page.mouse.down();
+    await page.mouse.move(x + 10, y + 3, { steps: 3 });
+    await page.mouse.move(to!.x + to!.width / 2, to!.y + 60, { steps: 25 });
+    await expect(target).toHaveClass(/cdk-drop-list-dragging/);
+    await page.mouse.up();
+  }
+  const editor = page.getByRole('dialog', { name: 'Appointment', exact: true });
+  await dropIntoScheduled();
+  await expect(editor).toBeVisible();
+  await expect(editor.locator('select[aria-label="Customer"] option:checked')).toHaveText('Invoice Scheduling Customer');
+  await expect(page.locator('dialog[aria-label="Schedule"][open]')).toBeVisible();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await editor.getByRole('button', { name: 'Close appointment', exact: true }).click();
+  await page.getByRole('button', { name: 'Close schedule', exact: true }).click();
+  await expect(card).toBeVisible();
+  const afterCancel = await (await request.get('/api/workitems', { headers })).json();
+  expect(afterCancel.find((item: any) => item.id === job.id).laneId).toBe(invoiceLaneId);
+  expect((await (await request.get('/api/schedule', { headers })).json())).toHaveLength(1);
+
+  await dropIntoScheduled();
+  await expect(editor).toBeVisible();
+  const day = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
+  await editor.locator('input[type="datetime-local"]').nth(0).fill(day + 'T09:00');
+  await editor.locator('input[type="datetime-local"]').nth(1).fill(day + 'T11:00');
+  const saved = page.waitForResponse(response => response.url().endsWith('/api/schedule') && response.request().method() === 'POST');
+  await editor.getByRole('button', { name: 'Save', exact: true }).click();
+  const savedResponse = await saved;
+  expect(savedResponse.ok(), await savedResponse.text()).toBeTruthy();
+  expect(savedResponse.request().postDataJSON()).toMatchObject({ customerId, workItemId: job.id, resource: 'bay-1' });
+  await expect(editor).toBeHidden();
+  await expect(scheduled.locator('.cards > .card').filter({ hasText: '2024 Jeep Wrangler' })).toBeVisible();
+  await expect(card).toHaveCount(0);
+  const appointments = await (await request.get('/api/schedule', { headers })).json();
+  expect(appointments).toHaveLength(2);
+  expect(appointments.find((item: any) => item.workItemId === job.id)).toMatchObject({ customerId, vehicle: '2024 Jeep Wrangler' });
+  expect(appointments.find((item: any) => item.id === oldAppointment.id)).toMatchObject({ start: olderStart, end: olderEnd, workItemId: olderJob.id });
+  const afterSave = await (await request.get('/api/workitems', { headers })).json();
+  expect(afterSave.filter((item: any) => item.invoiceId === invoiceId)).toHaveLength(1);
+  expect(afterSave.find((item: any) => item.id === job.id).laneId).toBe(scheduledLaneId);
+});
+
 test('draft invoices hide job and card-charge actions while issued invoices keep the appropriate actions', async ({ page, request }) => {
   const account = await workspace(request);
   const headers = { 'x-tenant-id': account.tenant };

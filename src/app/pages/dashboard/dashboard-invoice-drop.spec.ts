@@ -1,4 +1,5 @@
 import { signal } from '@angular/core';
+import { fakeAsync, tick } from '@angular/core/testing';
 import DashboardComponent from './dashboard.component';
 
 describe('dragging quotes into Invoices', () => {
@@ -54,5 +55,93 @@ describe('dragging quotes into Invoices', () => {
     expect(component.status()).toContain('Create and accept a quote');
     expect(component.items()).toBe(original);
     expect(component.createInvoiceFromQuoteCard).not.toHaveBeenCalled();
+  });
+});
+
+describe('dragging invoices into Scheduled', () => {
+  function board(stage = 'accepted', paidAmount = 100, jobId: string | undefined = 'job-1', customerId = 'customer-1') {
+    const component = Object.create(DashboardComponent.prototype) as any;
+    const invoiceLane = { id: 'invoices', name: 'Invoices', stageKey: 'invoiced' };
+    const scheduledLane = { id: 'scheduled', name: 'Scheduled', stageKey: 'scheduled' };
+    const card = { id: 'paid-card', laneId: invoiceLane.id, customerId, jobId, invoiceId: 'invoice-1', title: 'Paid invoice' };
+    const original = { invoices: [card], scheduled: [] };
+    component.items = signal(original);
+    component.lanes = () => [invoiceLane, scheduledLane];
+    component.status = signal('');
+    component.deferInteractivityRestore = () => {};
+    component.linkedDocumentForCard = () => ({ id: 'invoice-1', documentType: 'invoice', stage, total: 100, paidAmount });
+    component.effectiveCustomerIdForItem = () => customerId;
+    component.openScheduleModal = jasmine.createSpy('openScheduleModal');
+    component.hasFutureSchedule = jasmine.createSpy('hasFutureSchedule').and.returnValue(true);
+    component.itemsApi = { update: jasmine.createSpy('update') };
+    const drop = { previousContainer: { id: invoiceLane.id, data: [card] }, container: { id: scheduledLane.id, data: [] }, previousIndex: 0, currentIndex: 0 };
+    return { component, original, drop };
+  }
+
+  it('opens the same scheduling modal as the button with the exact paid job and leaves the board unchanged', () => {
+    const { component, original, drop } = board();
+    component.onCardsDrop(drop, 'scheduled');
+    expect(component.openScheduleModal).toHaveBeenCalledOnceWith('customer-1', 'paid-card');
+    expect(component.items()).toBe(original);
+    expect(component.itemsApi.update).not.toHaveBeenCalled();
+    expect(component.hasFutureSchedule).not.toHaveBeenCalled();
+  });
+
+  it('keeps customer-only scheduling available for a legacy paid invoice without a job identifier', () => {
+    const { component, original, drop } = board('accepted', 100, '');
+    component.onCardsDrop(drop, 'scheduled');
+    expect(component.openScheduleModal).toHaveBeenCalledOnceWith('customer-1', null);
+    expect(component.items()).toBe(original);
+  });
+
+  for (const [stage, paidAmount] of [['draft', 0], ['sent', 0], ['accepted', 50], ['canceled', 100]] as const) {
+    it(`does not schedule a ${stage} invoice with ${paidAmount} paid against a 100 total`, () => {
+      const { component, original, drop } = board(stage, paidAmount);
+      component.onCardsDrop(drop, 'scheduled');
+      expect(component.status()).toContain('must be paid');
+      expect(component.openScheduleModal).not.toHaveBeenCalled();
+      expect(component.items()).toBe(original);
+      expect(component.itemsApi.update).not.toHaveBeenCalled();
+    });
+  }
+
+  it('keeps a paid invoice in place when its customer is missing', () => {
+    const { component, original, drop } = board('accepted', 100, 'job-1', '');
+    component.onCardsDrop(drop, 'scheduled');
+    expect(component.status()).toContain('Select a customer');
+    expect(component.openScheduleModal).not.toHaveBeenCalled();
+    expect(component.items()).toBe(original);
+  });
+});
+
+describe('drag cleanup between scheduling attempts', () => {
+  it('cancels pending cleanup when another drag starts and cleans up after that drag ends', fakeAsync(() => {
+    const component = Object.create(DashboardComponent.prototype) as any;
+    component.clearResidualDragState = jasmine.createSpy('clearResidualDragState');
+    component.deferInteractivityRestore(80);
+    component.onCardDragStarted();
+    tick(100);
+    expect(component.clearResidualDragState).not.toHaveBeenCalled();
+    component.onCardDragEnded();
+    tick(101);
+    expect(component.clearResidualDragState).toHaveBeenCalledTimes(1);
+  }));
+
+  it('does not remove the preview or active drag classes while a card is being dragged', () => {
+    const component = Object.create(DashboardComponent.prototype) as any;
+    component.forceOverlayInteractivityReset = () => {};
+    const preview = document.createElement('div'), card = document.createElement('div');
+    preview.className = 'cdk-drag-preview'; card.className = 'cdk-drag-dragging';
+    document.body.append(preview, card);
+    try {
+      component.onCardDragStarted();
+      component.clearResidualDragState();
+      expect(preview.isConnected).toBeTrue();
+      expect(card.classList.contains('cdk-drag-dragging')).toBeTrue();
+      component.cardDragActive = false;
+      component.clearResidualDragState();
+      expect(preview.isConnected).toBeFalse();
+      expect(card.classList.contains('cdk-drag-dragging')).toBeFalse();
+    } finally { preview.remove(); card.remove(); }
   });
 });

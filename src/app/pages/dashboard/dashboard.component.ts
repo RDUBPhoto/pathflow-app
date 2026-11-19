@@ -4017,6 +4017,7 @@ export default class DashboardComponent implements OnDestroy {
   }
 
   private clearResidualDragState(): void {
+    if (this.cardDragActive) return;
     if (typeof document === 'undefined') return;
     const draggingCards = document.querySelectorAll('.cdk-drag-dragging');
     draggingCards.forEach(node => node.classList.remove('cdk-drag-dragging'));
@@ -4033,7 +4034,18 @@ export default class DashboardComponent implements OnDestroy {
     this.forceOverlayInteractivityReset();
   }
 
+  private cardDragActive = false;
+
+  onCardDragStarted(): void {
+    this.cardDragActive = true;
+    if (this.interactivityRestoreTimer) {
+      clearTimeout(this.interactivityRestoreTimer);
+      this.interactivityRestoreTimer = null;
+    }
+  }
+
   onCardDragEnded(): void {
+    this.cardDragActive = false;
     this.deferInteractivityRestore(100);
   }
 
@@ -4340,6 +4352,18 @@ export default class DashboardComponent implements OnDestroy {
           this.status.set('This quote already has an invoice. Open it from Invoices.');
         } else {
           void this.createInvoiceFromQuoteCard(moved, sourceLane);
+        }
+        return;
+      }
+      if (sourceLane && targetLane && this.laneStageKey(sourceLane) === 'invoiced' && this.laneStageKey(targetLane) === 'scheduled') {
+        const invoice = this.linkedDocumentForCard(moved, sourceLane);
+        const customerId = this.effectiveCustomerIdForItem(moved);
+        if (!invoice || !this.isInvoicePaidInFull(invoice)) {
+          this.status.set('The invoice must be paid before scheduling this job.');
+        } else if (!customerId) {
+          this.status.set('Select a customer before scheduling this job.');
+        } else {
+          this.openScheduleModal(customerId, moved.jobId ? moved.id : null);
         }
         return;
       }

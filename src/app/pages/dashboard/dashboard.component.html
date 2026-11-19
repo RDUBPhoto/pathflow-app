@@ -78,6 +78,7 @@
                 class="card"
                 [class.has-activity]="hasUnreadActivity(it) || hasUnreadLeadNotice(it, lane) || hasUnseenCardNotice(it, lane)"
                 [cdkDragDisabled]="isMobileLayout()"
+                (cdkDragStarted)="onCardDragStarted()"
                 (cdkDragEnded)="onCardDragEnded()"
                 cdkDrag>
                 <div class="card-body">

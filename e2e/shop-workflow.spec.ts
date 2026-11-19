@@ -649,8 +649,8 @@ test('manual PayLynx card entry explains declines and blocks retries for an unco
   expect(submissions).toBe(2);
 });
 
-test('day and week calendars keep their height and the page scrolls in a short window', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 920 });
+test('day and week calendars fill the page, resize, and scroll in a short window', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1050 });
   await page.addInitScript(() => {
     localStorage.setItem('pathflow.dev.auth.user', JSON.stringify({
       role: 'admin', email: 'calendar-layout@example.test', displayName: 'Calendar Layout QA'
@@ -666,21 +666,51 @@ test('day and week calendars keep their height and the page scrolls in a short w
   const grid = page.locator('.scheduler_default_main');
   const timeline = grid.locator('.scheduler_default_scrollable');
   await expect(timeline).toBeVisible();
-  const gridHeight = await grid.evaluate(element => element.getBoundingClientRect().height);
-  expect(await timeline.evaluate(element => element.clientHeight)).toBe(500);
-  expect(await content.evaluate(element => element.scrollHeight)).toBe(await content.evaluate(element => element.clientHeight));
+
+  async function expectFillsPage() {
+    await expect.poll(() => content.evaluate(element => {
+      const panel = element.querySelector('.schedule-shell')!;
+      return Math.abs(element.getBoundingClientRect().bottom - panel.getBoundingClientRect().bottom
+        - parseFloat(getComputedStyle(element).paddingBottom));
+    })).toBeLessThan(2);
+    expect(await timeline.evaluate(element => element.clientHeight)).toBeGreaterThan(500);
+    expect(await content.evaluate(element => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1);
+    const lastBay = grid.locator('.scheduler_default_rowheader').filter({ hasText: 'Four-Post Lift' });
+    await expect.poll(async () => {
+      const row = await lastBay.boundingBox();
+      const area = await timeline.boundingBox();
+      return Math.abs(area!.y + area!.height - row!.y - row!.height);
+    }).toBeLessThan(6);
+  }
+
+  for (const height of [1050, 1400, 920]) {
+    await page.setViewportSize({ width: 1440, height });
+    for (const view of ['Day', 'Week']) {
+      await page.getByRole('button', { name: view, exact: true }).click();
+      await expectFillsPage();
+    }
+  }
 
   await page.setViewportSize({ width: 1280, height: 540 });
   for (const view of ['Day', 'Week']) {
     await page.getByRole('button', { name: view, exact: true }).click();
     await expect(grid).toBeVisible();
-    expect(await grid.evaluate(element => element.getBoundingClientRect().height)).toBe(gridHeight);
+    await expect.poll(() => timeline.evaluate(element => element.clientHeight)).toBe(500);
+    await content.evaluate(element => { element.scrollTop = 0; });
     await timeline.hover({ position: { x: 60, y: 80 } });
     await page.mouse.wheel(0, 800);
     await expect.poll(() => content.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
     await expect(grid.getByText('Four-Post Lift', { exact: true })).toBeInViewport();
     expect(await timeline.evaluate(element => element.scrollTop)).toBe(0);
   }
+
+  // Growing a window while the page is scrolled must return to a fitted calendar.
+  await page.setViewportSize({ width: 1440, height: 1050 });
+  await expectFillsPage();
+  await page.getByRole('button', { name: 'Month', exact: true }).click();
+  await expect(page.locator('.month_default_main')).toBeVisible();
+  await page.getByRole('button', { name: 'Day', exact: true }).click();
+  await expectFillsPage();
 });
 
 test('month calendar fills the page and grows for a busy week', async ({ page }) => {

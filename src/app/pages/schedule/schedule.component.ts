@@ -85,6 +85,7 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
   private readonly weekMinCellWidth = 172;
   private readonly dayCellWidth = 72;
   private readonly monthMinCellHeight = 84;
+  private readonly schedulerMinHeight = 500;
   private readonly statusAutoDismissMs = 5000;
   private statusDismissTimer: ReturnType<typeof setTimeout> | null = null;
   private nowLineTimer: ReturnType<typeof setInterval> | null = null;
@@ -244,7 +245,7 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     rowMarginBottom: 10,
     eventHeight: 80,
     heightSpec: 'Fixed',
-    height: 500,
+    height: this.schedulerMinHeight,
     onTimeRangeSelected: args => {
       if (this.isHoliday(args.start)) {
         this.setStatusError('Closed for holiday.');
@@ -501,7 +502,7 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     this.applyViewConfig(false);
     this.startNowLineTimer();
     this.resizeObserver = new ResizeObserver(() => {
-      if (this.isMonthView()) this.scheduleMonthViewportHeightUpdate();
+      if (this.isMonthView()) this.scheduleViewportHeightUpdate();
       else this.applyViewConfig(false);
     });
     for (const element of [this.scheduleContent, this.scheduleControls, this.scheduleShell]) {
@@ -511,14 +512,44 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
 
   ngOnDestroy() {
     this.resizeObserver?.disconnect();
-    if (this.monthViewportFrame !== null) cancelAnimationFrame(this.monthViewportFrame);
+    if (this.viewportFrame !== null) cancelAnimationFrame(this.viewportFrame);
     this.clearStatusTimer();
     this.stopNowLineTimer();
     this.clearNowLineScrollListener();
   }
 
   private resizeObserver: ResizeObserver | null = null;
-  private monthViewportFrame: number | null = null;
+  private viewportFrame: number | null = null;
+
+  private updateSchedulerViewportHeight(): void {
+    const content = this.scheduleContent?.nativeElement;
+    const shell = this.scheduleShell?.nativeElement;
+    const stage = shell?.querySelector<HTMLElement>('.scheduler-stage');
+    const grid = stage?.querySelector<HTMLElement>('.scheduler_default_main');
+    const timeline = grid?.querySelector<HTMLElement>('.scheduler_default_scrollable');
+    if (!content || !shell || !stage || !grid || !timeline) return;
+
+    // Measure in content coordinates so resizing while scrolled doesn't add height.
+    const stageTop = stage.getBoundingClientRect().top - content.getBoundingClientRect().top + content.scrollTop;
+    const shellStyle = getComputedStyle(shell);
+    const insets = parseFloat(getComputedStyle(content).paddingBottom) + parseFloat(shellStyle.paddingBottom)
+      + parseFloat(shellStyle.borderBottomWidth);
+    // DayPilot's height applies to the timeline, excluding its time headers and border.
+    const chrome = grid.offsetHeight - timeline.clientHeight;
+    const height = Math.max(this.schedulerMinHeight, Math.floor(content.clientHeight - stageTop - insets - chrome));
+    // Share extra space between bays without stretching appointment cards. Busy rows
+    // can still grow for overlapping appointments and use the timeline's scrollbar.
+    const rowSpace = Math.max(20, Math.floor(height / Math.max(1, this.resources().length)) - (this.config.eventHeight ?? 80));
+    const rowMarginTop = Math.floor(rowSpace / 2);
+    const rowMarginBottom = rowSpace - rowMarginTop;
+    if (this.config.height === height && this.config.rowMarginTop === rowMarginTop
+      && this.config.rowMarginBottom === rowMarginBottom) return;
+    this.config.height = height;
+    this.config.rowMarginTop = rowMarginTop;
+    this.config.rowMarginBottom = rowMarginBottom;
+    this.scheduler?.control.update({ height, rowMarginTop, rowMarginBottom });
+    this.syncNowLine();
+  }
 
   private updateMonthViewportHeight(): void {
     if (!this.isMonthView()) return;
@@ -541,11 +572,12 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     this.month?.control.update({ cellHeight });
   }
 
-  private scheduleMonthViewportHeightUpdate(): void {
-    if (this.monthViewportFrame !== null) return;
-    this.monthViewportFrame = requestAnimationFrame(() => {
-      this.monthViewportFrame = null;
-      this.updateMonthViewportHeight();
+  private scheduleViewportHeightUpdate(): void {
+    if (this.viewportFrame !== null) return;
+    this.viewportFrame = requestAnimationFrame(() => {
+      this.viewportFrame = null;
+      if (this.isMonthView()) this.updateMonthViewportHeight();
+      else this.updateSchedulerViewportHeight();
     });
   }
 
@@ -695,7 +727,7 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     if (mode === 'month') {
       this.monthConfig.startDate = start;
       this.month?.control.update({ startDate: start });
-      this.scheduleMonthViewportHeightUpdate();
+      this.scheduleViewportHeightUpdate();
       this.hideNowLine();
       return;
     }
@@ -735,6 +767,7 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
         this.scrollToAnchor(anchor, mode);
       }
     }
+    this.scheduleViewportHeightUpdate();
     this.syncNowLine();
   }
 

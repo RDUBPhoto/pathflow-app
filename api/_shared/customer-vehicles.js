@@ -68,7 +68,7 @@ function updateVehicles(existing = {}, body = {}) {
   }
   return storedVehicles(list, text(body.primaryVehicleId || existing.primaryVehicleId));
 }
-function appendVehicle(customer = {}, incoming = {}) {
+function appendVehicle(customer = {}, incoming = {}, preserveExisting = false) {
   const list = readVehicles(customer);
   const candidate = normalizeVehicle(incoming);
   if (!candidate) return { patch: storedVehicles(list, customer.primaryVehicleId), vehicle: null };
@@ -77,7 +77,7 @@ function appendVehicle(customer = {}, incoming = {}) {
   if (!match && hasDescription) match = list.find(item => (!candidate.vin || !item.vin) && identity(item) === identity(candidate)
     && (!item.vehicleTrim || !candidate.vehicleTrim || item.vehicleTrim.toLowerCase() === candidate.vehicleTrim.toLowerCase()));
   if (match) {
-    for (const key of VEHICLE_FIELDS) if (candidate[key]) match[key] = candidate[key];
+    for (const key of VEHICLE_FIELDS) if (candidate[key] && (!preserveExisting || !match[key])) match[key] = candidate[key];
   } else {
     match = { ...candidate, id: text(incoming.id) || "vehicle-" + randomUUID() };
     list.push(match);
@@ -86,7 +86,7 @@ function appendVehicle(customer = {}, incoming = {}) {
 }
 function mergeVehicles(target, source) {
   let combined = { ...target, ...storedVehicles(readVehicles(target), target.primaryVehicleId) };
-  for (const vehicle of readVehicles(source)) combined = { ...combined, ...appendVehicle(combined, vehicle).patch };
+  for (const vehicle of readVehicles(source)) combined = { ...combined, ...appendVehicle(combined, vehicle, true).patch };
   return storedVehicles(readVehicles(combined), target.primaryVehicleId);
 }
 

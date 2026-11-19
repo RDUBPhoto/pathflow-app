@@ -56,3 +56,10 @@ test('a repeated vehicle description without its trim reuses the saved vehicle',
   assert.equal(readVehicles(added.patch).length, 1);
   assert.equal(added.vehicle.vehicleTrim, 'Sport');
 });
+
+test('merging the same vehicle keeps existing details while filling missing fields', () => {
+  const merged = mergeVehicles(first, { ...first, rowKey: 'duplicate', wheelTorque: 'older value', vehicleTrim: 'SVT' });
+  assert.equal(readVehicles(merged).length, 1);
+  assert.equal(merged.wheelTorque, first.wheelTorque);
+  assert.equal(merged.vehicleTrim, 'SVT');
+});

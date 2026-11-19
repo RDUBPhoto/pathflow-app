@@ -1,13 +1,24 @@
 const { createHash, randomBytes, randomUUID } = require("node:crypto");
 
-async function issuePasswordReset(client, email) {
+const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
+const INVITATION_TTL_MS = 72 * 60 * 60 * 1000;
+
+async function issuePasswordToken(client, email, purpose, ttlMs) {
   const token = randomBytes(32).toString("hex");
   await client.createEntity({
     partitionKey: "v1", rowKey: createHash("sha256").update(token).digest("hex"),
-    email, revision: randomUUID(), used: false,
-    expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString()
+    email, purpose, revision: randomUUID(), used: false,
+    expiresAt: new Date(Date.now() + ttlMs).toISOString()
   });
   return token;
+}
+
+function issuePasswordReset(client, email) {
+  return issuePasswordToken(client, email, "password-reset", PASSWORD_RESET_TTL_MS);
+}
+
+function issuePasswordSetupInvitation(client, email) {
+  return issuePasswordToken(client, email, "invitation", INVITATION_TTL_MS);
 }
 
 async function claimPasswordReset(client, token) {
@@ -26,4 +37,4 @@ async function claimPasswordReset(client, token) {
   return record.email;
 }
 
-module.exports = { issuePasswordReset, claimPasswordReset };
+module.exports = { issuePasswordReset, issuePasswordSetupInvitation, claimPasswordReset };

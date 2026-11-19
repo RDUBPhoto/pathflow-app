@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { TableClient } = require("../_shared/table-client");
 const { hashPassword, requirePrincipal } = require("../_shared/auth");
-const { issuePasswordReset } = require("../_shared/password-reset");
+const { issuePasswordReset, issuePasswordSetupInvitation, claimPasswordReset } = require("../_shared/password-reset");
 const access = require("../access");
 
 async function fixture(run) {
@@ -10,7 +10,8 @@ async function fixture(run) {
     STORAGE_CONNECTION_STRING: "UseDevelopmentStorage=true", DATA_BACKEND: "table",
     WEBSITE_SITE_NAME: "production-fixture", PATHFLOW_ENVIRONMENT: "production", NODE_ENV: "production",
     EMAIL_MODE: "mock", APP_BASE_URL: "https://app.example.test", AUTH_PRIMARY_PROVIDER: "local",
-    AUTH_LOCAL_PASSWORD_ENABLED: "true", SUBSCRIPTION_BILLING_ENABLED: "false"
+    AUTH_LOCAL_PASSWORD_ENABLED: "true", SUBSCRIPTION_BILLING_ENABLED: "false",
+    SENDGRID_API_KEY: "fixture-key", EMAIL_FROM: "sender@example.test"
   };
   const before = Object.fromEntries(Object.keys(environment).map(key => [key, process.env[key]]));
   Object.assign(process.env, environment);
@@ -58,6 +59,111 @@ async function fixture(run) {
     }
   }
 }
+
+async function invitationFixture(run) {
+  return fixture(async context => {
+    process.env.EMAIL_MODE = "sendgrid";
+    const originalFetch = global.fetch;
+    const messages = [];
+    let status = 202;
+    global.fetch = async (url, options) => {
+      assert.equal(url, "https://api.sendgrid.com/v3/mail/send");
+      messages.push(JSON.parse(options.body));
+      return new Response(status === 202 ? null : "Rejected by test mail provider", { status });
+    };
+    context.put("useraccess", { partitionKey: "v1", rowKey: "admin@example.test", email: "admin@example.test",
+      rolesJson: '["authenticated","admin"]', status: "active", locationIdsJson: '["tenant-a"]', defaultLocationId: "tenant-a" });
+    context.put("tenants", { partitionKey: "v1", rowKey: "tenant-a", name: "Test Shop" });
+    const headers = { "x-tenant-id": "tenant-a", "x-ms-client-principal": Buffer.from(JSON.stringify({
+      userId: "admin", userDetails: "admin@example.test", identityProvider: "aad", userRoles: ["authenticated"]
+    })).toString("base64") };
+    try { await run({ ...context, headers, messages, rejectEmail: () => status = 403 }); }
+    finally { global.fetch = originalFetch; }
+  });
+}
+
+function passwordTokenFromEmail(message) {
+  const text = message.content.find(item => item.type === "text/plain").value;
+  const url = text.match(/https:\/\/app\.example\.test\/login#reset_[a-f0-9]{64}/)?.[0];
+  assert.ok(url, "email must contain a usable password setup link");
+  return new URL(url).hash.slice("#reset_".length);
+}
+
+test("an invitation email sets up a password once and activates only the invited shop membership", () => invitationFixture(async ({ request, headers, messages, rows }) => {
+  const email = "new-staff@example.test";
+  const response = await request("POST", { op: "invite-user", name: "New Staff", email, role: "admin" }, headers);
+  assert.equal(response.status, 200);
+  assert.equal(response.body.emailSent, true);
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].personalizations[0].to[0].email, email);
+  assert.match(messages[0].subject, /Test Shop/);
+  assert.match(messages[0].content[0].value, /72 hours \(3 days\)/);
+  const token = passwordTokenFromEmail(messages[0]);
+  const record = [...rows("authpasswordresets").values()][0];
+  assert.equal(record.purpose, "invitation");
+  assert.ok(Math.abs(Date.parse(record.expiresAt) - Date.now() - 72 * 3600000) < 5000);
+  assert.doesNotMatch(JSON.stringify(response.body), new RegExp(token));
+  assert.equal(rows("useraccess").get("v1|" + email).status, "invited");
+  assert.equal(rows("authlocalaccounts").size, 0);
+  const setup = await request("POST", { op: "reset-password", token, password: "InvitedPassword-123" });
+  assert.equal(setup.status, 200);
+  const user = rows("useraccess").get("v1|" + email);
+  assert.equal(user.status, "active");
+  assert.equal(user.emailVerified, true);
+  assert.deepEqual(JSON.parse(user.locationIdsJson), ["tenant-a"]);
+  assert.equal(Boolean(user.isSuperAdmin), false);
+  assert.equal((await request("POST", { op: "reset-password", token, password: "ReplayedPassword-123" })).status, 400);
+  const login = await request("POST", { op: "password-login", email, password: "InvitedPassword-123" });
+  assert.equal(login.status, 200);
+  const profile = await request("GET", null, { cookie: login.headers["set-cookie"].split(";")[0] }, { scope: "me" });
+  assert.equal(profile.body.profile.defaultLocationId, "tenant-a");
+  assert.equal(profile.body.profile.accessLocked, false);
+}));
+
+test("mail rejection reports the saved invitation accurately and a retry does not duplicate the user", () => invitationFixture(async ({ request, headers, rejectEmail, rows }) => {
+  rejectEmail();
+  const payload = { op: "invite-user", name: "New Staff", email: "new-staff@example.test", role: "user" };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await request("POST", payload, headers);
+    assert.equal(response.status, 503);
+    assert.equal(response.body.ok, false);
+    assert.equal(response.body.emailSent, false);
+    assert.equal(response.body.code, "INVITATION_EMAIL_FAILED");
+    assert.match(response.body.error, /saved.*could not be sent.*Resend invite/);
+    assert.ok(response.body.items.some(item => item.email === payload.email && item.status === "invited"));
+  }
+  assert.equal([...rows("useraccess").values()].filter(row => row.email === payload.email).length, 1);
+}));
+
+test("invitation links last three days while ordinary reset links still expire after one hour", () => fixture(async ({ client }) => {
+  const store = client("authpasswordresets");
+  const now = Date.now();
+  const originalNow = Date.now;
+  const invitation = await issuePasswordSetupInvitation(store, "staff@example.test");
+  const expiredInvitation = await issuePasswordSetupInvitation(store, "staff@example.test");
+  const reset = await issuePasswordReset(store, "staff@example.test");
+  try {
+    Date.now = () => now + 48 * 3600000;
+    assert.equal(await claimPasswordReset(store, reset), null);
+    assert.equal(await claimPasswordReset(store, invitation), "staff@example.test");
+    assert.equal(await claimPasswordReset(store, invitation), null);
+    Date.now = () => now + 73 * 3600000;
+    assert.equal(await claimPasswordReset(store, expiredInvitation), null);
+  } finally { Date.now = originalNow; }
+}));
+
+test("admin password resets email a valid token and surface mail failures", () => invitationFixture(async ({ request, headers, messages, put, rejectEmail }) => {
+  const email = "existing@example.test";
+  put("useraccess", { partitionKey: "v1", rowKey: email, email, status: "active", locationIdsJson: '["tenant-a"]' });
+  const response = await request("POST", { op: "reset-user-password", email }, headers);
+  assert.equal(response.status, 200);
+  const token = passwordTokenFromEmail(messages[0]);
+  assert.equal((await request("POST", { op: "reset-password", token, password: "ResetPassword-123" })).status, 200);
+  rejectEmail();
+  const failed = await request("POST", { op: "reset-user-password", email }, headers);
+  assert.equal(failed.status, 503);
+  assert.match(failed.body.error, /could not be sent/);
+}));
 
 test("password login establishes a secure session and profile checks do not clear a new login", () => fixture(async ({ request, put }) => {
   const password = hashPassword("FixturePassword-123");

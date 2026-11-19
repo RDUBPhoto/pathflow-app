@@ -149,6 +149,42 @@ test('the password reset view validates matching passwords and sends the single-
   await expect(page).toHaveURL(/\/login$/);
 });
 
+test('a failed invitation remains visible, reports the email error and can be resent without a false success', async ({ page, request }) => {
+  const account = await workspace(request);
+  await signIn(page, account.email, account.password);
+  await expect(page).toHaveURL(/\/dashboard$/);
+  const email = 'invited-' + randomUUID() + '@example.test';
+  let invitationAttempts = 0;
+  await page.route('**/api/access', async route => {
+    const body = route.request().postDataJSON();
+    if (body?.op !== 'invite-user') return route.continue();
+    expect(body).toMatchObject({ name: 'Invited Staff', email, role: 'admin', tenantId: account.tenant });
+    invitationAttempts++;
+    if (invitationAttempts > 1) return route.continue();
+    return route.fulfill({ status: 503, json: {
+      ok: false, code: 'INVITATION_EMAIL_FAILED', emailSent: false, tenantId: account.tenant,
+      error: 'The user was saved, but the invitation email could not be sent. Use Resend invite to try again.',
+      items: [{ id: email, name: 'Invited Staff', email, role: 'admin', status: 'invited' }]
+    } });
+  });
+  await page.goto('/admin-settings?section=users');
+  await expect(page.getByRole('heading', { name: 'User Access', exact: true })).toBeVisible();
+  await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Invited Staff');
+  await page.getByRole('textbox', { name: 'Email', exact: true }).fill(email);
+  await page.getByRole('combobox', { name: 'Role', exact: true }).selectOption('admin');
+  await page.getByRole('button', { name: 'Add User', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('invitation email could not be sent');
+  await expect(page.getByText('Invite sent to ' + email, { exact: false })).toHaveCount(0);
+  const user = page.locator('.user-row').filter({ hasText: email });
+  await expect(user).toHaveCount(1);
+  await expect(user.getByText('invited', { exact: true })).toBeVisible();
+  await user.getByRole('button', { name: 'Resend invite', exact: true }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Invite sent to ' + email })).toContainText('72 hours (3 days)');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(user).toHaveCount(1);
+  expect(invitationAttempts).toBe(2);
+});
+
 test('server WebAuthn passkeys register and authenticate in the production build', async ({ page, request, context }) => {
   const account = await workspace(request);
   const protocol = await context.newCDPSession(page);

@@ -1,8 +1,73 @@
 # Azure Deployment Plan
 
-> **Status:** Validated — application-only sandbox release to the existing Pathflow Static Web App.
+> **Status:** Validated — invitation delivery and 72-hour setup-link release to the existing production app.
 
 ## Current rollout scope
+
+### Invitation delivery release validated on 2026-11-19
+
+The user authorized fixing invitation email confirmation, extending new invitation links to three
+days and verifying actual email receipt, password setup and login in production. This is an
+application-only follow-up to the existing `pathflow-app` Static Web App deployment. The approved
+Pathflow subscription, resource group, managed API and CI/CD recipe below remain the target.
+
+- Invitations return success only after the configured email provider accepts the message.
+  Failed delivery returns HTTP 503 with an accurate saved-user message and the current user list.
+  The UI shows the pending user, offers Resend invite and clears stale success messages.
+- New and resent invitation tokens last 72 hours and remain single-use. Ordinary reset tokens
+  retain their one-hour lifetime. Invitation emails and the admin UI state the three-day lifetime.
+- Fixed admin password reset emails that previously built links without issuing a token.
+  Authenticated admin reset requests also report email-send errors accurately.
+- Validation proof: `npm run test:api` passed 105 tests with one environment-gated integration skip;
+  `npm run test:unit:ci` passed all 51; `npm run test:auth:production` passed all 10 browser tests,
+  including failure display and resend. `npm run build`, `npm run verify:deploy-output` and
+  source whitespace checks passed on 2026-11-19. Both dependency audits reported zero vulnerabilities.
+- Tests prove 48-hour-old invitations work, 73-hour-old invitations expire, ordinary password
+  resets still expire after one hour, used tokens cannot be replayed, membership activates only
+  in the invited shop, and provider rejection cannot be reported as email success.
+- Static role verification: this release changes zero infrastructure or Azure RBAC assignments.
+  Read-only Azure lookup confirmed the existing Standard Static Web App and hostname. All
+  application validation checks passed; the Azure validation workflow records Validated status.
+- Production verification will use a temporary tenant-scoped QA admin and a unique plus-address
+  on the user's connected Gmail inbox. Verify actual receipt, the email's setup link, password
+  creation, secure login, membership, reload and token replay rejection. Remove exact QA identities,
+  sessions and reset tokens after verification. No existing staff passwords will be changed.
+
+### Hosted deployment completed on 2026-11-18
+
+- Hosted site: https://www.pathflow-app.com. Existing Azure Static Web App and managed API retained.
+- Deployed application commit: `843019f52610acce5a4ea081893d5cc7e6a4b028`.
+- Successful release workflow: https://github.com/RDUBPhoto/pathflow-app/actions/runs/44391461825.
+- Linux regression gate passed 101 API tests, 51 Angular unit tests, two startup browser tests,
+  nine HTTPS authentication browser tests and 25 shop browser tests. The environment-gated API
+  integration also passed separately in the isolated shop runner. One ordinary API integration
+  discovery was skipped as designed. Security audits, production build, artifact verification
+  and clean API packaging passed. All release jobs completed successfully.
+- Pinned release runners to Ubuntu 24.04 after Ubuntu latest moved beyond the browser dependency
+  support matrix. A slow Ubuntu mirror delayed dependency downloads. The successful release kept
+  the complete regression gate. A redundant standalone run was canceled to avoid duplicate work.
+- Hosted frontend SHA256 exactly matches the tested CI artifact:
+  `9f70c2885b1a872e05314c9a0ce716e7f4ef3b74664686e294fc99ed194f7678`.
+- Hosted JSON health checks passed: `/api/ping` in 807 ms and `/api/ready` in 149 ms,
+  with database readiness confirmed. Hosted auth config confirms password login enabled and
+  subscription charging disabled.
+- A temporary tenant-scoped Admin account signed in through the hosted login page. Verified
+  Secure, HttpOnly and SameSite=Lax session cookie flags, page reload persistence, complimentary
+  workspace access and rejection of an unassigned tenant with HTTP 403.
+- PayLynx sandbox account connection validation passed and PayLynx test mode is now the default
+  hosted invoice provider for `pathflow-app`. Other existing provider settings were retained.
+- An anonymous customer checkout used the hosted PayLynx card iframe and tokenized test card.
+  Confirmed a real $1.00 sandbox payment, gateway reference `1437234`, with no raw
+  card number or CVV sent to Pathflow. The customer confirmation displayed $1.00 paid.
+- The hosted staff invoice UI successfully voided that payment. After reloading both staff and
+  customer views, the invoice showed $0.00 paid and $1.00 due. Verification finished at
+  `2026-11-18T20:45:03.761Z`.
+- Removed the temporary account, its 1 session and all 10 test invoice-related
+  records, including the synthetic job, ledger entries and notifications. Read-back confirmed
+  deletion. Cleanup completed at `2026-11-18T20:45:20.382Z`. No real customer email or SMS was sent.
+- No live-money transaction or new Azure resource, role assignment, SKU or budget change occurred.
+  Subscription charging remains deferred. Real settled-refund processing was not exercised by
+  this hosted smoke test; this verification covered charge and void as requested.
 
 ### Authorized hosted deployment on 2026-11-18
 

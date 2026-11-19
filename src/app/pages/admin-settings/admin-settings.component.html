@@ -526,15 +526,16 @@
                   <option value="admin">Admin</option>
                 </select>
               </div>
-              <button class="btn ui-button btn-primary" type="button" (click)="addUser()">
+              <button class="btn ui-button btn-primary" type="button" (click)="addUser()" [disabled]="!!invitationEmailSending()">
                 <ui-icon slot="start" name="plus"></ui-icon>
-                Add User
+                {{ invitationEmailSending() ? 'Sending…' : 'Add User' }}
               </button>
             </div>
+            <div class="sms-help">New team members receive a password setup link that expires in 72 hours (3 days).</div>
             <div class="summary-row">
               <span class="ui-badge" uiBadge color="primary">{{ userCount() }} users</span>
               @if (statusMessage) {
-                <span>{{ statusMessage }}</span>
+                <span role="status">{{ statusMessage }}</span>
               }
             </div>
             @if (showSectionSetupError('users') && userCount() <= 0) {
@@ -543,7 +544,7 @@
               </div>
             }
             @if (usersError) {
-              <div class="sms-feedback error">{{ usersError }}</div>
+              <div class="sms-feedback error" role="alert">{{ usersError }}</div>
             }
             <div class="user-list">
               @for (user of users(); track user) {
@@ -575,9 +576,15 @@
                     <span class="ui-badge" uiBadge [color]="user.status === 'active' ? 'success' : (user.status === 'disabled' ? 'danger' : 'tertiary')">
                       {{ user.status }}
                     </span>
-                    <button class="btn ui-button btn-ghost-primary btn-sm" type="button" (click)="resetUserPassword(user)">
-                      Reset password
-                    </button>
+                    @if (user.status === 'invited') {
+                      <button class="btn ui-button btn-ghost-primary btn-sm" type="button" (click)="resendInvite(user)" [disabled]="!!invitationEmailSending()">
+                        {{ invitationEmailSending() === user.email ? 'Sending…' : 'Resend invite' }}
+                      </button>
+                    } @else {
+                      <button class="btn ui-button btn-ghost-primary btn-sm" type="button" (click)="resetUserPassword(user)">
+                        Reset password
+                      </button>
+                    }
                     <button class="btn ui-button btn-ghost-danger btn-sm" type="button" (click)="removeUser(user)">
                       <ui-icon name="circle-minus"></ui-icon>
                     </button>

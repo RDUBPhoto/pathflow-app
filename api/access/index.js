@@ -13,7 +13,7 @@ const {
   verifyRegistrationResponse
 } = require("@simplewebauthn/server");
 const { sanitizeTenantId } = require("../_shared/tenant");
-const { issuePasswordReset, claimPasswordReset } = require("../_shared/password-reset");
+const { issuePasswordReset, issuePasswordSetupInvitation, claimPasswordReset } = require("../_shared/password-reset");
 const {
   hashPassword,
   verifyPassword,
@@ -1241,6 +1241,7 @@ function inviteEmailMarkup(payload) {
     `You were invited to join Pathflow for ${workspaceName} as ${role}.`,
     "",
     `Set password + join: ${signupUrl}`,
+    "This link works once and expires in 72 hours (3 days).",
     `Already set up? Sign in: ${loginUrl}`,
     "",
     "If your workspace uses Microsoft or Google sign-in, use that option on the login screen.",
@@ -1251,6 +1252,7 @@ function inviteEmailMarkup(payload) {
     `<p>Hi ${firstName},</p>`,
     `<p>You were invited to join <strong>Pathflow</strong> for <strong>${workspaceName}</strong> as <strong>${role}</strong>.</p>`,
     `<p><a href="${signupUrl}" style="display:inline-block;background:#1d4ed8;color:#fff;text-decoration:none;padding:10px 14px;border-radius:6px;font-weight:600;">Set password & join</a></p>`,
+    `<p>This link works once and expires in 72 hours (3 days).</p>`,
     `<p><a href="${loginUrl}" style="display:inline-block;background:#0f172a;color:#fff;text-decoration:none;padding:10px 14px;border-radius:6px;font-weight:600;border:1px solid #334155;">Already set up? Sign in</a></p>`,
     `<p style="color:#64748b;">If your workspace uses Microsoft or Google sign-in, use that option on the login screen.<br/>If your workspace uses email/password, set your password first, then sign in.</p>`
   ].join("");
@@ -1264,7 +1266,10 @@ function inviteEmailMarkup(payload) {
 async function sendPasswordResetEmail(context, req, payload) {
   const email = normalizeEmail(payload && payload.email);
   if (!email) return false;
-  const resetUrl = buildPasswordResetUrl(req, payload.token);
+  const token = payload.token || await issuePasswordReset(
+    await getTableClient(asString(process.env.STORAGE_CONNECTION_STRING), "authpasswordresets"), email
+  );
+  const resetUrl = buildPasswordResetUrl(req, token);
   const display = asString(payload && payload.displayName || email);
   const firstName = display.split(/\s+/).filter(Boolean)[0] || "there";
   const workspaceName = asString(payload && payload.workspaceName || "your Pathflow workspace");
@@ -2038,7 +2043,7 @@ module.exports = async function (context, req) {
           humanizeTenantId(tenantId);
         const firstName = targetName.split(/\s+/).filter(Boolean)[0] || "there";
         const loginUrl = buildInviteLoginUrl(req, { email: targetEmail, tenantId });
-        const resetToken = await issuePasswordReset(await getTableClient(connectionString, "authpasswordresets"), targetEmail);
+        const resetToken = await issuePasswordSetupInvitation(await getTableClient(connectionString, "authpasswordresets"), targetEmail);
         const signupUrl = buildPasswordResetUrl(req, resetToken);
         const inviteMarkup = inviteEmailMarkup({
           workspaceName,
@@ -2048,14 +2053,21 @@ module.exports = async function (context, req) {
           loginUrl,
           signupUrl
         });
-        await sendTransactionalEmail(context, {
+        const emailSent = await sendTransactionalEmail(context, {
           to: targetEmail,
           subject: `You're invited to Pathflow - ${workspaceName}`,
           text: inviteMarkup.text,
           html: inviteMarkup.html
         });
         const users = await listWorkspaceUsers(userClient, tenantId);
-        context.res = json(200, { ok: true, items: users, tenantId });
+        if (!emailSent) {
+          context.res = json(503, {
+            ok: false, code: "INVITATION_EMAIL_FAILED", emailSent: false, items: users, tenantId,
+            error: "The user was saved, but the invitation email could not be sent. Use Resend invite to try again."
+          });
+          return;
+        }
+        context.res = json(200, { ok: true, emailSent: true, items: users, tenantId });
         return;
       }
 
@@ -2121,11 +2133,15 @@ module.exports = async function (context, req) {
       if (op === "reset-user-password") {
         const targetUser = await getUserEntity(userClient, targetEmail);
         if (targetUser) {
-          await sendPasswordResetEmail(context, req, {
+          const emailSent = await sendPasswordResetEmail(context, req, {
             email: targetEmail,
             displayName: asString(targetUser.displayName || targetEmail),
             workspaceName: tenantId
           });
+          if (!emailSent) {
+            context.res = json(503, { ok: false, error: "The password reset email could not be sent. Please try again." });
+            return;
+          }
         }
         context.res = json(200, {
           ok: true,

@@ -16,6 +16,10 @@ type UsersResponse = {
   tenantId: string;
 };
 
+type InvitationResponse = UsersResponse & {
+  emailSent: boolean;
+};
+
 type MessageResponse = {
   ok: boolean;
   message?: string;
@@ -32,7 +36,7 @@ export class AccessAdminApiService {
   }
 
   inviteUser(payload: { name: string; email: string; role: 'admin' | 'user'; tenantId?: string }) {
-    return this.http.post<UsersResponse>('/api/access', {
+    return this.http.post<InvitationResponse>('/api/access', {
       op: 'invite-user',
       ...payload
     });

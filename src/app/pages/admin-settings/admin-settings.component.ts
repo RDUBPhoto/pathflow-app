@@ -436,6 +436,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
   readonly paymentGatewaySettings = inject(PaymentGatewaySettingsService);
 
   readonly users = signal<WorkspaceUser[]>(this.cloneDefaultUsers());
+  readonly invitationEmailSending = signal('');
   readonly integrations = signal<AppIntegration[]>(this.cloneDefaultIntegrations());
   readonly supplierConnectors = signal<InventoryConnector[]>([]);
   readonly supplierLoading = signal(false);
@@ -1084,27 +1085,47 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
     const email = this.newUserEmail.trim().toLowerCase();
     const name = this.newUserName.trim();
     if (!name || !email) {
-      this.statusMessage = 'Name and email are required.';
+      this.statusMessage = '';
+      this.usersError = 'Name and email are required.';
       return;
     }
+    this.sendUserInvitation({ name, email, role: this.newUserRole }, true);
+  }
+
+  resendInvite(user: WorkspaceUser): void {
+    this.sendUserInvitation({ name: user.name, email: user.email, role: user.role }, false);
+  }
+
+  private sendUserInvitation(payload: { name: string; email: string; role: 'admin' | 'user' }, clearForm: boolean): void {
+    if (this.invitationEmailSending()) return;
+    const email = payload.email.trim().toLowerCase();
     this.usersError = '';
+    this.statusMessage = '';
+    this.invitationEmailSending.set(email);
     this.accessAdminApi
       .inviteUser({
-        name,
+        ...payload,
         email,
-        role: this.newUserRole,
         tenantId: this.tenantContext.tenantId()
       })
+      .pipe(finalize(() => this.invitationEmailSending.set('')))
       .subscribe({
         next: res => {
           this.users.set(Array.isArray(res.items) ? res.items : []);
-          this.newUserName = '';
-          this.newUserEmail = '';
-          this.newUserRole = 'user';
-          this.statusMessage = `Invite sent to ${email}.`;
+          if (res.emailSent !== true) {
+            this.usersError = 'The user was saved, but the invitation email was not confirmed. Use Resend invite to try again.';
+            return;
+          }
+          if (clearForm) {
+            this.newUserName = '';
+            this.newUserEmail = '';
+            this.newUserRole = 'user';
+          }
+          this.statusMessage = `Invite sent to ${email}. The link expires in 72 hours (3 days).`;
           void this.setupProgress.refresh();
         },
         error: err => {
+          if (Array.isArray(err?.error?.items)) this.users.set(err.error.items);
           this.usersError = this.extractApiError(err, 'Could not invite user.');
         }
       });
@@ -1160,6 +1181,7 @@ export default class AdminSettingsComponent implements OnInit, OnDestroy {
 
   resetUserPassword(user: WorkspaceUser): void {
     this.usersError = '';
+    this.statusMessage = '';
     this.accessAdminApi
       .resetUserPassword({
         email: user.email,

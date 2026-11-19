@@ -773,6 +773,85 @@ test('month calendar fills the page and grows for a busy week', async ({ page })
   expect(await month.evaluate(element => element.scrollTop)).toBe(0);
 });
 
+test.describe('month scheduling', () => {
+  test.use({ timezoneId: 'Asia/Tokyo' });
+
+  test('clicking a month day or date opens the appointment editor and saves on the chosen shop date', async ({ page }) => {
+    await page.clock.setFixedTime(new Date('2026-11-19T18:00:00Z'));
+    await page.addInitScript(() => localStorage.setItem('pathflow.dev.auth.user', JSON.stringify({
+      role: 'admin', email: 'month-scheduling@example.test', displayName: 'Month Scheduling QA'
+    })));
+    const customer = { id: 'month-customer', name: 'Month Customer', email: 'month@example.test' };
+    const appointments: any[] = [];
+    const writes: any[] = [];
+    const messages: string[] = [];
+    await page.route('**/api/**', route => {
+      const request = route.request();
+      const url = new URL(request.url());
+      const body = request.method() === 'POST' ? request.postDataJSON() : null;
+      if (url.pathname === '/api/settings') {
+        const key = url.searchParams.get('key') || '';
+        if (key.endsWith('schedule.viewmode')) return route.fulfill({ json: { value: 'month' } });
+        if (key === 'schedule.settings') return route.fulfill({ json: { value: {
+          bays: [{ id: 'bay-1', name: 'Lift One' }, { id: 'bay-2', name: 'Lift Two' }],
+          openHour: 9, closeHour: 17, timeZone: 'America/Los_Angeles', showWeekends: false,
+          holidays: ['2026-11-24'], federalYear: 2026, federalInitialized: true
+        } } });
+      }
+      if (url.pathname === '/api/customers') return route.fulfill({ json: [customer] });
+      if (url.pathname === '/api/schedule') {
+        if (!body) return route.fulfill({ json: appointments });
+        writes.push(body);
+        appointments.push({ ...body, id: 'month-appointment' });
+        return route.fulfill({ json: { ok: true, id: 'month-appointment' } });
+      }
+      if (body && (url.pathname === '/api/email' || url.pathname === '/api/sms')) messages.push(url.pathname);
+      return route.fulfill({ json: { ok: true, items: [] } });
+    });
+    await page.goto('/schedule?customerId=month-customer&autoOpen=0');
+    const month = page.locator('.month_default_main');
+    await expect(month).toBeVisible();
+    const cell = (day: number) => month.locator('.month_default_cell').filter({
+      has: page.locator('.month_default_cell_header').getByText(String(day), { exact: true })
+    });
+    const editor = page.getByRole('dialog', { name: 'Appointment', exact: true });
+    await cell(20).click({ position: { x: 40, y: 50 } });
+    await expect(editor).toBeVisible();
+    await expect(editor.locator('input[aria-label="Start"]')).toHaveValue('2026-11-20T09:00');
+    await expect(editor.locator('input[aria-label="End"]')).toHaveValue('2026-11-20T13:00');
+    await expect(editor.getByRole('combobox', { name: 'Customer', exact: true })).toHaveValue(/month-customer/);
+    await editor.getByRole('combobox', { name: 'Lift / Bay (Category)' }).selectOption({ label: 'Lift Two' });
+    await editor.getByRole('textbox', { name: 'Notes', exact: true }).fill('Created from Month view');
+    await editor.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(editor).toBeHidden();
+    await expect.poll(() => writes.length).toBe(1);
+    expect(writes[0]).toMatchObject({ customerId: customer.id, resource: 'bay-2', notes: 'Created from Month view' });
+    expect(writes[0].start).toMatch(/^2026-11-20T09:00/);
+    expect(writes[0].end).toMatch(/^2026-11-20T13:00/);
+    await page.getByRole('button', { name: 'Close appointment message', exact: true }).click();
+    await month.locator('.month_default_event').filter({ hasText: customer.name }).click();
+    await expect(editor.locator('input[aria-label="Start"]')).toHaveValue('2026-11-20T09:00');
+    await expect(editor.getByRole('textbox', { name: 'Notes', exact: true })).toHaveValue('Created from Month view');
+    await expect(editor.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
+    await editor.getByRole('button', { name: 'Close appointment', exact: true }).click();
+
+    await cell(23).locator('.month_default_cell_header').click();
+    await expect(editor.locator('input[aria-label="Start"]')).toHaveValue('2026-11-23T09:00');
+    await expect(editor.locator('select[aria-label="Customer"] option:checked')).toHaveText('Unassigned');
+    await editor.getByRole('button', { name: 'Close appointment', exact: true }).click();
+    await cell(24).click({ position: { x: 40, y: 50 } });
+    await expect(page.getByText('Closed for holiday.', { exact: true })).toBeVisible();
+    await expect(editor).toBeHidden();
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await cell(25).click({ position: { x: 10, y: 50 } });
+    await expect(editor.locator('input[aria-label="Start"]')).toHaveValue('2026-11-25T09:00');
+    await editor.getByRole('button', { name: 'Close appointment', exact: true }).click();
+    expect(writes).toHaveLength(1);
+    expect(messages).toEqual([]);
+  });
+});
+
 test('the Tabler appointment editor supports selecting a bay and blocking it', async ({ page }) => {
   const email = 'calendar-ui@example.test';
   await page.addInitScript(devEmail => {

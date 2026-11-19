@@ -378,12 +378,15 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
     eventDeleteHandling: 'Disabled',
     eventMoveHandling: 'Update',
     eventResizeHandling: 'Disabled',
-    timeRangeSelectedHandling: 'Disabled',
+    timeRangeSelectedHandling: 'Enabled',
+    cellHeaderClickHandling: 'Enabled',
     weekStarts: 0,
     headerHeight: 30,
     cellHeight: this.monthMinCellHeight,
     eventHeight: 15,
     width: '100%',
+    onTimeRangeSelected: args => this.openMonthDateEditor(args.start, args.control),
+    onCellHeaderClick: args => this.openMonthDateEditor(args.start, args.control),
     onBeforeCellRender: args => {
       const dateKey = args.cell.start.toString('yyyy-MM-dd');
       const todayDate = this.localTodayDatePart();
@@ -1425,6 +1428,27 @@ export default class ScheduleComponent implements AfterViewInit, OnDestroy {
   private vehicleLabel(c: UICustomer): string {
     const parts = [c.vehicleYear, c.vehicleMake, c.vehicleModel].filter(Boolean);
     return parts.join(' ');
+  }
+
+  private openMonthDateEditor(date: DayPilot.Date, control: DayPilot.Month): void {
+    control.clearSelection();
+    if (this.isHoliday(date)) {
+      this.setStatusError('Closed for holiday.');
+      return;
+    }
+    const resource = this.resources()[0]?.id;
+    if (!resource) {
+      this.setStatusError('Add a lift or bay in Schedule settings before scheduling.');
+      return;
+    }
+    const start = date.getDatePart().addHours(this.settingsOpenHour());
+    this.openEditor({
+      id: null,
+      start: start.toString(),
+      end: start.addHours(4).toString(),
+      resource: String(resource),
+      customerId: this.planningCustomerId() || undefined
+    });
   }
 
   private openEditor(data: {

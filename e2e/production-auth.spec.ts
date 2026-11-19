@@ -207,3 +207,100 @@ test('server WebAuthn passkeys register and authenticate in the production build
   await dialog.getByRole('button', { name: 'Log In', exact: true }).click();
   await expect(page).toHaveURL(/\/dashboard$/);
 });
+
+
+test('a returning website lead keeps both vehicles and carries the new vehicle into its quote', async ({ page, request }) => {
+  const account = await workspace(request);
+  const headers = { 'x-tenant-id': account.tenant };
+  const customerResponse = await request.post('/api/customers', { headers, data: {
+    name: 'Returning Vehicle Customer', email: 'returning@example.invalid', phone: '+15125550182',
+    vehicleYear: '2013', vehicleMake: 'Ford', vehicleModel: 'Raptor', vehicleTrim: 'SVT', wheelTorque: '150'
+  } });
+  expect(customerResponse.ok(), await customerResponse.text()).toBeTruthy();
+  const { id } = await customerResponse.json();
+  const lead = await request.post('/api/widget/lead', { data: {
+    tenantId: account.tenant, name: 'Returning Vehicle Customer', email: 'returning@example.invalid',
+    phone: '+15125550182', vehicleYear: '2021', vehicleMake: 'Jeep', vehicleModel: 'Wrangler',
+    vehicleTrim: 'Sport', message: 'Second vehicle visit', smsOptIn: false
+  } });
+  expect(lead.ok(), await lead.text()).toBeTruthy();
+  const customers = await (await request.get('/api/customers', { headers })).json();
+  const customer = customers.find((row: any) => row.id === id);
+  expect(customer.vehicles).toHaveLength(2);
+  expect(customer.vehicleModel).toBe('Raptor');
+  const jeep = customer.vehicles.find((row: any) => row.vehicleMake === 'Jeep');
+  await signIn(page, account.email, account.password);
+  await expect(page).toHaveURL(/\/dashboard$/);
+  const card = page.locator('.cards .card').filter({ hasText: 'Returning Vehicle Customer' });
+  await expect(card).toContainText('2021 Jeep Wrangler');
+  await card.getByRole('button', { name: 'Create Quote', exact: true }).click();
+  await expect(page).toHaveURL(new RegExp('vehicleId=' + jeep.id));
+  await expect(page.getByLabel('Vehicle for this quote')).toHaveValue(jeep.id);
+  const next = page.getByRole('button', { name: 'Continue', exact: true });
+  await next.click();
+  await page.getByRole('button', { name: 'Add Labor Line' }).click();
+  const fields = page.locator('.line-item-row .line-field');
+  await fields.nth(0).fill('Second vehicle alignment');
+  await fields.nth(1).fill('100');
+  await next.click();
+  await expect.poll(async () => {
+    const result = await (await request.get('/api/service-documents', { headers })).json();
+    return result.items.some((row: any) => row.document?.vehicleId === jeep.id && row.document?.vehicle?.includes('Jeep'));
+  }).toBeTruthy();
+  await page.goto('/customers/' + id);
+  const tabs = page.getByRole('tablist', { name: 'Customer vehicles' });
+  await expect(tabs.getByRole('tab')).toHaveCount(2);
+  const save = page.getByRole('button', { name: 'Save Customer', exact: true }).first();
+  await expect(save).toBeDisabled();
+  await tabs.getByRole('tab', { name: /2021 Jeep Wrangler/ }).click();
+  await expect(save).toBeDisabled();
+  await page.getByRole('textbox', { name: 'Trim', exact: true }).fill('Rubicon');
+  await tabs.getByRole('tab', { name: /2013 Ford Raptor/ }).click();
+  await expect(page.getByRole('textbox', { name: 'Trim', exact: true })).toHaveValue('SVT');
+  await page.getByRole('textbox', { name: 'Trim', exact: true }).fill('SVT preserved');
+  await save.click();
+  await expect(save).toBeDisabled();
+  await page.reload();
+  await tabs.getByRole('tab', { name: /2021 Jeep Wrangler/ }).click();
+  await expect(page.getByRole('textbox', { name: 'Trim', exact: true })).toHaveValue('Rubicon');
+  await page.getByRole('button', { name: 'Add vehicle', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Make', exact: true }).fill('Toyota');
+  await page.getByRole('textbox', { name: 'Model', exact: true }).fill('Tacoma');
+  await page.getByRole('textbox', { name: 'Year', exact: true }).fill('2024');
+  await save.click();
+  await expect(save).toBeDisabled();
+  await expect(tabs.getByRole('tab')).toHaveCount(3);
+  page.once('dialog', dialog => dialog.accept());
+  await page.getByRole('button', { name: 'Remove Vehicle', exact: true }).click();
+  await save.click();
+  await expect(save).toBeDisabled();
+  await page.reload();
+  await expect(tabs.getByRole('tab')).toHaveCount(2);
+  await expect(tabs).toContainText('SVT preserved');
+  await expect(tabs).toContainText('Rubicon');
+});
+
+test('a business reset clears cached quotes without uploading them again', async ({ page, request }) => {
+  const account = await workspace(request);
+  const headers = { 'x-tenant-id': account.tenant };
+  const id = 'cached-quote-' + randomUUID();
+  const seed = await request.post('/api/service-documents', { headers, data: {
+    id, revision: null, document: { id, documentType: 'quote', invoiceNumber: 'QTE-CACHE-RESET',
+      stage: 'draft', customerName: 'Old cached customer', total: 10, subtotal: 10, taxTotal: 0,
+      lineItems: [], timeline: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+  } });
+  expect(seed.ok(), await seed.text()).toBeTruthy();
+  await signIn(page, account.email, account.password);
+  await expect(page).toHaveURL(/\/dashboard$/);
+  const key = 'pathflow.invoices.v1.' + account.tenant;
+  await expect.poll(() => page.evaluate(key => localStorage.getItem(key), key)).toContain(id);
+  const uploads: string[] = [];
+  await page.route('**/api/service-documents', async route => {
+    if (route.request().method() === 'GET') return route.fulfill({ json: { items: [], resetVersion: 'fresh-business-reset' } });
+    uploads.push(route.request().postData() || '');
+    return route.fulfill({ json: { ok: true } });
+  });
+  await page.reload();
+  await expect.poll(() => page.evaluate(key => localStorage.getItem(key), key)).not.toContain(id);
+  expect(uploads.some(body => body.includes(id))).toBeFalsy();
+});

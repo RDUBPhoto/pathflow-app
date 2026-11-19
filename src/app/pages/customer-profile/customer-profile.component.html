@@ -172,9 +172,9 @@
               <ui-input aria-label="Last Name *" [(ngModel)]="lastName"></ui-input>
             </div>
           </div>
-          @if (showInlineValidation() && (!firstName.trim() || !lastName.trim())) {
+          @if (showInlineValidation() && !firstName.trim()) {
             <div class="field-error">
-              First and last name are required.
+              A customer name is required.
             </div>
           }
 
@@ -339,6 +339,25 @@
         <ui-icon name="car"></ui-icon>
         Vehicle Details
       </div>
+      <div class="vehicle-tabs-toolbar">
+        <div class="nav nav-pills vehicle-tabs" role="tablist" aria-label="Customer vehicles">
+          @for (vehicle of vehicleDrafts(); track vehicle.id) {
+            <button type="button" class="nav-link" role="tab"
+              [class.active]="selectedVehicleId() === vehicle.id"
+              [attr.aria-selected]="selectedVehicleId() === vehicle.id"
+              (click)="selectVehicle(vehicle.id)">
+              {{ vehicleTabLabel(vehicle) }}
+              @if (vehicle.id === primaryVehicleId()) { <span class="badge bg-primary-lt ms-2">Primary</span> }
+            </button>
+          }
+        </div>
+        <button type="button" class="btn btn-outline-primary btn-sm" (click)="addVehicle()" [disabled]="saving() || loading()">
+          <ui-icon name="plus"></ui-icon> Add vehicle
+        </button>
+      </div>
+      @if (selectedVehicleId() !== primaryVehicleId() && hasVehicleData()) {
+        <button type="button" class="btn btn-link btn-sm px-0 mb-3" (click)="makeVehiclePrimary()">Make primary vehicle</button>
+      }
 
       <div class="vin-row">
         <div class="ui-item">
@@ -349,7 +368,7 @@
         <button type="button" class="btn ui-button btn-outline-primary vin-btn" (click)="openVinPhotoPicker()" [disabled]="isVinWorkflowBusy()">
           {{ vinPhotoOcrLoading ? 'Scanning photo...' : 'Scan VIN Photo' }}
         </button>
-        @if (hasVehicleData()) {
+        @if (hasVehicleData() || vehicleDrafts().length > 1) {
           <button type="button"
             class="btn ui-button btn-outline-danger vin-btn remove-vehicle-btn"
             (click)="confirmRemoveVehicle()">

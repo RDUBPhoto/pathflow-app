@@ -1167,3 +1167,12 @@
   }
 
 }
+.vehicle-tabs-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .75rem;
+  margin-bottom: 1rem;
+}
+.vehicle-tabs { flex: 1; gap: .4rem; }
+.vehicle-tabs .nav-link { white-space: normal; text-align: left; }

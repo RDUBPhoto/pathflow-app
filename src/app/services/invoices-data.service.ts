@@ -21,6 +21,8 @@ export type InvoiceCard = {
   invoicedAt: string;
   total: number;
   vehicle: string;
+  vehicleId?: string;
+  vehicleVin?: string;
   template: string;
   stage: InvoiceStage;
   isExpired: boolean;
@@ -100,6 +102,8 @@ export type InvoiceDetail = {
   customerPhone?: string;
   customerAddress?: string;
   vehicle: string;
+  vehicleId?: string;
+  vehicleVin?: string;
 
   businessName: string;
   businessEmail?: string;
@@ -153,6 +157,8 @@ export type InvoiceDraftPayload = {
   customerPhone?: string | null;
   customerAddress?: string | null;
   vehicle?: string | null;
+  vehicleId?: string | null;
+  vehicleVin?: string | null;
 
   businessName?: string | null;
   businessEmail?: string | null;
@@ -563,6 +569,7 @@ const INVOICES_STORAGE_KEY_PREFIX = 'pathflow.invoices.v1';
 type SharedDocument = { id: string; revision: string; document: InvoiceDetail | null };
 type PendingDocument = { document: InvoiceDetail | null; revision: string | null; conflict?: boolean };
 type DocumentSync = {
+  resetVersion?: string;
   revisions: Record<string, string>;
   pending: Record<string, PendingDocument>;
   migrated: boolean;
@@ -638,6 +645,8 @@ export class InvoicesDataService {
       customerPhone: this.safeText(payload.customerPhone) || '',
       customerAddress: this.safeText(payload.customerAddress) || '',
       vehicle: this.safeText(payload.vehicle) || 'Vehicle TBD',
+      vehicleId: this.safeText(payload.vehicleId),
+      vehicleVin: this.safeText(payload.vehicleVin),
 
       businessName: this.safeText(payload.businessName) || 'Shop',
       businessEmail: this.safeText(payload.businessEmail) || '',
@@ -1164,6 +1173,8 @@ export class InvoicesDataService {
       customerPhone: quote.customerPhone,
       customerAddress: quote.customerAddress,
       vehicle: quote.vehicle,
+      vehicleId: quote.vehicleId,
+      vehicleVin: quote.vehicleVin,
       businessName: quote.businessName,
       businessEmail: quote.businessEmail,
       businessPhone: quote.businessPhone,
@@ -1260,6 +1271,8 @@ export class InvoicesDataService {
       invoicedAt: this.formatInvoiceDate(invoice.issueDate || invoice.createdAt),
       total: this.roundCurrency(invoice.total),
       vehicle: this.safeText(invoice.vehicle) || 'Vehicle TBD',
+      vehicleId: this.safeText(invoice.vehicleId),
+      vehicleVin: this.safeText(invoice.vehicleVin),
       template: this.safeText(invoice.template) || 'Other',
       stage: invoice.stage,
       isExpired: this.isExpiredQuote(invoice)
@@ -1305,6 +1318,8 @@ export class InvoicesDataService {
       customerPhone: this.safeText(invoice.customerPhone),
       customerAddress: this.safeText(invoice.customerAddress),
       vehicle: this.safeText(invoice.vehicle) || 'Vehicle TBD',
+      vehicleId: this.safeText(invoice.vehicleId),
+      vehicleVin: this.safeText(invoice.vehicleVin),
       businessName: this.safeText(invoice.businessName) || 'Shop',
       businessEmail: this.safeText(invoice.businessEmail),
       businessPhone: this.safeText(invoice.businessPhone),
@@ -1615,9 +1630,16 @@ export class InvoicesDataService {
     const sync = this.syncFor(tenant);
     const headers = { 'x-tenant-id': tenant, 'x-skip-action-toast': '1' };
     try {
-      const { items } = await firstValueFrom(http.get<{ items: SharedDocument[] }>('/api/service-documents', { headers }).pipe(timeout(15000)));
+      const { items, resetVersion } = await firstValueFrom(http.get<{ items: SharedDocument[]; resetVersion?: string }>('/api/service-documents', { headers }).pipe(timeout(15000)));
       if (!isActive()) return;
-      const local = new Map(this.state().map(item => [item.id, item]));
+      if (resetVersion && sync.resetVersion !== resetVersion) {
+        this.state.set([]);
+        sync.pending = {};
+        sync.revisions = {};
+        sync.migrated = true;
+        sync.resetVersion = resetVersion;
+      }
+      const local = new Map(this.state().filter(item => !sync.migrated || !!sync.pending[item.id]).map(item => [item.id, item]));
       for (const row of items) {
         sync.revisions[row.id] = row.revision;
         if (sync.pending[row.id]) continue;
@@ -1639,7 +1661,7 @@ export class InvoicesDataService {
         if (pending.conflict || sync.pending[id] !== pending) continue;
         try {
           const result = await firstValueFrom(http.post<{ revision: string }>('/api/service-documents', {
-            id, revision: pending.revision, document: pending.document
+            id, revision: pending.revision, document: pending.document, resetVersion: sync.resetVersion || ''
           }, { headers }).pipe(timeout(15000)));
           sync.revisions[id] = result.revision;
           if (sync.pending[id] === pending) delete sync.pending[id];

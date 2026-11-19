@@ -30,6 +30,7 @@ import { QuoteResponseApiService } from '../../services/quote-response-api.servi
 import { NotificationsApiService } from '../../services/notifications-api.service';
 import { AuthService } from '../../auth/auth.service';
 import { isExpiredCompletedCard } from './completed-card-visibility';
+import { customerVehicles, vehicleSummary } from '../../utils/customer-vehicles';
 import { DEFAULT_SHOP_TIME_ZONE, formatShopAppointment, shopCalendarIso, shopTimeMillis } from '../../utils/shop-time';
 
 type ColorOpt = { label: string; hex: string };
@@ -2497,7 +2498,7 @@ export default class DashboardComponent implements OnDestroy {
     this.markLeadSeen(it, lane);
     const customerId = (it.customerId || '').trim();
     if (!customerId) return;
-    this.router.navigate(['/customers', customerId]);
+    this.router.navigate(['/customers', customerId], { queryParams: { vehicleId: it.vehicleId || undefined } });
   }
 
   openCustomerActivity(it: WorkItem, lane: Lane, activity: 'sms' | 'email', event?: Event): void {
@@ -2570,7 +2571,7 @@ export default class DashboardComponent implements OnDestroy {
       this.status.set('No customer linked to this lead yet.');
       return;
     }
-    this.openQuoteBuilderForCustomer(customerId);
+    this.openDocumentBuilderForCustomer(customerId, 'quote', it.id);
   }
 
   canCreateInvoiceFromQuote(it: WorkItem, lane: Lane): boolean {
@@ -2929,18 +2930,19 @@ export default class DashboardComponent implements OnDestroy {
   }
 
   vehicleOf(it: WorkItem): string {
+    const document = this.invoicesData.getInvoiceById(workItemDocumentRef(it));
+    if (document?.vehicle && document.vehicle !== 'Vehicle TBD') return document.vehicle;
     const cust = this.customersMap()[it.customerId ?? ''] as any;
-    const parts = [cust?.vehicleYear, cust?.vehicleMake, cust?.vehicleModel]
-      .filter(Boolean)
-      .map((s: string) => s.toString().trim())
-      .filter(Boolean);
-    if (parts.length) return parts.join(' ');
-
+    const matched = customerVehicles(cust).find(vehicle => vehicle.id === it.vehicleId || (!!it.vin && vehicle.vin === it.vin));
     const itemParts = [it.vehicleYear, it.vehicleMake, it.vehicleModel]
       .filter(Boolean)
       .map((s: string | undefined) => String(s || '').trim())
       .filter(Boolean);
     if (itemParts.length) return itemParts.join(' ');
+    if (matched) return vehicleSummary(matched) || (matched.vin ? `VIN ${matched.vin}` : '');
+    if (it.vin) return `VIN ${it.vin}`;
+    const primary = [cust?.vehicleYear, cust?.vehicleMake, cust?.vehicleModel].filter(Boolean).join(' ');
+    if (primary) return primary;
 
     const m = (it.title || '').match(/\(([^)]+)\)/);
     return m?.[1] ?? '';
@@ -2948,7 +2950,8 @@ export default class DashboardComponent implements OnDestroy {
 
   colorOf(it: WorkItem): string {
     const cust = this.customersMap()[it.customerId ?? ''] as any;
-    const col = (cust?.vehicleColor || '').toString().trim();
+    const matched = customerVehicles(cust).find(vehicle => vehicle.id === it.vehicleId || (!!it.vin && vehicle.vin === it.vin));
+    const col = (it.vehicleColor || matched?.vehicleColor || (!it.vehicleId && !it.vin ? cust?.vehicleColor : '') || '').toString().trim();
     if (col) return col;
 
     const m = (it.title || '').match(/\[c=([^\]]+)\]/);
@@ -4531,6 +4534,9 @@ export default class DashboardComponent implements OnDestroy {
       customerId: id
     };
     if (workItemId) queryParams['workItemId'] = workItemId;
+    const workItem = Object.values(this.items()).flat().find(item => item.id === workItemId);
+    const vehicle = customerVehicles(customer).find(vehicle => vehicle.id === workItem?.vehicleId || (!!workItem?.vin && vehicle.vin === workItem.vin));
+    if (vehicle) queryParams['vehicleId'] = vehicle.id;
     if (customer) {
       queryParams['customerName'] = customer.name || '';
       queryParams['customerEmail'] = customer.email || '';

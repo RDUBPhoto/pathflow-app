@@ -36,11 +36,10 @@ function createInMemoryTables(failingTables = new Set()) {
   return { client, tables };
 }
 
-async function runWidgetLead({ failingTables = new Set(), tenantId = "Widget Test Shop", formBody } = {}) {
+async function runWidgetLead({ failingTables = new Set(), tenantId = "Widget Test Shop", formBody, memory = createInMemoryTables(failingTables) } = {}) {
   const originalFromConnectionString = TableClient.fromConnectionString;
   const originalStorageConnection = process.env.STORAGE_CONNECTION_STRING;
   const originalSmsMode = process.env.SMS_MODE;
-  const memory = createInMemoryTables(failingTables);
 
   TableClient.fromConnectionString = (_connectionString, tableName) => memory.client(tableName);
   process.env.STORAGE_CONNECTION_STRING = "UseDevelopmentStorage=true";
@@ -132,4 +131,35 @@ test("a cross-origin form can request a callback without VIN or SMS consent", as
   const lead = [...memory.tables.get("workitems").values()][0];
   assert.equal(lead.message, "Please call about a lift kit.");
   assert.equal(lead.vin, "");
+});
+
+test('a returning website customer gains a second vehicle and the lead points to that vehicle', async () => {
+  const memory = createInMemoryTables();
+  const originalFetch = global.fetch;
+  global.fetch = async () => ({ ok: false });
+  const contact = { name: 'Returning Customer', email: 'returning@example.test', phone: '+15555550123', smsOptIn: false };
+  try {
+    const first = await runWidgetLead({ memory, tenantId: 'returning-shop', formBody: { ...contact,
+      vin: '1FTFW1R60DFA00001', vehicleYear: '2013', vehicleMake: 'Ford', vehicleModel: 'Raptor', message: 'First visit' } });
+    assert.equal(first.context.res.status, 200);
+    const id = first.context.res.body.customerId;
+    const body = { ...contact, vin: '1FMDE5BH0MLA00001', vehicleYear: '2021', vehicleMake: 'Ford', vehicleModel: 'Bronco', message: 'Second vehicle visit' };
+    const second = await runWidgetLead({ memory, tenantId: 'returning-shop', formBody: body });
+    const again = await runWidgetLead({ memory, tenantId: 'returning-shop', formBody: body });
+    assert.equal(second.context.res.status, 200);
+    assert.equal(second.context.res.body.customerCreated, false);
+    assert.equal(second.context.res.body.customerId, id);
+    assert.equal(again.context.res.body.customerId, id);
+    const customer = [...memory.tables.get('customers').values()][0];
+    const vehicles = JSON.parse(customer.vehiclesJson);
+    assert.equal(memory.tables.get('customers').size, 1);
+    assert.equal(vehicles.length, 2);
+    assert.equal(customer.vin, '1FTFW1R60DFA00001');
+    assert.equal(customer.vehicleModel, 'Raptor');
+    assert.equal(vehicles[1].vin, body.vin);
+    const lead = [...memory.tables.get('workitems').values()].find(row => row.vin === body.vin);
+    assert.equal(lead.vehicleId, vehicles[1].id);
+    assert.equal(lead.vehicleModel, 'Bronco');
+    assert.equal([...memory.tables.get('workitems').values()].filter(row => row.vin === body.vin).length, 1);
+  } finally { global.fetch = originalFetch; }
 });

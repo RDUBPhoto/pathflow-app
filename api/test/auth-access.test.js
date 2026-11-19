@@ -312,3 +312,55 @@ test('complimentary access survives an expired trial while revoked users remain 
   rows('useraccess').get('v1|' + email).accessRevoked = true;
   assert.equal((await request('GET', null, headers, { scope: 'me' })).body.profile.accessLocked, true);
 }));
+
+async function dataSession(context) {
+  const { createHash } = require('node:crypto');
+  context.put('authsessions', { partitionKey: 'v1', rowKey: createHash('sha256').update('data-test').digest('hex'),
+    email: 'staff@example.test', expiresAt: new Date(Date.now() + 60000).toISOString() });
+  context.put('useraccess', { partitionKey: 'v1', rowKey: 'staff@example.test', email: 'staff@example.test',
+    status: 'active', rolesJson: '["authenticated","admin"]', locationIdsJson: '["tenant-a"]' });
+  return async (handler, method, body) => {
+    const result = { log: context.log };
+    await handler(result, { method, url: '/api/customers', headers: { cookie: 'pf_session=data-test', 'x-tenant-id': 'tenant-a' }, body, query: {} });
+    return result.res;
+  };
+}
+
+test('customer API saves separate vehicle edits and exposes legacy vehicles without losing the primary', () => fixture(async context => {
+  const invoke = await dataSession(context);
+  const customers = require('../customers');
+  const created = await invoke(customers, 'POST', { name: 'Vehicle Customer', phone: '+15125550100', vehicleYear: '2013', vehicleMake: 'Ford', vehicleModel: 'Raptor' });
+  assert.equal(created.status, 200);
+  const list = await invoke(customers, 'GET');
+  const customer = list.body.find(row => row.id === created.body.id);
+  assert.equal(customer.vehicles.length, 1);
+  const second = { id: 'second-vehicle', vehicleYear: '2021', vehicleMake: 'Jeep', vehicleModel: 'Wrangler' };
+  const updated = await invoke(customers, 'POST', { id: customer.id, vehicles: [...customer.vehicles, second], primaryVehicleId: customer.primaryVehicleId });
+  assert.equal(updated.status, 200);
+  const saved = (await invoke(customers, 'GET')).body.find(row => row.id === customer.id);
+  assert.equal(saved.vehicles.length, 2);
+  assert.equal(saved.vehicleModel, 'Raptor');
+  assert.equal(saved.vehicles[1].vehicleModel, 'Wrangler');
+  await invoke(customers, 'POST', { id: customer.id, vehicles: [saved.vehicles[1]] });
+  const removed = (await invoke(customers, 'GET')).body.find(row => row.id === customer.id);
+  assert.equal(removed.vehicles.length, 1);
+  assert.equal(removed.vehicleModel, 'Wrangler');
+}));
+
+test('a business reset rejects stale document uploads and allows documents from the fresh generation', () => fixture(async context => {
+  const invoke = await dataSession(context);
+  const documents = require('../service-documents');
+  const version = 'fresh-business-generation';
+  context.put('appsettings', { partitionKey: 'tenant-a', rowKey: 'business.dataResetVersion', valueJson: JSON.stringify(version) });
+  const document = { id: 'stale-invoice', documentType: 'invoice', customerName: 'Old browser customer' };
+  const stale = await invoke(documents, 'POST', { id: document.id, document });
+  assert.equal(stale.status, 409);
+  assert.equal(stale.body.code, 'BUSINESS_DATA_RESET');
+  assert.equal(context.rows('servicedocuments').size, 0);
+  const empty = await invoke(documents, 'GET');
+  assert.equal(empty.body.resetVersion, version);
+  assert.deepEqual(empty.body.items, []);
+  const fresh = await invoke(documents, 'POST', { id: document.id, document, resetVersion: version });
+  assert.equal(fresh.status, 200);
+  assert.equal(context.rows('servicedocuments').size, 1);
+}));

@@ -64,6 +64,7 @@ describe('InvoicesDataService', () => {
     const quote = service.createDraftInvoice({
       documentType: 'quote',
       stage: 'accepted',
+      vehicleId: 'second-vehicle', vehicleVin: '1J4FA49S14P123456', vehicle: '2021 Jeep Wrangler',
       customerName: 'QA Customer',
       customerEmail: 'customer@example.com',
       lineItems: [
@@ -82,6 +83,9 @@ describe('InvoicesDataService', () => {
     expect(createdInvoice).not.toBeNull();
     expect(createdInvoice?.documentType).toBe('invoice');
     expect(createdInvoice?.stage).toBe('draft');
+    expect(createdInvoice?.vehicleId).toBe('second-vehicle');
+    expect(createdInvoice?.vehicleVin).toBe('1J4FA49S14P123456');
+    expect(createdInvoice?.vehicle).toBe('2021 Jeep Wrangler');
 
     const refreshedQuote = service.getInvoiceById(quote.id);
     expect(refreshedQuote?.stage).toBe('accepted');

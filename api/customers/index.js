@@ -3,6 +3,7 @@ const { TableClient, isSqlBackendEnabled } = require("../_shared/table-client");
 const { randomUUID } = require("crypto");
 const { resolveTenantId } = require("../_shared/tenant");
 const { requirePrincipal } = require("../_shared/auth");
+const { VEHICLE_FIELDS, readVehicles, updateVehicles, mergeVehicles } = require("../_shared/customer-vehicles");
 
 const TABLE = "customers";
 const NOT_DUPLICATES_TABLE = "customernotduplicates";
@@ -282,6 +283,8 @@ function toCustomerDto(entity) {
   });
   return {
     id: toStr(entity.rowKey),
+    vehicles: readVehicles(entity),
+    primaryVehicleId: toStr(entity.primaryVehicleId) || readVehicles(entity)[0]?.id || "",
     business: toStr(entity.business),
     accountManager: toStr(entity.accountManager),
     creator: toStr(entity.creator),
@@ -730,7 +733,7 @@ function buildMergePatch(targetEntity, sourceEntity, tenantId) {
     patch.createdAt = nextCreated;
   }
 
-  return patch;
+  return { ...patch, ...mergeVehicles(targetEntity, sourceEntity) };
 }
 
 function mergedCustomerName(targetEntity, appliedPatch) {
@@ -1062,6 +1065,7 @@ module.exports = async function (context, req) {
                 createdAt: pick(source, "createdAt") || now,
                 updatedAt: now
               };
+              Object.assign(entity, updateVehicles(entity, source));
               await client.upsertEntity(entity, "Merge");
               existingCustomers.push(toCustomerDto(entity));
               created += 1;
@@ -1134,6 +1138,9 @@ module.exports = async function (context, req) {
               patch.notesHistory = notesHistoryValue;
             }
 
+            if (VEHICLE_FIELDS.some(key => Object.hasOwn(source, key)) || Object.hasOwn(source, "vehicles")) {
+              Object.assign(patch, updateVehicles(existing, source));
+            }
             const keys = Object.keys(patch);
             if (keys.length <= 3) {
               skipped += 1;
@@ -1257,6 +1264,7 @@ module.exports = async function (context, req) {
           createdAt,
           updatedAt: createdAt
         };
+        Object.assign(entity, updateVehicles(entity, b));
         await client.upsertEntity(entity, "Merge");
         context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true, id: rowKey } };
         return;
@@ -1349,7 +1357,9 @@ module.exports = async function (context, req) {
         }
         setIfPresent(patch, b, "createdAt");
         patch.updatedAt = new Date().toISOString();
-
+        if (VEHICLE_FIELDS.some(key => Object.hasOwn(b, key)) || Object.hasOwn(b, "vehicles") || Object.hasOwn(b, "primaryVehicleId")) {
+          Object.assign(patch, updateVehicles(await getCustomerEntity(client, id, tenantId) || { rowKey: id }, b));
+        }
         await client.upsertEntity(patch, "Merge");
         context.res = { status: 200, headers: { "content-type": "application/json" }, body: { ok: true, id } };
         return;
@@ -1359,6 +1369,6 @@ module.exports = async function (context, req) {
     context.res = { status: 405, headers: { "content-type": "application/json" }, body: { error: "Method not allowed" } };
   } catch (err) {
     context.log.error(err);
-    context.res = { status: 500, headers: { "content-type": "application/json" }, body: { error: "Server error", detail: String((err && err.message) || err) } };
+    context.res = { status: err.statusCode === 400 ? 400 : 500, headers: { "content-type": "application/json" }, body: { error: err.statusCode === 400 ? err.message : "Server error", detail: String((err && err.message) || err) } };
   }
 };

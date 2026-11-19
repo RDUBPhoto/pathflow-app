@@ -69,6 +69,8 @@ module.exports = async function (context, req) {
           notes: pick(e.notes),
           customerNote: pick(e.customerNote),
           vin: pick(e.vin),
+          vehicleId: pick(e.vehicleId),
+          vehicleColor: pick(e.vehicleColor),
           vehicleYear: pick(e.vehicleYear),
           vehicleMake: pick(e.vehicleMake),
           vehicleModel: pick(e.vehicleModel),
@@ -119,6 +121,7 @@ module.exports = async function (context, req) {
       const laneId = pick(b.laneId).trim();
       const customerId = pick(b.customerId).trim();
       const vin = Object.prototype.hasOwnProperty.call(b, "vin") ? pick(b.vin).trim() : null;
+      const vehicleId = Object.prototype.hasOwnProperty.call(b, "vehicleId") ? pick(b.vehicleId).trim() : null;
       const vehicleYear = Object.prototype.hasOwnProperty.call(b, "vehicleYear") ? pick(b.vehicleYear).trim() : null;
       const vehicleMake = Object.prototype.hasOwnProperty.call(b, "vehicleMake") ? pick(b.vehicleMake).trim() : null;
       const vehicleModel = Object.prototype.hasOwnProperty.call(b, "vehicleModel") ? pick(b.vehicleModel).trim() : null;
@@ -158,11 +161,12 @@ module.exports = async function (context, req) {
           source: pick(b.source).trim() === "phone" ? "phone" : "",
           leadSource: pick(b.source).trim() === "phone" ? "phone" : "",
           message: pick(b.message).trim().slice(0, 1200),
-          vin: "",
-          vehicleYear: "",
-          vehicleMake: "",
-          vehicleModel: "",
-          vehicleTrim: "",
+          vehicleId: vehicleId || "",
+          vin: vin || "",
+          vehicleYear: vehicleYear || "",
+          vehicleMake: vehicleMake || "",
+          vehicleModel: vehicleModel || "",
+          vehicleTrim: vehicleTrim || "",
           sort: max + 10,
           createdAt: now,
           updatedAt: now,
@@ -207,6 +211,7 @@ module.exports = async function (context, req) {
         if (laneId) patch.laneId = laneId;
         if (customerId) patch.customerId = customerId;
         if (vin !== null) patch.vin = vin;
+        if (vehicleId !== null) patch.vehicleId = vehicleId;
         if (vehicleYear !== null) patch.vehicleYear = vehicleYear;
         if (vehicleMake !== null) patch.vehicleMake = vehicleMake;
         if (vehicleModel !== null) patch.vehicleModel = vehicleModel;

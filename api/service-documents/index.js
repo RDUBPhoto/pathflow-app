@@ -4,6 +4,17 @@ const { resolveTenantId } = require("../_shared/tenant");
 const { resolveStaff } = require("../_shared/staff-access");
 
 const TABLE = "servicedocuments";
+const RESET_KEY = "business.dataResetVersion";
+
+async function dataResetVersion(tenantId) {
+  try {
+    const row = await (await table("appsettings")).getEntity(tenantId, RESET_KEY);
+    return String(JSON.parse(row.valueJson || '""') || "");
+  } catch (error) {
+    if (error.statusCode === 404) return "";
+    throw error;
+  }
+}
 
 function response(status, body) {
   return { status, headers: { "content-type": "application/json", "cache-control": "no-store" }, body };
@@ -116,7 +127,12 @@ module.exports = async function (context, req) {
       return;
     }
     if (req.method === "GET") {
-      context.res = response(200, { items: await listDocuments(tenantId) });
+      context.res = response(200, { items: await listDocuments(tenantId), resetVersion: await dataResetVersion(tenantId) });
+      return;
+    }
+    const resetVersion = await dataResetVersion(tenantId);
+    if (resetVersion && req.body?.resetVersion !== resetVersion) {
+      context.res = response(409, { code: "BUSINESS_DATA_RESET", error: "The business data was reset. Refresh before creating a new document." });
       return;
     }
     const { id, revision, document } = req.body || {};

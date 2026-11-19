@@ -32,6 +32,7 @@ import { TenantContextService } from '../../services/tenant-context.service';
 import { WorkItem, WorkItemsApi, workItemDocumentRef } from '../../services/workitems-api.service';
 import { normalizePhoneToE164 } from '../../utils/phone-format';
 import { environment } from '../../../environments/environment';
+import { CustomerVehicle, customerVehicles, vehicleSummary } from '../../utils/customer-vehicles';
 
 type StatusTone = 'neutral' | 'success' | 'error';
 type WizardStep = 1 | 2 | 3 | 4 | 5;
@@ -114,6 +115,17 @@ export default class InvoicesNewComponent {
   readonly recentLeadCustomers = signal<Customer[]>([]);
   readonly recentLeadsLoading = signal(false);
   readonly selectedCustomer = signal<Customer | null>(null);
+  readonly selectedVehicleId = signal('');
+  readonly availableVehicles = computed(() => customerVehicles(this.selectedCustomer()));
+  private pendingVehicleId = '';
+
+  selectedVehicle(): CustomerVehicle | undefined {
+    return this.availableVehicles().find(vehicle => vehicle.id === this.selectedVehicleId());
+  }
+
+  vehicleOptionLabel(vehicle: CustomerVehicle): string {
+    return [vehicleSummary(vehicle) || 'Vehicle', vehicle.vin].filter(Boolean).join(' · ');
+  }
 
   readonly draftId = signal<string | null>(null);
   readonly draftSavedAt = signal<string>('');
@@ -288,6 +300,7 @@ export default class InvoicesNewComponent {
 
     this.route.queryParamMap.subscribe(params => {
       this.pendingCustomerId = (params.get('customerId') || '').trim();
+      this.pendingVehicleId = (params.get('vehicleId') || '').trim();
       this.sourceWorkItemId = (params.get('workItemId') || '').trim();
       this.documentType.set(this.parseDocumentType(params.get('type')));
       const prefill: CustomerPrefill = {
@@ -348,6 +361,9 @@ export default class InvoicesNewComponent {
   }
 
   selectCustomer(customer: Customer, options?: { syncQuery?: boolean }): void {
+    const vehicles = customerVehicles(customer);
+    const preferred = this.selectedCustomer()?.id === customer.id ? this.selectedVehicleId() : this.pendingVehicleId;
+    this.selectedVehicleId.set(vehicles.find(vehicle => vehicle.id === preferred)?.id || customer.primaryVehicleId || vehicles[0]?.id || '');
     this.selectedCustomer.set(customer);
     if (options?.syncQuery) {
       this.customerQuery.set(this.customerDisplayName(customer));
@@ -812,6 +828,8 @@ export default class InvoicesNewComponent {
       customerPhone: String(customer.phone || customer.mobile || '').trim() || undefined,
       customerAddress: this.customerAddressSummary(customer) || undefined,
       vehicle: this.customerVehicleSummary(customer) || 'Vehicle TBD',
+      vehicleId: this.selectedVehicleId(),
+      vehicleVin: this.selectedVehicle()?.vin || '',
       businessName: String(profile.companyName || '').trim() || 'Your Company',
       businessEmail: String(profile.companyEmail || '').trim() || undefined,
       businessPhone: String(profile.companyPhone || '').trim() || undefined,
@@ -1040,6 +1058,10 @@ export default class InvoicesNewComponent {
 
   customerVehicleSummary(customer: Customer | null | undefined): string {
     if (!customer) return '';
+    if (customer.id === this.selectedCustomer()?.id && this.selectedVehicle()) {
+      const vehicle = this.selectedVehicle();
+      return vehicleSummary(vehicle) || (vehicle?.vin ? `VIN ${vehicle.vin}` : '');
+    }
     return [customer.vehicleYear, customer.vehicleMake, customer.vehicleModel, customer.vehicleTrim]
       .map(value => String(value || '').trim())
       .filter(Boolean)

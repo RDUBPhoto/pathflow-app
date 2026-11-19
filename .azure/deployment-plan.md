@@ -1,8 +1,147 @@
 # Azure Deployment Plan
 
-> **Status:** Validated — invitation delivery and 72-hour setup-link release to the existing production app.
+> **Status:** Vehicle support validated locally; production release and authorized business-data reset pending.
 
 ## Current rollout scope
+
+### Multiple vehicles and production fresh start authorized on 2026-11-19
+
+- The user explicitly requested preserving a returning website customer's existing vehicle,
+  adding the new vehicle separately with profile tabs, and clearing production customers,
+  invoices, quotes and related business activity after deploying the fix.
+- Preserve all staff accounts, passwords, passkeys, sessions, business settings, SMS routing,
+  gateway credentials, lanes, inventory/catalog/stock, vendors, connectors and templates.
+  Clear only the explicit customer/workflow table allowlist in the existing SQL catalog,
+  including historical imported partitions. No schema, infrastructure or provider transactions
+  are deleted or modified. Inventory quantities remain unchanged.
+- Vehicle collections migrate legacy vehicle fields on read. The primary vehicle remains a
+  backward-compatible projection. Website intake adds/reuses a matching vehicle without
+  overwriting the old one. Each lead and document carries the selected vehicle ID and snapshot.
+  Profile tabs support independent editing, adding, removal and primary selection, and stale
+  VIN lookups cannot overwrite a different selected vehicle. Quotes preserve their selected
+  vehicle when converted into invoices.
+- Reset protection adds a tenant-specific data generation marker to document synchronization.
+  Old browser caches are discarded after reset; outdated clients cannot upload cleared drafts.
+  Server collections also remove cached documents that are no longer present.
+- Local validation: production build passed; Angular 51/51, API 113 passed with one existing
+  environment-dependent skip. The production HTTPS browser suite covers returning-customer
+  vehicle intake, correct dashboard/quote selection, separate vehicle tab edits, adding/removing
+  vehicles, and discarding cached documents after a business reset, alongside the ten existing
+  authentication/invitation checks. Final run and CI proof to follow.
+- Reset preflight discovered 5,208 customers and older transactional/import/test records.
+  Prepare a private verified compressed recovery backup, then acquire a serializable SQL lock,
+  recheck the sole registered tenant, delete only the allowlisted transaction rows, set the
+  cache reset marker and verify protected entity fingerprints unchanged before committing.
+  Abort/roll back if scope, backup verification or preservation checks fail.
+- Release through the existing GitHub regression/deployment gate to the existing Standard
+  Static Web App and managed Functions. No Azure resource, SKU, role, subscription or spending
+  change. Verify the hosted vehicle journey before the reset, then empty APIs and UI afterwards.
+
+
+### Exodus production SMS verified on 2026-11-19
+
+- Reused the existing production business `pathflow-app`, as confirmed by the user. The workspace
+  and business display name are now Exodus 4x4; the internal tenant ID and existing records remain.
+- Assigned existing Azure number `+18338978049` to this tenant and corrected the global phone
+  lookup that previously pointed to unregistered legacy partition `primary-location`.
+- Copied ACS credentials securely from the existing Azure resource into production settings and
+  enabled `SMS_MODE=azure`. No global sender fallback was enabled. The development app remains
+  isolated in mock mode. All unrelated hosted settings were read back and confirmed unchanged.
+- The existing Event Grid subscription still delivers SMS received and SMS delivery report events
+  to the production SMS endpoint. Added a random shared secret as a secret static
+  `x-pathflow-sms-key` delivery header and matching hosted `SMS_WEBHOOK_KEY`. Azure reports
+  successful provisioning and secret storage. Requests without webhook authentication return 401.
+  The CLI update required restating the existing HTTPS endpoint when adding a delivery header.
+- Detected one simulated response from a warm pre-change worker during settings propagation.
+  It was not treated as live delivery. Removed only that exact simulated QA record, confirmed
+  live Azure status across fresh requests, and sent one actual carrier test message.
+- Real SMS gateway message `1b81b21c-22c3-406c-9cb2-811bc3226c10` was accepted without simulation and its
+  authenticated delivery report recorded Delivered, with Azure detail 2000 Message Delivered
+  Successfully. The user independently confirmed receiving the message on their supplied phone.
+- The user's real reply SMS Ready arrived in the Exodus production partition, matched the existing
+  Robert customer conversation, and was confirmed at `2026-11-19T14:59:06.419Z`.
+- Hosted browser verification confirmed the sender number and label, azure mode and live-ready
+  status. The actual outgoing test and incoming reply are visible together in Messages Hub.
+  UI verification completed at `2026-11-19T15:00:04.816Z`.
+- Removed the temporary tenant-scoped verification account and its sessions, with account deletion
+  read back, at `2026-11-19T15:00:41.987Z`. Kept the genuine test SMS and user reply in the existing
+  customer conversation. Hosted ping and database readiness remain healthy.
+- No source code, dependency, Azure role, resource count, SKU or recurring number purchase changed.
+  All five focused SMS handler and SDK tests passed. The existing deployed application was used.
+- Automatic number assignment on future business signup is a follow-up. It needs dedicated-number
+  reservation or acquisition, idempotent tenant assignment, approval tracking and status handling.
+  Existing ACS customer resources with phone numbers can acquire numbers during the transition,
+  but Microsoft has announced ACS SMS and direct number management retirement on September 30,
+  2028. Keep provider choice separate from onboarding before implementing automatic purchases.
+  References: https://learn.microsoft.com/en-us/azure/communication-services/acs-retirement-and-breaking-changes-guide#acs-sms
+  and https://learn.microsoft.com/en-us/azure/communication-services/quickstarts/telephony/get-phone-number.
+
+### Exodus production SMS configuration authorized on 2026-11-19
+
+The user authorized using the existing `pathflow-app` production business for Exodus 4x4 and
+testing SMS delivery to their supplied mobile number. Reuse the existing Communication Services
+resource `acs-pathflow-dev-us` and purchased number `+18338978049` in the approved Pathflow
+subscription and resource group. No new number, resource, SKU or recurring commitment is requested.
+
+- Current production SMS mode and ACS credentials are unset. Current development settings use
+  isolated mock messaging. Azure confirms the purchased toll-free number supports inbound and
+  outbound SMS. The existing Event Grid subscription routes both SMS received and delivery reports
+  to `https://www.pathflow-app.com/api/sms` and is provisioned successfully.
+- A stale sender lookup points to the unregistered legacy `primary-location` partition. Assign
+  the number specifically to `pathflow-app` and correct the phone-to-tenant lookup. Keep the
+  internal tenant ID and existing business records. Name this business Exodus 4x4 for SMS branding.
+- Copy the existing ACS credentials securely into hosted app settings, enable Azure SMS and
+  configure a random shared webhook secret. Add the matching secret header to the existing
+  Event Grid subscription. Preserve other application settings and event subscription behavior.
+  Keep the sender number tenant-specific; no shared global sender fallback is enabled.
+- Preflight validation: current application source is the tested deployed invitation release.
+  Verify focused SMS handler/SDK tests, Azure number ownership and capabilities, live app/API/SQL
+  health and the exact tenant/sender records before applying configuration. This change introduces
+  no Azure role assignments or application code changes.
+- Validation proof on 2026-11-19: all five focused SMS webhook/SDK tests passed. Hosted JSON
+  health checks passed (`/api/ping` 369 ms, `/api/ready` 82 ms, SQL ready). Azure CLI confirmed
+  existing number ownership and two-way capabilities, an active event subscription with both
+  required SMS event types, and the exact stale sender lookup. Production SQL tenant routing is
+  disabled, so sender and phone lookup records currently reside in the production catalog.
+  The user confirmed reusing the existing business and supplied the test recipient number.
+  All configuration preflight checks passed; no build, dependency, infrastructure or RBAC changes
+  are required for this configuration-only rollout. Azure validation records Validated status.
+- Verify hosted config, one real SMS to the user, carrier delivery report persistence, and incoming
+  reply routing if the user replies. Remove the temporary verification login and sessions.
+- Future signup automation is a subsequent implementation: reserve or acquire a dedicated number,
+  persist a unique tenant mapping, track verification and enable messaging after approval. Current
+  Azure documentation also announces ACS SMS and direct number management retirement on September
+  30, 2028; keep provider selection and number assignment separate when implementing that workflow.
+
+### Production invitation verification completed on 2026-11-19
+
+- Deployed commit `110e255fd79af6c6dec89bb8d89fc3163dbd1eff` through successful release
+  https://github.com/RDUBPhoto/pathflow-app/actions/runs/44543330887. The standalone regression
+  run https://github.com/RDUBPhoto/pathflow-app/actions/runs/44543331355 also passed.
+- Cloud gate passed 105 API tests, 51 Angular tests, two startup browser tests, 10 secure
+  production-build authentication browser tests, 25 shop browser tests and the isolated API
+  integration. Both dependency audits, build, deploy verifier and clean package checks passed.
+- Hosted frontend matched the tested CI artifact, SHA256
+  `f25399148b6629ffa36c2ed5c6e8cd22c5ae74b910a12981bab6c31bf514d55f`.
+  Hosted ping passed in 345 ms and SQL readiness in 123 ms.
+- Used the hosted Add User UI with a temporary tenant-scoped QA admin. SendGrid accepted the
+  invitation; the UI showed the saved Invited user, three-day expiry and Resend invite.
+- Verified actual delivery to the connected Gmail inbox at `2026-11-19T14:30:28+00:00`.
+  Read the received email, followed its genuine SendGrid-tracked link and confirmed it resolved
+  to the production password setup page. The email states the 72-hour expiry.
+- SQL read-back confirmed the persisted invitation purpose and 72-hour expiry
+  (expires `2026-11-22T14:30:27.914Z`). Password setup activated and verified the
+  test user. The hosted admin list changed from Invited/Resend invite to Active/Reset password.
+- The new user signed in with its selected password, received a Secure/HttpOnly/SameSite=Lax
+  session cookie and remained signed in after reload. Its access was limited to the invited
+  tenant; unassigned-tenant API requests returned 403. Replaying the consumed email token returned
+  400 invalid/expired. Verification completed at `2026-11-19T14:31:45.921Z`.
+- Deleted both exact temporary QA identities, their sessions and password setup tokens
+  (7 records). Account deletion was confirmed by read-back; cleanup completed
+  at `2026-11-19T14:32:13.749Z`. Existing staff accounts and passwords were not modified.
+- The new 72-hour expiry applies to newly issued or resent invitations. Ordinary password resets
+  retain one-hour expiry. Historical tokens are not extended. No infrastructure, RBAC, billing,
+  payment configuration or resource-cost changes were made.
 
 ### Invitation delivery release validated on 2026-11-19
 

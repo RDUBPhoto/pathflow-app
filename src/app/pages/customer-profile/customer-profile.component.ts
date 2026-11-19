@@ -23,6 +23,7 @@ import { CompanySwitcherComponent } from '../../components/header/company-switch
 import { formatLocalDateTime, toLocalDateTimeInput, toLocalDateTimeStorage } from '../../utils/datetime-local';
 import { formatUsPhoneInput, normalizePhoneToE164 } from '../../utils/phone-format';
 import { environment } from '../../../environments/environment';
+import { CustomerVehicle, VEHICLE_FIELDS, customerVehicles, vehicleSummary } from '../../utils/customer-vehicles';
 
 type CustomerTab = 'vehicle' | 'schedule' | 'invoices' | 'sms' | 'email';
 type CustomerMobileTab = 'profile' | CustomerTab;
@@ -145,6 +146,60 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   readonly isMobileLayout = signal(false);
   readonly mobileTab = signal<CustomerMobileTab>('profile');
   readonly heroMenuOpen = signal(false);
+  readonly vehicleDrafts = signal<CustomerVehicle[]>([]);
+  readonly selectedVehicleId = signal('');
+  readonly primaryVehicleId = signal('');
+  private vinRequestVersion = 0;
+
+  vehicleTabLabel(vehicle: CustomerVehicle): string {
+    const current = vehicle.id === this.selectedVehicleId() ? this.currentVehicleDraft() : vehicle;
+    return vehicleSummary(current) || (current.vin ? `VIN ${current.vin}` : 'New vehicle');
+  }
+
+  private currentVehicleDraft(): CustomerVehicle {
+    return { id: this.selectedVehicleId(), ...Object.fromEntries(VEHICLE_FIELDS.map(key => [key, this[key].trim()])) };
+  }
+
+  private currentVehicles(): CustomerVehicle[] {
+    const current = this.currentVehicleDraft();
+    return this.vehicleDrafts().map(vehicle => vehicle.id === current.id ? current : vehicle)
+      .filter(vehicle => VEHICLE_FIELDS.some(key => !!vehicle[key]?.trim()));
+  }
+
+  private applyVehicleDraft(vehicle: CustomerVehicle): void {
+    this.vinRequestVersion++;
+    this.selectedVehicleId.set(vehicle.id);
+    for (const key of VEHICLE_FIELDS) this[key] = vehicle[key] || '';
+    this.vinStatus = '';
+    this.vinDecoded.set({});
+    this.vinDecodeLoading.set(false);
+    this.vinDecodeLockedFor = '';
+  }
+
+  selectVehicle(id: string): void {
+    if (id === this.selectedVehicleId()) return;
+    const current = this.currentVehicleDraft();
+    this.vehicleDrafts.update(list => list.map(vehicle => vehicle.id === current.id ? current : vehicle));
+    const vehicle = this.vehicleDrafts().find(item => item.id === id);
+    if (vehicle) this.applyVehicleDraft(vehicle);
+  }
+
+  addVehicle(): void {
+    if (!this.hasVehicleData()) {
+      this.status.set('Enter the current vehicle details before adding another vehicle.');
+      return;
+    }
+    const current = this.currentVehicleDraft();
+    this.vehicleDrafts.update(list => list.map(vehicle => vehicle.id === current.id ? current : vehicle));
+    const vehicle = { id: crypto.randomUUID() };
+    this.vehicleDrafts.update(list => [...list, vehicle]);
+    this.applyVehicleDraft(vehicle);
+    this.status.set('Add the vehicle details, then save the customer.');
+  }
+
+  makeVehiclePrimary(): void {
+    this.primaryVehicleId.set(this.selectedVehicleId());
+  }
 
   firstName = '';
   lastName = '';
@@ -621,8 +676,8 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
       return;
     }
 
-    if (!first || !last) {
-      this.error.set('First and last name are required.');
+    if (!first) {
+      this.error.set('A customer name is required.');
       return;
     }
 
@@ -636,7 +691,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     }
 
     if (!this.isEmailValid()) {
-      this.error.set('A valid email address is required.');
+      this.error.set('Enter a valid email address, or leave it blank.');
       return;
     }
     if (!this.isSecondaryEmailValid()) {
@@ -654,7 +709,19 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
       return;
     }
 
+    const vehicles = this.currentVehicles();
+    const vins = vehicles.map(vehicle => String(vehicle.vin || '').trim().toUpperCase()).filter(Boolean);
+    if (new Set(vins).size !== vins.length) {
+      this.error.set('This VIN is already on another vehicle tab. Update the existing vehicle instead.');
+      return;
+    }
+    if (vehicles.some(vehicle => vehicle.vehicleYear && !/^\d{4}$/.test(vehicle.vehicleYear))) {
+      this.error.set('Each vehicle year must be a 4-digit value.');
+      return;
+    }
     const payload: Omit<Customer, 'id'> & { id?: string } = {
+      vehicles,
+      primaryVehicleId: this.primaryVehicleId() || vehicles[0]?.id || '',
       id: this.customerId() || undefined,
       name: `${first} ${last}`.trim(),
       firstName: first,
@@ -779,6 +846,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     this.router.navigate(['/invoices/new'], {
       queryParams: {
         customerId,
+        vehicleId: this.selectedVehicleId(),
         customerName: this.displayName() || null,
         customerEmail: this.email.trim() || null,
         customerPhone: this.phone.trim() || null,
@@ -829,12 +897,17 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   }
 
   confirmRemoveVehicle(): void {
-    if (!this.hasVehicleData()) return;
+    if (!this.hasVehicleData() && this.vehicleDrafts().length <= 1) return;
     const confirmed = window.confirm(
       'Remove this vehicle from the customer profile? This clears VIN, decoded data, and wheel/tire fitment.'
     );
     if (!confirmed) return;
-    this.clearVehicleData();
+    const removedId = this.selectedVehicleId();
+    const remaining = this.vehicleDrafts().filter(vehicle => vehicle.id !== removedId);
+    if (this.primaryVehicleId() === removedId) this.primaryVehicleId.set(remaining[0]?.id || '');
+    const next = remaining[0] || { id: crypto.randomUUID() };
+    this.vehicleDrafts.set(remaining.length ? remaining : [next]);
+    this.applyVehicleDraft(next);
     this.status.set('Vehicle removed. Click Save Customer to keep this change.');
     this.error.set('');
   }
@@ -851,8 +924,10 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     const hydrateFitmentFields = options?.hydrateFitmentFields ?? !silent;
     const lockUntilInputChange = options?.lockUntilInputChange !== false;
     const onSettled = options?.onSettled;
+    const requestVersion = ++this.vinRequestVersion;
     let settled = false;
     const settle = () => {
+      if (requestVersion !== this.vinRequestVersion) return;
       if (settled) return;
       settled = true;
       if (!silent) {
@@ -894,6 +969,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     const url = `https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValuesExtended/${encodeURIComponent(vin)}?format=json`;
     this.http.get<any>(url).subscribe({
       next: res => {
+        if (requestVersion !== this.vinRequestVersion) return;
         const result = res?.Results?.[0] || {};
         const make = this.cleanVinValue(result.Make);
         const model = this.cleanVinValue(result.Model);
@@ -986,10 +1062,12 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
           details,
           silent,
           applyToForm: hydrateFitmentFields,
+          requestVersion,
           onSettled: settle
         });
       },
       error: () => {
+        if (requestVersion !== this.vinRequestVersion) return;
         this.vinDecoded.set({});
         if (!silent) {
           this.clearFitmentFields();
@@ -1031,6 +1109,8 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   }
 
   private async scanVinFromPhoto(file: File): Promise<void> {
+    const vehicleId = this.selectedVehicleId();
+    const requestVersion = this.vinRequestVersion;
     this.vinPhotoOcrLoading = true;
     this.status.set('');
     this.error.set('');
@@ -1040,6 +1120,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
       const res = await firstValueFrom(
         this.http.post<{ ok?: boolean; vin?: string; error?: string }>('/api/vin-ocr', { imageBase64 })
       );
+      if (vehicleId !== this.selectedVehicleId() || requestVersion !== this.vinRequestVersion) return;
       const vin = String(res?.vin || '').trim().toUpperCase();
       if (!vin) {
         this.vinStatus = 'Could not find a valid 17-character VIN in the photo.';
@@ -1750,7 +1831,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
 
   isEmailValid(): boolean {
     const value = this.email.trim();
-    return !!value && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+    return !value || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
   }
 
   isSecondaryEmailValid(): boolean {
@@ -1786,7 +1867,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
       this.isSecondaryPhoneValid() &&
       this.isSecondaryEmailValid() &&
       this.isAddressValid() &&
-      !!this.firstName.trim() && !!this.lastName.trim();
+      !!this.firstName.trim();
   }
 
   canSubmitSms(): boolean {
@@ -2023,6 +2104,12 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     this.frontRimSize = customer.frontRimSize || '';
     this.rearRimSize = customer.rearRimSize || '';
     this.vehicleColor = customer.vehicleColor || '';
+    const vehicles = customerVehicles(customer);
+    const preferred = this.route.snapshot.queryParamMap.get('vehicleId') || this.selectedVehicleId() || customer.primaryVehicleId;
+    const selected = vehicles.find(vehicle => vehicle.id === preferred) || vehicles[0] || { id: crypto.randomUUID() };
+    this.vehicleDrafts.set(vehicles.length ? vehicles : [selected]);
+    this.primaryVehicleId.set(customer.primaryVehicleId || vehicles[0]?.id || '');
+    this.applyVehicleDraft(selected);
     this.vinStatus = '';
     this.vinDecoded.set({});
     this.addressSuggestions.set([]);
@@ -2038,12 +2125,15 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
         hydrateVehicleFields: false,
         hydrateFitmentFields: false,
         lockUntilInputChange: false,
-        onSettled: () => this.captureInitialSnapshot()
       });
     }
   }
 
   private resetForm(): void {
+    const vehicle = { id: crypto.randomUUID() };
+    this.vehicleDrafts.set([vehicle]);
+    this.primaryVehicleId.set('');
+    this.applyVehicleDraft(vehicle);
     this.firstName = '';
     this.lastName = '';
     this.phone = '';
@@ -2576,6 +2666,8 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
       this.captureInitialSnapshot();
       return savedId;
     }
+    this.vehicleDrafts.set(payload.vehicles || this.currentVehicles());
+    this.primaryVehicleId.set(payload.primaryVehicleId || payload.vehicles?.[0]?.id || '');
     this.captureInitialSnapshot();
     return savedId;
   }
@@ -2713,6 +2805,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
     details: Record<string, string>;
     silent: boolean;
     applyToForm: boolean;
+    requestVersion: number;
     onSettled?: () => void;
   }): void {
     const query = new URLSearchParams();
@@ -2724,6 +2817,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
 
     this.http.get<FitmentLookupResponse>(`/api/fitment?${query.toString()}`).subscribe({
       next: res => {
+        if (params.requestVersion !== this.vinRequestVersion) return;
         if (params.applyToForm) {
           this.applyFitmentFromLookup(res);
         }
@@ -2749,6 +2843,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
         params.onSettled?.();
       },
       error: () => {
+        if (params.requestVersion !== this.vinRequestVersion) return;
         this.vinStatus = params.silent
           ? ''
           : 'VIN decoded. Fitment lookup unavailable (check Wheel-Size API key).';
@@ -2968,6 +3063,8 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
 
   private buildCustomerSnapshot(): string {
     return JSON.stringify({
+      vehicles: this.currentVehicles(),
+      primaryVehicleId: this.primaryVehicleId(),
       firstName: this.firstName.trim(),
       lastName: this.lastName.trim(),
       phone: this.phone.trim(),
@@ -2977,29 +3074,6 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
       address: this.toStoredAddress(this.address),
       notes: this.notes.trim(),
       notesHistory: this.notesHistoryPayload(),
-      vin: this.vin.trim(),
-      vehicleMake: this.vehicleMake.trim(),
-      vehicleModel: this.vehicleModel.trim(),
-      vehicleYear: this.vehicleYear.trim(),
-      vehicleTrim: this.vehicleTrim.trim(),
-      vehicleDoors: this.vehicleDoors.trim(),
-      bedLength: this.bedLength.trim(),
-      cabType: this.cabType.trim(),
-      engineModel: this.engineModel.trim(),
-      engineCylinders: this.engineCylinders.trim(),
-      transmissionStyle: this.transmissionStyle.trim(),
-      boltPattern: this.boltPattern.trim(),
-      rearBoltPattern: this.rearBoltPattern.trim(),
-      pcd: this.pcd.trim(),
-      rearPcd: this.rearPcd.trim(),
-      centreBore: this.centreBore.trim(),
-      wheelFasteners: this.wheelFasteners.trim(),
-      wheelTorque: this.wheelTorque.trim(),
-      frontTireSize: this.frontTireSize.trim(),
-      rearTireSize: this.rearTireSize.trim(),
-      frontRimSize: this.frontRimSize.trim(),
-      rearRimSize: this.rearRimSize.trim(),
-      vehicleColor: this.vehicleColor.trim()
     });
   }
 

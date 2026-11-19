@@ -22,6 +22,8 @@ export type WorkItem = {
   notes?: string;
   customerNote?: string;
   vin?: string;
+  vehicleId?: string;
+  vehicleColor?: string;
   vehicleYear?: string;
   vehicleMake?: string;
   vehicleModel?: string;

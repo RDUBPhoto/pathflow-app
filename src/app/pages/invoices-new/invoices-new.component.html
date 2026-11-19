@@ -91,6 +91,14 @@
               </button>
             }
           </div>
+          @if (hasSelectedCustomer() && availableVehicles().length) {
+            <label class="field-label mt-3" for="document-vehicle">Vehicle for this {{ documentLabelLower() }}</label>
+            <select id="document-vehicle" class="form-select" [ngModel]="selectedVehicleId()" (ngModelChange)="selectedVehicleId.set($event)">
+              @for (vehicle of availableVehicles(); track vehicle.id) {
+                <option [value]="vehicle.id">{{ vehicleOptionLabel(vehicle) }}</option>
+              }
+            </select>
+          }
         </section>
       }
 

@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, concatMap, from, map, of, reduce, timeout } from 'rxjs';
+import { CustomerVehicle } from '../utils/customer-vehicles';
 
 export type Customer = {
   id: string;
@@ -37,6 +38,8 @@ export type Customer = {
   tags?: string;
   contactTags?: string;
   vin?: string;
+  vehicles?: CustomerVehicle[];
+  primaryVehicleId?: string;
   vehicleMake?: string;
   vehicleModel?: string;
   vehicleYear?: string;

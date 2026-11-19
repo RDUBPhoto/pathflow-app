@@ -15,6 +15,7 @@ const SETTINGS_TABLE = "appsettings";
 const BUSINESS_PROFILE_KEY = "business.profile";
 const USERS_PARTITION = "v1";
 const SENDER_TABLE = "smssenders";
+const { VEHICLE_FIELDS, readVehicles, appendVehicle } = require("../_shared/customer-vehicles");
 const SENDER_DEFAULT_ROW_KEY = "default";
 const AUTO_CREATED_CREATOR = "Auto-Created Lead";
 const DUPLICATE_REASON_WEIGHTS = Object.freeze({
@@ -368,6 +369,9 @@ async function ensureLeadsLane(lanesClient, tenantId) {
 
 function customerFromEntity(entity) {
   return {
+    ...Object.fromEntries(VEHICLE_FIELDS.map(key => [key, asString(entity[key])])),
+    vehiclesJson: entity.vehiclesJson,
+    primaryVehicleId: entity.primaryVehicleId,
     id: asString(entity.rowKey),
     name: asString(entity.name),
     firstName: asString(entity.firstName),
@@ -398,7 +402,7 @@ async function findMatchingCustomer(customersClient, inbound, tenantId) {
     let score = 0;
     const reasons = [];
 
-    if (targetVin && normalizeVin(current.vin) === targetVin) {
+    if (targetVin && readVehicles(current).some(vehicle => normalizeVin(vehicle.vin) === targetVin)) {
       score += DUPLICATE_REASON_WEIGHTS.vin;
       reasons.push("vin");
     }
@@ -538,10 +542,14 @@ async function createCustomer(customersClient, inbound, tenantId) {
     updatedAt: now
   };
   applyConsentFields(entity, inbound, now, initialConsentStatus(inbound));
+  const added = appendVehicle({}, inbound);
+  Object.assign(entity, added.patch);
+  inbound.vehicleId = added.vehicle?.id || "";
 
   await customersClient.upsertEntity(entity, "Merge");
 
   return {
+    ...entity,
     id,
     name: fullName,
     firstName: names.firstName,
@@ -574,11 +582,9 @@ async function updateCustomerFromInbound(customersClient, customer, inbound, ten
   if (!asString(customer.phone) && asString(inbound.phoneE164 || inbound.phone)) {
     patch.phone = asString(inbound.phoneE164 || inbound.phone);
   }
-  if (!asString(customer.vin) && asString(inbound.vin)) patch.vin = asString(inbound.vin);
-  if (!asString(customer.vehicleYear) && asString(inbound.vehicleYear)) patch.vehicleYear = asString(inbound.vehicleYear);
-  if (!asString(customer.vehicleMake) && asString(inbound.vehicleMake)) patch.vehicleMake = asString(inbound.vehicleMake);
-  if (!asString(customer.vehicleModel) && asString(inbound.vehicleModel)) patch.vehicleModel = asString(inbound.vehicleModel);
-  if (!asString(customer.vehicleTrim) && asString(inbound.vehicleTrim)) patch.vehicleTrim = asString(inbound.vehicleTrim);
+  const added = appendVehicle(customer, inbound);
+  Object.assign(patch, added.patch);
+  inbound.vehicleId = added.vehicle?.id || "";
   if (!asString(customer.creator)) patch.creator = AUTO_CREATED_CREATOR;
 
   const nextNotes = mergeNotes(customer.notes, inbound.message, inbound.sourceName);
@@ -593,6 +599,7 @@ async function updateCustomerFromInbound(customersClient, customer, inbound, ten
   }
 
   await customersClient.upsertEntity(patch, "Merge");
+  return { ...customer, ...patch };
 }
 
 async function setCustomerConsentStatus(customersClient, tenantId, customerId, status, extra = {}) {
@@ -758,6 +765,9 @@ async function findExistingLeadForCustomer(workItemsClient, laneId, customerId, 
 
   let latest = null;
   for await (const entity of iter) {
+    if (inbound.vehicleId && entity.vehicleId && inbound.vehicleId !== entity.vehicleId) continue;
+    if (!inbound.vin && (inbound.vehicleMake || inbound.vehicleModel) &&
+      ["vehicleYear", "vehicleMake", "vehicleModel"].some(key => asString(entity[key]).toLowerCase() !== asString(inbound[key]).toLowerCase())) continue;
     if (asString(entity.source) !== "web" || asString(entity.message) !== asString(inbound.message) ||
         asString(entity.vin) !== asString(inbound.vin)) continue;
     const createdAt = asString(entity.createdAt);
@@ -810,6 +820,7 @@ async function createLead(workItemsClient, laneId, inbound, customer, tenantId) 
       laneId,
       title: buildLeadTitle(customer, inbound),
       customerId: customer.id,
+      vehicleId: asString(inbound.vehicleId),
       customerName: customer.name,
       sort,
       source: "web",
@@ -850,6 +861,7 @@ async function touchLead(workItemsClient, id, inbound, tenantId, laneId, custome
       updatedAt: new Date().toISOString(),
       title: buildLeadTitle(customer, inbound),
       customerId: asString(customer && customer.id),
+      vehicleId: asString(inbound.vehicleId),
       customerName: asString(customer && customer.name),
       source: "web",
       leadSource: "web",
@@ -1092,6 +1104,10 @@ function inboundFromBody(req, body) {
     phone: normalizeE164(phone) || phone,
     phoneE164: normalizeE164(phone),
     vin,
+    vehicleYear: asString(body.vehicleYear || body.year),
+    vehicleMake: asString(body.vehicleMake || body.make),
+    vehicleModel: asString(body.vehicleModel || body.model),
+    vehicleTrim: asString(body.vehicleTrim || body.trim),
     message,
     sourceName,
     smsOptInProvided,
@@ -1164,10 +1180,10 @@ module.exports = async function (context, req) {
 
   if (inbound.vin) {
     const vinDetails = await decodeVinDetails(inbound.vin);
-    inbound.vehicleYear = vinDetails.vehicleYear;
-    inbound.vehicleMake = vinDetails.vehicleMake;
-    inbound.vehicleModel = vinDetails.vehicleModel;
-    inbound.vehicleTrim = vinDetails.vehicleTrim;
+    inbound.vehicleYear = vinDetails.vehicleYear || inbound.vehicleYear;
+    inbound.vehicleMake = vinDetails.vehicleMake || inbound.vehicleMake;
+    inbound.vehicleModel = vinDetails.vehicleModel || inbound.vehicleModel;
+    inbound.vehicleTrim = vinDetails.vehicleTrim || inbound.vehicleTrim;
   }
 
   try {
@@ -1191,7 +1207,7 @@ module.exports = async function (context, req) {
     if (match && match.customer && forceReuse) {
       customer = match.customer;
       matchedBy = match.reasons;
-      await updateCustomerFromInbound(customersClient, match.customer, inbound, tenantId);
+      customer = await updateCustomerFromInbound(customersClient, match.customer, inbound, tenantId);
     } else {
       customer = await createCustomer(customersClient, inbound, tenantId);
       customerCreated = true;

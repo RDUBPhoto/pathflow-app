@@ -9,8 +9,6 @@ import { AppNotification, NotificationsApiService } from '../../../services/noti
 import { ThemeService } from '../../../services/theme.service';
 import { AdminSetupProgressService } from '../../../services/admin-setup-progress.service';
 
-const NOTIFICATION_OPENED_HINTS_KEY = 'pathflow.notifications.opened.v1';
-const NOTIFICATION_ACK_STATE_KEY = 'pathflow.notifications.ack.v1';
 
 @Component({
   selector: 'app-user-menu',
@@ -43,7 +41,6 @@ export class UserMenuComponent implements OnInit, OnDestroy {
   readonly notificationItems = signal<AppNotification[]>([]);
   readonly notificationsTotal = signal(0);
   readonly unreadNotifications = signal(0);
-  readonly unreadCounterAcknowledged = signal(false);
   readonly showAllNotifications = signal(false);
   readonly loadingMoreNotifications = signal(false);
   readonly hasMoreAllNotifications = signal(false);
@@ -57,7 +54,7 @@ export class UserMenuComponent implements OnInit, OnDestroy {
     return String(count);
   });
   readonly showUnreadCounter = computed(() =>
-    this.unreadNotifications() > 0 && !this.unreadCounterAcknowledged()
+    this.unreadNotifications() > 0
   );
   readonly notificationAriaLabel = computed(() => {
     const unread = this.unreadNotifications();
@@ -70,8 +67,7 @@ export class UserMenuComponent implements OnInit, OnDestroy {
   private readonly recentLimit = 3;
   private readonly allPageSize = 50;
   private allOffset = 0;
-  private acknowledgedUnreadIds = new Set<string>();
-  private acknowledgedUnreadCount = 0;
+  private notificationLoadVersion = 0;
   private readonly handleNotificationsRefresh = () => {
     this.refreshNotifications(false);
   };
@@ -129,6 +125,7 @@ export class UserMenuComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.notificationLoadVersion++;
     if (this.refreshTimer) {
       clearInterval(this.refreshTimer);
       this.refreshTimer = null;
@@ -159,7 +156,6 @@ export class UserMenuComponent implements OnInit, OnDestroy {
       this.showAllNotifications.set(false);
       return;
     }
-    this.acknowledgeCurrentUnread();
 
     if (this.showAllNotifications()) {
       this.loadAllNotifications(false);
@@ -221,7 +217,6 @@ export class UserMenuComponent implements OnInit, OnDestroy {
           items.map(item => ({ ...item, read: true, readAt: item.readAt || new Date().toISOString() }))
         );
         this.unreadNotifications.set(0);
-        this.syncUnreadCounterState(this.notificationItems(), 0);
       },
       error: () => {
         this.notificationsError.set('Could not mark notifications as read.');
@@ -252,7 +247,6 @@ export class UserMenuComponent implements OnInit, OnDestroy {
         );
         const nextUnread = Math.max(0, this.unreadNotifications() - 1);
         this.unreadNotifications.set(nextUnread);
-        this.syncUnreadCounterState(this.notificationItems(), nextUnread);
         navigate();
       },
       error: () => {
@@ -275,11 +269,7 @@ export class UserMenuComponent implements OnInit, OnDestroy {
   }
 
   isNotificationUnread(notification: AppNotification): boolean {
-    if (!notification || notification.read) return false;
-    if (!this.unreadCounterAcknowledged()) return true;
-    const id = String(notification.id || '').trim();
-    if (!id) return false;
-    return !this.acknowledgedUnreadIds.has(id);
+    return !!notification && !notification.read;
   }
 
   onAvatarError(): void {
@@ -328,6 +318,7 @@ export class UserMenuComponent implements OnInit, OnDestroy {
   }
 
   private loadRecentNotifications(background: boolean): void {
+    const version = ++this.notificationLoadVersion;
     if (!background) {
       this.notificationsLoading.set(true);
       this.notificationsError.set('');
@@ -335,17 +326,18 @@ export class UserMenuComponent implements OnInit, OnDestroy {
 
     this.notificationsApi.listRecent(this.recentLimit).subscribe({
       next: res => {
+        if (version !== this.notificationLoadVersion) return;
         this.notificationItems.set(Array.isArray(res.items) ? res.items : []);
         const unreadFromItems = this.notificationItems().filter(item => !item.read).length;
         const unread = Number.isFinite(res.unreadCount) ? Number(res.unreadCount) : unreadFromItems;
         this.notificationsTotal.set(Number.isFinite(res.total) ? Number(res.total) : this.notificationItems().length);
         this.unreadNotifications.set(Math.max(0, unread));
-        this.syncUnreadCounterState(this.notificationItems(), Math.max(0, unread));
         this.hasMoreAllNotifications.set(false);
         this.loadingMoreNotifications.set(false);
         this.notificationsLoading.set(false);
       },
       error: () => {
+        if (version !== this.notificationLoadVersion) return;
         if (!background) {
           this.notificationsError.set('Notifications unavailable.');
           this.notificationsLoading.set(false);
@@ -364,8 +356,10 @@ export class UserMenuComponent implements OnInit, OnDestroy {
       this.notificationsError.set('');
     }
 
+    const version = ++this.notificationLoadVersion;
     this.notificationsApi.listAll(this.allPageSize, this.allOffset).subscribe({
       next: res => {
+        if (version !== this.notificationLoadVersion) return;
         const incoming = Array.isArray(res.items) ? res.items : [];
         const nextItems = append
           ? this.mergeNotifications(this.notificationItems(), incoming)
@@ -380,7 +374,6 @@ export class UserMenuComponent implements OnInit, OnDestroy {
         const unread = Number.isFinite(res.unreadCount) ? Number(res.unreadCount) : unreadFromItems;
         this.notificationsTotal.set(Number.isFinite(res.total) ? Number(res.total) : this.notificationItems().length);
         this.unreadNotifications.set(Math.max(0, unread));
-        this.syncUnreadCounterState(this.notificationItems(), Math.max(0, unread));
         const hasMore = typeof res.hasMore === 'boolean'
           ? res.hasMore
           : this.allOffset < this.notificationsTotal();
@@ -389,6 +382,7 @@ export class UserMenuComponent implements OnInit, OnDestroy {
         this.notificationsLoading.set(false);
       },
       error: () => {
+        if (version !== this.notificationLoadVersion) return;
         if (append) {
           this.loadingMoreNotifications.set(false);
           this.notificationsError.set('Could not load more notifications.');
@@ -583,177 +577,11 @@ export class UserMenuComponent implements OnInit, OnDestroy {
   }
 
   private rememberOpenedNotification(notification: AppNotification): void {
-    if (typeof window === 'undefined') return;
-    try {
-      const raw = localStorage.getItem(NOTIFICATION_OPENED_HINTS_KEY);
-      const list = raw ? JSON.parse(raw) : [];
-      const existing = Array.isArray(list) ? list : [];
-      const next = [
-        ...existing,
-        {
-          id: String(notification.id || '').trim(),
-          entityType: String(notification.entityType || '').trim().toLowerCase(),
-          entityId: String(notification.entityId || '').trim(),
-          metadata: (notification.metadata && typeof notification.metadata === 'object')
-            ? notification.metadata
-            : {},
-          openedAt: new Date().toISOString()
-        }
-      ];
-      localStorage.setItem(
-        NOTIFICATION_OPENED_HINTS_KEY,
-        JSON.stringify(next.slice(-100))
-      );
-    } catch {
-      // Ignore local storage failures.
-    }
-  }
-
-  private acknowledgeCurrentUnread(): void {
-    const unreadCount = Math.max(0, this.unreadNotifications());
-    const unreadIds = this.notificationItems()
-      .filter(item => !item.read)
-      .map(item => String(item.id || '').trim())
-      .filter(Boolean);
-    this.acknowledgedUnreadCount = unreadCount;
-    this.acknowledgedUnreadIds = unreadIds.length ? new Set(unreadIds) : new Set<string>();
-    if (unreadCount > 0) {
-      this.unreadCounterAcknowledged.set(true);
-      this.writeAcknowledgementState(unreadCount, unreadIds);
-      return;
-    }
-    this.unreadCounterAcknowledged.set(false);
-    this.clearAcknowledgementState();
-  }
-
-  private syncUnreadCounterState(items: AppNotification[], unreadCount: number): void {
-    if (!Number.isFinite(unreadCount) || unreadCount <= 0) {
-      this.unreadCounterAcknowledged.set(false);
-      this.acknowledgedUnreadIds = new Set<string>();
-      this.acknowledgedUnreadCount = 0;
-      this.clearAcknowledgementState();
-      return;
-    }
-
-    const unreadIds = (Array.isArray(items) ? items : [])
-      .filter(item => !item.read)
-      .map(item => String(item.id || '').trim())
-      .filter(Boolean);
-
-    if (!this.unreadCounterAcknowledged()) {
-      const stored = this.readAcknowledgementState();
-      if (stored && unreadCount <= stored.count) {
-        if (!unreadIds.length) {
-          this.unreadCounterAcknowledged.set(true);
-          this.acknowledgedUnreadCount = stored.count;
-          this.acknowledgedUnreadIds = new Set<string>();
-          return;
-        }
-        const storedIds = new Set(stored.ids);
-        const allUnreadAlreadyAcknowledged = unreadIds.every(id => storedIds.has(id));
-        if (allUnreadAlreadyAcknowledged) {
-          this.unreadCounterAcknowledged.set(true);
-          this.acknowledgedUnreadCount = stored.count;
-          this.acknowledgedUnreadIds = new Set(unreadIds);
-          return;
-        }
-      }
-      this.acknowledgedUnreadIds = unreadIds.length ? new Set(unreadIds) : new Set<string>();
-      return;
-    }
-
-    if (!unreadIds.length) {
-      if (unreadCount > this.acknowledgedUnreadCount) {
-        this.unreadCounterAcknowledged.set(false);
-        this.clearAcknowledgementState();
-      }
-      return;
-    }
-
-    // If we acknowledged by count before IDs were loaded, adopt current IDs
-    // while unread count has not increased.
-    if (!this.acknowledgedUnreadIds.size) {
-      if (unreadCount <= this.acknowledgedUnreadCount) {
-        this.acknowledgedUnreadIds = new Set(unreadIds);
-        this.acknowledgedUnreadCount = unreadCount;
-        this.writeAcknowledgementState(unreadCount, unreadIds);
-        return;
-      }
-      this.unreadCounterAcknowledged.set(false);
-      this.acknowledgedUnreadIds = new Set(unreadIds);
-      this.clearAcknowledgementState();
-      return;
-    }
-
-    const hasNewUnread = unreadIds.some(id => !this.acknowledgedUnreadIds.has(id));
-    if (hasNewUnread) {
-      this.unreadCounterAcknowledged.set(false);
-      this.acknowledgedUnreadIds = new Set(unreadIds);
-      this.clearAcknowledgementState();
-      return;
-    }
-
-    const nextAcknowledged = new Set<string>();
-    for (const id of unreadIds) {
-      if (this.acknowledgedUnreadIds.has(id)) {
-        nextAcknowledged.add(id);
-      }
-    }
-    this.acknowledgedUnreadIds = nextAcknowledged;
-    this.acknowledgedUnreadCount = unreadCount;
-    this.writeAcknowledgementState(unreadCount, Array.from(nextAcknowledged));
-  }
-
-  private notificationAcknowledgementStorageKey(): string {
-    const email = String(this.userEmail() || '').trim().toLowerCase();
-    if (!email) return '';
-    return `${NOTIFICATION_ACK_STATE_KEY}:${email}`;
-  }
-
-  private readAcknowledgementState(): { count: number; ids: string[] } | null {
-    if (typeof window === 'undefined') return null;
-    const key = this.notificationAcknowledgementStorageKey();
-    if (!key) return null;
-    try {
-      const raw = localStorage.getItem(key);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw) as { count?: unknown; ids?: unknown };
-      const count = Number(parsed?.count);
-      if (!Number.isFinite(count) || count <= 0) return null;
-      const ids = Array.isArray(parsed?.ids)
-        ? parsed.ids.map(id => String(id || '').trim()).filter(Boolean)
-        : [];
-      return { count, ids };
-    } catch {
-      return null;
-    }
-  }
-
-  private writeAcknowledgementState(count: number, ids: string[]): void {
-    if (typeof window === 'undefined') return;
-    const key = this.notificationAcknowledgementStorageKey();
-    if (!key) return;
-    try {
-      localStorage.setItem(
-        key,
-        JSON.stringify({
-          count: Math.max(0, count),
-          ids: Array.from(new Set((Array.isArray(ids) ? ids : []).map(id => String(id || '').trim()).filter(Boolean)))
-        })
-      );
-    } catch {
-      // Ignore local storage failures.
-    }
-  }
-
-  private clearAcknowledgementState(): void {
-    if (typeof window === 'undefined') return;
-    const key = this.notificationAcknowledgementStorageKey();
-    if (!key) return;
-    try {
-      localStorage.removeItem(key);
-    } catch {
-      // Ignore local storage failures.
-    }
+    this.notificationsApi.rememberOpened([{
+      entityType: notification.entityType,
+      entityId: notification.entityId || '',
+      metadata: notification.metadata || {},
+      openedAt: new Date().toISOString()
+    }]);
   }
 }

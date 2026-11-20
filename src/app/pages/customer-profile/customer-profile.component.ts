@@ -17,6 +17,7 @@ import { AuthService } from '../../auth/auth.service';
 import { TenantContextService } from '../../services/tenant-context.service';
 import { BrandSettingsService } from '../../services/brand-settings.service';
 import { BusinessProfileService } from '../../services/business-profile.service';
+import { NotificationsApiService } from '../../services/notifications-api.service';
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
 import { PageBackButtonComponent } from '../../components/navigation/page-back-button/page-back-button.component';
 import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
@@ -113,6 +114,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   private readonly router = inject(Router);
   private readonly http = inject(HttpClient);
   private readonly customersApi = inject(CustomersApi);
+  private readonly notificationsApi = inject(NotificationsApiService);
   private readonly smsApi = inject(SmsApiService);
   private readonly emailApi = inject(EmailApiService);
   private readonly scheduleApi = inject(ScheduleApi);
@@ -2031,6 +2033,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
             return;
           }
           this.fillForm(customer);
+          this.notificationsApi.acknowledgeView([{ type: 'customer', id: customer.id }]);
           this.loadDuplicateMatchesForCurrent();
           if (this.activeTab() === 'schedule') {
             this.loadCustomerSchedule();

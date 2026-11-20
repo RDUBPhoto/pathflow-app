@@ -25,7 +25,7 @@ import { PaymentGatewaySettingsService } from '../../services/payment-gateway-se
 import { WorkItem, WorkItemsApi } from '../../services/workitems-api.service';
 import { AddressLookupService, AddressSuggestion } from '../../services/address-lookup.service';
 import { AuthService } from '../../auth/auth.service';
-import { AppNotification, NotificationsApiService } from '../../services/notifications-api.service';
+import { NotificationsApiService } from '../../services/notifications-api.service';
 import { EmailApiService } from '../../services/email-api.service';
 import { SmsApiService } from '../../services/sms-api.service';
 import { TenantContextService } from '../../services/tenant-context.service';
@@ -318,6 +318,7 @@ export default class InvoiceDetailComponent implements OnDestroy {
 
     effect(() => {
       this.invoicesData.invoiceDetails();
+      this.invoicesData.documentSyncReady();
       const id = String(this.route.snapshot.paramMap.get('id') || '').trim();
       if (id) untracked(() => this.resolveInvoiceFromStore(id));
     });
@@ -1871,6 +1872,8 @@ export default class InvoiceDetailComponent implements OnDestroy {
     return `XXXX${digits.slice(-4)}`;
   }
 
+  private lastNotificationView = '';
+
   private loadInvoice(id: string): void {
     this.loading.set(true);
     this.error.set('');
@@ -1913,6 +1916,11 @@ export default class InvoiceDetailComponent implements OnDestroy {
     }
     this.error.set('');
     this.loading.set(false);
+    if (this.invoicesData.documentSyncReady() && this.snapshot(this.invoice()!) === foundSnapshot
+      && this.lastNotificationView !== foundSnapshot) {
+      this.lastNotificationView = foundSnapshot;
+      void this.markStaleWorkflowNotificationsRead(found);
+    }
     this.scheduleAutoOpenSendModal();
     this.scheduleAutoSendNow();
   }
@@ -2020,63 +2028,13 @@ export default class InvoiceDetailComponent implements OnDestroy {
   }
 
   private async markStaleWorkflowNotificationsRead(detail: InvoiceDetail): Promise<void> {
-    const ids = await this.findUnreadWorkflowNotificationIds(detail);
-    if (!ids.length) return;
     try {
-      await firstValueFrom(this.notificationsApi.markReadBatch(ids));
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('pathflow:notifications-refresh'));
-      }
+      await firstValueFrom(this.notificationsApi.markRelatedRead([
+        { type: detail.documentType, id: detail.id, number: detail.invoiceNumber }
+      ]));
     } catch {
-      // Notification cleanup is best-effort and should not block the workflow action.
+      // Notification state must not block opening or updating a document.
     }
-  }
-
-  private async findUnreadWorkflowNotificationIds(detail: InvoiceDetail): Promise<string[]> {
-    try {
-      const response = await firstValueFrom(this.notificationsApi.listAll(100, 0));
-      const items = Array.isArray(response.items) ? response.items : [];
-      const ids = items
-        .filter(item => !item.read && this.notificationBelongsToDocument(item, detail))
-        .map(item => String(item.id || '').trim())
-        .filter(Boolean);
-      return Array.from(new Set(ids));
-    } catch {
-      return [];
-    }
-  }
-
-  private notificationBelongsToDocument(notification: AppNotification, detail: InvoiceDetail): boolean {
-    const documentId = String(detail.id || '').trim().toLowerCase();
-    const documentNumber = String(detail.invoiceNumber || '').trim().toLowerCase();
-    const customerName = String(detail.customerName || '').trim().toLowerCase();
-    const route = String(notification.route || '').trim().toLowerCase();
-    const entityId = String(notification.entityId || '').trim().toLowerCase();
-    const metadata = notification.metadata || {};
-    const metadataIds = [
-      metadata['invoiceId'],
-      metadata['quoteId'],
-      metadata['documentId']
-    ].map(value => String(value || '').trim().toLowerCase()).filter(Boolean);
-    const metadataNumbers = [
-      metadata['invoiceNumber'],
-      metadata['quoteNumber'],
-      metadata['documentNumber']
-    ].map(value => String(value || '').trim().toLowerCase()).filter(Boolean);
-    const metadataCustomer = String(metadata['customerName'] || '').trim().toLowerCase();
-
-    if (documentId && (entityId === documentId || metadataIds.includes(documentId))) return true;
-    if (documentId && route.includes(encodeURIComponent(documentId).toLowerCase())) return true;
-    if (documentNumber && metadataNumbers.includes(documentNumber)) return true;
-
-    const title = String(notification.title || '').trim().toLowerCase();
-    const message = String(notification.message || '').trim().toLowerCase();
-    const text = `${title} ${message}`;
-    if (documentNumber && text.includes(documentNumber)) {
-      if (!customerName || !metadataCustomer || metadataCustomer === customerName || text.includes(customerName)) return true;
-    }
-
-    return false;
   }
 
   private snapshot(invoice: InvoiceDetail): string {

@@ -21,6 +21,111 @@ async function signIn(page: Page, email: string, password: string) {
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 }
 
+async function notificationFixture(request: APIRequestContext) {
+  const account = await workspace(request);
+  const headers = { 'x-tenant-id': account.tenant };
+  const customerResponse = await request.post('/api/customers', { headers, data: {
+    name: 'Notification Customer', email: 'notification@example.invalid', phone: '+15125550150'
+  } });
+  expect(customerResponse.ok(), await customerResponse.text()).toBeTruthy();
+  const customerId = (await customerResponse.json()).id;
+  const ids = [randomUUID(), randomUUID(), randomUUID()];
+  for (let index = 0; index < ids.length; index++) {
+    const id = ids[index];
+    const response = await request.post('/api/service-documents', { headers, data: { id, document: {
+      id, documentType: index === 2 ? 'quote' : 'invoice', stage: index === 2 ? 'sent' : 'accepted',
+      invoiceNumber: 'READ-' + index, customerId, customerName: 'Notification Customer',
+      subtotal: 100, taxTotal: 0, total: 100, paidAmount: index === 2 ? 0 : 100,
+      lineItems: [{ id: 'labor', type: 'labor', description: 'Installation', quantity: 1,
+        unitPrice: 100, taxRate: 0, lineSubtotal: 100, taxAmount: 0, lineTotal: 100 }], timeline: []
+    } } });
+    expect(response.ok(), await response.text()).toBeTruthy();
+  }
+  async function notify(index: number, title: string) {
+    const type = index === 2 ? 'quote' : 'invoice';
+    const response = await request.post('/api/notifications', { headers, data: {
+      op: 'createMention', targetEmail: account.email, title, message: title,
+      entityType: type, entityId: ids[index], route: `/${type === 'quote' ? 'quotes' : 'invoices'}/${ids[index]}`,
+      metadata: { [`${type}Id`]: ids[index], customerId }
+    } });
+    expect(response.ok(), await response.text()).toBeTruthy();
+    return (await response.json()).item.id;
+  }
+  async function unread() {
+    const response = await request.get('/api/notifications?scope=all&limit=100', { headers });
+    expect(response.ok()).toBeTruthy();
+    return (await response.json()).items.filter((item: any) => !item.read).map((item: any) => item.id).sort();
+  }
+  return { ...account, customerId, ids, notify, unread };
+}
+
+test('reading exact invoices and quotes persists notifications and synchronizes another tab without clearing another visit', async ({ page, request }) => {
+  const fixture = await notificationFixture(request);
+  await signIn(page, fixture.email, fixture.password);
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await page.goto('/customers');
+  const first = await fixture.notify(0, 'First invoice paid');
+  const second = await fixture.notify(1, 'Second invoice paid');
+  const quote = await fixture.notify(2, 'Quote accepted');
+  await page.reload();
+  const bell = page.locator('#notifications-trigger');
+  await expect(bell).toHaveAttribute('aria-label', 'Open notifications (3 unread)');
+  await bell.click();
+  await expect(page.locator('.notification-item.unread')).toHaveCount(3);
+  expect(await fixture.unread()).toEqual([first, second, quote].sort());
+  await expect(bell).toHaveAttribute('aria-label', 'Open notifications (3 unread)');
+  await page.getByRole('button', { name: 'Close notifications', exact: true }).click();
+  await page.goto('/customers/' + fixture.customerId);
+  await expect(page.getByRole('heading', { name: 'Customer Profile', exact: true })).toBeVisible();
+  expect(await fixture.unread()).toEqual([first, second, quote].sort());
+
+  const otherTab = await page.context().newPage();
+  try {
+    await otherTab.goto('/customers');
+    await expect(otherTab.locator('#notifications-trigger')).toHaveAttribute('aria-label', 'Open notifications (3 unread)');
+    await page.goto('/invoices/' + fixture.ids[0]);
+    await expect(page.locator('.stage-field select')).toHaveValue('accepted');
+    await expect.poll(fixture.unread).toEqual([second, quote].sort());
+    await expect(otherTab.locator('#notifications-trigger')).toHaveAttribute('aria-label', 'Open notifications (2 unread)');
+    await page.reload();
+    expect(await fixture.unread()).toEqual([second, quote].sort());
+    await bell.click();
+    await page.locator('.notification-item').filter({ hasText: 'Second invoice paid' }).click();
+    await expect(page).toHaveURL(new RegExp('/invoices/' + fixture.ids[1] + '$'));
+    await expect.poll(fixture.unread).toEqual([quote]);
+    await page.goto('/quotes/' + fixture.ids[2]);
+    await expect(page.locator('.stage-field select')).toHaveValue('sent');
+    await expect.poll(fixture.unread).toEqual([]);
+    await page.goto('/customers');
+    const later = await fixture.notify(0, 'New final invoice payment');
+    await page.reload();
+    await expect(bell).toHaveAttribute('aria-label', 'Open notifications (1 unread)');
+    expect(await fixture.unread()).toEqual([later]);
+    await page.goto('/invoices/' + fixture.ids[0]);
+    await expect.poll(fixture.unread).toEqual([]);
+  } finally { await otherTab.close(); }
+});
+
+test('failed or missing document reads leave notifications unread and keep the invoice usable', async ({ page, request }) => {
+  const fixture = await notificationFixture(request);
+  const first = await fixture.notify(0, 'Invoice still unread');
+  await signIn(page, fixture.email, fixture.password);
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await page.goto('/invoices/missing-notification-document');
+  await expect(page.getByText('Invoice not found.', { exact: true })).toBeVisible();
+  expect(await fixture.unread()).toEqual([first]);
+  await page.route('**/api/notifications', route => route.request().method() === 'POST'
+    && route.request().postDataJSON()?.op === 'markRelatedRead'
+    ? route.fulfill({ status: 503, json: { error: 'Temporary failure' } }) : route.continue());
+  await page.goto('/invoices/' + fixture.ids[0]);
+  await expect(page.locator('.stage-field select')).toHaveValue('accepted');
+  await expect(page.locator('#notifications-trigger')).toHaveAttribute('aria-label', 'Open notifications (1 unread)');
+  expect(await fixture.unread()).toEqual([first]);
+  await page.unroute('**/api/notifications');
+  await page.reload();
+  await expect.poll(fixture.unread).toEqual([]);
+});
+
 test('the production build signs in using a secure cookie and survives reload and protected navigation', async ({ page, request }) => {
   const account = await workspace(request);
   await signIn(page, account.email, account.password);

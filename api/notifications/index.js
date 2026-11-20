@@ -3,6 +3,7 @@ const { TableClient } = require("../_shared/table-client");
 const { randomUUID } = require("crypto");
 const { resolveTenantId, sanitizeTenantId } = require("../_shared/tenant");
 const { requirePrincipal } = require("../_shared/auth");
+const { notificationContexts, matchesNotificationContext } = require("../_shared/notification-context");
 
 const NOTIFICATIONS_TABLE = "notifications";
 const USERS_TABLE = "useraccess";
@@ -712,6 +713,25 @@ module.exports = async function notificationsApi(context, req) {
         }
       });
       await pruneNotifications(notificationClient, tenantId);
+      return;
+    }
+
+    if (op === "markrelatedread") {
+      const contexts = notificationContexts(body.contexts);
+      if (!contexts.length) {
+        context.res = json(400, { ok: false, error: "Supply 1-20 valid notification contexts." });
+        return;
+      }
+      const readAt = new Date().toISOString();
+      const unread = await listRawUserNotifications(notificationClient, tenantId, actor, true);
+      const matches = unread.filter(item => !item.read && item.tenantId === tenantId
+        && matchesRecipient(actor, item) && contexts.some(value => matchesNotificationContext(item, value)));
+      // Work on this snapshot only. Events arriving later remain unread.
+      for (const item of matches) {
+        await notificationClient.upsertEntity({ partitionKey: scopedTenantId, rowKey: item.id,
+          read: true, readAt, updatedAt: readAt }, "Merge");
+      }
+      context.res = json(200, { ok: true, updated: matches.length, readAt });
       return;
     }
 

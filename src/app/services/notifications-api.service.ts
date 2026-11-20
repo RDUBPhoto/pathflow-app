@@ -1,7 +1,21 @@
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Injectable, inject } from '@angular/core';
-import { Observable } from 'rxjs';
+import { DestroyRef, Injectable, inject } from '@angular/core';
+import { finalize, Observable, tap } from 'rxjs';
 import { AuthService } from '../auth/auth.service';
+import { TenantContextService } from './tenant-context.service';
+
+export type NotificationContext = {
+  type: 'invoice' | 'quote' | 'customer' | 'lead' | 'workitem' | 'job' | 'email' | 'sms';
+  id: string;
+  number?: string;
+};
+export type NotificationOpenedHint = {
+  entityType: string;
+  entityId: string;
+  metadata: Record<string, unknown>;
+  openedAt: string;
+};
+const READ_CHANGE_KEY = 'pathflow.notifications.changed.v2';
 
 export type AppNotificationType = 'mention' | string;
 
@@ -74,8 +88,71 @@ type NotificationsCreateResponse = {
 @Injectable({ providedIn: 'root' })
 export class NotificationsApiService {
   private readonly auth = inject(AuthService);
+  private readonly tenant = inject(TenantContextService);
+  private readonly inFlight = new Set<string>();
 
-  constructor(private readonly http: HttpClient) {}
+  constructor(private readonly http: HttpClient) {
+    const changed = (event: StorageEvent) => {
+      if (event.key !== READ_CHANGE_KEY || !event.newValue) return;
+      try {
+        if (JSON.parse(event.newValue).scope === this.readScope()) this.refreshReadState();
+      } catch { /* Ignore malformed or unrelated storage events. */ }
+    };
+    window.addEventListener('storage', changed);
+    inject(DestroyRef).onDestroy(() => window.removeEventListener('storage', changed));
+  }
+
+  markRelatedRead(contexts: NotificationContext[]): Observable<{ ok: boolean; updated: number; readAt: string }> {
+    const scope = this.readScope();
+    return this.http.post<{ ok: boolean; updated: number; readAt: string }>('/api/notifications',
+      this.withActorBody({ op: 'markRelatedRead', contexts })).pipe(tap(result => {
+      if (scope !== this.readScope()) return;
+      this.rememberOpened(contexts.map(value => ({ entityType: value.type, entityId: value.id,
+        metadata: { [`${value.type}Id`]: value.id, [`${value.type}Number`]: value.number,
+          ...(value.type === 'workitem' || value.type === 'lead' ? { leadItemId: value.id } : {}) },
+        openedAt: result.readAt })));
+      this.broadcastReadChange();
+    }));
+  }
+
+  acknowledgeView(contexts: NotificationContext[]): void {
+    const valid = contexts.filter(value => !!value.id);
+    if (!valid.length) return;
+    if (valid.length > 20) {
+      for (let offset = 0; offset < valid.length; offset += 20) this.acknowledgeView(valid.slice(offset, offset + 20));
+      return;
+    }
+    const key = this.readScope() + JSON.stringify(valid);
+    if (this.inFlight.has(key)) return;
+    this.inFlight.add(key);
+    this.markRelatedRead(valid).pipe(finalize(() => this.inFlight.delete(key))).subscribe({
+      error: () => { /* Reading notifications must not prevent opening a record. */ }
+    });
+  }
+
+  openedHints(): NotificationOpenedHint[] {
+    try {
+      const hints = JSON.parse(localStorage.getItem(this.openedHintsKey()) || '[]');
+      return Array.isArray(hints) ? hints : [];
+    } catch { return []; }
+  }
+
+  rememberOpened(hints: NotificationOpenedHint[]): void {
+    this.saveOpenedHints([...this.openedHints(), ...hints]);
+    window.dispatchEvent(new CustomEvent('pathflow:notifications-opened'));
+  }
+
+  saveOpenedHints(hints: NotificationOpenedHint[]): void {
+    try { localStorage.setItem(this.openedHintsKey(), JSON.stringify(hints.slice(-100))); } catch { /* Storage is optional. */ }
+  }
+
+  private openedHintsKey(): string { return 'pathflow.notifications.opened.v2:' + this.readScope(); }
+  private readScope(): string { return `${this.tenant.tenantId()}:${this.auth.user()?.email?.toLowerCase() || this.auth.user()?.id || ''}`; }
+  private refreshReadState(): void { window.dispatchEvent(new CustomEvent('pathflow:notifications-refresh')); }
+  private broadcastReadChange(): void {
+    this.refreshReadState();
+    try { localStorage.setItem(READ_CHANGE_KEY, JSON.stringify({ scope: this.readScope(), at: Date.now(), nonce: Math.random() })); } catch { /* Storage is optional. */ }
+  }
 
   listRecent(limit = 3): Observable<NotificationsRecentResponse> {
     const params = this.withActorParams(
@@ -132,21 +209,21 @@ export class NotificationsApiService {
     return this.http.post<{ ok: boolean; id: string; updated: boolean }>(
       '/api/notifications',
       this.withActorBody({ op: 'markRead', id })
-    );
+    ).pipe(tap(() => this.broadcastReadChange()));
   }
 
   markReadBatch(ids: string[]): Observable<{ ok: boolean; updated: number }> {
     return this.http.post<{ ok: boolean; updated: number }>(
       '/api/notifications',
       this.withActorBody({ op: 'markReadBatch', ids })
-    );
+    ).pipe(tap(() => this.broadcastReadChange()));
   }
 
   markAllRead(): Observable<{ ok: boolean; updated: number }> {
     return this.http.post<{ ok: boolean; updated: number }>(
       '/api/notifications',
       this.withActorBody({ op: 'markAllRead' })
-    );
+    ).pipe(tap(() => this.broadcastReadChange()));
   }
 
   private normalizeLimit(value: number, fallback: number): number {

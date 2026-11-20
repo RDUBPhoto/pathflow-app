@@ -27,7 +27,7 @@ import { catchError, firstValueFrom, forkJoin, of, timeout } from 'rxjs';
 import { InvoiceResponseApiService } from '../../services/invoice-response-api.service';
 import { CustomerPortalApi } from '../../services/customer-portal-api.service';
 import { QuoteResponseApiService } from '../../services/quote-response-api.service';
-import { NotificationsApiService } from '../../services/notifications-api.service';
+import { NotificationContext, NotificationsApiService } from '../../services/notifications-api.service';
 import { AuthService } from '../../auth/auth.service';
 import { isExpiredCompletedCard } from './completed-card-visibility';
 import { customerVehicles, vehicleSummary } from '../../utils/customer-vehicles';
@@ -42,7 +42,6 @@ const DASHBOARD_SEEN_CARDS_KEY = 'dashboard.cards.seen.v1';
 const DASHBOARD_NOTIFIED_LEADS_KEY = 'dashboard.leads.notified.v1';
 const DASHBOARD_DISMISSED_DOC_CARDS_KEY = 'dashboard.dismissedDocCards.v1';
 const DASHBOARD_CARD_SEEN_KEY_SEPARATOR = '::';
-const NOTIFICATION_OPENED_HINTS_KEY = 'pathflow.notifications.opened.v1';
 const DASHBOARD_LOAD_TIMEOUT_MS = 25000;
 
 @Component({
@@ -2721,6 +2720,7 @@ export default class DashboardComponent implements OnDestroy {
   }
 
   private markCardSeen(it: WorkItem, lane?: Lane): void {
+    this.acknowledgeCardNotifications(it);
     if (!this.seenCardsLoaded || !this.seenCardsInitialized) return;
     const key = this.cardSeenKeyForItem(it, lane);
     if (!key) return;
@@ -2728,6 +2728,7 @@ export default class DashboardComponent implements OnDestroy {
   }
 
   private markCardSeenForLaneId(it: WorkItem, laneId: string): void {
+    this.acknowledgeCardNotifications(it);
     if (!this.seenCardsLoaded || !this.seenCardsInitialized) return;
     const itemId = String(it?.id || '').trim();
     const key = this.cardSeenKey(itemId, laneId);
@@ -2744,6 +2745,20 @@ export default class DashboardComponent implements OnDestroy {
     };
     this.seenCardIds.set(next);
     this.persistSeenCardsNow(next);
+  }
+
+  private acknowledgeCardNotifications(item: WorkItem): void {
+    const contexts: NotificationContext[] = [{ type: 'workitem', id: item.id }, { type: 'lead', id: item.id }];
+    const reference = workItemDocumentRef(item);
+    const document = reference ? this.invoicesData.getInvoiceById(reference) : null;
+    if (document) contexts.push({ type: document.documentType, id: document.id, number: document.invoiceNumber });
+    this.notificationsApi.acknowledgeView(contexts);
+  }
+
+  @HostListener('window:pathflow:notifications-opened')
+  @HostListener('window:pathflow:notifications-refresh')
+  onNotificationRead(): void {
+    this.applyOpenedNotificationSeenHints(this.items());
   }
 
   private suppressesGenericNewNotice(lane: Lane | null | undefined): boolean {
@@ -2807,120 +2822,55 @@ export default class DashboardComponent implements OnDestroy {
   }
 
   private applyOpenedNotificationSeenHints(map: Record<string, WorkItem[]>): void {
-    if (typeof window === 'undefined') return;
-    if (!this.seenLeadsLoaded || !this.seenLeadsInitialized) return;
-    if (!this.seenCardsLoaded || !this.seenCardsInitialized) return;
-
-    let raw = '';
-    try {
-      raw = String(localStorage.getItem(NOTIFICATION_OPENED_HINTS_KEY) || '');
-    } catch {
-      return;
-    }
-    if (!raw) return;
-
-    let parsed: Array<Record<string, unknown>> = [];
-    try {
-      const value = JSON.parse(raw);
-      parsed = Array.isArray(value) ? value : [];
-    } catch {
-      return;
-    }
-    if (!parsed.length) return;
-
-    const nowMs = Date.now();
-    const keepHints: Array<Record<string, unknown>> = [];
-    const seenLeadIds = { ...this.seenLeadIds() };
-    const seenCardIds = { ...this.seenCardIds() };
+    if (!this.seenLeadsLoaded || !this.seenLeadsInitialized || !this.seenCardsLoaded || !this.seenCardsInitialized) return;
+    const hints = this.notificationsApi.openedHints();
+    const keep = [];
+    const seenLeads = { ...this.seenLeadIds() };
+    const seenCards = { ...this.seenCardIds() };
     let changed = false;
-
-    for (const hint of parsed) {
-      const openedAtMs = this.asMillis(String(hint['openedAt'] || ''));
-      if (openedAtMs && nowMs - openedAtMs > 7 * 24 * 60 * 60 * 1000) {
-        continue;
-      }
-
-      const metadata = (hint['metadata'] && typeof hint['metadata'] === 'object')
-        ? (hint['metadata'] as Record<string, unknown>)
-        : {};
-      const entityType = String(hint['entityType'] || '').trim().toLowerCase();
-      const entityId = String(hint['entityId'] || '').trim();
-      const metadataLeadItemId = String(metadata['leadItemId'] || '').trim();
-      const metadataCustomerId = String(metadata['customerId'] || '').trim();
-      const metadataQuoteId = String(metadata['quoteId'] || '').trim();
-      const metadataQuoteNumber = String(metadata['quoteNumber'] || '').trim().toLowerCase();
-      const metadataInvoiceId = String(metadata['invoiceId'] || '').trim();
-      const metadataInvoiceNumber = String(metadata['invoiceNumber'] || '').trim().toLowerCase();
-      const entityIdLower = entityId.toLowerCase();
-
-      const matchedItems: Array<{ laneId: string; item: WorkItem }> = [];
-      const lanes = this.lanes();
-      for (const [laneId, rows] of Object.entries(map || {})) {
-        const lane = lanes.find(entry => String(entry.id || '').trim() === laneId) || null;
-        for (const row of rows || []) {
-          const itemId = String(row.id || '').trim();
-          const customerId = String(row.customerId || '').trim();
-          if (!itemId) continue;
-          const leadMatch = !!metadataLeadItemId && itemId === metadataLeadItemId;
-          const customerMatch = !!metadataCustomerId && customerId === metadataCustomerId;
-          const entityCustomerMatch = entityType === 'customer' && !!entityId && customerId === entityId;
-          const entityLeadMatch = entityType === 'lead' && !!entityId && (itemId === entityId || customerId === entityId);
-          let docMatch = false;
-          if (lane && (entityType === 'quote' || entityType === 'invoice')) {
-            const linked = this.linkedDocumentForCard(row, lane);
-            if (linked) {
-              const linkedId = String(linked.id || '').trim();
-              const linkedNumber = String(linked.invoiceNumber || '').trim().toLowerCase();
-              if (entityType === 'quote' && linked.documentType === 'quote') {
-                docMatch =
-                  (!!metadataQuoteId && linkedId === metadataQuoteId)
-                  || (!!metadataQuoteNumber && linkedNumber === metadataQuoteNumber)
-                  || (!!entityId && (linkedId === entityId || linkedNumber === entityIdLower));
-              } else if (entityType === 'invoice' && linked.documentType === 'invoice') {
-                docMatch =
-                  (!!metadataInvoiceId && linkedId === metadataInvoiceId)
-                  || (!!metadataInvoiceNumber && linkedNumber === metadataInvoiceNumber)
-                  || (!!entityId && (linkedId === entityId || linkedNumber === entityIdLower));
-              }
+    for (const hint of hints) {
+      const openedAt = this.asMillis(hint.openedAt);
+      if (!openedAt || Date.now() - openedAt > 7 * 24 * 60 * 60 * 1000) continue;
+      keep.push(hint);
+      const type = hint.entityType;
+      const metadata = hint.metadata || {};
+      const id = String(hint.entityId || '');
+      const documentType = type === 'invoice' || type === 'quote' ? type
+        : metadata['invoiceId'] ? 'invoice' : metadata['quoteId'] ? 'quote' : '';
+      for (const [laneId, rows] of Object.entries(map)) {
+        const lane = this.lanes().find(item => item.id === laneId);
+        for (const item of rows) {
+          // Opening an earlier stage must not acknowledge a later move or update.
+          if (this.asMillis(item.updatedAt || item.createdAt || '') > openedAt) continue;
+          let matches = false;
+          if (documentType) {
+            const reference = workItemDocumentRef(item);
+            const document = reference ? this.invoicesData.getInvoiceById(reference) : null;
+            if (document?.documentType !== documentType) continue;
+            const ids = [type === documentType ? id : '', String(metadata[`${documentType}Id`] || '')].filter(Boolean);
+            const number = String(metadata[`${documentType}Number`] || '').toLowerCase();
+            matches = ids.includes(document.id) || ids.includes(document.invoiceNumber)
+              || (!!number && number === document.invoiceNumber.toLowerCase());
+          } else {
+            const leadItemId = String(metadata['leadItemId'] || '');
+            matches = (leadItemId ? item.id === leadItemId : ['lead', 'workitem', 'item'].includes(type) && item.id === id);
+            if (!matches && lane && this.isLeadLane(lane) && ['customer', 'lead'].includes(type)) {
+              matches = item.customerId === id || (!!metadata['customerId'] && item.customerId === metadata['customerId']);
             }
           }
-          if (leadMatch || customerMatch || entityCustomerMatch || entityLeadMatch || docMatch) {
-            matchedItems.push({ laneId, item: row });
-          }
-        }
-      }
-
-      if (!matchedItems.length) {
-        keepHints.push(hint);
-        continue;
-      }
-
-      for (const match of matchedItems) {
-        const itemId = String(match.item.id || '').trim();
-        if (!itemId) continue;
-        if (!seenLeadIds[itemId]) {
-          seenLeadIds[itemId] = true;
-          changed = true;
-        }
-        const cardKey = this.cardSeenKey(itemId, match.laneId);
-        if (cardKey && !seenCardIds[cardKey]) {
-          seenCardIds[cardKey] = true;
-          changed = true;
+          if (!matches) continue;
+          if (!seenLeads[item.id]) { seenLeads[item.id] = true; changed = true; }
+          const key = this.cardSeenKey(item.id, laneId);
+          if (key && !seenCards[key]) { seenCards[key] = true; changed = true; }
         }
       }
     }
-
-    try {
-      localStorage.setItem(NOTIFICATION_OPENED_HINTS_KEY, JSON.stringify(keepHints.slice(-100)));
-    } catch {
-      // Ignore local storage failures.
-    }
-
+    this.notificationsApi.saveOpenedHints(keep);
     if (!changed) return;
-    this.seenLeadIds.set(seenLeadIds);
-    this.seenCardIds.set(seenCardIds);
-    this.persistSeenLeadsNow(seenLeadIds);
-    this.persistSeenCardsNow(seenCardIds);
+    this.seenLeadIds.set(seenLeads);
+    this.seenCardIds.set(seenCards);
+    this.persistSeenLeadsNow(seenLeads);
+    this.persistSeenCardsNow(seenCards);
   }
 
   leadReceivedLabel(it: WorkItem): string {

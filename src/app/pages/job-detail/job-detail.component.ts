@@ -26,6 +26,7 @@ import {
 } from '../../services/attachments-api.service';
 import { JobDetailPart, JobDetailPayload, JobDetailQuery, JobDetailService } from '../../services/job-detail.service';
 import { JobTask, JobTaskPayload, JobTasksApiService } from '../../services/job-tasks-api.service';
+import { NotificationsApiService } from '../../services/notifications-api.service';
 import { PurchaseOrderLine, PurchaseOrdersApiService } from '../../services/purchase-orders-api.service';
 
 type AdditionalPartDraft = {
@@ -95,6 +96,7 @@ type JobPartPoRef = {
 })
 export default class JobDetailComponent implements OnInit, OnDestroy {
   private readonly route = inject(ActivatedRoute);
+  private readonly notificationsApi = inject(NotificationsApiService);
   private readonly router = inject(Router);
   private readonly jobDetailService = inject(JobDetailService);
   private readonly additionalPartsApi = inject(AdditionalPartsApiService);
@@ -148,6 +150,11 @@ export default class JobDetailComponent implements OnInit, OnDestroy {
     this.jobDetailService.load(query).subscribe({
       next: detail => {
         this.detail.set(detail);
+        this.notificationsApi.acknowledgeView([
+          { type: 'job', id: detail.jobId },
+          ...[...detail.invoices, ...detail.quotes].map(({ document }) => ({ type: document.documentType, id: document.id, number: document.invoiceNumber })),
+          ...detail.workItems.map(item => ({ type: 'workitem' as const, id: item.id }))
+        ]);
         this.loading.set(false);
         this.ensureAndLoadTasks(detail);
       },

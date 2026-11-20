@@ -4,6 +4,7 @@ const { resolveTenantId } = require("../_shared/tenant");
 const { requirePrincipal } = require("../_shared/auth");
 const { makeShopCalendar, readShopHours, workClock } = require("../_shared/shop-hours");
 const { rememberPortalClosure } = require("../_shared/customer-portal");
+const { vehicleMileagePatch } = require("../_shared/vehicle-mileage");
 
 const T_ITEMS = "workitems";
 const T_EVENTS = "events";
@@ -41,7 +42,10 @@ module.exports = async function (context, req) {
     if (method === "GET") {
       const laneId = pick(req.query && req.query.laneId);
       const out = [];
-      const filter = laneId ? `PartitionKey eq '${tenantId}' and laneId eq '${laneId.replace(/'/g,"''")}'` : `PartitionKey eq '${tenantId}'`;
+      const customerId = pick(req.query && req.query.customerId);
+      const filter = `PartitionKey eq '${tenantId}'`
+        + (laneId ? ` and laneId eq '${laneId.replace(/'/g,"''")}'` : '')
+        + (customerId ? ` and customerId eq '${customerId.replace(/'/g,"''")}'` : '');
       const iter = items.listEntities({ queryOptions: { filter } });
       const now = Date.now();
       let calendar;
@@ -75,6 +79,10 @@ module.exports = async function (context, req) {
           vehicleMake: pick(e.vehicleMake),
           vehicleModel: pick(e.vehicleModel),
           vehicleTrim: pick(e.vehicleTrim),
+          mileageIn: e.mileageIn ?? null,
+          mileageOut: e.mileageOut ?? null,
+          mileageInRecordedAt: pick(e.mileageInRecordedAt),
+          mileageOutRecordedAt: pick(e.mileageOutRecordedAt),
           sort: num(e.sort),
           createdAt,
           updatedAt: pick(e.updatedAt),
@@ -276,6 +284,7 @@ module.exports = async function (context, req) {
           context.res = { status: 409, body: { error: "Check in this job before starting work." } };
           return;
         }
+        Object.assign(patch, await vehicleMileagePatch(conn, tenantId, existing, patch, b, principal));
         await items.upsertEntity(patch, "Merge");
         if (b.markPickedUp === true && existing.invoiceId) {
           await rememberPortalClosure(tenantId, existing.invoiceId).catch(() => {});
@@ -312,6 +321,7 @@ module.exports = async function (context, req) {
     context.res = { status: 405, headers: { "content-type": "application/json" }, body: { error: "Method not allowed" } };
   } catch (err) {
     context.log.error(err);
-    context.res = { status: 500, headers: { "content-type": "application/json" }, body: { error: "Server error", detail: String(err && err.message || err) } };
+    const status = err.statusCode === 400 ? 400 : 500;
+    context.res = { status, headers: { "content-type": "application/json" }, body: { error: status === 400 ? err.message : "Server error", detail: String(err && err.message || err) } };
   }
 };

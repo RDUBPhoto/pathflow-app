@@ -359,6 +359,42 @@
         <button type="button" class="btn btn-link btn-sm px-0 mb-3" (click)="makeVehiclePrimary()">Make primary vehicle</button>
       }
 
+      <section class="card mb-3" aria-label="Vehicle mileage history">
+        <div class="card-body">
+          <h3 class="card-title">Mileage in &amp; out</h3>
+          @if (mileageLoading()) {
+            <p class="text-secondary mb-0" role="status">Loading mileage history…</p>
+          } @else if (mileageLoadError()) {
+            <p class="text-danger" role="alert">{{ mileageLoadError() }}</p>
+            <button type="button" class="btn btn-outline-primary btn-sm" (click)="loadVehicleMileage()">Retry mileage history</button>
+          } @else if (selectedVehicleMileage().length) {
+            @let latest = selectedVehicleMileage()[0];
+            <div class="row mb-3">
+              <div class="col-6"><div class="text-secondary">Latest mileage in</div><strong>{{ latest.mileageIn != null ? (latest.mileageIn | number) + ' mi' : 'Not recorded' }}</strong></div>
+              <div class="col-6"><div class="text-secondary">Latest mileage out</div><strong>{{ latest.mileageOut != null ? (latest.mileageOut | number) + ' mi' : 'Not recorded' }}</strong></div>
+            </div>
+            <div class="table-responsive">
+              <table class="table table-vcenter mb-0">
+                <thead><tr><th>Visit</th><th>Job / invoice</th><th>Mileage in</th><th>Mileage out</th><th>Miles driven</th></tr></thead>
+                <tbody>
+                  @for (visit of selectedVehicleMileage(); track visit.id) {
+                    <tr>
+                      <td>{{ (visit.checkedInAt || visit.completedAt || visit.createdAt) | date:'mediumDate' }}</td>
+                      <td>{{ mileageVisitLabel(visit) }}</td>
+                      <td>{{ visit.mileageIn != null ? (visit.mileageIn | number) : '—' }}</td>
+                      <td>{{ visit.mileageOut != null ? (visit.mileageOut | number) : '—' }}</td>
+                      <td>{{ visit.mileageIn != null && visit.mileageOut != null ? ((visit.mileageOut - visit.mileageIn) | number) : '—' }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          } @else {
+            <p class="text-secondary mb-0">No mileage recorded for this vehicle yet. Readings are optional at check-in and job completion.</p>
+          }
+        </div>
+      </section>
+
       <div class="vin-row">
         <div class="ui-item">
           <span class="ui-label">VIN</span>

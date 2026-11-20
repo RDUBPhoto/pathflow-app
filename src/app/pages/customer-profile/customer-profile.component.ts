@@ -18,6 +18,7 @@ import { TenantContextService } from '../../services/tenant-context.service';
 import { BrandSettingsService } from '../../services/brand-settings.service';
 import { BusinessProfileService } from '../../services/business-profile.service';
 import { NotificationsApiService } from '../../services/notifications-api.service';
+import { WorkItem, WorkItemsApi, workItemDocumentRef } from '../../services/workitems-api.service';
 import { UserMenuComponent } from '../../components/user/user-menu/user-menu.component';
 import { PageBackButtonComponent } from '../../components/navigation/page-back-button/page-back-button.component';
 import { CompanySwitcherComponent } from '../../components/header/company-switcher/company-switcher.component';
@@ -115,6 +116,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   private readonly http = inject(HttpClient);
   private readonly customersApi = inject(CustomersApi);
   private readonly notificationsApi = inject(NotificationsApiService);
+  private readonly workItemsApi = inject(WorkItemsApi);
   private readonly smsApi = inject(SmsApiService);
   private readonly emailApi = inject(EmailApiService);
   private readonly scheduleApi = inject(ScheduleApi);
@@ -151,6 +153,36 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
   readonly vehicleDrafts = signal<CustomerVehicle[]>([]);
   readonly selectedVehicleId = signal('');
   readonly primaryVehicleId = signal('');
+  readonly mileageVisits = signal<WorkItem[]>([]);
+  readonly mileageLoading = signal(false);
+  readonly mileageLoadError = signal('');
+  readonly selectedVehicleMileage = computed(() => this.mileageVisits()
+    .filter(item => item.customerId === this.customerId() && item.vehicleId === this.selectedVehicleId()
+      && (item.mileageIn != null || item.mileageOut != null))
+    .sort((a,b) => String(b.checkedInAt || b.completedAt || b.createdAt).localeCompare(String(a.checkedInAt || a.completedAt || a.createdAt))));
+
+  loadVehicleMileage(): void {
+    const id = this.customerId();
+    if (!id) return;
+    this.mileageLoading.set(true);
+    this.mileageLoadError.set('');
+    this.workItemsApi.list(id).subscribe({
+      next: visits => {
+        if (this.customerId() !== id) return;
+        this.mileageVisits.set(visits);
+        this.mileageLoading.set(false);
+      },
+      error: () => {
+        if (this.customerId() !== id) return;
+        this.mileageLoadError.set('Mileage history could not be loaded.');
+        this.mileageLoading.set(false);
+      }
+    });
+  }
+
+  mileageVisitLabel(item: WorkItem): string {
+    return this.invoicesData.getInvoiceById(workItemDocumentRef(item))?.invoiceNumber || 'Shop visit';
+  }
   private vinRequestVersion = 0;
 
   vehicleTabLabel(vehicle: CustomerVehicle): string {
@@ -2033,6 +2065,7 @@ export default class CustomerProfileComponent implements OnInit, OnDestroy {
             return;
           }
           this.fillForm(customer);
+          this.loadVehicleMileage();
           this.notificationsApi.acknowledgeView([{ type: 'customer', id: customer.id }]);
           this.loadDuplicateMatchesForCurrent();
           if (this.activeTab() === 'schedule') {

@@ -28,6 +28,10 @@ export type WorkItem = {
   vehicleMake?: string;
   vehicleModel?: string;
   vehicleTrim?: string;
+  mileageIn?: number | null;
+  mileageOut?: number | null;
+  mileageInRecordedAt?: string;
+  mileageOutRecordedAt?: string;
   sort?: number;
   createdAt?: string;
   updatedAt?: string;
@@ -54,8 +58,8 @@ export function workItemDocumentRef(item: WorkItem): string {
 export class WorkItemsApi {
   constructor(private http: HttpClient) {}
 
-  list(): Observable<WorkItem[]> {
-    return this.http.get<WorkItem[]>('/api/workitems');
+  list(customerId?: string): Observable<WorkItem[]> {
+    return this.http.get<WorkItem[]>('/api/workitems', { params: customerId ? { customerId } : {} });
   }
 
   create(title: string, laneId: string, intake?: { source: 'phone'; message: string; customerId: string }): Observable<{ ok: boolean; id: string }> {

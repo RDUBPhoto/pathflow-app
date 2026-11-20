@@ -118,6 +118,47 @@ export default class DashboardComponent implements OnDestroy {
   appointmentInfoMessage = signal('');
   appointmentInfoSending = signal(false);
   appointmentInfoError = signal('');
+  readonly mileagePrompt = signal<{ item: WorkItem; phase: 'in' | 'out'; confirm: (value: Partial<WorkItem>) => void } | null>(null);
+  readonly mileageValue = signal('');
+  readonly mileageVehicleId = signal('');
+  readonly mileageError = signal('');
+  readonly mileageVehicles = computed(() => customerVehicles(this.customersMap()[this.mileagePrompt()?.item.customerId || '']));
+
+  private requestMileage(item: WorkItem, phase: 'in' | 'out', confirm: (value: Partial<WorkItem>) => void): void {
+    if (this.mileagePrompt()) return;
+    const vehicles = customerVehicles(this.customersMap()[item.customerId || '']);
+    const matched = vehicles.find(vehicle => vehicle.id === item.vehicleId) || this.vehicleForWorkItem(item)
+      || (vehicles.length === 1 ? vehicles[0] : undefined);
+    this.mileageVehicleId.set(matched?.id || '');
+    this.mileageValue.set(String((phase === 'in' ? item.mileageIn : item.mileageOut) ?? ''));
+    this.mileageError.set('');
+    this.mileagePrompt.set({ item, phase, confirm });
+  }
+
+  closeMileagePrompt(): void { this.mileagePrompt.set(null); }
+
+  confirmMileage(skip = false): void {
+    const prompt = this.mileagePrompt();
+    if (!prompt) return;
+    const raw = skip ? '' : this.mileageValue().trim();
+    if (raw && (!/^\d+$/.test(raw) || Number(raw) > 9999999)) {
+      this.mileageError.set('Enter a whole number from 0 to 9,999,999, or skip mileage.');
+      return;
+    }
+    if (raw && !this.mileageVehicles().some(v => v.id === this.mileageVehicleId())) {
+      this.mileageError.set('Select a saved vehicle, or skip mileage.');
+      return;
+    }
+    if (raw && prompt.phase === 'out' && prompt.item.mileageIn != null && Number(raw) < prompt.item.mileageIn) {
+      this.mileageError.set('Mileage out cannot be less than mileage in.');
+      return;
+    }
+    const value: Partial<WorkItem> = raw ? {
+      [prompt.phase === 'in' ? 'mileageIn' : 'mileageOut']: Number(raw), vehicleId: this.mileageVehicleId()
+    } : {};
+    this.closeMileagePrompt();
+    prompt.confirm(value);
+  }
   unreadActivityByCustomer = signal<Record<string, number>>({});
   unreadEmailByCustomer = signal<Record<string, number>>({});
   unreadSmsIdsByCustomer = signal<Record<string, string[]>>({});
@@ -856,6 +897,10 @@ export default class DashboardComponent implements OnDestroy {
       return;
     }
 
+    this.requestMileage(it, 'in', value => this.performCheckIn(it, inProgressLaneId, value));
+  }
+
+  private performCheckIn(it: WorkItem, inProgressLaneId: string, mileage: Partial<WorkItem>): void {
     const checkedInAt = new Date().toISOString();
     this.status.set('Checking in customer');
     this.itemsApi.update({
@@ -863,6 +908,7 @@ export default class DashboardComponent implements OnDestroy {
       laneId: inProgressLaneId,
       workClockAction: 'check-in',
       checkedInAt,
+      ...mileage,
       completedAt: '',
       calendarOverrideAt: '',
       isPaused: false,
@@ -885,6 +931,7 @@ export default class DashboardComponent implements OnDestroy {
           const target = next[inProgressLaneId] || [];
           target.unshift({
             ...it,
+            ...mileage,
             laneId: inProgressLaneId,
             checkedInAt,
             completedAt: '',
@@ -4272,7 +4319,7 @@ export default class DashboardComponent implements OnDestroy {
     return this.getLaneCards(laneId).length;
   }
 
-  onCardsDrop(event: CdkDragDrop<WorkItem[]>, targetLaneId: string) {
+  onCardsDrop(event: CdkDragDrop<WorkItem[]>, targetLaneId: string, mileage: Partial<WorkItem> | null = null) {
     this.deferInteractivityRestore(80);
     const map = { ...this.items() };
     const sourceId = event.previousContainer.id;
@@ -4317,6 +4364,17 @@ export default class DashboardComponent implements OnDestroy {
         }
         return;
       }
+      const mileagePhase = this.isCompletedLaneById(targetLaneId) && !moved.completedAt ? 'out'
+        : this.isInProgressLaneById(targetLaneId) && !moved.checkedInAt ? 'in' : null;
+      if (mileagePhase && mileage === null) {
+        if (mileagePhase === 'in' && moved.customerId && !this.hasCalendarEventForItem(moved)) {
+          this.status.set('Calendar event required before check-in.');
+          this.openScheduleModal(moved.customerId, moved.jobId ? moved.id : null);
+          return;
+        }
+        this.requestMileage(moved, mileagePhase, value => this.onCardsDrop(event, targetLaneId, value));
+        return;
+      }
       const movedId = String(moved.id || '').trim();
       map[sourceId] = (map[sourceId] || []).filter(row => String(row.id || '').trim() !== movedId);
       const targetExisting = (map[targetId] || []).filter(row => String(row.id || '').trim() !== movedId);
@@ -4329,7 +4387,7 @@ export default class DashboardComponent implements OnDestroy {
         ? Math.max(0, targetExisting.findIndex(row => String(row.id || '').trim() === beforeId))
         : targetExisting.length;
       const canonicalMoved = (this.items()[sourceId] || []).find(row => String(row.id || '').trim() === movedId) || moved;
-      const movedForTarget = { ...canonicalMoved, laneId: targetLaneId };
+      const movedForTarget = { ...canonicalMoved, ...mileage, laneId: targetLaneId };
       targetExisting.splice(insertAt, 0, movedForTarget);
       map[targetId] = targetExisting;
       const movedCustomerId = this.effectiveCustomerIdForItem(moved);
@@ -4426,7 +4484,7 @@ export default class DashboardComponent implements OnDestroy {
           pauseDurationMs: this.safeDuration(updated.pauseDurationMs)
         });
       }
-      const updateBody: Partial<WorkItem> & { id: string; workClockAction?: WorkClockAction } = { id: updated.id, laneId: targetLaneId };
+      const updateBody: Partial<WorkItem> & { id: string; workClockAction?: WorkClockAction } = { id: updated.id, laneId: targetLaneId, ...mileage };
       if (needsAutoCheckIn) {
         updateBody.workClockAction = 'check-in';
         updateBody.checkedInAt = autoCheckInAt;
@@ -4495,6 +4553,10 @@ export default class DashboardComponent implements OnDestroy {
           if (movedCustomerId && movedOutOfScheduled) {
             this.deleteFutureAppointmentsForCustomer(movedCustomerId, updated.jobId ? updated.id : undefined);
           }
+        },
+        error: err => {
+          this.status.set(this.extractApiError(err, 'Could not update the job'));
+          this.loadAll();
         }
       });
     }

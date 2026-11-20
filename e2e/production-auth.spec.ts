@@ -21,6 +21,107 @@ async function signIn(page: Page, email: string, password: string) {
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 }
 
+test('optional mileage follows check-in and completion, persists per vehicle and preserves earlier visits', async ({ page, request }, testInfo) => {
+  test.setTimeout(90000);
+  await page.setViewportSize({width:3000,height:1000});
+  await page.route('**/api/settings?*',route=>new URL(route.request().url()).searchParams.get('key')?.endsWith('dashboard.onboarding.v1.completed')
+    ? route.fulfill({json:{value:true}}) : route.continue());
+  const account = await workspace(request), headers = {'x-tenant-id':account.tenant};
+  async function post(path: string, data: object) {
+    const response = await request.post('/api/'+path,{headers,data});
+    expect(response.ok(),await response.text()).toBeTruthy(); return response.json();
+  }
+  const vehicles = [
+    {id:'mileage-ford',vehicleYear:'2024',vehicleMake:'Ford',vehicleModel:'Raptor'},
+    {id:'mileage-jeep',vehicleYear:'2022',vehicleMake:'Jeep',vehicleModel:'Wrangler'}
+  ];
+  const {id:customerId} = await post('customers',{name:'Mileage Customer',phone:'+15125550152',vehicles,primaryVehicleId:vehicles[0].id});
+  await post('settings',{key:'schedule.settings',value:{openHour:0,closeHour:24,timeZone:'America/Chicago',showWeekends:true,holidays:[],bays:[{id:'bay-1',name:'Lift 1'}]}});
+  const lanes = await (await request.get('/api/lanes',{headers})).json();
+  const scheduledId = lanes.find((lane:any)=>lane.stageKey==='scheduled').id;
+  const jobs:any[] = [];
+  const list = async () => (await (await request.get('/api/workitems',{headers})).json());
+  for (let index=0;index<3;index++) {
+    const id=randomUUID(), vehicle=vehicles[index===2?1:0], number='INV-MILEAGE-'+index;
+    const invoiceData={subtotal:100,taxTotal:0,total:100,lineItems:[{id:'labor',type:'labor',description:'Inspection',quantity:1,unitPrice:100,taxRate:0,lineSubtotal:100,taxAmount:0,lineTotal:100}]};
+    await post('service-documents',{id,document:{id,documentType:'invoice',invoiceNumber:number,stage:'sent',customerId,customerName:'Mileage Customer',vehicleId:vehicle.id,vehicle:`${vehicle.vehicleYear} ${vehicle.vehicleMake} ${vehicle.vehicleModel}`,...invoiceData,paidAmount:0,timeline:[]}});
+    await post('invoice-response',{op:'publish-snapshot',invoiceId:id,invoiceNumber:number,publicToken:randomUUID(),customerName:'Mileage Customer',amount:'100.00',invoiceData,paymentProvider:'stripe'});
+    await post('invoice-response',{op:'record-manual-payment',action:'pay',invoiceId:id,invoiceNumber:number,customerId,customerName:'Mileage Customer',paymentAmount:100});
+    const job=(await list()).find((item:any)=>item.invoiceId===id);expect(job?.jobId).toBeTruthy();
+    await post('workitems',{id:job.id,vehicleId:vehicle.id,laneId:scheduledId});
+    await post('schedule',{customerId,workItemId:job.id,vehicleId:vehicle.id,resource:'bay-1',start:new Date(Date.now()+(index+1)*86400000).toISOString(),end:new Date(Date.now()+(index+1)*86400000+3600000).toISOString()});
+    jobs.push(job);
+  }
+  await signIn(page,account.email,account.password);await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page.getByRole('button',{name:'Add to Scheduled',exact:true})).toBeVisible();
+  if(await page.getByRole('button',{name:'Skip',exact:true}).isVisible()) await page.getByRole('button',{name:'Skip',exact:true}).click();
+  const modal=page.getByRole('dialog',{name:'Vehicle mileage',exact:true});
+  const card=(index:number)=>page.locator(`[data-work-item-id="${jobs[index].id}"]`);
+  async function drop(index:number,targetName:string) {
+    const target=page.locator('.lane').filter({has:page.getByRole('button',{name:'Add to '+targetName,exact:true})}).locator('.cards');
+    const handle=card(index).locator('.card-drag-handle');
+    await expect(handle).toBeVisible();await expect(target).toBeVisible();
+    type Box={x:number;y:number;width:number;height:number};
+    const bounds:{from:Box|null;to:Box|null}={from:null,to:null};
+    await expect.poll(async()=>{bounds.from=await handle.boundingBox();bounds.to=await target.boundingBox();return !!(bounds.from&&bounds.to);}).toBe(true);
+    const from=bounds.from!,to=bounds.to!;
+    const x=from!.x+from!.width/2,y=from!.y+from!.height/2;
+    await page.mouse.move(x,y);await page.mouse.down();await page.mouse.move(x+10,y+3,{steps:3});
+    await page.mouse.move(to!.x+to!.width/2,to!.y+60,{steps:25});await expect(target).toHaveClass(/cdk-drop-list-dragging/);await page.mouse.up();
+  }
+  await card(0).getByRole('button',{name:'Check-in',exact:true}).click();
+  await expect(modal).toBeVisible();await modal.getByRole('button',{name:'Cancel mileage entry',exact:true}).click();
+  expect((await list()).find((j:any)=>j.id===jobs[0].id).checkedInAt).toBeFalsy();
+  await card(0).getByRole('button',{name:'Check-in',exact:true}).click();
+  await modal.getByLabel('Mileage in (optional)',{exact:true}).fill('45200');
+  await modal.screenshot({path:testInfo.outputPath('mileage-in.png')});
+  for (const theme of ['light','dark']) {
+    await page.setViewportSize({width:390,height:720});
+    await page.evaluate(theme=>{
+      document.documentElement.setAttribute('data-theme',theme);document.documentElement.setAttribute('data-bs-theme',theme);
+      document.documentElement.style.colorScheme=theme;
+    },theme);
+    expect(await modal.evaluate(element=>element.scrollWidth<=element.clientWidth)).toBeTruthy();
+    await modal.screenshot({path:testInfo.outputPath('mileage-mobile-'+theme+'.png')});
+  }
+  await page.setViewportSize({width:3000,height:1000});
+  await page.evaluate(()=>{document.documentElement.setAttribute('data-theme','light');document.documentElement.setAttribute('data-bs-theme','light');document.documentElement.style.colorScheme='light';});
+  await modal.getByRole('button',{name:'Check in vehicle',exact:true}).click();
+  await expect.poll(async()=>(await list()).find((j:any)=>j.id===jobs[0].id).mileageIn).toBe(45200);
+  await drop(0,'Completed');await expect(modal).toBeVisible();
+  await modal.getByLabel('Mileage out (optional)',{exact:true}).fill('45199');
+  await modal.getByRole('button',{name:'Complete job',exact:true}).click();await expect(modal.getByRole('alert')).toContainText('less than');
+  expect((await list()).find((j:any)=>j.id===jobs[0].id).completedAt).toBeFalsy();
+  const rejected=await request.post('/api/workitems',{headers,data:{id:jobs[0].id,completedAt:new Date().toISOString(),mileageOut:45199}});
+  expect(rejected.status()).toBe(400);
+  await modal.getByLabel('Mileage out (optional)',{exact:true}).fill('45205');await modal.getByRole('button',{name:'Complete job',exact:true}).click();
+  await expect.poll(async()=>(await list()).find((j:any)=>j.id===jobs[0].id).mileageOut).toBe(45205);
+  await drop(1,'In-Progress');await expect(modal).toBeVisible();
+  await modal.getByLabel('Mileage in (optional)',{exact:true}).fill('45220');await modal.getByRole('button',{name:'Check in vehicle',exact:true}).click();
+  await expect.poll(async()=>(await list()).find((j:any)=>j.id===jobs[1].id).mileageIn).toBe(45220);
+  await drop(1,'Completed');await modal.getByRole('button',{name:'Skip mileage',exact:true}).click();
+  await expect.poll(async()=>!!(await list()).find((j:any)=>j.id===jobs[1].id).completedAt).toBe(true);
+  expect((await list()).find((j:any)=>j.id===jobs[1].id).mileageOut).toBeNull();
+  await card(2).getByRole('button',{name:'Check-in',exact:true}).click();await modal.getByRole('button',{name:'Check in vehicle',exact:true}).click();
+  await expect.poll(async()=>!!(await list()).find((j:any)=>j.id===jobs[2].id).checkedInAt).toBe(true);
+  await drop(2,'Completed');await modal.getByRole('button',{name:'Skip mileage',exact:true}).click();
+  await expect.poll(async()=>!!(await list()).find((j:any)=>j.id===jobs[2].id).completedAt).toBe(true);
+  expect((await list()).find((j:any)=>j.id===jobs[2].id).mileageIn).toBeNull();
+  await post('customers',{id:customerId,name:'Mileage Customer',vehicles:vehicles.map(vehicle=>({...vehicle,vehicleTrim:'Updated profile'}))});
+  expect((await list()).find((j:any)=>j.id===jobs[0].id).mileageOut).toBe(45205);
+  await page.goto('/customers/'+customerId);
+  const history=page.getByRole('region',{name:'Vehicle mileage history',exact:true});
+  await expect(history.locator('tbody tr')).toHaveCount(2);await expect(history).toContainText('45,200');await expect(history).toContainText('45,205');await expect(history).toContainText('45,220');
+  await page.getByRole('tab',{name:/2022 Jeep Wrangler/}).click();await expect(history).toContainText('No mileage recorded');
+  await page.getByRole('tab',{name:/2024 Ford Raptor/}).click();await expect(history.locator('tbody tr')).toHaveCount(2);
+  await page.reload();await expect(history.locator('tbody tr')).toHaveCount(2);
+  await page.route('**/api/workitems?customerId=*',route=>route.fulfill({status:503,json:{error:'Temporarily unavailable'}}));
+  await page.reload();await expect(history.getByRole('alert')).toContainText('could not be loaded');
+  await page.unroute('**/api/workitems?customerId=*');
+  await history.getByRole('button',{name:'Retry mileage history',exact:true}).click();await expect(history.locator('tbody tr')).toHaveCount(2);
+  const filtered=await (await request.get('/api/workitems?customerId=not-this-customer',{headers})).json();expect(filtered).toEqual([]);
+});
+
 async function notificationFixture(request: APIRequestContext) {
   const account = await workspace(request);
   const headers = { 'x-tenant-id': account.tenant };

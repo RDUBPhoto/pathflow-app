@@ -76,6 +76,7 @@
             @for (it of getLaneCards(lane.id); track trackItem($index, it)) {
               <div
                 class="card"
+                [attr.data-work-item-id]="it.id"
                 [class.has-activity]="hasUnreadActivity(it) || hasUnreadLeadNotice(it, lane) || hasUnseenCardNotice(it, lane)"
                 [cdkDragDisabled]="isMobileLayout()"
                 (cdkDragStarted)="onCardDragStarted()"
@@ -538,6 +539,54 @@
         (closed)="onCustomerModalClosed()
         " (saved)="onCustomerSaved($event)">
         </app-customer-modal>
+      }
+    </ng-template>
+  </ui-modal>
+
+  <ui-modal [isOpen]="!!mileagePrompt()" label="Vehicle mileage" (didDismiss)="closeMileagePrompt()" style="--ui-dialog-width: 28rem">
+    <ng-template>
+      @if (mileagePrompt(); as prompt) {
+        <header class="modal-header">
+          <h2 class="modal-title">{{ prompt.phase === 'in' ? 'Mileage in' : 'Mileage out' }}</h2>
+          <button type="button" class="btn-close app-close-button ms-auto" aria-label="Cancel mileage entry" (click)="closeMileagePrompt()"></button>
+        </header>
+        <form (ngSubmit)="confirmMileage()">
+          <div class="modal-body">
+            <p class="mb-2">{{ customerName(prompt.item) }}</p>
+            <p class="text-secondary">Record the odometer reading in miles. This is optional.</p>
+            @if (mileageVehicles().length > 1) {
+              <label for="mileage-vehicle" class="form-label">Vehicle</label>
+              <select id="mileage-vehicle" name="mileageVehicle" class="form-select mb-3"
+                [ngModel]="mileageVehicleId()" (ngModelChange)="mileageVehicleId.set($event)"
+                [disabled]="prompt.item.mileageIn != null || prompt.item.mileageOut != null">
+                <option value="">Select the vehicle</option>
+                @for (vehicle of mileageVehicles(); track vehicle.id) {
+                  <option [value]="vehicle.id">{{ vehicle.vehicleYear }} {{ vehicle.vehicleMake }} {{ vehicle.vehicleModel }} {{ vehicle.vehicleTrim }} {{ vehicle.vin ? '· VIN ' + vehicle.vin.slice(-6) : '' }}</option>
+                }
+              </select>
+            } @else if (mileageVehicles().length === 1) {
+              <p class="fw-semibold">{{ vehicleOf(prompt.item) }}</p>
+            } @else {
+              <p class="text-secondary">Add a vehicle to the customer profile to save mileage. You can skip for now.</p>
+            }
+            <label for="vehicle-mileage" class="form-label">{{ prompt.phase === 'in' ? 'Mileage in' : 'Mileage out' }} (optional)</label>
+            <div class="input-group">
+              <input id="vehicle-mileage" name="vehicleMileage" class="form-control" inputmode="numeric" type="text"
+                maxlength="7" placeholder="e.g. 45200" [ngModel]="mileageValue()" (ngModelChange)="mileageValue.set($event)"
+                [attr.aria-invalid]="!!mileageError()" aria-describedby="mileage-help" autofocus />
+              <span class="input-group-text">mi</span>
+            </div>
+            <div id="mileage-help" class="form-hint">
+              @if (prompt.phase === 'out' && prompt.item.mileageIn != null) { Mileage in: {{ prompt.item.mileageIn | number }} mi. }
+              Saved to this visit in the customer's vehicle history.
+            </div>
+            @if (mileageError()) { <p class="text-danger mt-2 mb-0" role="alert">{{ mileageError() }}</p> }
+          </div>
+          <footer class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" (click)="confirmMileage(true)">Skip mileage</button>
+            <button type="submit" class="btn btn-primary">{{ prompt.phase === 'in' ? 'Check in vehicle' : 'Complete job' }}</button>
+          </footer>
+        </form>
       }
     </ng-template>
   </ui-modal>

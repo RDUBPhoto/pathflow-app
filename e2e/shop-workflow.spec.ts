@@ -1065,7 +1065,7 @@ test('the invoice lane creates and opens the correct invoice for a returning cus
 
   await page.goto('/dashboard');
   await unlinked.getByRole('button', { name: 'Create Invoice', exact: true }).click();
-  expect(new URL(page.url()).searchParams.get('workItemId')).toBe(legacy.id);
+  await expect.poll(() => new URL(page.url()).searchParams.get('workItemId')).toBe(legacy.id);
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect.poll(async () => {
     const cards = await (await page.request.get('/api/workitems', { headers })).json();

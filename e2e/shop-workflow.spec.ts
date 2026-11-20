@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { readFile } from 'node:fs/promises';
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
+import { expectCloseAlignment } from './close-alignment';
 
 async function downloadPdf(page: Page, button: Locator, filename: RegExp) {
   const downloaded = page.waitForEvent('download');
@@ -323,6 +324,7 @@ test('Tabler controls support the dashboard and document board on a phone', asyn
   const notifications = page.getByRole('button', { name: /notifications/i }).first();
   await notifications.click();
   await expect(page.getByRole('button', { name: 'Close notifications' })).toBeVisible();
+  await expectCloseAlignment(page.getByRole('button',{name:'Close notifications',exact:true}));
   await page.keyboard.press('Escape');
   await expect(notifications).toBeFocused();
 
@@ -583,6 +585,7 @@ for (const scenario of ['void', 'refund'] as const) {
     await expect(stage).toHaveValue('accepted');
     await page.getByRole('button', { name: 'More invoice actions' }).click();
     await page.getByRole('button', { name: 'Return or void payment 83001' }).click();
+    await expectCloseAlignment(page.getByRole('button',{name:'Close payment return',exact:true}));
     if (creditInvoice) {
       await page.getByLabel('Invoice treatment').selectOption('credit');
       await page.getByLabel('Card fee to retain (optional)').fill('0.03');
@@ -1077,6 +1080,7 @@ test('the invoice lane creates and opens the correct invoice for a returning cus
   await page.getByRole('button', { name: 'Add New Customer' }).click();
   await page.route('https://nominatim.openstreetmap.org/**', route => route.fulfill({ json: [] }));
   const customerForm = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: 'Add Customer', exact: true }) });
+  await expectCloseAlignment(customerForm.getByRole('button',{name:'Close customer form',exact:true}));
   for (const [field, value] of Object.entries({
     'First Name *': 'First-time', 'Last Name *': 'Invoice Customer', 'Phone *': '5125550106',
     'Email *': 'first-invoice@example.test', 'Address *': '100 Example Street',
@@ -1342,6 +1346,7 @@ test('one customer visit link follows the quote, invoice, appointment and pickup
     await page.goto(invoicePath);
     await page.getByRole('button', { name: 'Customer Portal', exact: true }).click();
     const access = page.getByRole('dialog', { name: 'Customer Portal' });
+    await expectCloseAlignment(access.getByRole('button',{name:'Close customer portal',exact:true}));
     await expect(access.getByRole('textbox', { name: 'Visit link' })).toHaveValue(link.href);
     await access.getByRole('button', { name: 'Revoke link' }).click();
     await expect(access.getByText('Link revoked.', { exact: true })).toBeVisible();

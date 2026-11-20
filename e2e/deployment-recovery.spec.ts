@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { expect, test, type Page, type APIRequestContext } from '@playwright/test';
+import { expectCloseAlignment } from './close-alignment';
 
 const output = path.join(process.cwd(), 'dist/web/browser');
 const index = readFileSync(path.join(output, 'index.html'), 'utf8');
@@ -60,6 +61,7 @@ test('idle logout with an open overlay reaches a usable login and signs back in 
   const before = await documents(page);
   await page.getByRole('textbox', { name: 'Global search', exact: true }).fill('idle test');
   await expect(page.getByRole('textbox', { name: 'Search the workspace', exact: true })).toBeVisible();
+  await expectCloseAlignment(page.getByRole('button',{name:'Close search',exact:true}));
   await page.clock.fastForward(31 * 60 * 1000);
   await expect(page).toHaveURL(/\/login\?reason=idle$/);
   await expect(page.getByRole('status').filter({ hasText: '30 minutes of inactivity' })).toBeVisible();

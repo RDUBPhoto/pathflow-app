@@ -548,7 +548,7 @@
       @if (mileagePrompt(); as prompt) {
         <header class="modal-header">
           <h2 class="modal-title">{{ prompt.phase === 'in' ? 'Mileage in' : 'Mileage out' }}</h2>
-          <button type="button" class="btn-close app-close-button ms-auto" aria-label="Cancel mileage entry" (click)="closeMileagePrompt()"></button>
+          <button type="button" class="btn-close app-close-button" aria-label="Cancel mileage entry" (click)="closeMileagePrompt()"></button>
         </header>
         <form (ngSubmit)="confirmMileage()">
           <div class="modal-body">

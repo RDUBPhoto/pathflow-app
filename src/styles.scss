@@ -98,6 +98,19 @@ ui-icon { display: inline-block; width: 1.125em; height: 1.125em; flex: none; ve
   padding: 0;
 }
 .app-close-button:focus-visible { color: var(--tblr-primary); }
+// Tabler reserves 3.5rem on the end for an absolute close button. Our app
+// buttons participate in the header's flex row, so use balanced padding.
+.modal-header:has(> .app-close-button) {
+  padding-inline-end: var(--tblr-modal-header-padding-x, 1.5rem);
+  gap: .75rem;
+}
+.modal-header > .app-close-button { margin-inline-start: auto; }
+:where(.modal-header, .modal-head, .vendor-modal-head, .feedback-head, .quick-setup-head, .ui-toolbar):has(.app-close-button)
+  > :where(h1, h2, h3, .ui-title, div:not(.ui-buttons)),
+.d-flex:has(> .app-close-button) > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .ui-badge {
   color: var(--tblr-primary);
   background: color-mix(in srgb, var(--tblr-primary) 10%, transparent);

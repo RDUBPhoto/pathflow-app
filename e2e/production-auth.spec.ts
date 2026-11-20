@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Page, type APIRequestContext } from '@playwright/test';
+import { expectCloseAlignment } from './close-alignment';
 
 async function workspace(request: APIRequestContext) {
   const email = 'release-' + randomUUID() + '@example.test';
@@ -20,6 +21,40 @@ async function signIn(page: Page, email: string, password: string) {
   await page.getByLabel('Password', { exact: true }).fill(password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 }
+
+test('close icons stay aligned in customer forms, search, inventory, suppliers and feedback with long titles', async ({page,request},testInfo) => {
+  test.setTimeout(60000);
+  const account=await workspace(request);
+  const partName='Suspension part '+ 'A'.repeat(120);
+  await page.route('**/api/settings?*',route=>new URL(route.request().url()).searchParams.get('key')?.endsWith('dashboard.onboarding.v1.completed')
+    ? route.fulfill({json:{value:true}}) : route.continue());
+  await page.route('**/api/inventory*',route=>route.fulfill({json:{ok:true,items:[{id:'close-alignment-part',name:partName,sku:'ALIGN-1'}],needs:[]}}));
+  await page.route('**/api/vendors*',route=>route.fulfill({json:{vendors:[]}}));
+  await signIn(page,account.email,account.password);await expect(page).toHaveURL(/\/dashboard$/);
+  await page.getByRole('textbox',{name:'Global search',exact:true}).fill('close alignment');
+  await expectCloseAlignment(page.getByRole('button',{name:'Close search',exact:true}));
+  await page.getByRole('button',{name:'Close search',exact:true}).click();
+  for(const width of [1440,390]) {
+    await page.setViewportSize({width,height:800});
+    await page.goto('/dashboard');await page.getByRole('button',{name:'Add to Invoices',exact:true}).click();
+    await expectCloseAlignment(page.getByRole('button',{name:'Close customer search',exact:true}));
+    await page.getByRole('button',{name:'Add New Customer',exact:true}).click();
+    const customerClose=page.getByRole('button',{name:'Close customer form',exact:true});
+    await expectCloseAlignment(customerClose);await customerClose.click();
+    if(await page.getByRole('button',{name:'Close customer search',exact:true}).isVisible()) await page.getByRole('button',{name:'Close customer search',exact:true}).click();
+    await page.getByRole('button',{name:'Feedback',exact:true}).click();
+    const feedbackClose=page.getByRole('button',{name:'Close feedback panel',exact:true});
+    await expectCloseAlignment(feedbackClose);await feedbackClose.click();
+    await page.goto('/inventory');await page.locator('.inventory-table tbody tr').filter({hasText:'ALIGN-1'}).click();
+    const partClose=page.getByRole('button',{name:'Close part details',exact:true});
+    await expectCloseAlignment(partClose);
+    await page.locator('.inventory-modal').screenshot({path:testInfo.outputPath('long-part-header-'+width+'.png')});
+    await page.getByPlaceholder('Search or add supplier',{exact:true}).fill('Close Alignment Supplier');
+    await page.getByRole('button',{name:/No results. Add supplier/}).click();
+    const supplierClose=page.getByRole('button',{name:'Close supplier details',exact:true});
+    await expectCloseAlignment(supplierClose);await supplierClose.click();await partClose.click();
+  }
+});
 
 test('optional mileage follows check-in and completion, persists per vehicle and preserves earlier visits', async ({ page, request }, testInfo) => {
   test.setTimeout(90000);
@@ -74,6 +109,7 @@ test('optional mileage follows check-in and completion, persists per vehicle and
   expect((await list()).find((j:any)=>j.id===jobs[0].id).checkedInAt).toBeFalsy();
   await card(0).getByRole('button',{name:'Check-in',exact:true}).click();
   await modal.getByLabel('Mileage in (optional)',{exact:true}).fill('45200');
+  await expectCloseAlignment(modal.getByRole('button',{name:'Cancel mileage entry',exact:true}));
   await modal.screenshot({path:testInfo.outputPath('mileage-in.png')});
   for (const theme of ['light','dark']) {
     await page.setViewportSize({width:390,height:720});
@@ -82,6 +118,7 @@ test('optional mileage follows check-in and completion, persists per vehicle and
       document.documentElement.style.colorScheme=theme;
     },theme);
     expect(await modal.evaluate(element=>element.scrollWidth<=element.clientWidth)).toBeTruthy();
+    await expectCloseAlignment(modal.getByRole('button',{name:'Cancel mileage entry',exact:true}));
     await modal.screenshot({path:testInfo.outputPath('mileage-mobile-'+theme+'.png')});
   }
   await page.setViewportSize({width:3000,height:1000});
@@ -175,6 +212,7 @@ test('reading exact invoices and quotes persists notifications and synchronizes 
   await expect(page.locator('.notification-item.unread')).toHaveCount(3);
   expect(await fixture.unread()).toEqual([first, second, quote].sort());
   await expect(bell).toHaveAttribute('aria-label', 'Open notifications (3 unread)');
+  await expectCloseAlignment(page.getByRole('button', { name: 'Close notifications', exact: true }));
   await page.getByRole('button', { name: 'Close notifications', exact: true }).click();
   await page.goto('/customers/' + fixture.customerId);
   await expect(page.getByRole('heading', { name: 'Customer Profile', exact: true })).toBeVisible();
@@ -416,6 +454,9 @@ test('server WebAuthn passkeys register and authenticate in the production build
   await page.goto('/login');
   const dialog = page.getByRole('dialog', { name: 'Sign in with Face ID / Touch ID' });
   await expect(dialog).toBeVisible();
+  await expectCloseAlignment(dialog.getByRole('button',{name:'Close biometric sign-in',exact:true}));
+  await page.setViewportSize({width:390,height:720});
+  await expectCloseAlignment(dialog.getByRole('button',{name:'Close biometric sign-in',exact:true}));
   await dialog.getByRole('button', { name: 'Log In', exact: true }).click();
   await expect(page).toHaveURL(/\/dashboard$/);
 });
@@ -603,6 +644,8 @@ test('dragging a paid invoice into Scheduled opens its appointment flow and move
   const editor = page.getByRole('dialog', { name: 'Appointment', exact: true });
   await dropIntoScheduled();
   await expect(editor).toBeVisible();
+  await expectCloseAlignment(editor.getByRole('button',{name:'Close appointment',exact:true}));
+  await expectCloseAlignment(page.getByRole('button',{name:'Close schedule',exact:true}));
   await expect(editor.locator('select[aria-label="Customer"] option:checked')).toHaveText('Invoice Scheduling Customer');
   await expect(page.locator('dialog[aria-label="Schedule"][open]')).toBeVisible();
   await expect(page).toHaveURL(/\/dashboard$/);

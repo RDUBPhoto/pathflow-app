@@ -302,6 +302,19 @@ Optional hosted QA summary email (sent every scheduled/manual run):
 2. `SENDGRID_API_KEY` valid SendGrid API key.
 3. `EMAIL_FROM` verified sender email.
 
+Set `QA_REPORT_EMAIL_FROM` to use a dedicated verified sender for hosted QA;
+otherwise the report uses `EMAIL_FROM`. The sender identity must be verified in
+the SendGrid account that owns `SENDGRID_API_KEY`. A 403 saying the from address
+does not match a verified Sender Identity requires correcting that sender
+configuration; rerunning the workflow will not repair it.
+
+Hosted smoke tests require missing quote IDs to show `Response not confirmed`
+and the missing-ID error, with no acceptance or decline confirmation. This
+protects against claiming a customer response was saved without a quote ID.
+Smoke failures fail the test step directly. Report-delivery failures fail the
+email step separately, while report artifacts are still uploaded. Run
+`npm run test:hosted:email` to check report error handling without sending email.
+
 ## Additional Resources
 
 For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.

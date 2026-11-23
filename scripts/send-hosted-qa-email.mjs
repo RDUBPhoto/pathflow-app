@@ -116,12 +116,17 @@ async function main() {
     if (!response.ok) {
       const detail = await response.text().catch(() => '');
       console.error(`[hosted-qa] Email failed: HTTP ${response.status}${detail ? ` ${detail}` : ''}`);
+      if (response.status === 403 && /verified Sender Identity/i.test(detail)) {
+        console.error('[hosted-qa] Configure QA_REPORT_EMAIL_FROM with a verified SendGrid sender for this API key.');
+      }
+      process.exitCode = 1;
       return;
     }
 
     console.log(`[hosted-qa] Email sent to ${recipients.join(', ')}.`);
   } catch (err) {
     console.error(`[hosted-qa] Email failed: ${String(err && err.message || err)}`);
+    process.exitCode = 1;
   }
 }
 

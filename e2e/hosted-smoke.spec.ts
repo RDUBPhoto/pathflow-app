@@ -155,16 +155,22 @@ test.describe('Hosted Smoke', () => {
     await expect(page).toHaveURL(/\/login/);
   });
 
-  test('quote accepted fallback remains available for missing quote id', async ({ page }) => {
+  test('quote acceptance is not confirmed when the quote id is missing', async ({ page }) => {
     await page.goto('/quote-accepted?action=accept&tenantId=main&quoteNumber=QTE-TEST', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByText('Quote Accepted')).toBeVisible();
-    await expect(page.getByText('Quote response captured.')).toBeVisible();
+    await expect(page.getByText('Response not confirmed', { exact: true })).toBeVisible();
+    await expect(page.getByText('Quote ID is missing. Please contact the service team.', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Retry response', exact: true })).toBeEnabled();
+    await expect(page.getByText('Quote Accepted', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('Quote response captured.', { exact: true })).toHaveCount(0);
   });
 
-  test('quote declined fallback remains available for missing quote id', async ({ page }) => {
+  test('quote decline is not confirmed when the quote id is missing', async ({ page }) => {
     await page.goto('/quote-declined?action=decline&tenantId=main&quoteNumber=QTE-TEST', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByText('Quote Declined')).toBeVisible();
-    await expect(page.getByText('Quote response captured.')).toBeVisible();
+    await expect(page.getByText('Response not confirmed', { exact: true })).toBeVisible();
+    await expect(page.getByText('Quote ID is missing. Please contact the service team.', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Retry response', exact: true })).toBeEnabled();
+    await expect(page.getByText('Quote Declined', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('Quote response captured.', { exact: true })).toHaveCount(0);
   });
 
   test('invoice payment fallback blocks checkout when invoice id is missing', async ({ page }) => {

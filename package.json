@@ -20,6 +20,7 @@
     "test:auth:production": "node scripts/run-production-auth-regression.mjs",
     "test:shop:isolated": "node scripts/run-shop-regression.mjs",
     "test:e2e:hosted": "npx --no-install playwright test -c playwright.hosted.config.ts",
+    "test:hosted:email": "node --test scripts/send-hosted-qa-email.test.mjs",
     "test:qa": "node scripts/run-qa.mjs",
     "qa:purge": "node scripts/purge-qa-data.mjs",
     "verify:deploy-output": "node scripts/verify-deploy-output.mjs"

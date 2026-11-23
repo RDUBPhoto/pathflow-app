@@ -515,8 +515,11 @@ test('new customer save stays disabled until required contact fields are complet
 
 test('quote accepted public page handles missing quote id gracefully', async ({ page }) => {
   await page.goto('/quote-accepted?action=accept&tenantId=main&quoteNumber=QTE-TEST');
-  await expect(page.getByText('Quote Accepted')).toBeVisible();
-  await expect(page.getByText('Quote response captured.')).toBeVisible();
+  await expect(page.getByText('Response not confirmed', { exact: true })).toBeVisible();
+  await expect(page.getByText('Quote ID is missing. Please contact the service team.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Retry response', exact: true })).toBeEnabled();
+  await expect(page.getByText('Quote Accepted', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Quote response captured.', { exact: true })).toHaveCount(0);
 });
 
 test('invoice payment page blocks checkout when invoice id is missing', async ({ page }) => {
